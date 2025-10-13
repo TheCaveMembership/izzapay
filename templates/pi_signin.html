@@ -18,16 +18,17 @@
       --dim:#5f6d90;
     }
     body{font-family:Inter,Arial,Helvetica,sans-serif;background:#000;color:var(--txt);margin:0}
-    .wrap{max-width:1100px;margin:0 auto;padding:16px 16px 140px}
-    @media (min-width:720px){ .wrap{padding:24px 24px 160px} }
+    .wrap{max-width:1100px;margin:0 auto;padding:16px 16px 160px}
+    @media (min-width:720px){ .wrap{padding:24px 24px 180px} }
 
     /* Top bar */
     .topbar{
-      display:flex;align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap;
+      display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap;
       padding:10px 0; position:sticky; top:0; z-index:50;
       background:rgba(0,0,0,.9); backdrop-filter:blur(10px); border-bottom:1px solid var(--line);
     }
-    .brand a{display:inline-flex;align-items:center}
+    .brand{display:flex;align-items:center;gap:12px}
+    .brand a.logo{display:inline-flex;align-items:center}
     .brand-word{height:36px;filter:drop-shadow(0 0 10px rgba(255,255,255,.06))}
     .actions{display:flex;gap:8px;flex-wrap:wrap}
 
@@ -43,7 +44,7 @@
     .btn.ghost:hover{border-color:#3f4e79}
 
     /* Headings & copy */
-    h1{margin:16px 0 6px;font-size:34px;line-height:1.1}
+    h1{margin:16px 0 6px;font-size:40px;line-height:1.05;letter-spacing:.4px}
     h2{margin:28px 0 4px;font-size:22px}
     p{color:var(--muted);margin:8px 0 16px}
 
@@ -69,14 +70,14 @@
     .mark.purple .dot{background:#2a1f4a}
     .mark.active.gold .dot{background:var(--gold1); box-shadow:0 0 14px 2px rgba(255,207,77,.55)}
     .mark.active.purple .dot{background:var(--piPurple2); box-shadow:0 0 14px 2px rgba(183,132,255,.55)}
+    @media (max-width:980px){ .rail, .railNav{display:none} }
 
-    @media (max-width:980px){
-      .rail, .railNav{display:none}
-    }
-
-    /* Scroll reveal */
+    /* Reveal */
     .reveal{opacity:0;transform:translateY(18px);transition:opacity .5s ease,transform .5s ease}
     .reveal.show{opacity:1;transform:translateY(0)}
+
+    /* Secondary logo under hero words */
+    .hero-logo{height:34px;margin:6px 0 6px;display:block;filter:drop-shadow(0 0 10px rgba(255,255,255,.06))}
   </style>
   <script src="https://sdk.minepi.com/pi-sdk.js"></script>
 </head>
@@ -97,6 +98,7 @@
 
   <!-- RIGHT rail markers (Pay loop) -->
   <nav class="railNav right" aria-label="IZZA Pay Steps">
+    <a class="mark purple" data-target="#s-store-cta"><span class="dot"></span><span class="label">My Store & Transactions</span></a>
     <a class="mark purple" data-target="#s-sell"><span class="dot"></span><span class="label">Sell Any Item</span></a>
     <a class="mark purple" data-target="#s-custom"><span class="dot"></span><span class="label">Customize Store</span></a>
     <a class="mark purple" data-target="#s-collect"><span class="dot"></span><span class="label">Crafted Collectibles</span></a>
@@ -106,19 +108,20 @@
     <!-- Top bar -->
     <div class="topbar">
       <div class="brand">
-        <a href="/" aria-label="IZZA PAY — Home">
+        <a class="logo" href="/" aria-label="IZZA PAY — Home">
           <img src="/static/izzapay-word.svg" class="brand-word" alt="IZZA PAY wordmark">
         </a>
+        <a class="btn ghost" href="/explore">Browse Stores</a>
       </div>
       <div class="actions">
-        <a class="btn ghost" href="/explore">Browse Stores</a>
-        <a class="btn ghost" href="/privacy">Privacy</a>
+        <!-- (Privacy moved to bottom next to language selector) -->
       </div>
     </div>
 
     <!-- HERO -->
     <section class="section" id="s-hero">
-      <h1 class="reveal">Build, sell, and play in IZZA</h1>
+      <h1 class="reveal">BUILD, SELL, PLAY</h1>
+      <img src="/static/izzapay-word.svg" alt="IZZA PAY" class="hero-logo reveal">
       <p class="reveal">Craft AI-SVG items, mint as digital collectibles, and get paid in Pi. Buyers equip items in-game — from damage-reducing armor to fully automatic guns. Your creativity powers the IZZA ecosystem.</p>
 
       <div class="pillrow reveal">
@@ -154,6 +157,16 @@
       </div>
     </section>
 
+    <!-- STORE CTA ROW (moved ABOVE Sell Any Item) -->
+    <section class="section" id="s-store-cta">
+      <div class="cta-row reveal">
+        <button id="piSignInBtn_clone" class="btn purple">MY STORE</button>
+        <a class="btn gold" href="/orders">TRANSACTIONS</a>
+      </div>
+      <p id="msg" class="reveal" style="margin-top:8px;color:var(--muted)"></p>
+      <div id="err" style="color:#ff9aa2;white-space:pre-wrap"></div>
+    </section>
+
     <!-- PAY LOOP DETAILS -->
     <section class="section">
       <div class="reveal" id="s-sell">
@@ -169,16 +182,6 @@
         <p>Mint game items as collectibles that also grant in-game access for buyers across City & Arcade.</p>
       </div>
     </section>
-
-    <!-- LOWER ROW (Authorize + Purchases) -->
-    <section class="section" id="s-auth">
-      <div class="cta-row reveal">
-        <button id="piSignInBtn_clone" class="btn purple">Authorize with Pi</button>
-        <a class="btn gold" href="/orders">View My Purchases</a>
-      </div>
-      <p id="msg" class="reveal" style="margin-top:8px;color:var(--muted)"></p>
-      <div id="err" style="color:#ff9aa2;white-space:pre-wrap"></div>
-    </section>
   </div>
 
   <!-- Pi SDK auth -->
@@ -186,7 +189,7 @@
   (function(){
     const msg = document.getElementById('msg');
     const err = document.getElementById('err');
-    const btnClone = document.getElementById('piSignInBtn_clone');
+    const btnClone = document.getElementById('piSignInBtn_clone'); // "MY STORE"
     const postUrl = "/auth/exchange";
     const sandbox = {{ 'true' if sandbox else 'false' }};
 
@@ -271,31 +274,91 @@
       });
     },{rootMargin:'-40% 0px -55% 0px', threshold:.05});
 
-    ['s-city','s-arcade','s-build','s-craft','s-missions','s-battles','s-sell','s-custom','s-collect','s-auth']
-      .forEach(id=>{ const el=document.getElementById(id); if(el) watch.observe(el); });
+    ['s-city','s-arcade','s-build','s-craft','s-missions','s-battles','s-store-cta','s-sell','s-custom','s-collect']
+      .forEach(id=>{ const el=document.getElementById(id); if(el) watch.observe        (el));
+      });
+    })();
+  </script>
+
+  <!-- Bottom chips: Language selector + Privacy link -->
+  <script>
+  (function(){
+    // ---- language chip ----
+    var KEY='izzaLang';
+    var choices=[['af','Afrikaans'],['ar','العربية'],['bn','বাংলা'],['bg','Български'],['ca','Català'],
+      ['cs','Čeština'],['da','Dansk'],['de','Deutsch'],['el','Ελληνικά'],['en','English'],
+      ['es','Español'],['et','Eesti'],['fa','فارسی'],['fi','Suomi'],['fil','Filipino'],
+      ['fr','Français'],['gu','ગુજરાતી'],['he','עברית'],['hi','हिन्दी'],['hr','Hrvatski'],
+      ['hu','Magyar'],['id','Indonesia'],['it','Italiano'],['ja','日本語'],['kn','ಕನ್ನಡ'],
+      ['ko','한국어'],['lt','Lietuvių'],['lv','Latviešu'],['ms','Melayu'],['nl','Nederlands'],
+      ['no','Norsk'],['pl','Polski'],['pt','Português'],['ro','Română'],['ru','Русский'],
+      ['sk','Slovenčina'],['sl','Slovenščina'],['sv','Svenska'],['ta','தமிழ்'],['te','తెలుగు'],
+      ['th','ไทย'],['tr','Türkçe'],['uk','Українська'],['ur','اردو'],['vi','Tiếng Việt'],['zh','中文']];
+
+    function getLang(){ try{ return localStorage.getItem(KEY)||'en'; }catch(_){ return 'en'; } }
+    function setLang(v){
+      try{
+        localStorage.setItem(KEY,v);
+        try{ window.dispatchEvent(new CustomEvent('izza-lang-changed',{detail:{lang:v}})); }catch(_){}
+        location.reload();
+      }catch(_){}
+    }
+
+    // container for both chips
+    var wrap=document.createElement('div');
+    Object.assign(wrap.style,{
+      position:'fixed',right:'10px',bottom:'10px',zIndex:'9999',
+      display:'flex',gap:'8px',alignItems:'center'
+    });
+
+    // language chip
+    var langChip=document.createElement('div');
+    Object.assign(langChip.style,{
+      background:'#121827',border:'1px solid #2a3550',borderRadius:'10px',
+      padding:'6px 8px',font:'12px/1.2 system-ui,Arial,sans-serif',color:'#cfe0ff',
+      boxShadow:'0 6px 18px rgba(0,0,0,.35)'
+    });
+    var lab=document.createElement('span'); lab.textContent='Language: ';
+    var sel=document.createElement('select'); sel.id='hsLang';
+    choices.forEach(function(c){ var o=document.createElement('option'); o.value=c[0]; o.textContent=c[1]; sel.appendChild(o); });
+    sel.value=getLang();
+    sel.addEventListener('change',function(){ setLang(this.value); });
+    langChip.appendChild(lab); langChip.appendChild(sel);
+
+    // privacy chip (matches language chip style)
+    var privacyChip=document.createElement('a');
+    privacyChip.href='/privacy'; privacyChip.textContent='Privacy';
+    Object.assign(privacyChip.style,{
+      background:'#121827',border:'1px solid #2a3550',borderRadius:'10px',
+      padding:'8px 12px',font:'12px/1.2 system-ui,Arial,sans-serif',color:'#cfe0ff',
+      textDecoration:'none',boxShadow:'0 6px 18px rgba(0,0,0,.35)'
+    });
+
+    wrap.appendChild(langChip);
+    wrap.appendChild(privacyChip);
+    document.body.appendChild(wrap);
   })();
   </script>
 
-  <!-- Language selector + translation (unchanged) -->
+  <!-- Translation bootstrap (unchanged behavior) -->
   <script>
+  window.TRANSLATE_TEXT = async (text, from, to) => {
+    try {
+      const r = await fetch('/api/translate', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ text, from, to })
+      });
+      const j = await r.json();
+      return (j && j.ok && typeof j.text === 'string') ? j.text : text;
+    } catch { return text; }
+  };
   (function(){
-    var KEY='izzaLang', LABEL='Language: ';
-    var choices=[['af','Afrikaans'],['ar','العربية'],['bn','বাংলা'],['bg','Български'],['ca','Català'],['cs','Čeština'],['da','Dansk'],['de','Deutsch'],['el','Ελληνικά'],['en','English'],['es','Español'],['et','Eesti'],['fa','فارسی'],['fi','Suomi'],['fil','Filipino'],['fr','Français'],['gu','ગુજરાતી'],['he','עברית'],['hi','हिन्दी'],['hr','Hrvatski'],['hu','Magyar'],['id','Indonesia'],['it','Italiano'],['ja','日本語'],['kn','ಕನ್ನಡ'],['ko','한국어'],['lt','Lietuvių'],['lv','Latviešu'],['ms','Melayu'],['nl','Nederlands'],['no','Norsk'],['pl','Polski'],['pt','Português'],['ro','Română'],['ru','Русский'],['sk','Slovenčina'],['sl','Slovenščina'],['sv','Svenska'],['ta','தமிழ்'],['te','తెలుగు'],['th','ไทย'],['tr','Türkçe'],['uk','Українська'],['ur','اردو'],['vi','Tiếng Việt'],['zh','中文']];
-    function getLang(){ try{return localStorage.getItem(KEY)||'en';}catch(_){return'en';} }
-    function setLang(v){ try{ localStorage.setItem(KEY,v); try{window.dispatchEvent(new CustomEvent('izza-lang-changed',{detail:{lang:v}}));}catch(_){} location.reload(); }catch(_){} }
-    var wrap=document.createElement('div');
-    Object.assign(wrap.style,{position:'fixed',right:'10px',bottom:'10px',zIndex:'9999',background:'#121827',border:'1px solid #2a3550',borderRadius:'10px',padding:'6px 8px',font:'12px/1.2 system-ui,Arial,sans-serif',color:'#cfe0ff',boxShadow:'0 6px 18px rgba(0,0,0,.35)'});
-    var sel=document.createElement('select'); sel.id='hsLang';
-    choices.forEach(function(c){ var o=document.createElement('option'); o.value=c[0]; o.textContent=c[1]; sel.appendChild(o); });
-    var lab=document.createElement('span'); lab.textContent=LABEL; wrap.appendChild(lab); wrap.appendChild(sel); document.body.appendChild(wrap);
-    sel.value=getLang(); sel.addEventListener('change',function(){ setLang(this.value); });
-  })();
-  </script>
-  <script>
-  window.TRANSLATE_TEXT=async(text,from,to)=>{try{const r=await fetch('/api/translate',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({text,from,to})});const j=await r.json();return (j&&j.ok&&typeof j.text==='string')?j.text:text;}catch{return text;}};
-  (function(){
-    const k='izzaLang', to=(localStorage.getItem(k)||'en').slice(0,5), from=(document.documentElement.getAttribute('lang')||'en').slice(0,5);
+    const LANG_KEY='izzaLang';
+    const to=(localStorage.getItem(LANG_KEY)||'en').slice(0,5);
+    const from=(document.documentElement.getAttribute('lang')||'en').slice(0,5);
     if(typeof window.TRANSLATE_TEXT!=='function'){ window.TRANSLATE_TEXT=async t=>t; }
+
     const SKIP=new Set(['SCRIPT','STYLE','NOSCRIPT','CODE','PRE','TEXTAREA','INPUT','SELECT','OPTION']);
     function collect(root){
       const nodes=[]; const w=document.createTreeWalker(root,NodeFilter.SHOW_TEXT,{acceptNode(n){
@@ -303,12 +366,40 @@
         const s=n.nodeValue; if(!s||!s.trim()) return NodeFilter.FILTER_REJECT;
         if(p.closest('[data-no-i18n="1"]')) return NodeFilter.FILTER_REJECT;
         return NodeFilter.FILTER_ACCEPT;
-      }}); let n; while((n=w.nextNode())) nodes.push(n); return nodes;
+      }});
+      let n; while((n=w.nextNode())) nodes.push(n); return nodes;
     }
-    async function translate(nodes){ for(const n of nodes){ try{ const p=n.parentElement, orig=(p?.dataset?.i18nOriginal)||n.nodeValue; const out=(to===from)?orig:await window.TRANSLATE_TEXT(orig,from,to); if(p&&p.dataset) p.dataset.i18nOriginal=orig; if(typeof out==='string'&&out&&out!==n.nodeValue) n.nodeValue=out; }catch{} } }
+    async function translate(nodes){
+      for(const n of nodes){
+        try{
+          const p=n.parentElement, orig=(p?.dataset?.i18nOriginal)||n.nodeValue;
+          const out=(to===from)?orig:await window.TRANSLATE_TEXT(orig,from,to);
+          if(p&&p.dataset) p.dataset.i18nOriginal=orig;
+          if(typeof out==='string'&&out&&out!==n.nodeValue) n.nodeValue=out;
+        }catch{}
+      }
+    }
     async function run(){ await translate(collect(document.body)); }
-    const mo=new MutationObserver(m=>{ const batch=[]; m.forEach(x=>{ if(x.type==='childList'){ x.addedNodes&&x.addedNodes.forEach(nd=>{ if(nd.nodeType===1) batch.push(...collect(nd)); else if(nd.nodeType===3) batch.push(nd); }); } else if(x.type==='characterData'&&x.target&&x.target.nodeType===3) batch.push(x.target); }); if(batch.length) translate(batch); });
-    if(document.readyState==='loading'){ document.addEventListener('DOMContentLoaded',()=>{ run(); mo.observe(document.body,{childList:true,characterData:true,subtree:true}); },{once:true}); } else { run(); mo.observe(document.body,{childList:true,characterData:true,subtree:true}); }
+
+    const mo=new MutationObserver(muts=>{
+      const batch=[]; for(const m of muts){
+        if(m.type==='childList'){
+          m.addedNodes&&m.addedNodes.forEach(nd=>{
+            if(nd.nodeType===1) batch.push(...collect(nd));
+            else if(nd.nodeType===3) batch.push(nd);
+          });
+        } else if(m.type==='characterData'&&m.target&&m.target.nodeType===3){
+          batch.push(m.target);
+        }
+      }
+      if(batch.length) translate(batch);
+    });
+
+    if(document.readyState==='loading'){
+      document.addEventListener('DOMContentLoaded',()=>{ run(); mo.observe(document.body,{childList:true,characterData:true,subtree:true}); },{once:true});
+    } else {
+      run(); mo.observe(document.body,{childList:true,characterData:true,subtree:true});
+    }
   })();
   </script>
 </body>
