@@ -125,6 +125,15 @@
         <div>Quantity: <strong>{{ qty }}</strong></div>
         <div>Total: <strong>{{ '%.7f'|format(expected_pi) }} Pi</strong></div>
       </div>
+
+      {# ===== Crafted item notice (only for single crafted-item checkout) ===== #}
+      {% if i and (i.fulfillment_kind == 'crafting') and not cart_mode %}
+      <p class="muted" style="margin:10px 0 0">
+        This is a crafted item. After payment you’ll receive a <strong>single-use voucher</strong>
+        worth the IC needed to mint it (~ {{ '%.0f'|format(expected_pi * 2000) }} IC).
+        Redeem the voucher in Crafting Land, then return to copy the SVG from your voucher page.
+      </p>
+      {% endif %}
     </div>
 
     <!-- Buyer & Shipping details -->
