@@ -3260,7 +3260,7 @@ def fulfill_session(s, tx_hash, buyer, shipping):
     if slug == "izza-game-crafting" and voucher_redirect_url:
         redirect_url = voucher_redirect_url
     else:
-        redirect_url = default_target
+        redirect_url = voucher_redirect_url or default_target
 
     # Build the JSON response once
     resp = jsonify({"ok": True, "redirect_url": redirect_url})
