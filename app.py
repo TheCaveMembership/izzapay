@@ -2639,21 +2639,62 @@ def voucher_new():
             return "<h2>Link expired</h2>", 410
         cx.execute("UPDATE voucher_redirects SET used=1 WHERE token=?", (tok,))
 
-    # ----- derive paid_pi from session or Pi API -----
+    # ----- pull session info (paid_pi + line items) -----
     paid_pi = 0.0
+    line_items_json = ""
+    svg_code = ""         # ← will hold crafted SVG (if found)
+    item_title = ""       # ← optional label for the SVG
+
     try:
         with conn() as cx:
             s = cx.execute(
-                "SELECT expected_pi FROM sessions WHERE id=?",
+                "SELECT expected_pi, line_items_json FROM sessions WHERE id=?",
                 (row["session_id"],),
             ).fetchone()
-        if s and s["expected_pi"] is not None:
-            paid_pi = float(s["expected_pi"])
-        else:
+        if s:
+            if s["expected_pi"] is not None:
+                paid_pi = float(s["expected_pi"])
+            line_items_json = (s["line_items_json"] or "")
+    except Exception:
+        pass
+
+    # Fallback for paid amount from Pi API if needed
+    if paid_pi <= 0.0:
+        try:
             r = fetch_pi_payment(row["payment_id"])
             if r.status_code == 200:
                 paid_pi = float(r.json().get("amount") or 0.0)
+        except Exception:
+            pass
+
+    # ----- Try to locate a crafted item in the session and grab its SVG -----
+    # We'll prefer the first item where fulfillment_kind='crafting' AND svg_code is present.
+    try:
+        if line_items_json:
+            lis = json.loads(line_items_json)
+            item_ids = [int(li.get("item_id")) for li in lis if li and li.get("item_id")]
+            if item_ids:
+                placeholders = ",".join("?" for _ in item_ids)
+                with conn() as cx:
+                    rows = cx.execute(
+                        f"SELECT id, title, fulfillment_kind, svg_code FROM items WHERE id IN ({placeholders})",
+                        tuple(item_ids),
+                    ).fetchall()
+                # Pick best candidate
+                for r in rows:
+                    if (r["fulfillment_kind"] or "").lower() == "crafting" and (r["svg_code"] or "").strip():
+                        svg_code = (r["svg_code"] or "").strip()
+                        item_title = r["title"] or ""
+                        break
+                # Fallback: if none were marked crafting, still use first with svg_code
+                if not svg_code:
+                    for r in rows:
+                        if (r["svg_code"] or "").strip():
+                            svg_code = (r["svg_code"] or "").strip()
+                            item_title = r["title"] or ""
+                            break
     except Exception:
+        # non-fatal: leave svg_code empty if anything goes wrong
         pass
 
     # ----- compute dynamic IC value (fallback to base) -----
@@ -2694,7 +2735,7 @@ def voucher_new():
         tok_param = None
     back_to_game = "/izza-game/auth" + (f"?t={tok_param}" if tok_param else "")
 
-    # ----- voucher page (plain HTML; we replace tokens below) -----
+    # ----- voucher page (now includes crafted SVG preview + copy) -----
     HTML_TMPL = r"""<!doctype html>
 <html lang="en" data-no-global-i18n="0">
 <head>
@@ -2706,7 +2747,7 @@ def voucher_new():
     html,body { height:100%; background:radial-gradient(1200px 60% at 50% -10%, #152037 0%, var(--bg) 60%) fixed; }
     body { margin:0; color:var(--text); font:14px/1.45 system-ui,-apple-system,Segoe UI,Roboto,Inter,Arial,sans-serif;
            display:flex; align-items:flex-start; justify-content:center; padding:20px; overflow-x:hidden; }
-    .wrap { position:relative; width:min(720px, 94vw); margin-top:8vh; }
+    .wrap { position:relative; width:min(760px, 94vw); margin-top:8vh; }
     .card { background:linear-gradient(180deg, rgba(19,28,48,.7), rgba(14,20,34,.9));
             border:1px solid var(--border); border-radius:16px; padding:18px 18px 16px;
             box-shadow:0 20px 60px rgba(0,0,0,.45), inset 0 0 0 1px rgba(255,255,255,.03);
@@ -2734,6 +2775,13 @@ def voucher_new():
     .foot { margin-top:12px; color:var(--muted); font-size:12px; }
     .badge { display:inline-block; border:1px solid #1bd760; color:#b8ffd1; background:#0b2b17;
              padding:4px 8px; border-radius:8px; font-weight:800; font-size:12px; margin-left:6px; }
+    .svgwrap { margin-top:14px; padding:14px; border:1px solid var(--border); border-radius:12px; background:#0b0f17; }
+    .svgwrap .head { display:flex; align-items:center; justify-content:space-between; gap:10px; }
+    .svgbox { width:100%; height:auto; display:block; background:transparent; margin-top:10px; }
+    .svgbox svg { width:100%; height:auto; display:block; }
+    .mono { font:600 12px/1.3 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; color:var(--muted); }
+    textarea.code { width:100%; min-height:140px; margin-top:8px; background:#0b1222; color:#e7ecff;
+                    border:1px solid var(--border); border-radius:10px; padding:10px; font-family:ui-monospace,Menlo,Consolas,monospace; }
     canvas.confetti, canvas.fireworks { position:fixed; inset:0; width:100vw; height:100vh; pointer-events:none; z-index:1; }
     canvas.fireworks { z-index:0; mix-blend-mode:screen; opacity:.75; }
   </style>
@@ -2760,15 +2808,18 @@ def voucher_new():
         <button class="btn primary" id="copyBtn" aria-label="Copy code">Copy</button>
       </div>
 
+      <!-- Crafted SVG preview (only shows if we have one) -->
+      __SVG_BLOCK__
+
       <div class="btns">
         <a class="btn success" href="__BACK__">Return</a>
         <button class="btn" id="moreBtn">See how to redeem</button>
       </div>
 
       <div class="foot" id="howto" style="display:none">
-        In the Crafting UI, scroll to <b>Packages → Create Item</b>, enter your item name, then under
-        “Have a code?” paste the voucher and press <b>Redeem</b>. Your credit counter will increase and
-        the Visuals tab will unlock.
+        In the Crafting UI, go to <b>Packages → Create Item</b>, enter the item name, then under
+        “Have a code?” paste the voucher and press <b>Redeem</b>. After minting, copy the SVG below
+        back into the mint screen if needed.
       </div>
     </div>
   </div>
@@ -2790,6 +2841,20 @@ def voucher_new():
       $("#copyBtn").textContent = "Copied ✓";
     }
     setTimeout(()=> $("#copyBtn").textContent = "Copy", 1800);
+  });
+
+  // Copy SVG button (if present)
+  $("#copySvgBtn")?.addEventListener("click", async ()=>{
+    const ta = $("#svgText");
+    if(!ta) return;
+    try{
+      await navigator.clipboard.writeText(ta.value);
+      $("#copySvgBtn").textContent = "SVG Copied ✓";
+    }catch(_){
+      ta.select(); document.execCommand('copy');
+      $("#copySvgBtn").textContent = "SVG Copied ✓";
+    }
+    setTimeout(()=> $("#copySvgBtn").textContent = "Copy SVG", 1500);
   });
 
   // Confetti
@@ -2847,12 +2912,40 @@ def voucher_new():
 </body>
 </html>"""
 
+    # If we have an SVG, render a preview block with copy; else render a note.
+    if svg_code:
+        # preview + textarea with the raw svg so user can copy/paste into the mint screen
+        svg_block = (
+            '<div class="svgwrap">'
+            f'  <div class="head"><div><b>Crafted item SVG</b>'
+            f'{(" — " + (item_title or "")) if item_title else ""}</div>'
+            '    <button class="btn" id="copySvgBtn">Copy SVG</button>'
+            '  </div>'
+            '  <div class="svgbox" data-no-i18n="1">'
+            f'{svg_code}'
+            '  </div>'
+            '  <textarea class="code" id="svgText" readonly>'
+            f'{svg_code}'
+            '  </textarea>'
+            '  <div class="mono" style="margin-top:6px">Tip: paste this SVG in the Crafting mint screen.</div>'
+            '</div>'
+        )
+    else:
+        svg_block = (
+            '<div class="svgwrap">'
+            '  <div class="head"><div><b>Crafted item SVG</b></div></div>'
+            '  <div class="mono">No SVG stored for this purchase. '
+            'Ask the seller to include the item’s SVG in the product, or return and copy it from the product page.</div>'
+            '</div>'
+        )
+
     html = (
         HTML_TMPL
         .replace("__CODE__", code)
         .replace("__IC__", str(int(ic_value)))
         .replace("__PI__", f"{float(paid_pi):.4f}")
         .replace("__BACK__", back_to_game)
+        .replace("__SVG_BLOCK__", svg_block)
     )
     return Response(html, headers={"Content-Type": "text/html; charset=utf-8"})
 # ----------------- PI PAYMENTS (approve/complete) -----------------
