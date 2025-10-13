@@ -85,7 +85,24 @@
 
     /* Bigger IZZA PAY logo under hero words */
     .hero-logo{height:clamp(58px,12vw,110px);margin:10px auto 8px;display:block;filter:drop-shadow(0 0 10px rgba(255,255,255,.06))}
+/* Reduce space below main button sections */
+#s-city {
+  margin-bottom: 0;
+  padding-bottom: 0;
+}
 
+#s-store-cta {
+  margin-bottom: 0;
+  padding-bottom: 0;
+}
+
+#s-store-cta .cta-row {
+  margin-bottom: 6px; /* optional fine-tune */
+}
+
+#s-city .cta-row {
+  margin-bottom: 6px; /* optional fine-tune */
+}
     /* Mobile: nudge the IZZA PAY logo to the right */
 @media (max-width: 768px){
   #s-hero .hero-logo{
