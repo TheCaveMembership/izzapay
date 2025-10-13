@@ -206,6 +206,8 @@
           <input type="hidden" name="t" value="{{ t or '' }}">
           <!-- keep crafted SVG for inventory usage -->
           <input type="hidden" id="svgCode" name="svg_code" value="">
+          <input type="hidden" name="crafted_part" id="crafted_part">
+          <input type="hidden" name="meta_type" id="meta_type" value="">
           <div class="field-inline">
             <div class="field"><label class="ip-label">Title</label><input class="ip-input" name="title" required></div>
             <div class="field"><label class="ip-label">SKU</label><input class="ip-input" name="sku"></div>
@@ -342,6 +344,8 @@
                       <input type="hidden" name="crafted_item_id" id="crafted_item_id_{{ it.id }}" value="{{ it.crafted_item_id or '' }}">
                       <input type="hidden" name="fulfillment_kind" id="fulfillment_kind_{{ it.id }}" value="{{ it.fulfillment_kind or '' }}">
                       <input type="hidden" name="category" id="category_{{ it.id }}" value="{{ it.category or '' }}">
+                      <input type="hidden" name="crafted_part" id="crafted_part_{{ it.id }}" value="{{ it.crafted_part or '' }}">
+                      <input type="hidden" name="meta_type" id="meta_type_{{ it.id }}" value="{{ it.meta_type or '' }}">
                       <small class="note">Leave empty to treat as a normal (physical) item.</small>
                     </div>
 
@@ -591,9 +595,10 @@
     },{passive:false});
   })();
 
-  // ---------- Crafting Land linker ----------
+    // ---------- Crafting Land linker --------- //
   (function(){
     const GAME_BASE='https://izzagame.onrender.com';
+
     const who=()=>{
       const q=(new URLSearchParams(location.search).get('u')||'').trim(); if(q) return q.replace(/^@+/,'').toLowerCase();
       const p=window.__IZZA_PROFILE__||{}; if(p.username) return String(p.username).toLowerCase();
@@ -601,67 +606,150 @@
       try{ const raw=localStorage.getItem('piAuthUser'); if(raw){ const j=JSON.parse(raw); if(j&&j.username) return String(j.username).toLowerCase(); } }catch{}
       return '';
     };
+
     async function fetchState(user){
       if(!user) return null;
       const r=await fetch(`${GAME_BASE}/api/state/${encodeURIComponent(user)}?prefer=lastGood`,{credentials:'omit'});
       if(!r.ok) throw new Error('state_fetch_failed'); return r.json();
     }
-    function itemsFromState(j){
-      const inv=(j&&j.inventory)||(j&&j.player&&j.player.inventory)||{};
-      const out=[]; Object.entries(inv).forEach(([key,val])=>{
-        if(!val||typeof val!=='object') return;
-        const count=Number(val.count||0), equippable=!!val.equippable;
-        const isGameItem=equippable||['armor','weapon','tool','trinket'].includes(String(val.type||'').toLowerCase());
-        if(!isGameItem && count<=0) return;
-        out.push({ id:key, title:val.name||key, img:val.image||val.image_url||'', sku:val.sku||'', svg:val.iconSvg||val.overlaySvg||(val.icon&&(val.icon.svg||val.icon))||'' });
-      }); return out;
+
+    // --- helpers used by itemsFromState
+    function normalizeCategory(rawType, rawCategory){
+      const t = String(rawType || '').toLowerCase();
+      let c = String(rawCategory || '').toLowerCase();
+      if (!c) c = t;           // fall back to type if category not set
+      if (c === 'armor') c = 'armour';
+      return c || 'armour';
     }
-    function ipfsToHttp(u){ if(!u) return ''; if(/^ipfs:\/\//i.test(u)){ const cid=u.replace(/^ipfs:\/\//i,'').replace(/^ipfs\//,''); return 'https://ipfs.io/ipfs/'+cid; } return u; }
-    let CRAFT_ITEMS={};
-    function fillSelect(sel, items, currentId, isEdit){
-      if(!sel) return;
-      sel.innerHTML=''; const opt0=document.createElement('option'); opt0.value=''; opt0.textContent='— ' + (isEdit?'None':'Select a crafted item') + ' —'; sel.appendChild(opt0);
-      items.forEach(it=>{ const o=document.createElement('option'); o.value=String(it.id); o.textContent=it.title||it.id; if(currentId && String(currentId)===String(it.id)) o.selected=true; sel.appendChild(o); });
-      CRAFT_ITEMS=Object.fromEntries(items.map(it=>[String(it.id), it]));
-    }
-    function markAsCrafting(hidId,fkId,catId,val){
-      const hid=document.getElementById(hidId), fk=document.getElementById(fkId), cat=document.getElementById(catId);
-      if(hid) hid.value=val||''; if(fk) fk.value=val?'crafting':''; if(cat) cat.value=val?'digital_collectible':'';
+    function normalizePart(raw){
+      const alias = {
+        head:'helmet', helmet:'helmet',
+        body:'vest', torso:'vest', chest:'vest', vest:'vest',
+        arm:'arms', arms:'arms',
+        leg:'legs', legs:'legs',
+        hand:'hands', hands:'hands',
+        weapon:'hands', // generic weapon → hands slot
+        gun:'gun',
+        melee:'melee', blade:'melee', sword:'melee'
+      };
+      const p = String(raw || '').toLowerCase();
+      return alias[p] || (['helmet','vest','arms','legs','hands','gun','melee'].includes(p) ? p : '');
     }
 
-    // Create form wiring
+    function itemsFromState(j){
+      const inv=(j&&j.inventory)||(j&&j.player&&j.player.inventory)||{};
+      const out=[];
+      Object.entries(inv).forEach(([key,val])=>{
+        if(!val||typeof val!=='object') return;
+        const count=Number(val.count||0), equippable=!!val.equippable;
+        const isGameItem =
+          equippable ||
+          ['armor','armour','weapon','tool','trinket','digital_collectible'].includes(String(val.type||'').toLowerCase());
+        if(!isGameItem && count<=0) return;
+
+        const category = normalizeCategory(val.type, val.category || val.cat);
+        const part     = normalizePart(val.part || val.slot || val.subslot);
+
+        out.push({
+          id:   key,
+          title: val.name || key,
+          img:  val.image || val.image_url || '',
+          sku:  val.sku || '',
+          svg:  val.iconSvg || val.overlaySvg || (val.icon && (val.icon.svg || val.icon)) || '',
+          category,
+          part
+        });
+      });
+      return out;
+    }
+
+    function ipfsToHttp(u){
+      if(!u) return '';
+      if(/^ipfs:\/\//i.test(u)){
+        const cid=u.replace(/^ipfs:\/\//i,'').replace(/^ipfs\//,'');
+        return 'https://ipfs.io/ipfs/'+cid;
+      }
+      return u;
+    }
+
+    let CRAFT_ITEMS={};
+
+    function fillSelect(sel, items, currentId, isEdit){
+      if(!sel) return;
+      sel.innerHTML='';
+      const opt0=document.createElement('option');
+      opt0.value=''; opt0.textContent='— ' + (isEdit?'None':'Select a crafted item') + ' —';
+      sel.appendChild(opt0);
+      items.forEach(it=>{
+        const o=document.createElement('option');
+        o.value=String(it.id);
+        o.textContent=it.title||it.id;
+        if(currentId && String(currentId)===String(it.id)) o.selected=true;
+        sel.appendChild(o);
+      });
+      CRAFT_ITEMS=Object.fromEntries(items.map(it=>[String(it.id), it]));
+    }
+
+    function markAsCrafting(hidId, fkId, catId, partId, metaTypeId, craftedId){
+      const hid=document.getElementById(hidId);
+      const fk =document.getElementById(fkId);
+      const cat=document.getElementById(catId);
+      const prt=document.getElementById(partId);
+      const mt =document.getElementById(metaTypeId);
+
+      const has=!!craftedId;
+      if(hid) hid.value = has ? craftedId : '';
+      if(fk)  fk.value  = has ? 'crafting' : '';
+
+      const item = has ? (CRAFT_ITEMS[craftedId]||{}) : null;
+      if(cat) cat.value = has ? (item.category || 'armour') : '';
+      if(prt) prt.value = has ? (item.part || '') : '';
+      if(mt)  mt.value  = has ? 'crafted_item' : '';
+    }
+
+    // --- Create form wiring
     (function wireCreate(){
       const sel=$('#craftedSelect'); if(!sel) return;
-      const hid='crafted_item_id', fk='fulfillment_kind', cat='category';
-      const imgIn=$('#itUrl'); const svgHidden=$('#svgCode'); const titleEl=$('#create-product form input[name="title"]'); const skuEl=$('#create-product form input[name="sku"]');
+      const hid='crafted_item_id';
+      const fk='fulfillment_kind';
+      const cat='category';
+      const partId='crafted_part';   // hidden input in your form
+      const metaTypeId='meta_type';  // hidden input in your form
+
+      const imgIn=$('#itUrl');
+      const svgHidden=$('#svgCode');
+      const titleEl=$('#create-product form input[name="title"]');
+      const skuEl=$('#create-product form input[name="sku"]');
 
       function setFromSvg(svg, id){
         svgHidden.value = svg || '';
         if(svg){
-          // show inline now (same look everywhere)
           injectSvg('#itThumb', svg, 80);
-          // (optional) still set a URL so the server has something in image_url if required
-          // Fallback: upload raw SVG so we have a permanent URL
           (async()=>{
             try{
               const blob=new Blob([svgNormalize(svg,512)],{type:'image/svg+xml'});
               const file=new File([blob], `${id||'crafted'}.svg`, {type:'image/svg+xml'});
               const url=await uploadTo('/upload', file);
               if(imgIn) imgIn.value=ABS(url);
-            }catch{/* ignore */}
+            }catch{}
           })();
         }
       }
 
       async function onChange(){
-        const id=sel.value||''; markAsCrafting(hid,fk,cat,id); if(!id) return;
+        const id=sel.value||'';
+        markAsCrafting(hid,fk,cat,partId,metaTypeId,id);
+        if(!id) return;
+
         const it=CRAFT_ITEMS[id]||{};
         if(titleEl) titleEl.value = it.title || titleEl.value;
         if(skuEl)   skuEl.value   = it.sku || '';
-        if(it.svg){ setFromSvg(it.svg, id); }
-        else if(it.img){
+
+        if(it.svg){
+          setFromSvg(it.svg, id);
+        }else if(it.img){
           const u=ABS(ipfsToHttp(it.img)).trim();
-          if(/\.svg(\?|$)/i.test(u)){ // inline SVG image URLs too
+          if(/\.svg(\?|$)/i.test(u)){
             await injectSvgFromUrl('#itThumb', u, 80);
             svgHidden.value = await (async()=>{ try{ const r=await fetch(u); return await r.text(); }catch{return ''} })();
           }else{
@@ -678,26 +766,55 @@
       if(btn){
         btn.addEventListener('click', async ()=>{
           btn.disabled=true; btn.textContent='Refreshing…';
-          try{ const user=who(); const state=await fetchState(user); fillSelect(sel, itemsFromState(state), document.getElementById(hid)?.value, false); }
-          finally{ btn.disabled=false; btn.textContent='Refresh'; }
+          try{
+            const user=who();
+            const state=await fetchState(user);
+            fillSelect(sel, itemsFromState(state), document.getElementById(hid)?.value, false);
+          }finally{
+            btn.disabled=false; btn.textContent='Refresh';
+          }
         });
       }
 
-      (async()=>{ try{ const user=who(); const state=await fetchState(user); fillSelect(sel, itemsFromState(state), document.getElementById(hid)?.value, false); }catch{} })();
+      (async()=>{ try{
+        const user=who();
+        const state=await fetchState(user);
+        fillSelect(sel, itemsFromState(state), document.getElementById(hid)?.value, false);
+      }catch{} })();
     })();
 
-    // Edit rows wiring
+    // --- Edit rows wiring
     (function wireEdit(){
       $all('.craftedEditSelect').forEach(sel=>{
-        const row=sel.closest('tr'); const id=sel.getAttribute('data-item-id'); const hidId='crafted_item_id_'+id; const fkId='fulfillment_kind_'+id; const catId='category_'+id;
-        const cur = document.getElementById(hidId)?.value || '';
+        const row=sel.closest('tr');
+        const id=sel.getAttribute('data-item-id');
+
+        const hidId='crafted_item_id_'+id;
+        const fkId='fulfillment_kind_'+id;
+        const catId='category_'+id;
+        const partId='crafted_part_'+id;   // hidden input in edit form
+        const metaTypeId='meta_type_'+id;  // hidden input in edit form
+
+        const cur=document.getElementById(hidId)?.value || '';
+
         sel.addEventListener('change', ()=>{
-          const v=sel.value||''; markAsCrafting(hidId,fkId,catId,v); if(!v) return;
-          const it=CRAFT_ITEMS[v]||{}; const tEl=row.querySelector('input[name="title"]'); const iEl=row.querySelector('input[name="image_url"]');
+          const v=sel.value||'';
+          markAsCrafting(hidId,fkId,catId,partId,metaTypeId,v);
+          if(!v) return;
+
+          const it=CRAFT_ITEMS[v]||{};
+          const tEl=row.querySelector('input[name="title"]');
+          const iEl=row.querySelector('input[name="image_url"]');
           if(tEl) tEl.value = it.title || tEl.value;
           if(iEl && it.img) iEl.value = ABS(ipfsToHttp(it.img)).trim();
         });
-        (async()=>{ try{ const user=who(); const state=await fetchState(user); const items=itemsFromState(state); fillSelect(sel, items, cur, true); }catch{} })();
+
+        (async()=>{ try{
+          const user=who();
+          const state=await fetchState(user);
+          const items=itemsFromState(state);
+          fillSelect(sel, items, cur, true);
+        }catch{} })();
       });
     })();
   })();
