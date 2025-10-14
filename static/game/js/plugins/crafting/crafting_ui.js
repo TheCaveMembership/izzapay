@@ -2535,7 +2535,7 @@ function bindInside(){
     btnAI.disabled = true;
     btnAI.setAttribute('aria-busy','true');
     btnAI.textContent = 'Generating…';
-    const waitEl = showWait('Crafting your SVG preview (this can take ~5–10s)…');
+    const waitEl = showWait('Crafting your SVG preview (this can take ~30s–1min)…');
 
     try{
       const [svg] = await Promise.all([ aiToSVG(prompt), sleep(MIN_AI_WAIT_MS) ]);
