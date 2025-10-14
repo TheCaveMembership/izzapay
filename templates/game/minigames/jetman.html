@@ -1580,14 +1580,31 @@ function monthStamp(){
 function yearStamp(){ return String(new Date().getFullYear()); }
 
 function readLocalLB(gameId, scope, stamp){
-  const key = scope==='alltime' ? `lb::${gameId}::alltime`
-                                : `lb::${gameId}::${scope}::${stamp}`;
-  try{ return JSON.parse(localStorage.getItem(key)||'[]'); }catch(_){ return []; }
+  try{
+    // Prefer izzaLb2; fall back to old lb::
+    const keyNew = scope==='alltime' ? `izzaLb2::${gameId}::alltime`
+                                     : `izzaLb2::${gameId}::${scope}::${stamp}`;
+    const keyOld = scope==='alltime' ? `lb::${gameId}::alltime`
+                                     : `lb::${gameId}::${scope}::${stamp}`;
+    const vNew = localStorage.getItem(keyNew);
+    if (vNew) return JSON.parse(vNew);
+    const vOld = localStorage.getItem(keyOld);
+    return vOld ? JSON.parse(vOld) : [];
+  }catch(_){ return []; }
 }
+
 function writeLocalLB(gameId, scope, stamp, rows){
-  const key = scope==='alltime' ? `lb::${gameId}::alltime`
-                                : `lb::${gameId}::${scope}::${stamp}`;
-  try{ localStorage.setItem(key, JSON.stringify(rows||[])); }catch(_){}
+  const keyNew = scope==='alltime' ? `izzaLb2::${gameId}::alltime`
+                                   : `izzaLb2::${gameId}::${scope}::${stamp}`;
+  const keyOld = scope==='alltime' ? `lb::${gameId}::alltime`
+                                   : `lb::${gameId}::${scope}::${stamp}`;
+  try{
+    const s = JSON.stringify(rows||[]);
+    // Write new format (what the modal prefers)
+    localStorage.setItem(keyNew, s);
+    // Mirror old format (back-compat with older pages)
+    localStorage.setItem(keyOld, s);
+  }catch(_){}
 }
 function dedupeSortTop20(rows){
   const best = {};
