@@ -1602,32 +1602,38 @@ function writeLocalLB(gameId, scope, stamp, rows){
     try{ localStorage.removeItem(oldKey); }catch(_){}
   }catch(_){}
 }
+// keep this signature the same
 function dedupeSortTop20(rows){
   const best = {};
   (rows||[]).forEach(r=>{
-    const u = (r&&r.u)||''; const s = (r&&r.s)|0;
-    if(!u) return;
-    if(!best[u] || s > best[u].s) best[u] = { u, s, t: null, m: null };
+    if (!r) return;
+    const u = (r.u||'').toString().trim();
+    const s = (r.s|0);
+    if (!u) return;
+    // normalize shape to izzaLb2
+    const t = (typeof r.t !== 'undefined') ? r.t : null;
+    const m = (typeof r.m !== 'undefined') ? r.m : null;
+    if (!best[u] || s > best[u].s) best[u] = { u, s, t, m };
   });
   return Object.values(best).sort((a,b)=>b.s-a.s).slice(0,20);
 }
+
 function upsertArenaLedger(gameId, score){
   const u = getMatchUser(); if(!u) return;
-  const row = { u, s:(score|0), ts:Date.now() };
+  // write the izzaLb2 shape (no "ts")
+  const row = { u, s:(score|0), t:null, m:null };
 
   // all-time
   const all = dedupeSortTop20([ ...readLocalLB(gameId,'alltime',''), row ]);
   writeLocalLB(gameId,'alltime','',all);
 
   // stamped scopes the Arena modal uses
-  const d = dailyStamp(), m = monthStamp(), y = yearStamp();
-  ['day','month','year'].forEach(scope=>{
-    const stamp = scope==='day'?d : scope==='month'?m : y;
+  const d = dailyStamp(), mth = monthStamp(), yr = yearStamp();
+  [['day',d], ['month',mth], ['year',yr]].forEach(([scope,stamp])=>{
     const merged = dedupeSortTop20([ ...readLocalLB(gameId,scope,stamp), row ]);
     writeLocalLB(gameId, scope, stamp, merged);
   });
 }
-
 /* ===== Server submit w/ stamps (basketball-compatible) ===== */
 /* ===== Server submit w/ stamps (basketball-compatible) ===== */
 async function recordLeaderboards(score){
