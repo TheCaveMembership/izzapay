@@ -319,27 +319,51 @@
       if(su){ const u=new URL(location.href); u.searchParams.set('u',su); history.replaceState(null,'',u.toString()); U=publishU(su); }
     }
   }catch(_){}
-  function withAuth(h){ const u=new URL(h, location.origin); if(T) u.searchParams.set('t',T); if(U) u.searchParams.set('u',U); return u.pathname+(u.search?u.search:''); }
-  document.querySelectorAll('a').forEach(a=>{
-    const href=a.getAttribute('href')||'';
-    if(href.startsWith('/izza-game/') || href.startsWith('/izza-city') || href.startsWith('/izza')){
-      a.href = withAuth(href);
-    }
-  });
-  document.querySelectorAll('#backBtn,#backBtn2,#startBack').forEach(a=>a.href = withAuth(a.getAttribute('href')));
-  window._withAuth = withAuth;
+  function withAuth(h){
+  const u = new URL(h, location.origin);
 
-  /* >>> add bearerHeaders like basketball <<< */
-  window.bearerHeaders = function(b){
-    const h=Object.assign({'content-type':'application/json'}, b||{});
-    try{
-      const tok=localStorage.getItem('izzaBearer')||'';
-      if(tok) h.authorization='Bearer '+tok;
-    }catch(_){}
-    return h;
-  };
+  // pull best-known token/user
+  let T = '';
+  let U = '';
+  try { T = localStorage.getItem('izzaTokenT') || ''; } catch(_){}
+  try { U = (localStorage.getItem('izzaUserU') || '').toString().trim(); } catch(_){}
+
+  // hard fallback: copy from CURRENT URL if storage isn't populated yet
+  const cur = new URLSearchParams(location.search);
+  if (!T && cur.get('t')) T = cur.get('t');
+  if (!U && cur.get('u')) U = cur.get('u');
+
+  if (T) u.searchParams.set('t', T);
+  if (U) u.searchParams.set('u', U);
+
+  return u.pathname + (u.search ? u.search : '');
+}
+
+// Rewrite most internal links to carry auth — but skip the end-overlay button (it has its own handler)
+document.querySelectorAll('a:not(#backBtn2)').forEach(a=>{
+  const href = a.getAttribute('href') || '';
+  if (href.startsWith('/izza-game/') || href.startsWith('/izza-city') || href.startsWith('/izza')) {
+    a.href = withAuth(href);
+  }
+});
+
+// Explicitly set these two common back links
+document.querySelectorAll('#backBtn,#startBack').forEach(a=>{
+  a.href = withAuth(a.getAttribute('href') || '');
+});
+
+window._withAuth = withAuth;
+
+/* >>> add bearerHeaders like basketball <<< */
+window.bearerHeaders = function(b){
+  const h = Object.assign({'content-type':'application/json'}, b||{});
+  try{
+    const tok = localStorage.getItem('izzaBearer') || '';
+    if (tok) h.authorization = 'Bearer ' + tok;
+  }catch(_){}
+  return h;
+};
 })();
-
 /* ===== Wallet helpers ===== */
 (function(){
   const CRAFT_KEYS=['izzaCrafting','craftingCredits','izzaCraftCredits'];
@@ -1127,7 +1151,8 @@ document.querySelectorAll('#backBtn,#startBack,a:not(#backBtn2)').forEach(a=>{
         await _wallet.syncFromPersist();
         await IZZA_PERSIST?.save?.();
       }catch(_){}
-        location.assign(_withAuth('/izza-game/minigames'));
+      // carry forward the exact current ?t=&u=
+      location.assign('/izza-game/minigames' + (location.search || ''));
     }, {passive:false});
   }
 })();
