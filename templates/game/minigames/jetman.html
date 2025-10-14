@@ -1616,22 +1616,41 @@ function upsertArenaLedger(gameId, score){
 }
 
 /* ===== Server submit w/ stamps (basketball-compatible) ===== */
+/* ===== Server submit w/ stamps (basketball-compatible) ===== */
 async function recordLeaderboards(score){
   try{
-    const daily=dailyStamp(), monthly=monthStamp(), yearly=yearStamp();
-    // local ledger (immediate visibility in modal)
-    upsertArenaLedger('jetman', score|0);
-    // push the updated ledger into the shared persist so it survives close/reopen
-try{
-  if (window.IZZA_PERSIST && typeof IZZA_PERSIST.save === 'function'){
-    await IZZA_PERSIST.save();
-  } else if (typeof window._izzaForceSave === 'function'){
-    window._izzaForceSave();
-  }
-}catch(_){}
+    const daily   = dailyStamp(),
+          monthly = monthStamp(),
+          yearly  = yearStamp();
 
-    // server endpoint used by basketball page
-    const body = { score: score|0, daily, monthly, yearly, game:'jetman', user:getMatchUser(), ts:Date.now() };
+    // 0) Local cache so you see yourself instantly
+    upsertArenaLedger('jetman', score|0);
+
+    // 1) Write to the periodized store that the Arena modal reads
+    try{
+      if (window.IZZA_LEADERBOARD && typeof IZZA_LEADERBOARD.submit === 'function'){
+        await IZZA_LEADERBOARD.submit({
+          game: 'jetman',
+          user: getMatchUser(),
+          score: score|0,
+          periods: ['all','year','month','day']
+        });
+      }
+    }catch(_){ /* non-fatal; fallback below still runs */ }
+
+    // 2) Keep your stamped write (back-compat / mirrors)
+    try{
+      if (window.IZZA_PERSIST && typeof IZZA_PERSIST.save === 'function'){
+        await IZZA_PERSIST.save();
+      } else if (typeof window._izzaForceSave === 'function'){
+        window._izzaForceSave();
+      }
+    }catch(_){}
+
+    const body = {
+      score: score|0, daily, monthly, yearly,
+      game: 'jetman', user: getMatchUser(), ts: Date.now()
+    };
     const endpoints = [
       withAuth('/izza-game/api/leaderboard'),
       (window.IZZA_PERSIST_BASE||'').replace(/\/+$/,'') + '/izza-game/api/leaderboard',
@@ -1640,10 +1659,10 @@ try{
 
     for (let i=0;i<endpoints.length;i++){
       try{
-        const r = await fetch(endpoints[i],{
-          method:'POST',
-          credentials:'include',
-          mode:'cors',
+        const r = await fetch(endpoints[i], {
+          method: 'POST',
+          credentials: 'include',
+          mode: 'cors',
           headers: bearerHeaders(),
           body: JSON.stringify(body)
         });
