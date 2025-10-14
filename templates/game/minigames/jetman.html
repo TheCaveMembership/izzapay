@@ -1581,37 +1581,33 @@ function yearStamp(){ return String(new Date().getFullYear()); }
 
 function readLocalLB(gameId, scope, stamp){
   try{
-    // Prefer izzaLb2; fall back to old lb::
-    const keyNew = scope==='alltime' ? `izzaLb2::${gameId}::alltime`
-                                     : `izzaLb2::${gameId}::${scope}::${stamp}`;
-    const keyOld = scope==='alltime' ? `lb::${gameId}::alltime`
-                                     : `lb::${gameId}::${scope}::${stamp}`;
-    const vNew = localStorage.getItem(keyNew);
-    if (vNew) return JSON.parse(vNew);
-    const vOld = localStorage.getItem(keyOld);
-    return vOld ? JSON.parse(vOld) : [];
+    const key = scope==='alltime'
+      ? `izzaLb2::${gameId}::alltime`
+      : `izzaLb2::${gameId}::${scope}::${stamp}`;
+    const v = localStorage.getItem(key);
+    return v ? JSON.parse(v) : [];
   }catch(_){ return []; }
 }
 
 function writeLocalLB(gameId, scope, stamp, rows){
-  const keyNew = scope==='alltime' ? `izzaLb2::${gameId}::alltime`
-                                   : `izzaLb2::${gameId}::${scope}::${stamp}`;
-  const keyOld = scope==='alltime' ? `lb::${gameId}::alltime`
-                                   : `lb::${gameId}::${scope}::${stamp}`;
+  const key = scope==='alltime'
+    ? `izzaLb2::${gameId}::alltime`
+    : `izzaLb2::${gameId}::${scope}::${stamp}`;
   try{
-    const s = JSON.stringify(rows||[]);
-    // Write new format (what the modal prefers)
-    localStorage.setItem(keyNew, s);
-    // Mirror old format (back-compat with older pages)
-    localStorage.setItem(keyOld, s);
+    localStorage.setItem(key, JSON.stringify(rows||[]));
+    // optional: actively remove the old mirror so nothing accidentally reads it
+    const oldKey = scope==='alltime'
+      ? `lb::${gameId}::alltime`
+      : `lb::${gameId}::${scope}::${stamp}`;
+    try{ localStorage.removeItem(oldKey); }catch(_){}
   }catch(_){}
 }
 function dedupeSortTop20(rows){
   const best = {};
   (rows||[]).forEach(r=>{
-    const u = (r&&r.u)||''; const s=(r&&r.s)|0;
+    const u = (r&&r.u)||''; const s = (r&&r.s)|0;
     if(!u) return;
-    if(!best[u] || s>best[u].s) best[u] = { u, s, ts:r.ts||Date.now() };
+    if(!best[u] || s > best[u].s) best[u] = { u, s, t: null, m: null };
   });
   return Object.values(best).sort((a,b)=>b.s-a.s).slice(0,20);
 }
@@ -1688,6 +1684,18 @@ async function recordLeaderboards(score){
     }
   }catch(_){}
 }
+
+  (function migrateOldDailyOnce(){
+  try{
+    const d = dailyStamp();
+    const oldKey = `lb::jetman::day::${d}`;
+    const newKey = `izzaLb2::jetman::day::${d}`;
+    if (!localStorage.getItem(newKey) && localStorage.getItem(oldKey)) {
+      localStorage.setItem(newKey, localStorage.getItem(oldKey));
+      localStorage.removeItem(oldKey);
+    }
+  }catch(_){}
+})();
   
 /* ===== Game over (unchanged) ===== */
 function gameOver(){
