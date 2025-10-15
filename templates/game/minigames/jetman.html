@@ -202,62 +202,57 @@ document.getElementById('cityBtn2').href  = withAuth('/izza-game/play');
 document.getElementById('arenaBtn').href = withAuth('/izza-game/minigames');
 
 /* ====== COINS/CRAFT wallet (MATCH BASKETBALL) ====== */
-function bearerHeaders(base) { var headers = Object.assign({ 'content-type':'application/json' }, base || {}); try{ var bearer = localStorage.getItem('izzaBearer') || ''; if (bearer) headers['authorization'] = 'Bearer ' + bearer; }catch(_){}
-  return headers; }
-function parseWalletResponse(j){ if (!j || typeof j !== 'object') return { coins:0, crafting:0 }; if ('coins' in j || 'crafting' in j || 'credits' in j){
-  var craft = (typeof j.crafting!=='undefined') ? j.crafting : j.credits; return { coins: Number(j.coins)||0, crafting: Number(craft)||0 }; }
-  if (j.wallet)   return parseWalletResponse(j.wallet); if (j.balance)  return parseWalletResponse(j.balance); return { coins:0, crafting:0 }; }
+function bearerHeaders(base) {
+  var headers = Object.assign({ 'content-type':'application/json' }, base || {});
+  try{ var bearer = localStorage.getItem('izzaBearer') || ''; if (bearer) headers['authorization'] = 'Bearer ' + bearer; }catch(_){}
+  return headers;
+}
 var CRAFT_KEYS=['izzaCrafting','craftingCredits','izzaCraftCredits'];
-function readCraftAny(){ for(var i=0;i<CRAFT_KEYS.length;i++){ var v=parseInt(localStorage.getItem(CRAFT_KEYS[i])||'0',10); if(isFinite(v)&&v>0) return v|0; } var v0=parseInt(localStorage.getItem(CRAFT_KEYS[0])||'0',10)||0; return v0|0; }
-function writeCraftAll(v){ var n=Math.max(0,v|0); for(var i=0;i<CRAFT_KEYS.length;i++) localStorage.setItem(CRAFT_KEYS[i],String(n));
-  try{ window.dispatchEvent(new Event('izza-crafting-changed')); }catch(_){ } }
+
 function readCoinsLS(){ return (parseInt(localStorage.getItem('izzaCoins')||'0',10)|0); }
 function writeCoinsLS(v){ localStorage.setItem('izzaCoins', String((v|0))); }
-var coinsHUD = document.getElementById('coinsHUD'); function paintCoinsHUD(n){ coinsHUD.textContent = String(Math.max(0, n|0)); }
 
-/* === Wallet handoff (kept), but mirror Basketball’s flow for persistence === */
-function prepareWalletHandoff(){
-  try{
-    var u = (window.__IZZA_PROFILE__ && window.__IZZA_PROFILE__.username) ||
-            (localStorage.getItem('izzaUserU')||'');
-    var payload = {
-      ts: Date.now(),
-      user: (u||'').toString().trim().replace(/^@+/, '').toLowerCase(),
-      coins: readCoinsLS()|0,
-      craft: readCraftAny()|0
-    };
-    sessionStorage.setItem('izzaWalletHandoff', JSON.stringify(payload));
-  }catch(_){}
+function readCraftAny(){
+  for(var i=0;i<CRAFT_KEYS.length;i++){
+    var v=parseInt(localStorage.getItem(CRAFT_KEYS[i])||'0',10);
+    if(isFinite(v)&&v>0) return v|0;
+  }
+  return (parseInt(localStorage.getItem(CRAFT_KEYS[0])||'0',10)|0);
 }
-function consumeWalletHandoff(maxAgeMs){ if(!maxAgeMs) maxAgeMs = 120000; try{ var raw = sessionStorage.getItem('izzaWalletHandoff'); if(!raw) return null;
-  var s = JSON.parse(raw); if(!s || !s.ts || (Date.now() - s.ts) > maxAgeMs) return null; if (s.user){ var u = s.user.toString().trim().replace(/^@+/, '').toLowerCase();
-    window.__IZZA_PROFILE__ = Object.assign({}, window.__IZZA_PROFILE__, { username: u }); window.izzaUserKey = { get: function(){ return u; } };
-    try{ localStorage.setItem('izzaUserU', u); localStorage.setItem('piAuthUser', JSON.stringify({ username:u })); }catch(_){}
-    U = u; } localStorage.setItem('izzaCoins', String(s.coins|0)); localStorage.setItem('izzaCrafting', String(s.craft|0)); return { coins:s.coins|0, craft:s.craft|0 }; }catch(_){ return null; } }
+function writeCraftAll(v){
+  var n=Math.max(0,v|0);
+  for(var i=0;i<CRAFT_KEYS.length;i++) localStorage.setItem(CRAFT_KEYS[i],String(n));
+  try{ window.dispatchEvent(new Event('izza-crafting-changed')); }catch(_){}
+}
 
-/* ===== Adopt Basketball’s wallet-dirty + persistence pattern ===== */
-let walletDirty=false, WALLET_READY=false;
+var coinsHUD = document.getElementById('coinsHUD');
+function paintCoinsHUD(n){ coinsHUD.textContent = String(Math.max(0, n|0)); }
 function updateCoinsHUD(){ paintCoinsHUD(readCoinsLS()|0); }
 function syncCoinsHUD(){ updateCoinsHUD(); }
+
+/* wallet-dirty + persist like Basketball */
+let walletDirty=false, WALLET_READY=false;
+
 async function persistWalletAndSave(){
   try{
-    writeCraftAll(readCraftAny());
+    writeCraftAll(readCraftAny()); // normalize keys
     if(window.IZZA_PERSIST && typeof IZZA_PERSIST.save==='function'){
-      await IZZA_PERSIST.save(); walletDirty=false;
+      await IZZA_PERSIST.save();
+      walletDirty=false;
     } else if (typeof window._izzaForceSave === 'function'){
-      window._izzaForceSave(); walletDirty=false;
+      window._izzaForceSave();
+      walletDirty=false;
     }
   }catch(_){}
 }
 
-/* Replace Jetman’s applyCoins with Basketball’s behavior (await save, mark dirty) */
+/* award coins and auto-convert every 1000 -> 1 craft credit */
 async function applyCoins(delta){
   const before = readCoinsLS()|0;
   const after  = before + (delta|0);
   writeCoinsLS(after);
   walletDirty = true;
 
-  /* Auto-craft award each 1000 coins (keep Jetman feature) */
   try{
     const COINS_PER_CREDIT = 1000;
     const beforeBlocks = Math.floor(before / COINS_PER_CREDIT);
@@ -278,53 +273,112 @@ async function applyCoins(delta){
   WALLET_READY = true;
   updateCoinsHUD();
 
-  /* Persist like basketball (save immediately; best-effort) */
+  /* Persist immediately (best effort) */
   try{
     if(window.IZZA_PERSIST && typeof IZZA_PERSIST.save==='function'){
-      await IZZA_PERSIST.save(); walletDirty=false;
+      await IZZA_PERSIST.save();
+      walletDirty=false;
     }
   }catch(_){}
   return after;
 }
 
-/* Keep page-exit behaviors like basketball */
+/* handoff wallet across pages (unchanged behavior) */
+function prepareWalletHandoff(){
+  try{
+    var u = (window.__IZZA_PROFILE__ && window.__IZZA_PROFILE__.username) ||
+            (localStorage.getItem('izzaUserU')||'');
+    var payload = {
+      ts: Date.now(),
+      user: (u||'').toString().trim().replace(/^@+/, '').toLowerCase(),
+      coins: readCoinsLS()|0,
+      craft: readCraftAny()|0
+    };
+    sessionStorage.setItem('izzaWalletHandoff', JSON.stringify(payload));
+  }catch(_){}
+}
+function consumeWalletHandoff(maxAgeMs){
+  if(!maxAgeMs) maxAgeMs = 120000;
+  try{
+    var raw = sessionStorage.getItem('izzaWalletHandoff'); if(!raw) return null;
+    var s = JSON.parse(raw); if(!s || !s.ts || (Date.now() - s.ts) > maxAgeMs) return null;
+    if (s.user){
+      var u = s.user.toString().trim().replace(/^@+/, '').toLowerCase();
+      window.__IZZA_PROFILE__ = Object.assign({}, window.__IZZA_PROFILE__, { username: u });
+      window.izzaUserKey = { get: function(){ return u; } };
+      try{
+        localStorage.setItem('izzaUserU', u);
+        localStorage.setItem('piAuthUser', JSON.stringify({ username:u }));
+      }catch(_){}
+    }
+    localStorage.setItem('izzaCoins', String(s.coins|0));
+    localStorage.setItem('izzaCrafting', String(s.craft|0));
+    return { coins:s.coins|0, craft:s.craft|0 };
+  }catch(_){ return null; }
+}
+
+/* hydrate on load (best-effort) */
+function waitForPersistReady(opts){
+  opts = opts || {};
+  var timeout = opts.timeout || 3000, interval = opts.interval || 40;
+  return new Promise(function(res){
+    var t0 = performance.now();
+    function check(){
+      if (window.IZZA_PERSIST && typeof IZZA_PERSIST.load === 'function') return res(true);
+      if (performance.now() - t0 > timeout) return res(false);
+      setTimeout(check, interval);
+    }
+    if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', check, {once:true}); else check();
+  });
+}
+function hydrateFromSnapshot(){
+  return new Promise(function(resolve){
+    waitForPersistReady().then(function(){
+      try{
+        if (window.IZZA_PERSIST && typeof IZZA_PERSIST.load === 'function'){
+          IZZA_PERSIST.load().then(function(){
+            try{ writeCraftAll(readCraftAny()); WALLET_READY=true; updateCoinsHUD(); }catch(_){}
+            resolve(readCoinsLS());
+          }).catch(function(){ WALLET_READY=true; updateCoinsHUD(); resolve(readCoinsLS()); });
+        } else { WALLET_READY=true; updateCoinsHUD(); resolve(readCoinsLS()); }
+      }catch(_){ WALLET_READY=true; updateCoinsHUD(); resolve(readCoinsLS()); }
+    });
+  });
+}
+
+/* keep HUD synced + persist on hide */
 window.addEventListener('storage', function(e){
   if (e && (e.key==='izzaCoins' || (e.key && CRAFT_KEYS.includes(e.key)))) updateCoinsHUD();
 }, false);
-window.addEventListener('izza-coins-changed', syncCoinsHUD, {passive:true});
-window.addEventListener('izza-wallet-changed', syncCoinsHUD, {passive:true});
+window.addEventListener('izza-coins-changed',    syncCoinsHUD, {passive:true});
+window.addEventListener('izza-wallet-changed',   syncCoinsHUD, {passive:true});
 window.addEventListener('izza-crafting-changed', syncCoinsHUD, {passive:true});
+
 document.addEventListener('visibilitychange', async ()=>{
-  if(document.hidden){
-    if(walletDirty){ try{ await persistWalletAndSave(); }catch(_){} }
-  }else{
-    updateCoinsHUD();
-  }
+  if(document.hidden){ if(walletDirty){ try{ await persistWalletAndSave(); }catch(_){ } } }
+  else{ updateCoinsHUD(); }
 }, {passive:true});
+
 window.addEventListener('pagehide', ()=>{
   if(walletDirty && window.IZZA_PERSIST && typeof IZZA_PERSIST.save==='function'){
     try{ IZZA_PERSIST.save(); walletDirty=false; }catch(_){}
   }
 });
 
-/* Hook exit links to also persist (kept from Jetman) */
+/* hook exit links to save */
 function persistThenGo(href){
   try{ prepareWalletHandoff(); }catch(_){}
-  try{
-    if (window.IZZA_PERSIST && typeof IZZA_PERSIST.save === 'function'){
-      IZZA_PERSIST.save().catch(function(){});
-    }
-  }catch(_){}
+  try{ if (window.IZZA_PERSIST && typeof IZZA_PERSIST.save === 'function'){ IZZA_PERSIST.save().catch(function(){}); } }catch(_){}
   location.href = withAuth(href);
 }
 ['backBtn','arenaBtn','cityBtn','cityBtn2'].forEach(function(id){
   var a = document.getElementById(id);
   if (!a) return;
-  a.addEventListener('click', function(e){
-    e.preventDefault();
-    persistThenGo(a.getAttribute('href'));
-  }, false);
+  a.addEventListener('click', function(e){ e.preventDefault(); persistThenGo(a.getAttribute('href')); }, false);
 });
+
+/* initial HUD paint */
+(function(){ try{ document.getElementById('coinsHUD').textContent = String(readCoinsLS()|0); }catch(_){} })();
 
 /* ===== Snapshot hydrate (minor: mark ready and paint coins) ===== */
 function waitForPersistReady(opts){ opts = opts || {}; var timeout = opts.timeout || 3000, interval = opts.interval || 40; return new Promise(function(res){
@@ -1489,7 +1543,7 @@ function bumpHigh(key, score){
   if(score>prev){ localStorage.setItem(key, String(score)); }
 }
 
-/* Write rows to all namespaces and keep ts like basketball */
+/* stamped arrays (top-20 unique by user, highest wins) */
 function upsertArenaLedger(gameId, score){
   const u = (window.izzaUserKey && window.izzaUserKey.get && window.izzaUserKey.get())
             || (localStorage.getItem('izzaUserU')||'').toLowerCase();
@@ -1522,14 +1576,14 @@ function upsertArenaLedger(gameId, score){
     arr.push(row);
     arr = arr
       .sort((a,b)=>b.s-a.s)
-      .filter((v,i,self)=> self.findIndex(x=>x.u===v.u)===i )
+      .filter((v,i,self)=> self.findIndex(x=>x.u===v.u)===i)
       .slice(0,20);
 
     writeAll(keyBase, arr);
   });
 }
 
-/* Basketball-style recordLeaderboards (dual-write + POST) */
+/* public entry point (and POST) */
 function recordLeaderboards(score){
   bumpHigh('izza_lb_day_'   + dailyStamp(),  score);
   bumpHigh('izza_lb_month_' + monthStamp(),  score);
