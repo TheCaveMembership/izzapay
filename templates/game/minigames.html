@@ -1120,10 +1120,10 @@ function readLocal(gameId, periodKey){
       }
 
       async function fetchServerLeaders(gameId, periodKey){
-  // ⚠️ IMPORTANT: prefer IZZA_LEADERBOARD.top which canonicalizes periods and fans out across mirrors.
-  // This fixes the “I only see myself” issue caused by sending `period=alltime` directly to the server.
   try{
-    const p = (String(periodKey||'alltime').toLowerCase() === 'alltime') ? 'all' : String(periodKey||'day').toLowerCase();
+    const p = (String(periodKey||'alltime').toLowerCase() === 'alltime')
+      ? 'all'
+      : String(periodKey||'day').toLowerCase();
     if (window.IZZA_LEADERBOARD && typeof IZZA_LEADERBOARD.top === 'function'){
       const r = await IZZA_LEADERBOARD.top({ game: gameId, limit: 20, period: p });
       if (r && r.ok && r.data && Array.isArray(r.data.rows)){
@@ -1131,27 +1131,7 @@ function readLocal(gameId, periodKey){
       }
     }
   }catch(_){}
-
-  // Fallback: same-origin endpoint (kept for back-compat and offline mirrors)
-  try{
-    const qp = periodKey ? `&period=${encodeURIComponent(periodKey)}` : '';
-    const url = withAuth(`/izza-game/api/leaderboard?game=${encodeURIComponent(gameId)}${qp}&limit=20`);
-    const r = await fetch(url, { credentials:'include', headers: bearerHeaders() });
-    if(r.ok){
-      const j = await r.json();
-      const rows = Array.isArray(j) ? j : (j && Array.isArray(j.rows) ? j.rows : null);
-      if (rows && rows.length) return rows;
-
-      // if “alltime” didn’t return, try server default (no period)
-      if (periodKey === 'alltime'){
-        const r2 = await fetch(withAuth(`/izza-game/api/leaderboard?game=${encodeURIComponent(gameId)}&limit=20`), { credentials:'include', headers: bearerHeaders() });
-        if (r2.ok){
-          const j2 = await r2.json();
-          return Array.isArray(j2) ? j2 : (j2 && j2.rows) || null;
-        }
-      }
-    }
-  }catch(_){}
+  // No server route on this origin; return null to avoid 404 noise
   return null;
 }
 
@@ -1316,16 +1296,19 @@ async function loadAndRender(seedFromLegacy=false){
     // 3) If empty, fall back to our local cache for this period
     rows = readLocalLeaders(gameId, period);
 
-    // 4) Still empty? Try server ALL-TIME, then cache locally for alltime
-    if (!rows || !rows.length){
-      const all = await fetchServerLeaders(gameId, 'alltime');
-      if (all && all.length){
-        const norm = normRows(all);
-        saveLocal(gameId, 'alltime', '', norm);
-        // If user is on Daily/Monthly/Yearly, we’ll still *show* something:
-        rows = norm;
-      }
+    // 4) If still empty:
+//    - If the selected tab IS All-Time, try server All-Time once.
+//    - Otherwise, stay empty (don’t inject All-Time into Daily/Monthly/Annual).
+if (!rows || !rows.length){
+  if (period === 'alltime'){
+    const all = await fetchServerLeaders(gameId, 'alltime');
+    if (all && all.length){
+      const norm = normRows(all);
+      saveLocal(gameId, 'alltime', '', norm);
+      rows = norm;
     }
+  }
+}
 
     // 5) Last-ditch: seed from legacy “last score”
     if ((!rows || !rows.length) && seedFromLegacy){
