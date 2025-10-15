@@ -193,7 +193,7 @@ function publishUsername(u){ if (!u) return ''; u = u.replace(/^@+/, '').toLower
   window.izzaUserKey = { get: function(){ return u; } };
   try{ if (!localStorage.getItem('piAuthUser')) localStorage.setItem('piAuthUser', JSON.stringify({ username: u })); }catch(_){}
   return u; }
-try{ if (U) publishUsername(U); else { var su = (localStorage.getItem(U_KEY)||'').toString().trim(); if (su){ var url2=new URL(location.href); url2.searchParams.set('u',su); history.replaceState(null,'',url2.toString()); U = publishUsername(su); } }catch(_){}
+try{ if (U) publishUsername(U); else { var su = (localStorage.getItem(U_KEY)||'').toString().trim(); if (su){ var url2=new URL(location.href); url2.searchParams.set('u',su); history.replaceState(null,'',url2.toString()); U = publishUsername(su); } } }catch(_){}
 function withAuth(href){ var url = new URL(href, location.origin); if (T) url.searchParams.set('t', T); if (U) url.searchParams.set('u', U);
   return url.pathname + (url.search ? url.search : ''); }
 document.getElementById('backBtn').href  = withAuth('/izza-game/minigames');
@@ -215,22 +215,7 @@ function readCoinsLS(){ return (parseInt(localStorage.getItem('izzaCoins')||'0',
 function writeCoinsLS(v){ localStorage.setItem('izzaCoins', String((v|0))); }
 var coinsHUD = document.getElementById('coinsHUD'); function paintCoinsHUD(n){ coinsHUD.textContent = String(Math.max(0, n|0)); }
 
-/* === NEW: baseline guard to prevent async loads from lowering starting wallet === */
-var __START_BASELINE__ = null;
-function setStartBaselineFromLS(){
-  __START_BASELINE__ = { coins: readCoinsLS(), craft: readCraftAny() };
-}
-function coalesceWalletAgainstBaseline(){
-  if(!__START_BASELINE__) return;
-  var curC = readCoinsLS();
-  var curK = readCraftAny();
-  var wantC = Math.max(curC, __START_BASELINE__.coins|0);
-  var wantK = Math.max(curK, __START_BASELINE__.craft|0);
-  if (wantC !== curC){ writeCoinsLS(wantC); try{ window.dispatchEvent(new Event('izza-coins-changed')); }catch(_){} }
-  if (wantK !== curK){ writeCraftAll(wantK); }
-}
-
-/* === Wallet handoff (kept) === */
+/* === Wallet handoff (kept), but mirror Basketball’s flow for persistence === */
 function prepareWalletHandoff(){
   try{
     var u = (window.__IZZA_PROFILE__ && window.__IZZA_PROFILE__.username) ||
@@ -341,36 +326,13 @@ function persistThenGo(href){
   }, false);
 });
 
-/* ===== Snapshot hydrate (updated to coalesce against baseline) ===== */
+/* ===== Snapshot hydrate (minor: mark ready and paint coins) ===== */
 function waitForPersistReady(opts){ opts = opts || {}; var timeout = opts.timeout || 3000, interval = opts.interval || 40; return new Promise(function(res){
   var t0 = performance.now(); function check(){ if (window.IZZA_PERSIST && typeof IZZA_PERSIST.load === 'function') return res(true);
     if (performance.now() - t0 > timeout) return res(false); setTimeout(check, interval); } if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', check, {once:true}); else check(); }); }
-function hydrateFromSnapshot(){ 
-  return new Promise(function(resolve){ 
-    waitForPersistReady().then(function(){
-      try{
-        if (window.IZZA_PERSIST && typeof IZZA_PERSIST.load === 'function'){
-          IZZA_PERSIST.load().then(function(){
-            try{ 
-              // ⬇️ keep craft keys normalized and guard the baseline
-              writeCraftAll(readCraftAny());
-              coalesceWalletAgainstBaseline();
-              WALLET_READY=true; updateCoinsHUD();
-            }catch(_){}
-            resolve(readCoinsLS());
-          }).catch(function(){
-            WALLET_READY=true; updateCoinsHUD(); resolve(readCoinsLS());
-          });
-        } else {
-          WALLET_READY=true; updateCoinsHUD(); resolve(readCoinsLS());
-        }
-      }catch(_){
-        WALLET_READY=true; updateCoinsHUD(); resolve(readCoinsLS());
-      }
-    });
-  });
-}
-
+function hydrateFromSnapshot(){ return new Promise(function(resolve){ (function(){ waitForPersistReady().then(function(){ try{
+  if (window.IZZA_PERSIST && typeof IZZA_PERSIST.load === 'function'){ IZZA_PERSIST.load().then(function(){ try{ writeCraftAll(readCraftAny()); WALLET_READY=true; updateCoinsHUD(); }catch(_){}
+    resolve(readCoinsLS()); }).catch(function(){ WALLET_READY=true; updateCoinsHUD(); resolve(readCoinsLS()); }); } else { WALLET_READY=true; updateCoinsHUD(); resolve(readCoinsLS()); } }catch(_){ WALLET_READY=true; updateCoinsHUD(); resolve(readCoinsLS()); } }); })(); }); }
 var LAST_CHARACTER = null;
 function ensureSession(){ return fetch(withAuth('/izza-game/api/character'), { credentials:'include', headers: bearerHeaders() })
   .then(function(r){ if(!r.ok) return; return r.json().catch(function(){ return {}; }).then(function(j){ var uname = (j.user && j.user.username) || j.username || j.handle || '';
@@ -942,7 +904,7 @@ function makeSoftCircle(size, stops){
   var s=size||256, c=document.createElement('canvas'); c.width=c.height=s; var x=c.getContext('2d');
   var g=x.createRadialGradient(s/2,s/2,s*0.05, s/2,s/2,s*0.5);
   (stops||[[0,'rgba(255,255,255,.6)'],[1,'rgba(255,255,255,0)']]).forEach(function(st){ g.addColorStop(st[0], st[1]); });
-  x.fillStyle=g; x.beginPath(); x.arc(s/2,s/2, s*0.34, 0, Math.PI*2); x.fill();
+  x.fillStyle=g; x.beginPath(); x.arc(s/2,s/2,s/2,0,Math.PI*2); x.fill();
   var t=new THREE.CanvasTexture(c); t.anisotropy=4; t.generateMipmaps=false; t.minFilter=THREE.LinearFilter;
   return t;
 }
@@ -974,7 +936,7 @@ function makeGlassFacadeTexture(opts){
 
   var cols = opts.cols || 7, rows = opts.rows || 18;
   var padX = 12, padY = 12;
-    var cw = (W - padX*2)/cols, ch = (H - padY*2)/rows;
+  var cw = (W - padX*2)/cols, ch = (H - padY*2)/rows;
   ctx.strokeStyle = '#000000';
   ctx.lineWidth = 2;
   ctx.beginPath();
@@ -1110,7 +1072,6 @@ function makeBuildings(){
     z -= wallLen;
   }
 }
-
 /* ===== Obstacles — NEON GREEN bars ===== */
 var obstacles=[];
 function spawnObstacle(){
@@ -1134,7 +1095,6 @@ function spawnObstacle(){
 
   obstacles.push({ mesh: bar, type: 'bar', halfHeight: t/2 });
 }
-
 /* ===== Clouds / Neon dust motion ===== */
 var _cloudTex = null;
 function seedCloudsSetup(){
@@ -1717,6 +1677,7 @@ function drawUI(){
 
 /* ===== game state + loop ===== */
 var game = { score:0, ended:false };
+var SPAWN_BASE = 1.8;
 
 var spawnTimer=0;
 function frame(now){
@@ -1780,10 +1741,6 @@ function startGame(){
   try{
     var overlay = document.getElementById('startOverlay');
     overlay.style.display='none';
-
-    // set baseline BEFORE any hydrates or handoffs
-    setStartBaselineFromLS();
-
     var handoff = consumeWalletHandoff(); if (handoff) paintCoinsHUD(handoff.coins);
     hydrateFromSnapshot().then(function(){
       runStartCoins = readCoinsLS()|0;
