@@ -1155,13 +1155,14 @@ function readLocal(gameId, periodKey){
   return null;
 }
 
-      // Normalize rows { user, score } or { u, s } -> {u,s}
+      // Normalize rows and KEEP ts for time filtering
 function normRows(rows){
   return (rows||[]).map(r => ({
     u: (r.u ?? r.user ?? '—'),
     s: (r.s ?? r.score ?? 0)|0,
-    t: (r.t ?? r.timeMs ?? null),   // keep raw time if present
-    m: (r.m ?? r.moves  ?? null)    // keep raw moves if present
+    ts: (r.ts ?? r.timestamp ?? r.timeTs ?? null), // <— keep timestamp
+    t:  (r.t  ?? r.timeMs   ?? null),              // game-specific time (e.g., solitaire)
+    m:  (r.m  ?? r.moves    ?? null)
   }));
 }
 
@@ -1267,7 +1268,36 @@ function decodeSolitaireScore(raw){
   const moves     = Math.max(0, 1000 - tie);
   return { elapsedMs, moves };
 }
-
+// ---- Period helpers (UTC to avoid device TZ drift) ----
+function startOfUTCDay(d = new Date()){
+  const t = new Date(Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate()));
+  return t;
+}
+function endOfUTCDay(d = new Date()){
+  const e = startOfUTCDay(d);
+  e.setUTCDate(e.getUTCDate() + 1);
+  return e;
+}
+function startOfUTCMonth(d = new Date()){
+  return new Date(Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), 1));
+}
+function endOfUTCMonth(d = new Date()){
+  const e = startOfUTCMonth(d);
+  e.setUTCMonth(e.getUTCMonth() + 1);
+  return e;
+}
+function startOfUTCYear(d = new Date()){
+  return new Date(Date.UTC(d.getUTCFullYear(), 0, 1));
+}
+function endOfUTCYear(d = new Date()){
+  const e = startOfUTCYear(d);
+  e.setUTCFullYear(e.getUTCFullYear() + 1);
+  return e;
+}
+function filterByTsPeriod(rows, start, end){
+  const s = +start, e = +end;
+  return (rows||[]).filter(r => Number.isFinite(r.ts) && r.ts >= s && r.ts < e);
+}
 async function loadAndRender(seedFromLegacy=false){
   const gameId = elGame.value || 'basketball';
   const isSolitaire = String(gameId).startsWith('targets'); // targets::d1 / targets::d3
