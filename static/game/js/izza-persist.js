@@ -68,6 +68,11 @@ function readCoinsOnHand(){
   let v = 0;
   try{ v = Math.max(v, parseInt(localStorage.getItem('izzaCoins')||'0',10) || 0); }catch{}
   try{ if (window.IZZA?.api?.getCoins) v = Math.max(v, (IZZA.api.getCoins()|0) || 0); }catch{}
+  // NEW: cookie mirror (cross-subdomain first-load)
+  try{
+    const m = document.cookie.split('; ').find(s => s.startsWith('izzaCoins='));
+    if (m) v = Math.max(v, parseInt(decodeURIComponent(m.split('=').slice(1).join('='))||'0',10) || 0);
+  }catch{}
   const handoff = _readWalletHandoff();
   if (handoff && Number.isFinite(handoff.coins)) v = Math.max(v, handoff.coins|0);
   return v|0;
@@ -211,6 +216,20 @@ function readLeaderboardLocals(){
           else localStorage.setItem('izzaCoins', String(maxVal));
 
           try{ window.dispatchEvent(new Event('izza-coins-changed')); }catch{}
+          // NEW: mirror coins to cookie for cross-subdomain first load
+try{
+  const vv = encodeURIComponent(String(maxVal));
+  const baseC = `izzaCoins=${vv}; Path=/; Max-Age=${60*60*24*365}; SameSite=None; Secure`;
+  document.cookie = baseC;
+  if (location.hostname.endsWith('.onrender.com')){
+    document.cookie = `izzaCoins=${vv}; Path=/; Domain=.onrender.com; Max-Age=${60*60*24*365}; SameSite=None; Secure`;
+  }
+}catch{}
+
+// NEW: also emit wallet-style event so HUDs listening to one channel update
+try{
+  window.dispatchEvent(new CustomEvent('izza-wallet-changed', { detail:{ coins: maxVal } }));
+}catch{}
 
           // If local was higher, schedule a save to lift the server snapshot
           if (local > serverVal){
@@ -1008,17 +1027,25 @@ window.addEventListener('storage', (e)=>{
     tryKick('craft-credits-storage');
   }
 
-  // 🆕 Wallet coins mirror (lift server if LS moves forward)
-  if (e && e.key === 'izzaCoins'){
-    // ensure the in-memory wallet (HUD) sees the newer value too
-    try {
-      const v = readCoinsOnHand();
-      if (window.IZZA?.api?.setCoins) IZZA.api.setCoins(v);
-      window.dispatchEvent(new Event('izza-coins-changed'));
-    } catch(_) {}
+  // 🆕 Wallet coins mirror (lift server if LS moves forward) + cookie + wallet event
+if (e && e.key === 'izzaCoins'){
+  try {
+    const cur = readCoinsOnHand();
+    if (window.IZZA?.api?.setCoins) IZZA.api.setCoins(cur);
+    window.dispatchEvent(new Event('izza-coins-changed'));
+    // mirror to cookie so Arena first load sees it
+    const vv = encodeURIComponent(String(cur|0));
+    const baseC = `izzaCoins=${vv}; Path=/; Max-Age=${60*60*24*365}; SameSite=None; Secure`;
+    document.cookie = baseC;
+    if (location.hostname.endsWith('.onrender.com')){
+      document.cookie = `izzaCoins=${vv}; Path=/; Domain=.onrender.com; Max-Age=${60*60*24*365}; SameSite=None; Secure`;
+    }
+    // also fire the wallet-wide event used by credits
+    window.dispatchEvent(new CustomEvent('izza-wallet-changed', { detail:{ coins: cur|0 } }));
+  } catch(_){}
 
-    tryKick('coins-storage');
-  }
+  tryKick('coins-storage');
+}
 }, { passive:true }); // <-- don't forget this line!
 
   // periodic poll remains
