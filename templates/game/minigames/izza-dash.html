@@ -46,7 +46,6 @@
 
     .arena{position:relative;height:74vh;min-height:560px;border:1px solid var(--line);
            border-radius:14px;background:#000;overflow:hidden}
-    /* prevent selection/callout ONLY inside the game surface */
     .arena #gl, .arena .overlayUi, .arena .hud, .arena .playerAvatar{
       -webkit-user-select:none; user-select:none; -webkit-touch-callout:none;
     }
@@ -190,117 +189,36 @@
 })();
 
 /* =======================
-   Wallet helpers  (SYNCED WITH PERSIST + handoff)
+   Wallet (Basketball-parity snapshot + saves)
 ======================= */
 (function(){
   const CRAFT_KEYS=['izzaCrafting','craftingCredits','izzaCraftCredits'];
-  const toInt = v => { const n=parseInt(v,10); return Number.isFinite(n)?n:0; };
 
   function readCraftAny(){
-    try{
-      if(window.IZZA_PERSIST?.get){
-        const p = window.IZZA_PERSIST.get('craftingCredits') ?? window.IZZA_PERSIST.get('izzaCrafting');
-        if(p!=null) return toInt(p);
-      }
-    }catch(_){}
-    for(const k of CRAFT_KEYS){ const v=toInt(localStorage.getItem(k)||'0'); if(v>0) return v|0; }
-    return toInt(localStorage.getItem(CRAFT_KEYS[0])||'0')|0;
+    for(const k of CRAFT_KEYS){
+      const v=parseInt(localStorage.getItem(k)||'0',10);
+      if(Number.isFinite(v) && v>0) return v|0;
+    }
+    return (parseInt(localStorage.getItem(CRAFT_KEYS[0])||'0',10)||0)|0;
   }
-
   function writeCraftAll(v){
     const n=Math.max(0,v|0);
     for(const k of CRAFT_KEYS) localStorage.setItem(k,String(n));
-    try{ if(window.IZZA_PERSIST?.set) window.IZZA_PERSIST.set('craftingCredits', n); }catch(_){}
-    try{window.dispatchEvent(new Event('izza-crafting-changed'));}catch(_){}
-    saveSoon();
+    try{ window.dispatchEvent(new Event('izza-crafting-changed')); }catch(_){}
   }
 
-  /* IMPORTANT: prefer Persist → cookie/hand-off → local mirrors → API (last) */
-  function readCoins(){
-    // Persist (authoritative)
-    try{
-      if(window.IZZA_PERSIST){
-        const pv = (window.IZZA_PERSIST.get && window.IZZA_PERSIST.get('coins'));
-        if(pv!=null) return (pv|0);
-        if(window.IZZA_PERSIST.state && window.IZZA_PERSIST.state.coins!=null) return (window.IZZA_PERSIST.state.coins|0);
-      }
-    }catch(_){}
-    // Cookie (shared across Arena/City)
-    try{
-      const m = document.cookie.split('; ').find(s => s.startsWith('izzaCoins='));
-      if (m) { const cv = parseInt(decodeURIComponent(m.split('=').slice(1).join('='))||'0',10) || 0; if (cv > 0) return cv|0; }
-    }catch(_){}
-    // Handoff (fresh cross-page)
-    try{
-      const raw = sessionStorage.getItem('izzaWalletHandoff');
-      if (raw) { const s = JSON.parse(raw)||{}; if (Number.isFinite(s.coins) && (s.coins|0) > 0) return (s.coins|0); }
-    }catch(_){}
-    // Local mirrors
-    try{
-      const z = localStorage.getItem('izzaWallet');
-      if (z) { const w = JSON.parse(z); if (w && w.coins != null) return (w.coins|0); }
-    }catch(_){}
-    try{
-      const ls = parseInt(localStorage.getItem('izzaCoins')||'0',10) || 0;
-      if(ls>0) return ls|0;
-    }catch(_){}
-    // API (fallback only; can be stale in minigames)
-    try{ if (window.IZZA?.api?.getCoins) return (IZZA.api.getCoins()|0) || 0; }catch(_){}
-    return 0;
-  }
-
-  function writeCoins(v){
-    const n = (v|0);
+  function readCoinsLS(){ return (parseInt(localStorage.getItem('izzaCoins')||'0',10)|0); }
+  function writeCoinsLS(v){
+    const n=(v|0);
     localStorage.setItem('izzaCoins', String(n));
     try{
       const w = { coins:n, updatedAt:Date.now(), u:(window._authTU?.getU?.()||null) };
       localStorage.setItem('izzaWallet', JSON.stringify(w));
     }catch(_){}
-    try{
-      const vv = encodeURIComponent(String(n));
-      const baseC = `izzaCoins=${vv}; Path=/; Max-Age=${60*60*24*365}; SameSite=None; Secure`;
-      document.cookie = baseC;
-      if (location.hostname.endsWith('.onrender.com')){
-        document.cookie = `izzaCoins=${vv}; Path=/; Domain=.onrender.com; Max-Age=${60*60*24*365}; SameSite=None; Secure`;
-      }
-    }catch(_){}
-    try{ if (window.IZZA_PERSIST?.set) window.IZZA_PERSIST.set('coins', n); }catch(_){}
-    try{ window.dispatchEvent(new Event('izza-coins-changed')); }catch(_){}
-    try{ window.dispatchEvent(new CustomEvent('izza-wallet-changed', { detail:{ coins:n, crafting:readCraftAny() } })); }catch(_){}
-    saveSoon();
+    try{ document.cookie = `izzaCoins=${encodeURIComponent(String(n))}; Path=/; Max-Age=${60*60*24*365}; SameSite=None; Secure`; }catch(_){}
   }
 
-  // Pull from persist → local mirrors so HUD & Arena match exactly (NO readCoins here)
-  async function syncFromPersist(){
-    try{
-      if(window.IZZA_PERSIST?.load) await window.IZZA_PERSIST.load();
-      let c = 0;
-      try{
-        const pv = window.IZZA_PERSIST?.get?.('coins');
-        if(pv!=null) c = pv|0;
-        else if(window.IZZA_PERSIST?.state?.coins!=null) c = (window.IZZA_PERSIST.state.coins|0);
-      }catch(_){}
-      // If persist didn't have it, fall back once to other sources
-      if(!Number.isFinite(c) || c<=0){ c = readCoins(); }
-      writeCoins(c); // mirrors to cookie + local + events
-      // craft mirrors stay consistent
-      const craft = readCraftAny();
-      for(const k of ['izzaCrafting','craftingCredits','izzaCraftCredits']) localStorage.setItem(k,String(craft));
-    }catch(_){}
-  }
-
-  // Debounced save that carries T & U so Arena sees updates instantly
-  let saveTimer=null;
-  function saveSoon(){
-    try{
-      if(saveTimer) clearTimeout(saveTimer);
-      saveTimer=setTimeout(async()=>{
-        try{ if(window.IZZA_PERSIST?.save) await IZZA_PERSIST.save(); }catch(_){}
-      }, 120);
-    }catch(_){}
-  }
-
-  // Consume wallet handoff like Basketball (coins + craft + username), reject stale (>2 min)
+  // Same handoff pattern as Basketball (coins + craft + username) — accepts only fresh (<2 min)
   function consumeWalletHandoff(maxAgeMs=120000){
     try{
       const raw=sessionStorage.getItem('izzaWalletHandoff'); if(!raw) return null;
@@ -311,97 +229,25 @@
         window.izzaUserKey={get:()=>u};
         try{ localStorage.setItem('izzaUserU',u); localStorage.setItem('piAuthUser',JSON.stringify({username:u})); }catch(_){}
       }
-      writeCoins(s.coins|0);               // goes through mirrors + events
-      writeCraftAll(s.craft|0);            // mirrors craft and event
+      localStorage.setItem('izzaCoins', String(s.coins|0));
+      localStorage.setItem('izzaCrafting', String(s.craft|0));
       return { coins:s.coins|0, craft:s.craft|0 };
     }catch(_){ return null; }
   }
 
-  // Prime wallet from ALL sources and mirror the best everywhere before a run
-  async function primeWalletFromEverywhere(){
-    let best = 0;
-
-    // Persist first (authoritative)
+  async function persistSave(){
     try{
-      if(window.IZZA_PERSIST?.load) await IZZA_PERSIST.load();
-      const pv = window.IZZA_PERSIST?.get?.('coins');
-      if(pv!=null) best = Math.max(best, pv|0);
-      else if(window.IZZA_PERSIST?.state?.coins!=null) best = Math.max(best, window.IZZA_PERSIST.state.coins|0);
+      // mirror craft into all aliases, then save
+      writeCraftAll(readCraftAny());
+      if(window.IZZA_PERSIST && typeof IZZA_PERSIST.save==='function'){
+        await IZZA_PERSIST.save();
+      }
     }catch(_){}
-
-    // Handoff (keep craft/user if present)
-    const ho = (function(){
-      try{
-        const raw=sessionStorage.getItem('izzaWalletHandoff'); if(!raw) return null;
-        const s=JSON.parse(raw)||{};
-        if(!s.ts || (Date.now()-s.ts)>120000) return null;
-        return { coins: (s.coins|0), craft:(s.craft|0), user:(s.user||null) };
-      }catch(_){ return null; }
-    })();
-    if(ho){
-      best = Math.max(best, ho.coins|0);
-      try{
-        if(ho.user){
-          const u=String(ho.user).trim().replace(/^@+/, '').toLowerCase();
-          window.__IZZA_PROFILE__=Object.assign({},window.__IZZA_PROFILE__,{username:u});
-          window.izzaUserKey={get:()=>u};
-          localStorage.setItem('izzaUserU',u);
-          localStorage.setItem('piAuthUser',JSON.stringify({username:u}));
-        }
-      }catch(_){}
-    }
-
-    // Cookie
-    try{
-      const m = document.cookie.split('; ').find(s => s.startsWith('izzaCoins='));
-      if(m){ const cv = parseInt(decodeURIComponent(m.split('=').slice(1).join('='))||'0',10) || 0; best=Math.max(best, cv|0); }
-    }catch(_){}
-
-    // Local mirrors
-    try{
-      const z = localStorage.getItem('izzaWallet');
-      if(z){ const w=JSON.parse(z)||{}; if(w.coins!=null) best=Math.max(best, (w.coins|0)); }
-    }catch(_){}
-    try{ best=Math.max(best, (parseInt(localStorage.getItem('izzaCoins')||'0',10)||0)|0); }catch(_){}
-
-    // API LAST (can be stale in minigames)
-    try{ if(window.IZZA?.api?.getCoins){ best=Math.max(best, (IZZA.api.getCoins()|0)); } }catch(_){}
-
-    // Mirror chosen "best" to all stores (and persist)
-    writeCoins(best);
-    if(ho){ try{ writeCraftAll(ho.craft|0); }catch(_){} }
-
-    return best|0;
   }
 
-  window._wallet = { readCraftAny, writeCraftAll, readCoins, writeCoins, syncFromPersist, saveSoon, consumeWalletHandoff, primeWalletFromEverywhere };
-})();
-
-// Boot-time: lift the best-of (Persist + cookie + handoff + local + API) into mirrors ASAP
-(async function _bootMirrorCoinsFromCookie(){
-  try{
-    let best = 0;
-    try{
-      if(window.IZZA_PERSIST?.load) await IZZA_PERSIST.load();
-      const pv = window.IZZA_PERSIST?.get?.('coins');
-      if(pv!=null) best = Math.max(best, pv|0);
-      else if(window.IZZA_PERSIST?.state?.coins!=null) best = Math.max(best, window.IZZA_PERSIST.state.coins|0);
-    }catch(_){}
-    try{
-      const m  = document.cookie.split('; ').find(s => s.startsWith('izzaCoins='));
-      if(m){ const ck = parseInt(decodeURIComponent(m.split('=').slice(1).join('='))||'0',10) || 0; best=Math.max(best, ck|0); }
-    }catch(_){}
-    try{
-      const raw=sessionStorage.getItem('izzaWalletHandoff'); if(raw){ const ho=(JSON.parse(raw)||{}).coins|0; best=Math.max(best, ho|0); }
-    }catch(_){}
-    try{
-      const ls = parseInt(localStorage.getItem('izzaCoins')||'0',10) || 0; best=Math.max(best, ls|0);
-      const z = localStorage.getItem('izzaWallet'); if(z){ const w=JSON.parse(z)||{}; if(w.coins!=null) best=Math.max(best, w.coins|0); }
-    }catch(_){}
-    try{ if(window.IZZA?.api?.getCoins) best=Math.max(best, (IZZA.api.getCoins()|0)); }catch(_){}
-
-    if(best>0){ _wallet.writeCoins(best); }
-  }catch(_){}
+  window._walletBB = {
+    readCoinsLS, writeCoinsLS, readCraftAny, writeCraftAll, consumeWalletHandoff, persistSave
+  };
 })();
 
 /* =======================
@@ -438,13 +284,12 @@ window.addEventListener('keydown',(e)=>{ if(e.key==='m'||e.key==='M'){ e.prevent
 applyMuteState(localStorage.getItem('izzaMute')==='1');
 
 /* =======================
-   Snapshot hydrate
+   Snapshot hydrate (character)
 ======================= */
 async function ensureSession(){
   try{
     const r=await fetch(_withAuth('/izza-game/api/character'),{credentials:'include',headers:{'content-type':'application/json'}});
     if(r.ok){ const j=await r.json().catch(()=>({})); try{ localStorage.setItem('izzaCharacter', JSON.stringify(j)); }catch(_){}
-      const uname=(j.user&&j.user.username)||j.username||j.handle||''; if(uname){ /* seeded earlier */ }
       return j;
     }
   }catch(_){}
@@ -469,7 +314,7 @@ function showMsg(t, cls){ bigmsg.textContent=t; bigmsg.className='bigmsg show ' 
 function paintCoinsHUD(n){ coinsRunEl.textContent=String(Math.max(0, n|0)); }
 
 /* =======================
-   Avatar (robust ramp + fallback like Basketball)
+   Avatar (ramp + overlays as you had)
 ======================= */
 const SPRITES={ body:{ default:"/static/game/sprites/body/default.png", street_a:"/static/game/sprites/body/street_a.png", street_b:"/static/game/sprites/body/street_b.png" },
                 hair:{ short:"/static/game/sprites/hair/short.png", buzz:"/static/game/sprites/hair/buzz.png", long:"/static/game/sprites/hair/long.png" },
@@ -482,7 +327,7 @@ const HAIR_TO={ black:["#2C2C31","#17171B","#0A0A0D"], brown:["#7A5336","#5C3E28
 
 function loadImg(src){ return new Promise(res=>{ const i=new Image(); i.crossOrigin='anonymous'; i.onload=()=>res(i); i.onerror=()=>res(null); i.src=src; }); }
 const hexToRgb=h=>{ const n=parseInt(h.replace('#',''),16); return {r:(n>>16)&255,g:(n>>8)&255,b:n&255}; };
-const dist2=(a,b)=>{const dr=a.r-b.r,dg=a.g-b.g,db=a.b-b.b;return dr*dr+dg*dg+db*db;};
+const dist2=(a,b)=>{const dr=a.r-b.r,dg=a.g-b.g,db=a.b-b.b;return dr*dr+dg*dg+db*db; };
 const lum=(r,g,b)=>0.2126*r+0.7152*g+0.0722*b;
 
 function extractThreeToneRamp(img){
@@ -809,31 +654,45 @@ function layoutLevel(){
   showMsg('LEVEL '+level,'');
 }
 
-/* ----- coin → craft awarding (additional) ----- */
+/* ----- coin → craft awarding (match your logic; baseline = runStartCoins) ----- */
 let craftsGrantedThisRun = 0;
 function maybeGrantCraftCredits(){
-  const gained = Math.max(0, _wallet.readCoins() - runStartCoins);
+  const gained = Math.max(0, _walletBB.readCoinsLS() - runStartCoins);
   const shouldHave = Math.floor(gained / 1000);
   if(shouldHave > craftsGrantedThisRun){
     const delta = shouldHave - craftsGrantedThisRun;
-    _wallet.writeCraftAll(_wallet.readCraftAny() + delta);
+    _walletBB.writeCraftAll(_walletBB.readCraftAny() + delta);
     craftsGrantedThisRun = shouldHave;
+    try{ window.dispatchEvent(new Event('izza-crafting-changed')); }catch(_){}
   }
+}
+
+/* coins awarding now mirrors Basketball applyCoins() style */
+let WALLET_READY=false, walletDirty=false;
+function paintCoinsHUDFromLS(){ paintCoinsHUD(_walletBB.readCoinsLS()); }
+async function applyCoins(amount){
+  const cur = (_walletBB.readCoinsLS()|0) + (amount|0);
+  _walletBB.writeCoinsLS(cur);
+  walletDirty=true;
+  try{ window.dispatchEvent(new Event('izza-coins-changed')); }catch(_){}
+  try{ window.dispatchEvent(new CustomEvent('izza-wallet-changed', { detail:{ coins:cur, crafting:_walletBB.readCraftAny() } })); }catch(_){}
+  try{ if(window.IZZA_PERSIST?.save){ await IZZA_PERSIST.save(); walletDirty=false; } }catch(_){}
+  WALLET_READY=true; paintCoinsHUDFromLS();
+  return cur;
 }
 
 function awardAndNext(){
   const coinsWon = 100*level;
-  _wallet.writeCoins(_wallet.readCoins()+coinsWon);
-  paintCoinsHUD(_wallet.readCoins());
-  maybeGrantCraftCredits();
-
-  const justBeat = level;
-  showMsg('LEVEL '+justBeat+' COMPLETE!', 'scoreGlow');
-  setTimeout(()=>{
-    level++; score = level-1;
-    showMsg('LEVEL '+level+' — GO!', '');
-    setTimeout(()=>{ layoutLevel(); }, 420);
-  }, 700);
+  applyCoins(coinsWon).then(()=>{
+    maybeGrantCraftCredits();
+    const justBeat = level;
+    showMsg('LEVEL '+justBeat+' COMPLETE!', 'scoreGlow');
+    setTimeout(()=>{
+      level++; score = level-1;
+      showMsg('LEVEL '+level+' — GO!', '');
+      setTimeout(()=>{ layoutLevel(); }, 420);
+    }, 700);
+  });
 }
 
 /* ---------- Drag & place ---------- */
@@ -1027,6 +886,7 @@ async function submitLeaderboard(finalScore){
         body:JSON.stringify({ game:'puzzle', score: finalScore|0 })
       }).catch(()=>{});
     }
+    // local mirrors like Basketball
     const u=(window.izzaUserKey&&izzaUserKey.get&&izzaUserKey.get())||'guest';
     const row={u, s:finalScore|0, ts:Date.now()};
     const z=n=>String(n).padStart(2,'0'); const d=new Date();
@@ -1054,16 +914,18 @@ async function submitLeaderboard(finalScore){
   }catch(_){}
 }
 
+async function persistWalletAndSave(){ try{ await _walletBB.persistSave(); }catch(_){} }
+
 function showEndOverlay(){
   if(ended) return;
   ended=true;
-  const totalCoins = _wallet.readCoins();
+  const totalCoins = _walletBB.readCoinsLS();
   const runCoins = Math.max(0,totalCoins - runStartCoins);
   document.getElementById('finalScore').textContent = String(score|0);
   document.getElementById('finalCoins').textContent = String(runCoins|0);
   document.getElementById('finalCraft').textContent = String(craftsGrantedThisRun|0);
   endOverlay.style.display='flex';
-  try{ _wallet.saveSoon(); }catch(_){}
+  try{ const p=persistWalletAndSave(); Promise.race([p,new Promise(r=>setTimeout(r,200))]); }catch(_){}
   submitLeaderboard(score|0);
 }
 
@@ -1075,24 +937,38 @@ async function refreshAvatar(){
   }catch(_){}
 }
 
+/* ======== Start: mirror Basketball flow exactly for wallet snapshot ======== */
 async function start(){
   try{
-    // Prime from EVERYWHERE before we set baseline (mirrors + persist)
-    const startCoins = await _wallet.primeWalletFromEverywhere();
-    paintCoinsHUD(startCoins);
-    runStartCoins = startCoins;
-    craftsGrantedThisRun = 0;
+    // 1) Consume handoff first (if coming from City/Arena)
+    const handoff=_walletBB.consumeWalletHandoff();
+    if(handoff){ paintCoinsHUD(handoff.coins); }
 
-    // Keep pulling latest character; then re-sync mirrors from Persist explicitly
+    // 2) Prime City snapshot like Basketball (silent iframe)
+    try{
+      const src=_withAuth('/izza-game/play?prime=1&silent=1');
+      const f=document.createElement('iframe');
+      Object.assign(f.style,{position:'fixed',width:'0',height:'0',opacity:'0',pointerEvents:'none',border:'0'});
+      f.src=src; document.body.appendChild(f);
+      await new Promise(r=>setTimeout(r,500));
+    }catch(_){}
+
+    // 3) Ensure character + load Persist (doesn't override LS baseline)
     await ensureSession();
-    await _wallet.syncFromPersist(); // now reads Persist directly and mirrors
-    paintCoinsHUD(_wallet.readCoins());
-    runStartCoins = _wallet.readCoins();
+    try{ if(window.IZZA_PERSIST?.load) await IZZA_PERSIST.load(); }catch(_){}
+
+    // 4) Establish baseline from HUD (if set) or LS
+    WALLET_READY=true;
+    const hudVal = parseInt((coinsRunEl.textContent||'').trim(),10);
+    runStartCoins = Number.isFinite(hudVal) && hudVal>=0 ? hudVal : (_walletBB.readCoinsLS()||0);
+    paintCoinsHUD(runStartCoins);
+
   }catch(_){}
 
   // avatar (+ retry once after a short delay)
   await refreshAvatar(); setTimeout(refreshAvatar, 400);
 
+  // audio
   try{
     const AudioCtx = window.AudioContext || window.webkitAudioContext;
     window.audioCtx = window.audioCtx || new AudioCtx();
@@ -1121,11 +997,11 @@ endBtn.addEventListener('click', (e)=>{ e.preventDefault(); showEndOverlay(); },
 /* Return to Arcade — force persist save BEFORE navigating so Arena sees updated total immediately */
 document.getElementById('backBtn').addEventListener('click', async (e)=>{
   e.preventDefault();
-  try{ if(window.IZZA_PERSIST?.save) await IZZA_PERSIST.save(); }catch(_){}
+  try{ await _walletBB.persistSave(); }catch(_){}
   location.href = e.currentTarget.href;
 },{passive:false});
 
-/* Play Again (reset state, restart run) */
+/* Play Again (reset state, restart run) — baseline from LS like Basketball */
 document.addEventListener('click', (e)=>{
   const isAgain = e.target && e.target.id==='againBtn';
   if(!isAgain) return;
@@ -1133,40 +1009,27 @@ document.addEventListener('click', (e)=>{
   endOverlay.style.display='none';
   score = 0; level = 1; timeLeft = 30; ended = false;
 
-  _wallet.primeWalletFromEverywhere().then((coins)=>{
-    runStartCoins = coins|0;
+  try{
+    runStartCoins = _walletBB.readCoinsLS()|0;
     craftsGrantedThisRun = 0;
     if(!scene || !renderer) initThree();
     layoutLevel();
     requestAnimationFrame(loop);
-  }).catch(()=>{
-    runStartCoins = _wallet.readCoins();
+    paintCoinsHUDFromLS();
+  }catch(_){
+    runStartCoins = _walletBB.readCoinsLS();
     craftsGrantedThisRun = 0;
     if(!scene || !renderer) initThree();
     layoutLevel();
     requestAnimationFrame(loop);
-  });
+  }
 }, {passive:false});
 
 /* keep HUD coins synced like other games */
-window.addEventListener('storage', (e)=>{ if(e && (e.key==='izzaCoins' || e.key==='izzaWallet')){ paintCoinsHUD(_wallet.readCoins()); } }, {passive:true});
-window.addEventListener('izza-coins-changed', (e)=>{
-  const n = e && e.detail && Number.isFinite(e.detail.coins) ? e.detail.coins : _wallet.readCoins();
-  paintCoinsHUD(n);
-}, {passive:true});
-window.addEventListener('izza-wallet-changed', (e)=>{
-  const n = e && e.detail && Number.isFinite(e.detail.coins) ? e.detail.coins : _wallet.readCoins();
-  paintCoinsHUD(n);
-}, {passive:true});
-window.addEventListener('pageshow', async ()=>{
-  try{
-    const coins = await _wallet.primeWalletFromEverywhere(); // ensure HUD mirrors Arena when coming back
-    paintCoinsHUD(coins);
-  }catch(_){
-    try{ await _wallet.syncFromPersist(); }catch(_){}
-    paintCoinsHUD(_wallet.readCoins());
-  }
-}, {passive:true});
+window.addEventListener('storage', (e)=>{ if(e && (e.key==='izzaCoins' || e.key==='izzaWallet' || (e.key && ['izzaCrafting','craftingCredits','izzaCraftCredits'].includes(e.key)))){ paintCoinsHUDFromLS(); } }, {passive:true});
+window.addEventListener('izza-coins-changed', ()=>paintCoinsHUDFromLS(), {passive:true});
+window.addEventListener('izza-wallet-changed', ()=>paintCoinsHUDFromLS(), {passive:true});
+window.addEventListener('pageshow', ()=>{ try{ paintCoinsHUDFromLS(); }catch(_){} }, {passive:true});
 
 /* prevent long-press menu only inside the game display (not the START card) */
 document.getElementById('gl').addEventListener('contextmenu', e=>e.preventDefault(), {passive:false});
@@ -1175,9 +1038,9 @@ document.getElementById('arena').addEventListener('selectstart', e=>{
 },{passive:false});
 
 /* Save on hide/unload so Arena picks up new totals even if user leaves abruptly */
-window.addEventListener('pagehide', ()=>{ try{ IZZA_PERSIST?.save?.(); }catch(_){} }, {passive:true});
-window.addEventListener('visibilitychange', ()=>{ if(document.visibilityState==='hidden'){ try{ IZZA_PERSIST?.save?.(); }catch(_){} } }, {passive:true});
+window.addEventListener('pagehide', ()=>{ _walletBB.persistSave().catch(()=>{}); }, {passive:true});
+window.addEventListener('visibilitychange', ()=>{ if(document.visibilityState==='hidden'){ _walletBB.persistSave().catch(()=>{}); } }, {passive:true});
 </script>
 </body>
 </html>
-<!-- build: 2025-10-15 (wallet: Persist-first; syncFromPersist reads Persist; boot lift includes Persist; API last; overlays async decode) -->
+<!-- build: 2025-10-15 (DASH wallet parity with Basketball: handoff+LS baseline, prime iframe, apply/save on exit; keeps async equipped overlays) -->
