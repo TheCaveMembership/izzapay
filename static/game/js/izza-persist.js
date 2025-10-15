@@ -52,12 +52,26 @@
       const raw = localStorage.getItem('izzaInventory'); return raw? JSON.parse(raw) : {};
     }catch{ return {}; }
   }
-  function readCoinsOnHand(){
-    try{
-      if (window.IZZA?.api?.getCoins) return IZZA.api.getCoins()|0;
-      const raw = localStorage.getItem('izzaCoins'); return raw? (parseInt(raw,10)||0) : 0;
-    }catch{ return 0; }
-  }
+  // NEW: read wallet handoff (used by mini-games on navigate)
+function _readWalletHandoff(maxAgeMs = 120000){
+  try{
+    const raw = sessionStorage.getItem('izzaWalletHandoff');
+    if (!raw) return null;
+    const s = JSON.parse(raw)||{};
+    if (!s.ts || (Date.now() - s.ts) > maxAgeMs) return null;
+    return { coins: (s.coins|0) || 0, craft: (s.craft|0) || 0 };
+  }catch{ return null; }
+}
+
+// REPLACE your readCoinsOnHand() with this:
+function readCoinsOnHand(){
+  let v = 0;
+  try{ v = Math.max(v, parseInt(localStorage.getItem('izzaCoins')||'0',10) || 0); }catch{}
+  try{ if (window.IZZA?.api?.getCoins) v = Math.max(v, (IZZA.api.getCoins()|0) || 0); }catch{}
+  const handoff = _readWalletHandoff();
+  if (handoff && Number.isFinite(handoff.coins)) v = Math.max(v, handoff.coins|0);
+  return v|0;
+}
   function readMissions(){
     try{
       if (window.IZZA?.api?.getMissionCount) return IZZA.api.getMissionCount()|0;
@@ -981,17 +995,24 @@ if (seed.leaderboard && typeof seed.leaderboard === 'object'){
   }, 2000);
 
   // Also react if another tab changes the hearts LS key
-  window.addEventListener('storage', (e)=>{
-    const u=userKey();
-    if (e && (e.key===`izzaCurHeartSegments_${u}` || e.key==='izzaCurHeartSegments')){
-      _lastHearts = readHeartsSegs();
-      tryKick('hearts-storage');
-    }
-    // Crafting credits mirrors
-    if (e && (e.key==='izzaCrafting' || e.key==='craftingCredits' || e.key==='izzaCraftCredits')){
-      tryKick('craft-credits-storage');
-    }
-  });
+window.addEventListener('storage', (e)=>{
+  const u = userKey();
+
+  if (e && (e.key === `izzaCurHeartSegments_${u}` || e.key === 'izzaCurHeartSegments')){
+    _lastHearts = readHeartsSegs();
+    tryKick('hearts-storage');
+  }
+
+  // Crafting credits mirrors
+  if (e && (e.key === 'izzaCrafting' || e.key === 'craftingCredits' || e.key === 'izzaCraftCredits')){
+    tryKick('craft-credits-storage');
+  }
+
+  // 🆕 Wallet coins mirror (lift server if LS moves forward)
+  if (e && e.key === 'izzaCoins'){
+    tryKick('coins-storage');
+  }
+}, { passive:true });
 
   // periodic poll remains
   setInterval(()=> tryKick('poll'), 5000);
