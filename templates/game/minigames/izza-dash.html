@@ -190,15 +190,13 @@
 })();
 
 /* =======================
-   Wallet helpers  (SYNCED WITH PERSIST)
+   Wallet helpers  (SYNCED WITH PERSIST + handoff)
 ======================= */
 (function(){
   const CRAFT_KEYS=['izzaCrafting','craftingCredits','izzaCraftCredits'];
-
   const toInt = v => { const n=parseInt(v,10); return Number.isFinite(n)?n:0; };
 
   function readCraftAny(){
-    // prefer persist if present
     try{
       if(window.IZZA_PERSIST?.get){
         const p = window.IZZA_PERSIST.get('craftingCredits') ?? window.IZZA_PERSIST.get('izzaCrafting');
@@ -218,70 +216,46 @@
   }
 
   function readCoins(){
-  // 1) Try IZZA engine (if present)
-  try{ if (window.IZZA?.api?.getCoins) return (IZZA.api.getCoins()|0) || 0; }catch(_){}
+    try{ if (window.IZZA?.api?.getCoins) return (IZZA.api.getCoins()|0) || 0; }catch(_){}
+    try{
+      const m = document.cookie.split('; ').find(s => s.startsWith('izzaCoins='));
+      if (m) { const cv = parseInt(decodeURIComponent(m.split('=').slice(1).join('='))||'0',10) || 0; if (cv > 0) return cv|0; }
+    }catch(_){}
+    try{
+      const raw = sessionStorage.getItem('izzaWalletHandoff');
+      if (raw) { const s = JSON.parse(raw)||{}; if (Number.isFinite(s.coins) && (s.coins|0) > 0) return (s.coins|0); }
+    }catch(_){}
+    try{
+      const c = window.IZZA_PERSIST?.state?.coins;
+      if (c != null) return (c|0);
+    }catch(_){}
+    try{
+      const z = localStorage.getItem('izzaWallet');
+      if (z) { const w = JSON.parse(z); if (w && w.coins != null) return (w.coins|0); }
+    }catch(_){}
+    return (parseInt(localStorage.getItem('izzaCoins')||'0',10) || 0)|0;
+  }
 
-  // 2) Cookie mirror (cross-subdomain first-load)
-  try{
-    const m = document.cookie.split('; ').find(s => s.startsWith('izzaCoins='));
-    if (m) {
-      const cv = parseInt(decodeURIComponent(m.split('=').slice(1).join('='))||'0',10) || 0;
-      if (cv > 0) return cv|0;
-    }
-  }catch(_){}
-
-  // 3) Session handoff used on navigate between pages
-  try{
-    const raw = sessionStorage.getItem('izzaWalletHandoff');
-    if (raw) {
-      const s = JSON.parse(raw)||{};
-      if (Number.isFinite(s.coins) && (s.coins|0) > 0) return (s.coins|0);
-    }
-  }catch(_){}
-
-  // 4) Persist object state (if you later add IZZA_PERSIST.state)
-  try{
-    const c = window.IZZA_PERSIST?.state?.coins;
-    if (c != null) return (c|0);
-  }catch(_){}
-
-  // 5) Structured wallet mirror, then plain LS
-  try{
-    const z = localStorage.getItem('izzaWallet');
-    if (z) { const w = JSON.parse(z); if (w && w.coins != null) return (w.coins|0); }
-  }catch(_){}
-  return (parseInt(localStorage.getItem('izzaCoins')||'0',10) || 0)|0;
-}
-
-function writeCoins(v){
-  const n = (v|0);
-
-  // LS mirrors
-  localStorage.setItem('izzaCoins', String(n));
-  try{
-    const w = { coins:n, updatedAt:Date.now(), u:(window._authTU?.getU?.()||null) };
-    localStorage.setItem('izzaWallet', JSON.stringify(w));
-  }catch(_){}
-
-  // Cookie mirror (cross-subdomain)
-  try{
-    const vv = encodeURIComponent(String(n));
-    const baseC = `izzaCoins=${vv}; Path=/; Max-Age=${60*60*24*365}; SameSite=None; Secure`;
-    document.cookie = baseC;
-    if (location.hostname.endsWith('.onrender.com')){
-      document.cookie = `izzaCoins=${vv}; Path=/; Domain=.onrender.com; Max-Age=${60*60*24*365}; SameSite=None; Secure`;
-    }
-  }catch(_){}
-
-  // Optional persist “set” if you add it later
-  try{ if (window.IZZA_PERSIST?.set) window.IZZA_PERSIST.set('coins', n); }catch(_){}
-
-  // Broadcast to any HUDs that listen to either channel
-  try{ window.dispatchEvent(new Event('izza-coins-changed')); }catch(_){}
-  try{ window.dispatchEvent(new CustomEvent('izza-wallet-changed', { detail:{ coins:n } })); }catch(_){}
-
-  saveSoon();
-}
+  function writeCoins(v){
+    const n = (v|0);
+    localStorage.setItem('izzaCoins', String(n));
+    try{
+      const w = { coins:n, updatedAt:Date.now(), u:(window._authTU?.getU?.()||null) };
+      localStorage.setItem('izzaWallet', JSON.stringify(w));
+    }catch(_){}
+    try{
+      const vv = encodeURIComponent(String(n));
+      const baseC = `izzaCoins=${vv}; Path=/; Max-Age=${60*60*24*365}; SameSite=None; Secure`;
+      document.cookie = baseC;
+      if (location.hostname.endsWith('.onrender.com')){
+        document.cookie = `izzaCoins=${vv}; Path=/; Domain=.onrender.com; Max-Age=${60*60*24*365}; SameSite=None; Secure`;
+      }
+    }catch(_){}
+    try{ if (window.IZZA_PERSIST?.set) window.IZZA_PERSIST.set('coins', n); }catch(_){}
+    try{ window.dispatchEvent(new Event('izza-coins-changed')); }catch(_){}
+    try{ window.dispatchEvent(new CustomEvent('izza-wallet-changed', { detail:{ coins:n, crafting:readCraftAny() } })); }catch(_){}
+    saveSoon();
+  }
 
   // Pull from persist → local mirrors so HUD & Arena match exactly
   async function syncFromPersist(){
@@ -304,17 +278,32 @@ function writeCoins(v){
     try{
       if(saveTimer) clearTimeout(saveTimer);
       saveTimer=setTimeout(async()=>{
-        try{
-          if(window.IZZA_PERSIST?.save) await window.IZZA_PERSIST.save();
-        }catch(_){}
+        try{ if(window.IZZA_PERSIST?.save) await IZZA_PERSIST.save(); }catch(_){}
       }, 120);
     }catch(_){}
   }
 
-  window._wallet = { readCraftAny, writeCraftAll, readCoins, writeCoins, syncFromPersist, saveSoon };
+  // Consume wallet handoff like Basketball (coins + craft + username), reject stale (>2 min)
+  function consumeWalletHandoff(maxAgeMs=120000){
+    try{
+      const raw=sessionStorage.getItem('izzaWalletHandoff'); if(!raw) return null;
+      const s=JSON.parse(raw); if(!s||!s.ts||(Date.now()-s.ts)>maxAgeMs) return null;
+      if(s.user){
+        const u=s.user.toString().trim().replace(/^@+/, '').toLowerCase();
+        window.__IZZA_PROFILE__=Object.assign({},window.__IZZA_PROFILE__,{username:u});
+        window.izzaUserKey={get:()=>u};
+        try{ localStorage.setItem('izzaUserU',u); localStorage.setItem('piAuthUser',JSON.stringify({username:u})); }catch(_){}
+      }
+      writeCoins(s.coins|0);               // goes through mirrors + events
+      writeCraftAll(s.craft|0);            // mirrors craft and event
+      return { coins:s.coins|0, craft:s.craft|0 };
+    }catch(_){ return null; }
+  }
+
+  window._wallet = { readCraftAny, writeCraftAll, readCoins, writeCoins, syncFromPersist, saveSoon, consumeWalletHandoff };
 })();
 
-  // Boot-time sync: if cookie has a higher value than LS, lift LS BEFORE first start()
+// Boot-time: if cookie/hand-off beats LS, lift before first start()
 (function _bootMirrorCoinsFromCookie(){
   try{
     const ls = parseInt(localStorage.getItem('izzaCoins')||'0',10) || 0;
@@ -323,9 +312,7 @@ function writeCoins(v){
     let ho = 0;
     try{ const raw=sessionStorage.getItem('izzaWalletHandoff'); if(raw){ ho=(JSON.parse(raw)||{}).coins|0; } }catch(_){}
     const best = Math.max(ls, ck, ho);
-    if (best !== ls) {
-      _wallet.writeCoins(best); // <-- use exported function
-    }
+    if (best !== ls) { _wallet.writeCoins(best); }
   }catch(_){}
 })();
 
@@ -394,7 +381,7 @@ function showMsg(t, cls){ bigmsg.textContent=t; bigmsg.className='bigmsg show ' 
 function paintCoinsHUD(n){ coinsRunEl.textContent=String(Math.max(0, n|0)); }
 
 /* =======================
-   Avatar (trimmed)
+   Avatar (robust ramp + fallback like Basketball)
 ======================= */
 const SPRITES={ body:{ default:"/static/game/sprites/body/default.png", street_a:"/static/game/sprites/body/street_a.png", street_b:"/static/game/sprites/body/street_b.png" },
                 hair:{ short:"/static/game/sprites/hair/short.png", buzz:"/static/game/sprites/hair/buzz.png", long:"/static/game/sprites/hair/long.png" },
@@ -404,54 +391,110 @@ const SKIN_TO={ light:["#FFE7D6","#F3C6A7","#D8A187"], medium:["#F1BD94","#D79A7
 const FEMALE_DRESS_BASE=["#7AB6FF","#4E84E3","#2F5CB5"];
 const FEMALE_DRESS_TO={ blue:["#7AB6FF","#4E84E3","#2F5CB5"], red:["#FF7A7A","#E24C4C","#B12F2F"], green:["#7DD68A","#4CB56B","#2F7F47"], purple:["#B796FF","#8C6BE0","#6A49B8"], yellow:["#FFE08A","#E7C45A","#B89433"], pink:["#FFA6D6","#E57CB2","#C45C96"], black:["#3A3A3D","#232326","#0E0E10"], white:["#FFFFFF","#E6E6E6","#C9C9C9"] };
 const HAIR_TO={ black:["#2C2C31","#17171B","#0A0A0D"], brown:["#7A5336","#5C3E28","#3E2B1B"], blonde:["#FBE58F","#E5C35A","#B89433"], red:["#E65F35","#B54426","#8E321A"], white:["#FFFFFF","#E6E6E6","#C9C9C9"], blue:["#7AB6FF","#4E84E3","#2F5CB5"], green:["#7DD68A","#4CB56B","#2F7F47"], pink:["#FFA6D6","#E57CB2","#C45C96"] };
+
 function loadImg(src){ return new Promise(res=>{ const i=new Image(); i.crossOrigin='anonymous'; i.onload=()=>res(i); i.onerror=()=>res(null); i.src=src; }); }
-function paletteSwap(img, fromHex, toHex, tol=4000){
-  const hexToRgb = h => {
-    const n = parseInt(h.replace('#',''),16);
-    return { r: (n>>16)&255, g: (n>>8)&255, b: (n&255) };
-  };
-  const from = fromHex.map(h=>hexToRgb(h)), to = toHex.map(h=>hexToRgb(h));
-  const w = img.width, h = img.height, oc = document.createElement('canvas'); oc.width = w; oc.height = h;
-  const cx = oc.getContext('2d',{willReadFrequently:true}); cx.imageSmoothingEnabled = false; cx.drawImage(img,0,0);
-  const id = cx.getImageData(0,0,w,h), d = id.data;
-  function sd(a,b){ const dr=a.r-b.r, dg=a.g-b.g, db=a.b-b.b; return dr*dr + dg*dg + db*db; }
+const hexToRgb=h=>{ const n=parseInt(h.replace('#',''),16); return {r:(n>>16)&255,g:(n>>8)&255,b:n&255}; };
+const dist2=(a,b)=>{const dr=a.r-b.r,dg=a.g-b.g,db=a.b-b.b;return dr*dr+dg*dg+db*db;};
+const lum=(r,g,b)=>0.2126*r+0.7152*g+0.0722*b;
+
+function extractThreeToneRamp(img){
+  const w=img.width,h=img.height, oc=document.createElement('canvas'); oc.width=w; oc.height=h;
+  const c=oc.getContext('2d',{willReadFrequently:true}); c.imageSmoothingEnabled=false; c.drawImage(img,0,0);
+  const d=c.getImageData(0,0,w,h).data, samples=[];
+  for(let i=0;i<d.length;i+=4){ if(d[i+3]<10) continue; const r=d[i],g=d[i+1],b=d[i+2]; samples.push({r,g,b,L:lum(r,g,b)}); }
+  if(samples.length<10) return ["#C8C8C8","#9C9C9C","#6E6E6E"];
+  samples.sort((a,b)=>a.L-b.L);
+  function pick(q){ const idx=Math.max(0,Math.min(samples.length-1,Math.floor(q*(samples.length-1)))); const s=samples[idx];
+    return '#'+s.r.toString(16).padStart(2,'0')+s.g.toString(16).padStart(2,'0')+s.b.toString(16).padStart(2,'0'); }
+  return [pick(0.2),pick(0.55),pick(0.85)];
+}
+
+function paletteSwap(img, fromRampHex, toRampHex, tolerance=2000){
+  const from=fromRampHex.map(hexToRgb), to=toRampHex.map(hexToRgb);
+  const w=img.width,h=img.height, oc=document.createElement('canvas'); oc.width=w; oc.height=h;
+  const c=oc.getContext('2d',{willReadFrequently:true}); c.imageSmoothingEnabled=false; c.drawImage(img,0,0);
+  const id=c.getImageData(0,0,w,h), d=id.data; let changed=0;
   for(let i=0;i<d.length;i+=4){
     if(d[i+3]===0) continue;
-    const p = { r:d[i], g:d[i+1], b:d[i+2] };
-    let best=-1, score=1e9;
-    for(let k=0;k<from.length;k++){ const s=sd(p,from[k]); if(s<score){ score=s; best=k; } }
-    if(score<=tol){
-      const t = to[best] || to[1] || to[0];
+    const p={r:d[i],g:d[i+1],b:d[i+2]}; let best=-1,score=1e9;
+    for(let k=0;k<from.length;k++){ const s=dist2(p,from[k]); if(s<score){score=s;best=k;} }
+    if(score<=tolerance){
+      const t=to[best]||to[1]||to[0];
+      if(d[i]!==t.r||d[i+1]!==t.g||d[i+2]!==t.b) changed++;
       d[i]=t.r; d[i+1]=t.g; d[i+2]=t.b;
     }
   }
-  cx.putImageData(id,0,0);
+  c.putImageData(id,0,0);
+  return {canvas:oc, changedPixels:changed};
+}
+
+function overlayTint(imgOrCanvas, hex, strength=1.0){
+  const src = imgOrCanvas;
+  const w=src.width,h=src.height, oc=document.createElement('canvas'); oc.width=w; oc.height=h;
+  const c=oc.getContext('2d',{willReadFrequently:true}); c.imageSmoothingEnabled=false; c.drawImage(src,0,0);
+  const id=c.getImageData(0,0,w,h), d=id.data, t=hexToRgb(hex);
+  function ov(a,b){a/=255;b/=255;const o=(a<.5)?(2*a*b):(1-2*(1-a)*(1-b));return Math.round(o*255);}
+  for(let i=0;i<d.length;i+=4){ if(d[i+3]===0) continue;
+    const r=ov(d[i],t.r), g=ov(d[i+1],t.g), b=ov(d[i+2],t.b);
+    d[i]=Math.round(d[i]*(1-strength)+r*strength);
+    d[i+1]=Math.round(d[i+1]*(1-strength)+g*strength);
+    d[i+2]=Math.round(d[i+2]*(1-strength)+b*strength);
+  }
+  c.putImageData(id,0,0);
   return oc;
 }
+
 async function buildAvatarCanvas(dstCtx,size,profile){
   const DW=size,DH=size,X=0,Y=0;
-  const type=profile.body_type||'male', tone=profile.skin_tone||'light', theme=profile.sprite_skin||'default';
-  const outfitKey=profile.outfit||'street', hairKey=profile.hair||'short', hairCol=profile.hair_color||'black';
-  const femaleOut=profile.female_outfit_color||'blue';
+  const type=(profile.body_type||profile.bodyType||'male');
+  const tone=(profile.skin_tone||profile.skinTone||'light');
+  const theme=(profile.sprite_skin||profile.spriteSkin||'default');
+  const outfitKey=(profile.outfit||'street');
+  const hairKey=(profile.hair||'short');
+  const hairCol=(profile.hair_color||profile.hairColor||'black');
+  const femaleOut=(profile.female_outfit_color||profile.femaleOutfitColor||'blue');
+
   let body=null;
-  if(type==='female'){ const femaleWide=`/static/game/sprites/body/${theme}__female_wide.png`; const femaleSlim=`/static/game/sprites/body/${theme}__female.png`; body=await loadImg(femaleWide)||await loadImg(femaleSlim); }
+  if(type==='female'){
+    const femaleWide=`/static/game/sprites/body/${theme}__female_wide.png`;
+    const femaleSlim=`/static/game/sprites/body/${theme}__female.png`;
+    body=await loadImg(femaleWide)||await loadImg(femaleSlim);
+  }
   if(!body) body=await loadImg(SPRITES.body[theme]||SPRITES.body.default);
   const hair=await loadImg(SPRITES.hair[hairKey]||SPRITES.hair.short);
   const outfit=(type==='female')?null:(await loadImg(SPRITES.outfit[outfitKey]||SPRITES.outfit.street));
+
   let bodyCanvas=null;
-  if(body){ const target=SKIN_TO[tone]||SKIN_TO.light; const ramp=paletteSwap(body, ["#F7D7C6","#E8BEA8","#D6A48E"], target, 4000); bodyCanvas=ramp; }
-  if(type==='female'&&bodyCanvas){ const target=FEMALE_DRESS_TO[femaleOut]||FEMALE_DRESS_TO.blue; bodyCanvas=paletteSwap(bodyCanvas, ["#7AB6FF","#4E84E3","#2F5CB5"], target, 4000); }
+  if(body){
+    const target=SKIN_TO[tone]||SKIN_TO.light;
+    const swapped=paletteSwap(body, SKIN_BASE, target, 4000);
+    bodyCanvas=swapped.canvas;
+    if(swapped.changedPixels<8){ bodyCanvas=overlayTint(body, target[1], 0.98); }
+  }
+  if(type==='female'&&bodyCanvas){
+    const target=FEMALE_DRESS_TO[femaleOut]||FEMALE_DRESS_TO.blue;
+    const reDress=paletteSwap(bodyCanvas, FEMALE_DRESS_BASE, target, 4000);
+    bodyCanvas=reDress.canvas;
+    if(reDress.changedPixels<6){ bodyCanvas=overlayTint(bodyCanvas, target[1], 0.85); }
+  }
+
   dstCtx.clearRect(0,0,DW,DH);
   if(bodyCanvas) dstCtx.drawImage(bodyCanvas, X, Y, DW, DH);
   if(outfit) dstCtx.drawImage(outfit, X, Y, DW, DH);
+
   if(hair){
-    const ramp=["#C8C8C8","#9C9C9C","#6E6E6E"], target=HAIR_TO[hairCol]||HAIR_TO.black;
-    const hairCanvas=paletteSwap(hair, ramp, target, 4000);
+    const detected=extractThreeToneRamp(hair);
+    const target=HAIR_TO[hairCol]||HAIR_TO.black;
+    const swap=paletteSwap(hair, detected, target, 4000);
+    let hairCanvas=swap.canvas;
+    if(swap.changedPixels<8){ hairCanvas=overlayTint(hairCanvas, target[1], 1.0); }
     dstCtx.drawImage(hairCanvas, X, Y, DW, DH);
   }
+
   try{ await drawEquippedOverlaysForAvatar(dstCtx, size); }catch(_){}
 }
-/* equipped overlay */
+
+/* equipped overlay (unchanged sizing) */
 (function(){
   const BOX128=Object.freeze({ head:{w:59,h:59,ox:64,oy:32,scale:1.12}, chest:{w:61,h:61,ox:64,oy:60,scale:1.15}, arms:{w:75,h:59,ox:64,oy:60,scale:1.15}, legs:{w:72,h:61,ox:64,oy:88,scale:1.18}, hands:{w:85,h:61,ox:86,oy:72,scale:1.34} });
   const cache=new Map(); const imgFromSvg=s=>{ if(!s) return null; if(cache.has(s)) return cache.get(s); const i=new Image(); i.decoding='async'; i.src='data:image/svg+xml;utf8,'+encodeURIComponent(s); cache.set(s,i); return i; };
@@ -688,7 +731,7 @@ function onMove(e){
   const baseRingR = 2.6 * rS;
   const safeX = THREE.MathUtils.clamp(h.x, -baseRingR*0.92, baseRingR*0.92);
   const safeZ = THREE.MathUtils.clamp(h.z, -baseRingR*0.55, baseRingR*0.55);
-  dragObj.position.set(safeX, baseY, safeZ);      // <-- stays on surface while dragging
+  dragObj.position.set(safeX, baseY, safeZ);
 }
 
 /* helpers for stacking */
@@ -697,22 +740,16 @@ function hDistVec(a, b){ const dx=a.x-b.x, dz=a.z-b.z; return Math.hypot(dx, dz)
 
 function onUp(){
   if(!dragging||!dragObj) return;
-
-  // magnetize to nearest stack center in XZ
   let best=null, bestD=1e9;
   for(const b of blocks){
     if(b===dragObj) continue;
     const d = hDistVec(b.position, dragObj.position);
     if(d < bestD){ best=b; bestD=d; }
   }
-
-  const SNAP_R = 1.05;
-  const STACK_TOL = 0.12;
-
+  const SNAP_R = 1.05, STACK_TOL = 0.12;
   if(best && bestD < SNAP_R){
     const baseX = best.position.x, baseZ = best.position.z;
     let highestTopY = -Infinity;
-
     for(const b of blocks){
       if(b===dragObj) continue;
       if(hDistVec({x:baseX,z:baseZ}, b.position) < STACK_TOL){
@@ -720,18 +757,12 @@ function onUp(){
         if(topY > highestTopY) highestTopY = topY;
       }
     }
-    // If no block exists at that spot, anchor to the floor (no floating base block)
     if(!Number.isFinite(highestTopY)){ highestTopY = baseY + 0.0; }
-
-    dragObj.position.x = baseX;
-    dragObj.position.z = baseZ;
-    dragObj.position.y = highestTopY + halfH(dragObj);
+    dragObj.position.set(baseX, highestTopY + halfH(dragObj), baseZ);
     try{ bleep('match'); }catch(_){}
   }else{
-    // If no snap, ensure the block remains on the floor
     dragObj.position.y = baseY;
   }
-
   dragging=false; dragObj=null;
   checkWin();
 }
@@ -743,15 +774,11 @@ window.addEventListener('pointerup', onUp, {passive:true});
 function fireMetal(e){
   if(ended) return;
   if(ammo<=0) return;
-  if(pickBlock(e)) return; // let dragging win if user tapped a block
+  if(pickBlock(e)) return;
 
   ammo--; ammoEl.textContent=ammo;
+  const origin=screenToPlane(e, 0); origin.y = baseY + 0.1;
 
-  // Spawn at tap point (on board plane), slightly above the surface
-  const origin=screenToPlane(e, 0);
-  origin.y = baseY + 0.1;
-
-  // Pick the nearest active sphere to this tap point
   let target = null, best=1e9;
   for(const s of spheres){
     const d = origin.distanceTo(s.position);
@@ -783,7 +810,7 @@ function checkWin(){
 }
 function fail(){
   showMsg('IZZA DASH STACK SMASHED','miss');
-  setTimeout(()=>{ showEndOverlay(); }, 420); /* show message, then end screen */
+  setTimeout(()=>{ showEndOverlay(); }, 420);
 }
 
 /* --- geometric helper: distance from point C to segment AB --- */
@@ -807,15 +834,12 @@ function loop(t){
     const s=spheres[i];
     s.position.addScaledVector(s.userData.v, dt);
 
-    // Any contact with any block → GAME OVER
     for(const b of blocks){
       if(s.position.distanceTo(b.position) < 0.8*currentPieceS){
-        fail();
-        return requestAnimationFrame(loop);
+        fail(); return requestAnimationFrame(loop);
       }
     }
 
-    // Projectile collision (swept)
     for(let j=projectilePool.length-1;j>=0;j--){
       const p=projectilePool[j];
       const nextP = p.position.clone().addScaledVector(p.userData.v, dt);
@@ -828,7 +852,7 @@ function loop(t){
       }
     }
 
-    if(s.position.y <= baseY){ fail(); return requestAnimationFrame(loop); } // reached board → GAME OVER
+    if(s.position.y <= baseY){ fail(); return requestAnimationFrame(loop); }
   }
 
   for(let j=projectilePool.length-1;j>=0;j--){
@@ -850,7 +874,7 @@ function tickTimer(){
   try{ bleep('tick'); }catch(_){}
   if(timeLeft<=0){
     showMsg('TIME OUT','miss');
-    showEndOverlay(); /* TIME OUT → end screen */
+    showEndOverlay();
   }
 }
 
@@ -860,20 +884,16 @@ async function submitLeaderboard(finalScore){
     if(window.IZZA_LEADERBOARD && typeof IZZA_LEADERBOARD.submit==='function'){
       await IZZA_LEADERBOARD.submit({ game:'puzzle', score: finalScore|0 });
     }else{
-      // legacy-compatible fallback; persist shim intercepts this too
       await fetch(_withAuth('/izza-game/api/leaderboard/submit'),{
         method:'POST',credentials:'include',
         headers:{'content-type':'application/json'},
         body:JSON.stringify({ game:'puzzle', score: finalScore|0 })
       }).catch(()=>{});
     }
-    // cache locally so it shows up offline/in snapshot — keep ONLY the user's highest score
     const u=(window.izzaUserKey&&izzaUserKey.get&&izzaUserKey.get())||'guest';
     const row={u, s:finalScore|0, ts:Date.now()};
     const z=n=>String(n).padStart(2,'0'); const d=new Date();
     const stamps={ day:`${d.getFullYear()}-${z(d.getMonth()+1)}-${z(d.getDate())}`, month:`${d.getFullYear()}-${z(d.getMonth()+1)}`, year:String(d.getFullYear()) };
-
-    // helper to upsert by username, keeping the highest score only
     function upsertHigh(key, r){
       try{
         const arr=JSON.parse(localStorage.getItem(key)||'[]');
@@ -881,7 +901,7 @@ async function submitLeaderboard(finalScore){
         for(let i=0;i<arr.length;i++){
           if(arr[i] && arr[i].u===r.u){
             found=true;
-            if((arr[i].s|0) < (r.s|0)) arr[i]=r; // replace only if higher
+            if((arr[i].s|0) < (r.s|0)) arr[i]=r;
             break;
           }
         }
@@ -890,11 +910,7 @@ async function submitLeaderboard(finalScore){
         localStorage.setItem(key, JSON.stringify(arr.slice(0,20)));
       }catch(_){}
     }
-
-    // all-time
     upsertHigh('izzaLb2::puzzle::alltime', row);
-
-    // daily / monthly / annual
     upsertHigh(`izzaLb2::puzzle::day::${stamps.day}`, row);
     upsertHigh(`izzaLb2::puzzle::month::${stamps.month}`, row);
     upsertHigh(`izzaLb2::puzzle::year::${stamps.year}`, row);
@@ -911,7 +927,7 @@ function showEndOverlay(){
   document.getElementById('finalCraft').textContent = String(craftsGrantedThisRun|0);
   endOverlay.style.display='flex';
   try{ _wallet.saveSoon(); }catch(_){}
-  submitLeaderboard(score|0); // ensure IZZA DASH (puzzle) posts & persists
+  submitLeaderboard(score|0);
 }
 
 async function refreshAvatar(){
@@ -924,12 +940,16 @@ async function refreshAvatar(){
 
 async function start(){
   try{
+    // FIRST: consume cross-page wallet handoff so HUD starts correct (matches Basketball)
+    const handoff = _wallet.consumeWalletHandoff?.();
+    if(handoff){ paintCoinsHUD(handoff.coins); }
+
     await ensureSession();
     // Pull latest wallet from Persist so we START with the Arena balance
     await _wallet.syncFromPersist();
   }catch(_){}
 
-  // Start with EXACT current balance from Arena (persist → mirrors)
+  // Start with EXACT current balance from Arena/handoff (persist → mirrors)
   paintCoinsHUD(_wallet.readCoins());
   runStartCoins=_wallet.readCoins();
   craftsGrantedThisRun = 0;
@@ -966,7 +986,6 @@ endBtn.addEventListener('click', (e)=>{ e.preventDefault(); showEndOverlay(); },
 document.getElementById('backBtn').addEventListener('click', async (e)=>{
   e.preventDefault();
   try{ if(window.IZZA_PERSIST?.save) await IZZA_PERSIST.save(); }catch(_){}
-  // ensure URL already has t/u (set earlier by withAuth)
   location.href = e.currentTarget.href;
 },{passive:false});
 
@@ -976,20 +995,24 @@ document.addEventListener('click', (e)=>{
   if(!isAgain) return;
   e.preventDefault();
   endOverlay.style.display='none';
-  // reset run state
   score = 0; level = 1; timeLeft = 30; ended = false;
-  runStartCoins = _wallet.readCoins();             // <-- new run starts from current wallet
+  runStartCoins = _wallet.readCoins();
   craftsGrantedThisRun = 0;
-  // clear scene if needed and layout level 1
   if(!scene || !renderer) initThree();
   layoutLevel();
   requestAnimationFrame(loop);
 }, {passive:false});
 
-/* keep HUD coins synced if other tabs alter wallet, or when returning from snapshots */
+/* keep HUD coins synced like other games */
 window.addEventListener('storage', (e)=>{ if(e && (e.key==='izzaCoins' || e.key==='izzaWallet')){ paintCoinsHUD(_wallet.readCoins()); } }, {passive:true});
-window.addEventListener('izza-coins-changed', ()=>paintCoinsHUD(_wallet.readCoins()), {passive:true});
-window.addEventListener('izza-wallet-changed', ()=>paintCoinsHUD(_wallet.readCoins()), {passive:true});
+window.addEventListener('izza-coins-changed', (e)=>{
+  const n = e && e.detail && Number.isFinite(e.detail.coins) ? e.detail.coins : _wallet.readCoins();
+  paintCoinsHUD(n);
+}, {passive:true});
+window.addEventListener('izza-wallet-changed', (e)=>{
+  const n = e && e.detail && Number.isFinite(e.detail.coins) ? e.detail.coins : _wallet.readCoins();
+  paintCoinsHUD(n);
+}, {passive:true});
 window.addEventListener('pageshow', async ()=>{
   try{ await _wallet.syncFromPersist(); }catch(_){}
   paintCoinsHUD(_wallet.readCoins());
@@ -1007,5 +1030,4 @@ window.addEventListener('visibilitychange', ()=>{ if(document.visibilityState===
 </script>
 </body>
 </html>
-<!-- build: 2025-10-06 -->
- 
+<!-- build: 2025-10-06 (avatar ramp+overlay; wallet handoff parity) -->
