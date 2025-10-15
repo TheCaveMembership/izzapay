@@ -218,31 +218,70 @@
   }
 
   function readCoins(){
-    // ALWAYS prefer the persist wallet if available (this is what Arena uses)
-    try{
-      if(window.IZZA_PERSIST?.get){
-        const c = window.IZZA_PERSIST.get('coins') ?? window.IZZA_PERSIST.get('izzaCoins') ?? window.IZZA_PERSIST.state?.coins;
-        if(c!=null) return toInt(c);
-      }
-    }catch(_){}
-    // fallback to any wallet snapshot Arena already left in LS
-    const z = localStorage.getItem('izzaWallet');
-    if(z){ try{ const w=JSON.parse(z); if(w&&w.coins!=null) return toInt(w.coins); }catch(_){ } }
-    return toInt(localStorage.getItem('izzaCoins')||'0');
-  }
+  // 1) Try IZZA engine (if present)
+  try{ if (window.IZZA?.api?.getCoins) return (IZZA.api.getCoins()|0) || 0; }catch(_){}
 
-  function writeCoins(v){
-    const n=(v|0);
-    localStorage.setItem('izzaCoins', String(n));
-    // keep a structured wallet mirror some pages use
-    try{
-      const w = { coins:n, updatedAt:Date.now(), u:(window._authTU?.getU?.()||null) };
-      localStorage.setItem('izzaWallet', JSON.stringify(w));
-    }catch(_){}
-    try{ if(window.IZZA_PERSIST?.set) window.IZZA_PERSIST.set('coins', n); }catch(_){}
-    try{window.dispatchEvent(new Event('izza-coins-changed'));}catch(_){}
-    saveSoon();
-  }
+  // 2) Cookie mirror (cross-subdomain first-load)
+  try{
+    const m = document.cookie.split('; ').find(s => s.startsWith('izzaCoins='));
+    if (m) {
+      const cv = parseInt(decodeURIComponent(m.split('=').slice(1).join('='))||'0',10) || 0;
+      if (cv > 0) return cv|0;
+    }
+  }catch(_){}
+
+  // 3) Session handoff used on navigate between pages
+  try{
+    const raw = sessionStorage.getItem('izzaWalletHandoff');
+    if (raw) {
+      const s = JSON.parse(raw)||{};
+      if (Number.isFinite(s.coins) && (s.coins|0) > 0) return (s.coins|0);
+    }
+  }catch(_){}
+
+  // 4) Persist object state (if you later add IZZA_PERSIST.state)
+  try{
+    const c = window.IZZA_PERSIST?.state?.coins;
+    if (c != null) return (c|0);
+  }catch(_){}
+
+  // 5) Structured wallet mirror, then plain LS
+  try{
+    const z = localStorage.getItem('izzaWallet');
+    if (z) { const w = JSON.parse(z); if (w && w.coins != null) return (w.coins|0); }
+  }catch(_){}
+  return (parseInt(localStorage.getItem('izzaCoins')||'0',10) || 0)|0;
+}
+
+function writeCoins(v){
+  const n = (v|0);
+
+  // LS mirrors
+  localStorage.setItem('izzaCoins', String(n));
+  try{
+    const w = { coins:n, updatedAt:Date.now(), u:(window._authTU?.getU?.()||null) };
+    localStorage.setItem('izzaWallet', JSON.stringify(w));
+  }catch(_){}
+
+  // Cookie mirror (cross-subdomain)
+  try{
+    const vv = encodeURIComponent(String(n));
+    const baseC = `izzaCoins=${vv}; Path=/; Max-Age=${60*60*24*365}; SameSite=None; Secure`;
+    document.cookie = baseC;
+    if (location.hostname.endsWith('.onrender.com')){
+      document.cookie = `izzaCoins=${vv}; Path=/; Domain=.onrender.com; Max-Age=${60*60*24*365}; SameSite=None; Secure`;
+    }
+  }catch(_){}
+
+  // Optional persist “set” if you add it later
+  try{ if (window.IZZA_PERSIST?.set) window.IZZA_PERSIST.set('coins', n); }catch(_){}
+
+  // Broadcast to any HUDs that listen to either channel
+  try{ window.dispatchEvent(new Event('izza-coins-changed')); }catch(_){}
+  try{ window.dispatchEvent(new CustomEvent('izza-wallet-changed', { detail:{ coins:n } })); }catch(_){}
+
+  saveSoon();
+}
 
   // Pull from persist → local mirrors so HUD & Arena match exactly
   async function syncFromPersist(){
@@ -273,6 +312,21 @@
   }
 
   window._wallet = { readCraftAny, writeCraftAll, readCoins, writeCoins, syncFromPersist, saveSoon };
+})();
+
+  // Boot-time sync: if cookie has a higher value than LS, lift LS BEFORE first start()
+(function _bootMirrorCoinsFromCookie(){
+  try{
+    const ls = parseInt(localStorage.getItem('izzaCoins')||'0',10) || 0;
+    const m  = document.cookie.split('; ').find(s => s.startsWith('izzaCoins='));
+    const ck = m ? (parseInt(decodeURIComponent(m.split('=').slice(1).join('='))||'0',10) || 0) : 0;
+    let ho = 0;
+    try{ const raw=sessionStorage.getItem('izzaWalletHandoff'); if(raw){ ho=(JSON.parse(raw)||{}).coins|0; } }catch(_){}
+    const best = Math.max(ls, ck, ho);
+    if (best !== ls) {
+      _wallet.writeCoins(best); // <-- use exported function
+    }
+  }catch(_){}
 })();
 
 /* =======================
@@ -935,6 +989,7 @@ document.addEventListener('click', (e)=>{
 /* keep HUD coins synced if other tabs alter wallet, or when returning from snapshots */
 window.addEventListener('storage', (e)=>{ if(e && (e.key==='izzaCoins' || e.key==='izzaWallet')){ paintCoinsHUD(_wallet.readCoins()); } }, {passive:true});
 window.addEventListener('izza-coins-changed', ()=>paintCoinsHUD(_wallet.readCoins()), {passive:true});
+window.addEventListener('izza-wallet-changed', ()=>paintCoinsHUD(_wallet.readCoins()), {passive:true});
 window.addEventListener('pageshow', async ()=>{
   try{ await _wallet.syncFromPersist(); }catch(_){}
   paintCoinsHUD(_wallet.readCoins());
