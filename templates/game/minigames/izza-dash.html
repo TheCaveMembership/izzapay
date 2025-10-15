@@ -215,25 +215,38 @@
     saveSoon();
   }
 
+  /* IMPORTANT: prefer Persist → cookie/hand-off → local mirrors → API (last) */
   function readCoins(){
-    try{ if (window.IZZA?.api?.getCoins) return (IZZA.api.getCoins()|0) || 0; }catch(_){}
+    // Persist (authoritative)
+    try{
+      if(window.IZZA_PERSIST){
+        const pv = (window.IZZA_PERSIST.get && window.IZZA_PERSIST.get('coins'));
+        if(pv!=null) return (pv|0);
+        if(window.IZZA_PERSIST.state && window.IZZA_PERSIST.state.coins!=null) return (window.IZZA_PERSIST.state.coins|0);
+      }
+    }catch(_){}
+    // Cookie (shared across Arena/City)
     try{
       const m = document.cookie.split('; ').find(s => s.startsWith('izzaCoins='));
       if (m) { const cv = parseInt(decodeURIComponent(m.split('=').slice(1).join('='))||'0',10) || 0; if (cv > 0) return cv|0; }
     }catch(_){}
+    // Handoff (fresh cross-page)
     try{
       const raw = sessionStorage.getItem('izzaWalletHandoff');
       if (raw) { const s = JSON.parse(raw)||{}; if (Number.isFinite(s.coins) && (s.coins|0) > 0) return (s.coins|0); }
     }catch(_){}
-    try{
-      const c = window.IZZA_PERSIST?.state?.coins;
-      if (c != null) return (c|0);
-    }catch(_){}
+    // Local mirrors
     try{
       const z = localStorage.getItem('izzaWallet');
       if (z) { const w = JSON.parse(z); if (w && w.coins != null) return (w.coins|0); }
     }catch(_){}
-    return (parseInt(localStorage.getItem('izzaCoins')||'0',10) || 0)|0;
+    try{
+      const ls = parseInt(localStorage.getItem('izzaCoins')||'0',10) || 0;
+      if(ls>0) return ls|0;
+    }catch(_){}
+    // API (fallback only; can be stale in minigames)
+    try{ if (window.IZZA?.api?.getCoins) return (IZZA.api.getCoins()|0) || 0; }catch(_){}
+    return 0;
   }
 
   function writeCoins(v){
@@ -257,18 +270,22 @@
     saveSoon();
   }
 
-  // Pull from persist → local mirrors so HUD & Arena match exactly
+  // Pull from persist → local mirrors so HUD & Arena match exactly (NO readCoins here)
   async function syncFromPersist(){
     try{
       if(window.IZZA_PERSIST?.load) await window.IZZA_PERSIST.load();
-      const c = readCoins(); // now prefers persist
-      localStorage.setItem('izzaCoins', String(c));
+      let c = 0;
       try{
-        const w = { coins:c, updatedAt:Date.now(), u:(window._authTU?.getU?.()||null) };
-        localStorage.setItem('izzaWallet', JSON.stringify(w));
+        const pv = window.IZZA_PERSIST?.get?.('coins');
+        if(pv!=null) c = pv|0;
+        else if(window.IZZA_PERSIST?.state?.coins!=null) c = (window.IZZA_PERSIST.state.coins|0);
       }catch(_){}
+      // If persist didn't have it, fall back once to other sources
+      if(!Number.isFinite(c) || c<=0){ c = readCoins(); }
+      writeCoins(c); // mirrors to cookie + local + events
+      // craft mirrors stay consistent
       const craft = readCraftAny();
-      for(const k of CRAFT_KEYS) localStorage.setItem(k,String(craft));
+      for(const k of ['izzaCrafting','craftingCredits','izzaCraftCredits']) localStorage.setItem(k,String(craft));
     }catch(_){}
   }
 
@@ -300,11 +317,19 @@
     }catch(_){ return null; }
   }
 
-  // FIX: Prime wallet from ALL sources (handoff + persist + cookie + local) and mirror it everywhere before a run
+  // Prime wallet from ALL sources and mirror the best everywhere before a run
   async function primeWalletFromEverywhere(){
     let best = 0;
 
-    // Try handoff first (and keep if fresh)
+    // Persist first (authoritative)
+    try{
+      if(window.IZZA_PERSIST?.load) await IZZA_PERSIST.load();
+      const pv = window.IZZA_PERSIST?.get?.('coins');
+      if(pv!=null) best = Math.max(best, pv|0);
+      else if(window.IZZA_PERSIST?.state?.coins!=null) best = Math.max(best, window.IZZA_PERSIST.state.coins|0);
+    }catch(_){}
+
+    // Handoff (keep craft/user if present)
     const ho = (function(){
       try{
         const raw=sessionStorage.getItem('izzaWalletHandoff'); if(!raw) return null;
@@ -326,16 +351,6 @@
       }catch(_){}
     }
 
-    // Persist (load first)
-    try{ if(window.IZZA_PERSIST?.load) await IZZA_PERSIST.load(); }catch(_){}
-    try{
-      const pc = (window.IZZA_PERSIST?.get ? window.IZZA_PERSIST.get('coins') : (window.IZZA_PERSIST?.state?.coins));
-      if(pc!=null) best = Math.max(best, pc|0);
-    }catch(_){}
-
-    // API
-    try{ if(window.IZZA?.api?.getCoins){ best=Math.max(best, (IZZA.api.getCoins()|0)); } }catch(_){}
-
     // Cookie
     try{
       const m = document.cookie.split('; ').find(s => s.startsWith('izzaCoins='));
@@ -349,12 +364,12 @@
     }catch(_){}
     try{ best=Math.max(best, (parseInt(localStorage.getItem('izzaCoins')||'0',10)||0)|0); }catch(_){}
 
-    // If handoff exists with craft, keep craft mirrored too
-    if(ho){ try{ localStorage.setItem('izzaCrafting', String(ho.craft|0)); }catch(_){} }
+    // API LAST (can be stale in minigames)
+    try{ if(window.IZZA?.api?.getCoins){ best=Math.max(best, (IZZA.api.getCoins()|0)); } }catch(_){}
 
     // Mirror chosen "best" to all stores (and persist)
-    try{ window._wallet?.writeCoins?.(best); }catch(_){ localStorage.setItem('izzaCoins', String(best)); }
-    try{ if(ho){ window._wallet?.writeCraftAll?.(ho.craft|0); } }catch(_){}
+    writeCoins(best);
+    if(ho){ try{ writeCraftAll(ho.craft|0); }catch(_){} }
 
     return best|0;
   }
@@ -362,16 +377,30 @@
   window._wallet = { readCraftAny, writeCraftAll, readCoins, writeCoins, syncFromPersist, saveSoon, consumeWalletHandoff, primeWalletFromEverywhere };
 })();
 
-// Boot-time: if cookie/hand-off beats LS, lift before first start()
-(function _bootMirrorCoinsFromCookie(){
+// Boot-time: lift the best-of (Persist + cookie + handoff + local + API) into mirrors ASAP
+(async function _bootMirrorCoinsFromCookie(){
   try{
-    const ls = parseInt(localStorage.getItem('izzaCoins')||'0',10) || 0;
-    const m  = document.cookie.split('; ').find(s => s.startsWith('izzaCoins='));
-    const ck = m ? (parseInt(decodeURIComponent(m.split('=').slice(1).join('='))||'0',10) || 0) : 0;
-    let ho = 0;
-    try{ const raw=sessionStorage.getItem('izzaWalletHandoff'); if(raw){ ho=(JSON.parse(raw)||{}).coins|0; } }catch(_){}
-    const best = Math.max(ls, ck, ho);
-    if (best !== ls) { _wallet.writeCoins(best); }
+    let best = 0;
+    try{
+      if(window.IZZA_PERSIST?.load) await IZZA_PERSIST.load();
+      const pv = window.IZZA_PERSIST?.get?.('coins');
+      if(pv!=null) best = Math.max(best, pv|0);
+      else if(window.IZZA_PERSIST?.state?.coins!=null) best = Math.max(best, window.IZZA_PERSIST.state.coins|0);
+    }catch(_){}
+    try{
+      const m  = document.cookie.split('; ').find(s => s.startsWith('izzaCoins='));
+      if(m){ const ck = parseInt(decodeURIComponent(m.split('=').slice(1).join('='))||'0',10) || 0; best=Math.max(best, ck|0); }
+    }catch(_){}
+    try{
+      const raw=sessionStorage.getItem('izzaWalletHandoff'); if(raw){ const ho=(JSON.parse(raw)||{}).coins|0; best=Math.max(best, ho|0); }
+    }catch(_){}
+    try{
+      const ls = parseInt(localStorage.getItem('izzaCoins')||'0',10) || 0; best=Math.max(best, ls|0);
+      const z = localStorage.getItem('izzaWallet'); if(z){ const w=JSON.parse(z)||{}; if(w.coins!=null) best=Math.max(best, w.coins|0); }
+    }catch(_){}
+    try{ if(window.IZZA?.api?.getCoins) best=Math.max(best, (IZZA.api.getCoins()|0)); }catch(_){}
+
+    if(best>0){ _wallet.writeCoins(best); }
   }catch(_){}
 })();
 
@@ -553,11 +582,10 @@ async function buildAvatarCanvas(dstCtx,size,profile){
   try{ await drawEquippedOverlaysForAvatar(dstCtx, size); }catch(_){}
 }
 
-/* equipped overlay (unchanged sizing) */
+/* equipped overlay (unchanged sizing; async decode) */
 (function(){
   const BOX128=Object.freeze({ head:{w:59,h:59,ox:64,oy:32,scale:1.12}, chest:{w:61,h:61,ox:64,oy:60,scale:1.15}, arms:{w:75,h:59,ox:64,oy:60,scale:1.15}, legs:{w:72,h:61,ox:64,oy:88,scale:1.18}, hands:{w:85,h:61,ox:86,oy:72,scale:1.34} });
 
-  // FIX: Make SVG overlay loading truly async and reliable (decode before draw)
   const cache = new Map();
   function imgFromSvgAsync(svg){
     if(!svg) return Promise.resolve(null);
@@ -1049,15 +1077,17 @@ async function refreshAvatar(){
 
 async function start(){
   try{
-    // FIX: Prime from EVERYWHERE before we set baseline (mirrors + persist)
+    // Prime from EVERYWHERE before we set baseline (mirrors + persist)
     const startCoins = await _wallet.primeWalletFromEverywhere();
     paintCoinsHUD(startCoins);
     runStartCoins = startCoins;
     craftsGrantedThisRun = 0;
 
-    // Keep pulling latest character (and persist mirror) like before
+    // Keep pulling latest character; then re-sync mirrors from Persist explicitly
     await ensureSession();
-    await _wallet.syncFromPersist(); // harmless after priming; keeps mirrors consistent
+    await _wallet.syncFromPersist(); // now reads Persist directly and mirrors
+    paintCoinsHUD(_wallet.readCoins());
+    runStartCoins = _wallet.readCoins();
   }catch(_){}
 
   // avatar (+ retry once after a short delay)
@@ -1103,7 +1133,6 @@ document.addEventListener('click', (e)=>{
   endOverlay.style.display='none';
   score = 0; level = 1; timeLeft = 30; ended = false;
 
-  // FIX: re-prime baseline on replay to avoid drift if user switched tabs / earned elsewhere
   _wallet.primeWalletFromEverywhere().then((coins)=>{
     runStartCoins = coins|0;
     craftsGrantedThisRun = 0;
@@ -1131,7 +1160,7 @@ window.addEventListener('izza-wallet-changed', (e)=>{
 }, {passive:true});
 window.addEventListener('pageshow', async ()=>{
   try{
-    const coins = await _wallet.primeWalletFromEverywhere(); // FIX: make sure HUD mirrors Arena when coming back
+    const coins = await _wallet.primeWalletFromEverywhere(); // ensure HUD mirrors Arena when coming back
     paintCoinsHUD(coins);
   }catch(_){
     try{ await _wallet.syncFromPersist(); }catch(_){}
@@ -1151,4 +1180,4 @@ window.addEventListener('visibilitychange', ()=>{ if(document.visibilityState===
 </script>
 </body>
 </html>
-<!-- build: 2025-10-06 (avatar ramp+overlay; wallet handoff parity + FIX: async overlay decode + wallet prime) -->
+<!-- build: 2025-10-15 (wallet: Persist-first; syncFromPersist reads Persist; boot lift includes Persist; API last; overlays async decode) -->
