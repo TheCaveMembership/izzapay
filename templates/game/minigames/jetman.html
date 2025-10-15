@@ -1296,7 +1296,7 @@ function makeSedan(dir, bodyColor){
     vehicleBodyMat(bodyColor)
   );
   nose.rotation.x = Math.PI/2;
-  nose.position.set(0, y0, (dir>0?1:-1)*L*0.34);
+    nose.position.set(0, y0, (dir>0?1:-1)*L*0.34);
   group.add(nose);
 
   const roof = new THREE.Mesh(
@@ -1337,7 +1337,7 @@ function makePickup(dir, bodyColor){
 
   const roof=new THREE.Mesh(
     new THREE.BoxGeometry(W*0.78,H*0.42,L*0.26),
-    new THREE.MeshStandardMaterial({color:0x2d3d6a, roughness:0.25, metalness:0.5})
+        new THREE.MeshStandardMaterial({color:0x2d3d6a, roughness:0.25, metalness:0.5})
   );
   roof.position.set(0,y0+H*0.40,-L*0.12);
   group.add(roof);
@@ -1525,7 +1525,7 @@ function awardFromProgress(deltaScore, game){
   if (add>0) applyCoins(add);
 }
 
-/* ===== Leaderboards — MATCH BASKETBALL EXACTLY ===== */
+/* ===== Leaderboards — ONLY izzaLB2 (no other keys) ===== */
 function dailyStamp(){
   const d = new Date();
   const z = n => String(n).padStart(2,'0');
@@ -1553,18 +1553,11 @@ function upsertArenaLedger(gameId, score){
   const parts = { day:dailyStamp(), month:monthStamp(), year:yearStamp() };
 
   function tryRead(k){ try{ const v=localStorage.getItem(k); return v?JSON.parse(v):null; }catch(_){ return null; } }
-  function readAny(keyBase){
-    return (
-      tryRead(`izzaLb2::${keyBase}`) ||
-      tryRead(`lb2::${keyBase}`)     ||
-      tryRead(`lb::${keyBase}`)      ||
-      []
-    );
+  function readOnly(keyBase){
+    return tryRead(`izzaLB2::${keyBase}`) || [];
   }
-  function writeAll(keyBase, rows){
-    try{ localStorage.setItem(`izzaLb2::${keyBase}`, JSON.stringify(rows)); }catch(_){}
-    try{ localStorage.setItem(`lb2::${keyBase}`,     JSON.stringify(rows)); }catch(_){}
-    try{ localStorage.setItem(`lb::${keyBase}`,      JSON.stringify(rows)); }catch(_){}
+  function writeOnly(keyBase, rows){
+    try{ localStorage.setItem(`izzaLB2::${keyBase}`, JSON.stringify(rows)); }catch(_){}
   }
 
   ['alltime','day','month','year'].forEach(period=>{
@@ -1572,18 +1565,18 @@ function upsertArenaLedger(gameId, score){
       ? `${gameId}::alltime`
       : `${gameId}::${period}::${parts[period]}`;
 
-    let arr = readAny(keyBase);
+    let arr = readOnly(keyBase);
     arr.push(row);
     arr = arr
       .sort((a,b)=>b.s-a.s)
       .filter((v,i,self)=> self.findIndex(x=>x.u===v.u)===i)
       .slice(0,20);
 
-    writeAll(keyBase, arr);
+    writeOnly(keyBase, arr);
   });
 }
 
-/* public entry point (and POST) */
+/* public entry point */
 function recordLeaderboards(score){
   bumpHigh('izza_lb_day_'   + dailyStamp(),  score);
   bumpHigh('izza_lb_month_' + monthStamp(),  score);
@@ -1619,12 +1612,12 @@ function gameOver(){
   finalCraftEl.textContent = Math.floor(coinsNow/COINS_PER_CREDIT) - Math.floor((runStartCoins|0)/COINS_PER_CREDIT);
   finishEl.style.display = 'flex';
 
-  /* persist like basketball (best effort) */
+  /* persist (best effort) */
   (async function(){ try{
     const p=persistWalletAndSave(); await Promise.race([p,new Promise(r=>setTimeout(r,200))]);
   }catch(_){}})();
 
-  /* submit + stamped write like basketball */
+  /* submit + stamped write */
   try{ recordLeaderboards(Math.floor(game.score)|0); }catch(_){}
 }
 
@@ -1821,7 +1814,7 @@ document.getElementById('againBtn').addEventListener('click', function(){
 updateCoinsHUD();
 
 /* ===== Meta ===== */
-/* Wallet + leaderboard behavior aligned with Basketball (coins persist across navigation; leaderboards dual-write izzaLb2/lb2/lb with ts). */
+/* Wallet + leaderboard behavior: coins persist across navigation; leaderboards write ONLY to "izzaLB2::..." stamped arrays. */
 })();
 </script>
 </body>
