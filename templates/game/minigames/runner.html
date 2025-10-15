@@ -242,7 +242,7 @@ async function hydrateWalletOnEntry(){
   try{
     const handoff=consumeWalletHandoff();
     if(handoff){ document.getElementById('coins').textContent=String(handoff.coins|0); document.getElementById('craft').textContent=String(readCraftAny()); }
-    // Prime City snapshot silently (lets City/Arena read latest)
+    // Prime City snapshot silently
     try{
       const src=withAuth('/izza-game/play?prime=1&silent=1');
       const f=document.createElement('iframe');
@@ -257,7 +257,7 @@ async function hydrateWalletOnEntry(){
 }
 
 /* -----------------------------------
-   AVATAR / SPRITES HELPERS (must be defined BEFORE use)
+   AVATAR / SPRITES HELPERS (moved up so HAIR_TO exists before use)
 ------------------------------------*/
 const SPRITES={body:{default:"/static/game/sprites/body/default.png",street_a:"/static/game/sprites/body/street_a.png",street_b:"/static/game/sprites/body/street_b.png"},hair:{short:"/static/game/sprites/hair/short.png",buzz:"/static/game/sprites/hair/buzz.png",long:"/static/game/sprites/hair/long.png"},outfit:{street:"/static/game/sprites/outfit/street.png",athletic:"/static/game/sprites/outfit/athletic.png",luxury:"/static/game/sprites/outfit/luxury.png"}};
 const SKIN_BASE=["#F7D7C6","#E8BEA8","#D6A48E"];
@@ -351,7 +351,7 @@ const PATH_SEGMENTS=[],PATH_SPACING=5.0,PATH_COUNT=90,PATH_LOOP=PATH_SPACING*PAT
   }
 })();
 
-/* Avatar preview (uses helpers already defined above) */
+/* Avatar preview */
 const avatarCanvas=document.getElementById('avatarCursor');
 const avCtx=avatarCanvas.getContext('2d',{willReadFrequently:true});
 avCtx.imageSmoothingEnabled=false;(function(){const profile=JSON.parse(localStorage.getItem('izzaCharacter')||'{}');buildAvatarCanvasWithGear(avCtx,avatarCanvas.width,profile);})();
@@ -552,13 +552,82 @@ function addCoins(n){
   document.getElementById('coins').textContent=String(next);
 }
 
-/* Leaderboard */
+/* ===== Leaderboards (daily / monthly / yearly / all-time; Basketball parity) ===== */
+function dailyStamp(){
+  const d = new Date(); const z=n=>String(n).padStart(2,'0');
+  return `${d.getFullYear()}-${z(d.getMonth()+1)}-${z(d.getDate())}`;
+}
+function monthStamp(){
+  const d = new Date(); const z=n=>String(n).padStart(2,'0');
+  return `${d.getFullYear()}-${z(d.getMonth()+1)}`;
+}
+function yearStamp(){ return String(new Date().getFullYear()); }
+
+function bumpHigh(key, score){
+  const prev=parseInt(localStorage.getItem(key)||'0',10)||0;
+  if(score>prev){ localStorage.setItem(key, String(score)); }
+}
+
+function upsertArenaLedger(gameId, score){
+  const u = (window.izzaUserKey && window.izzaUserKey.get && window.izzaUserKey.get())
+            || (localStorage.getItem('izzaUserU')||'').toLowerCase();
+  if(!u) return;
+
+  const row   = { u, s:score, ts:Date.now() };
+  const parts = { day:dailyStamp(), month:monthStamp(), year:yearStamp() };
+
+  function readAny(keyBase){
+    const tryRead = k => { try{ const v=localStorage.getItem(k); return v?JSON.parse(v):null; }catch(_){ return null; } };
+    return (
+      tryRead(`izzaLb2::${keyBase}`) ||
+      tryRead(`lb2::${keyBase}`)     ||
+      tryRead(`lb::${keyBase}`)      ||
+      []
+    );
+  }
+  function writeAll(keyBase, rows){
+    try{ localStorage.setItem(`izzaLb2::${keyBase}`, JSON.stringify(rows)); }catch(_){}
+    try{ localStorage.setItem(`lb2::${keyBase}`,     JSON.stringify(rows)); }catch(_){}
+    try{ localStorage.setItem(`lb::${keyBase}`,      JSON.stringify(rows)); }catch(_){}
+  }
+
+  ['alltime','day','month','year'].forEach(period=>{
+    const keyBase = (period==='alltime')
+      ? `${gameId}::alltime`
+      : `${gameId}::${period}::${parts[period]}`;
+
+    let arr = readAny(keyBase);
+    arr.push(row);
+    arr = arr
+      .sort((a,b)=>b.s-a.s)
+      .filter((v,i,self)=> self.findIndex(x=>x.u===v.u)===i )
+      .slice(0,20);
+
+    writeAll(keyBase, arr);
+  });
+}
+
+function recordLeaderboards(gameId, score){
+  // simple high markers for quick reads
+  bumpHigh('izza_lb_day_'   + dailyStamp(),  score);
+  bumpHigh('izza_lb_month_' + monthStamp(),  score);
+  bumpHigh('izza_lb_year_'  + yearStamp(),   score);
+
+  // structured tables for Arena UI
+  upsertArenaLedger(gameId, score);
+
+  if (window.IZZA_PERSIST && typeof IZZA_PERSIST.save === 'function') {
+    IZZA_PERSIST.save().catch(()=>{});
+  }
+}
+
+/* Server submit (kept compatible with Basketball style) */
 async function submitLeaderboard(score){
   try{
     if (window.IZZA_LEADERBOARD?.submit){
-      await IZZA_LEADERBOARD.submit({ game:'runner', score: Math.max(0, score|0), hi: Math.max(0, best|0) });
+      await IZZA_LEADERBOARD.submit({ game:'runner', score: Math.max(0, score|0) });
     } else {
-      await fetch(withAuth('/izza-game/api/leaderboard/submit'), {
+      await fetch(withAuth('/izza-game/api/leaderboard'), {
         method:'POST',credentials:'include',
         headers:{'content-type':'application/json'},
         body:JSON.stringify({ game:'runner', score:score|0 })
@@ -710,7 +779,7 @@ function tick(now){
 }
 requestAnimationFrame(tick);
 
-/* Game over — compute run delta and persist */
+/* Game over — compute run delta and persist + leaderboards */
 function gameOver(){
   if (over) return;
   over = true; 
@@ -732,10 +801,13 @@ function gameOver(){
   const overlay = document.getElementById('overOverlay');
   if (overlay) overlay.classList.add('show');
 
-  // persist + leaderboard in background
+  // persist + leaderboard (match Basketball: record current run score)
   (async ()=>{
     try{ await persistWalletAndSave(); }catch(_){}
-    try{ await submitLeaderboard(best); }catch(_){}
+    try{
+      recordLeaderboards('runner', finalScore);
+      await submitLeaderboard(finalScore);
+    }catch(_){}
   })();
 }
 
@@ -765,4 +837,7 @@ window.addEventListener('visibilitychange', ()=>{ if(document.visibilityState===
 </script>
 </body>
 </html>
-<!-- build: 2025-10-15 (RUNNER wallet parity fixed; avatar helpers moved before use to avoid ReferenceError; character renders again) -->
+<!-- build: 2025-10-15
+     Runner: wallet parity + avatar helpers placed before use (character shows),
+     Leaderboards: daily/monthly/yearly/all-time (Basketball parity) + dual-write namespaces + server POST
+-->
