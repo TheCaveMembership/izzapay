@@ -1010,9 +1010,16 @@ window.addEventListener('storage', (e)=>{
 
   // 🆕 Wallet coins mirror (lift server if LS moves forward)
   if (e && e.key === 'izzaCoins'){
+    // ensure the in-memory wallet (HUD) sees the newer value too
+    try {
+      const v = readCoinsOnHand();
+      if (window.IZZA?.api?.setCoins) IZZA.api.setCoins(v);
+      window.dispatchEvent(new Event('izza-coins-changed'));
+    } catch(_) {}
+
     tryKick('coins-storage');
   }
-}, { passive:true });
+}, { passive:true }); // <-- don't forget this line!
 
   // periodic poll remains
   setInterval(()=> tryKick('poll'), 5000);
