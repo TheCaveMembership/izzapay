@@ -300,7 +300,66 @@
     }catch(_){ return null; }
   }
 
-  window._wallet = { readCraftAny, writeCraftAll, readCoins, writeCoins, syncFromPersist, saveSoon, consumeWalletHandoff };
+  // FIX: Prime wallet from ALL sources (handoff + persist + cookie + local) and mirror it everywhere before a run
+  async function primeWalletFromEverywhere(){
+    let best = 0;
+
+    // Try handoff first (and keep if fresh)
+    const ho = (function(){
+      try{
+        const raw=sessionStorage.getItem('izzaWalletHandoff'); if(!raw) return null;
+        const s=JSON.parse(raw)||{};
+        if(!s.ts || (Date.now()-s.ts)>120000) return null;
+        return { coins: (s.coins|0), craft:(s.craft|0), user:(s.user||null) };
+      }catch(_){ return null; }
+    })();
+    if(ho){
+      best = Math.max(best, ho.coins|0);
+      try{
+        if(ho.user){
+          const u=String(ho.user).trim().replace(/^@+/, '').toLowerCase();
+          window.__IZZA_PROFILE__=Object.assign({},window.__IZZA_PROFILE__,{username:u});
+          window.izzaUserKey={get:()=>u};
+          localStorage.setItem('izzaUserU',u);
+          localStorage.setItem('piAuthUser',JSON.stringify({username:u}));
+        }
+      }catch(_){}
+    }
+
+    // Persist (load first)
+    try{ if(window.IZZA_PERSIST?.load) await IZZA_PERSIST.load(); }catch(_){}
+    try{
+      const pc = (window.IZZA_PERSIST?.get ? window.IZZA_PERSIST.get('coins') : (window.IZZA_PERSIST?.state?.coins));
+      if(pc!=null) best = Math.max(best, pc|0);
+    }catch(_){}
+
+    // API
+    try{ if(window.IZZA?.api?.getCoins){ best=Math.max(best, (IZZA.api.getCoins()|0)); } }catch(_){}
+
+    // Cookie
+    try{
+      const m = document.cookie.split('; ').find(s => s.startsWith('izzaCoins='));
+      if(m){ const cv = parseInt(decodeURIComponent(m.split('=').slice(1).join('='))||'0',10) || 0; best=Math.max(best, cv|0); }
+    }catch(_){}
+
+    // Local mirrors
+    try{
+      const z = localStorage.getItem('izzaWallet');
+      if(z){ const w=JSON.parse(z)||{}; if(w.coins!=null) best=Math.max(best, (w.coins|0)); }
+    }catch(_){}
+    try{ best=Math.max(best, (parseInt(localStorage.getItem('izzaCoins')||'0',10)||0)|0); }catch(_){}
+
+    // If handoff exists with craft, keep craft mirrored too
+    if(ho){ try{ localStorage.setItem('izzaCrafting', String(ho.craft|0)); }catch(_){} }
+
+    // Mirror chosen "best" to all stores (and persist)
+    try{ window._wallet?.writeCoins?.(best); }catch(_){ localStorage.setItem('izzaCoins', String(best)); }
+    try{ if(ho){ window._wallet?.writeCraftAll?.(ho.craft|0); } }catch(_){}
+
+    return best|0;
+  }
+
+  window._wallet = { readCraftAny, writeCraftAll, readCoins, writeCoins, syncFromPersist, saveSoon, consumeWalletHandoff, primeWalletFromEverywhere };
 })();
 
 // Boot-time: if cookie/hand-off beats LS, lift before first start()
@@ -497,23 +556,73 @@ async function buildAvatarCanvas(dstCtx,size,profile){
 /* equipped overlay (unchanged sizing) */
 (function(){
   const BOX128=Object.freeze({ head:{w:59,h:59,ox:64,oy:32,scale:1.12}, chest:{w:61,h:61,ox:64,oy:60,scale:1.15}, arms:{w:75,h:59,ox:64,oy:60,scale:1.15}, legs:{w:72,h:61,ox:64,oy:88,scale:1.18}, hands:{w:85,h:61,ox:86,oy:72,scale:1.34} });
-  const cache=new Map(); const imgFromSvg=s=>{ if(!s) return null; if(cache.has(s)) return cache.get(s); const i=new Image(); i.decoding='async'; i.src='data:image/svg+xml;utf8,'+encodeURIComponent(s); cache.set(s,i); return i; };
-  function readInv(){ try{ const iz=window.IZZA?.api?.getInventory?.(); if(iz) return JSON.parse(JSON.stringify(iz)); }catch(_){}
-    try{ return JSON.parse(localStorage.getItem('izzaInventory')||'{}'); }catch(_){ return {}; } }
+
+  // FIX: Make SVG overlay loading truly async and reliable (decode before draw)
+  const cache = new Map();
+  function imgFromSvgAsync(svg){
+    if(!svg) return Promise.resolve(null);
+    if(cache.has(svg)) return cache.get(svg);
+    const p = new Promise((resolve)=>{
+      const i=new Image();
+      i.decoding='async';
+      i.onload=()=>{ if(i.decode){ i.decode().catch(()=>{}).finally(()=>resolve(i)); } else { resolve(i); } };
+      i.onerror=()=>resolve(null);
+      i.src='data:image/svg+xml;utf8,'+encodeURIComponent(svg);
+    });
+    cache.set(svg,p);
+    return p;
+  }
+
+  function readInv(){
+    try{
+      const iz=window.IZZA?.api?.getInventory?.();
+      if(iz) return JSON.parse(JSON.stringify(iz));
+    }catch(_){}
+    try{ return JSON.parse(localStorage.getItem('izzaInventory')||'{}'); }catch(_){ return {}; }
+  }
   function isEq(it){ return !!(it&&(it.equipped===true||it.equip===true||((it.equippedCount|0)>0))); }
-  function equippedIn(slot){ const inv=readInv(); for(const k in inv){ const it=inv[k]; if(!it) continue; if((it.slot||'').toLowerCase()!==slot) continue; if(!isEq(it)) continue; const svg=(it.overlaySvg&&String(it.overlaySvg).trim())||(it.iconSvg&&String(it.iconSvg).trim())||''; return {key:k,it,svg}; } return null; }
-  function drawOne(ctx, svg, box, mul=1){ const im=imgFromSvg(svg); if(!im||!im.complete) return false; const w=Math.max(8,box.w|0),h=Math.max(8,box.h|0); const s=(box.scale||1)*mul;
+  function equippedIn(slot){
+    const inv=readInv();
+    for(const k in inv){
+      const it=inv[k]; if(!it) continue;
+      if((it.slot||'').toLowerCase()!==slot) continue;
+      if(!isEq(it)) continue;
+      const svg=(it.overlaySvg&&String(it.overlaySvg).trim())||(it.iconSvg&&String(it.iconSvg).trim())||'';
+      return {key:k,it,svg};
+    }
+    return null;
+  }
+
+  async function drawOne(ctx, svg, box, mul=1){
+    const im = await imgFromSvgAsync(svg);
+    if(!im) return false;
+    const w=Math.max(8,box.w|0),h=Math.max(8,box.h|0); const s=(box.scale||1)*mul;
     ctx.save(); ctx.imageSmoothingEnabled=false; ctx.translate(box.ox|0, box.oy|0); if(s!==1) ctx.scale(s,s);
-    try{ ctx.drawImage(im, -(w/2)|0, -(h/2)|0, w,h); }catch(_){ } ctx.restore(); return true; }
+    try{ ctx.drawImage(im, -(w/2)|0, -(h/2)|0, w,h); }catch(_){}
+    ctx.restore();
+    return true;
+  }
+
   async function drawEquippedOverlaysForAvatar(ctx, size){
     const k=(size>0?size/128:1);
     function scaled(b){ return { w:Math.round((b.w||0)*k), h:Math.round((b.h||0)*k), ox:Math.round((b.ox||0)*k), oy:Math.round((b.oy||0)*k), scale:b.scale }; }
-    const legs =equippedIn('legs');  if(legs ) drawOne(ctx, legs .svg, scaled(BOX128.legs ));
-    const chest=equippedIn('chest'); if(chest) drawOne(ctx, chest.svg, scaled(BOX128.chest));
-    const arms =equippedIn('arms');  if(arms ) drawOne(ctx, arms .svg, scaled(BOX128.arms ));
-    const head =equippedIn('head');  if(head ) drawOne(ctx, head .svg, scaled(BOX128.head ));
-    const hands=equippedIn('hands'); if(hands) drawOne(ctx, hands.svg, scaled(BOX128.hands));
+
+    const legs =equippedIn('legs');
+    const chest=equippedIn('chest');
+    const arms =equippedIn('arms');
+    const head =equippedIn('head');
+    const hands=equippedIn('hands');
+
+    const tasks=[];
+    if(legs ) tasks.push(drawOne(ctx, legs .svg, scaled(BOX128.legs )));
+    if(chest) tasks.push(drawOne(ctx, chest.svg, scaled(BOX128.chest)));
+    if(arms ) tasks.push(drawOne(ctx, arms .svg, scaled(BOX128.arms )));
+    if(head ) tasks.push(drawOne(ctx, head .svg, scaled(BOX128.head )));
+    if(hands) tasks.push(drawOne(ctx, hands.svg, scaled(BOX128.hands)));
+
+    await Promise.all(tasks);
   }
+
   window.drawEquippedOverlaysForAvatar=drawEquippedOverlaysForAvatar;
 })();
 
@@ -940,19 +1049,16 @@ async function refreshAvatar(){
 
 async function start(){
   try{
-    // FIRST: consume cross-page wallet handoff so HUD starts correct (matches Basketball)
-    const handoff = _wallet.consumeWalletHandoff?.();
-    if(handoff){ paintCoinsHUD(handoff.coins); }
+    // FIX: Prime from EVERYWHERE before we set baseline (mirrors + persist)
+    const startCoins = await _wallet.primeWalletFromEverywhere();
+    paintCoinsHUD(startCoins);
+    runStartCoins = startCoins;
+    craftsGrantedThisRun = 0;
 
+    // Keep pulling latest character (and persist mirror) like before
     await ensureSession();
-    // Pull latest wallet from Persist so we START with the Arena balance
-    await _wallet.syncFromPersist();
+    await _wallet.syncFromPersist(); // harmless after priming; keeps mirrors consistent
   }catch(_){}
-
-  // Start with EXACT current balance from Arena/handoff (persist → mirrors)
-  paintCoinsHUD(_wallet.readCoins());
-  runStartCoins=_wallet.readCoins();
-  craftsGrantedThisRun = 0;
 
   // avatar (+ retry once after a short delay)
   await refreshAvatar(); setTimeout(refreshAvatar, 400);
@@ -996,11 +1102,21 @@ document.addEventListener('click', (e)=>{
   e.preventDefault();
   endOverlay.style.display='none';
   score = 0; level = 1; timeLeft = 30; ended = false;
-  runStartCoins = _wallet.readCoins();
-  craftsGrantedThisRun = 0;
-  if(!scene || !renderer) initThree();
-  layoutLevel();
-  requestAnimationFrame(loop);
+
+  // FIX: re-prime baseline on replay to avoid drift if user switched tabs / earned elsewhere
+  _wallet.primeWalletFromEverywhere().then((coins)=>{
+    runStartCoins = coins|0;
+    craftsGrantedThisRun = 0;
+    if(!scene || !renderer) initThree();
+    layoutLevel();
+    requestAnimationFrame(loop);
+  }).catch(()=>{
+    runStartCoins = _wallet.readCoins();
+    craftsGrantedThisRun = 0;
+    if(!scene || !renderer) initThree();
+    layoutLevel();
+    requestAnimationFrame(loop);
+  });
 }, {passive:false});
 
 /* keep HUD coins synced like other games */
@@ -1014,8 +1130,13 @@ window.addEventListener('izza-wallet-changed', (e)=>{
   paintCoinsHUD(n);
 }, {passive:true});
 window.addEventListener('pageshow', async ()=>{
-  try{ await _wallet.syncFromPersist(); }catch(_){}
-  paintCoinsHUD(_wallet.readCoins());
+  try{
+    const coins = await _wallet.primeWalletFromEverywhere(); // FIX: make sure HUD mirrors Arena when coming back
+    paintCoinsHUD(coins);
+  }catch(_){
+    try{ await _wallet.syncFromPersist(); }catch(_){}
+    paintCoinsHUD(_wallet.readCoins());
+  }
 }, {passive:true});
 
 /* prevent long-press menu only inside the game display (not the START card) */
@@ -1030,4 +1151,4 @@ window.addEventListener('visibilitychange', ()=>{ if(document.visibilityState===
 </script>
 </body>
 </html>
-<!-- build: 2025-10-06 (avatar ramp+overlay; wallet handoff parity) -->
+<!-- build: 2025-10-06 (avatar ramp+overlay; wallet handoff parity + FIX: async overlay decode + wallet prime) -->
