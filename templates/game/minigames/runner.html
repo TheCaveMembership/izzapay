@@ -179,119 +179,96 @@ function withAuth(urlPath){
   return url.pathname + (url.search || '');
 }
 
-/* Arena-compatible wallet helpers */
+/* ------------------------------
+   WALLET HELPERS (Basketball/Dash parity)
+-------------------------------*/
 const CRAFT_KEYS = ['izzaCrafting','craftingCredits','izzaCraftCredits'];
 function readCraftAny(){ for(const k of CRAFT_KEYS){ const v=parseInt(localStorage.getItem(k)||'0',10); if(Number.isFinite(v)&&v>0) return v|0; } return (parseInt(localStorage.getItem(CRAFT_KEYS[0])||'0',10)||0)|0; }
-function writeCraftAll(v){ const n=Math.max(0,v|0); for(const k of CRAFT_KEYS) localStorage.setItem(k,String(n)); try{ window.dispatchEvent(new Event('izza-crafting-changed')); }catch(_){ } }
-function renderWalletFromLS(){ document.getElementById('coins').textContent = String(parseInt(localStorage.getItem('izzaCoins')||'0',10)||0); document.getElementById('craft').textContent = String(readCraftAny()); }
-renderWalletFromLS();
-
-/* --- LIVE WALLET SYNC: keeps coins & craft consistent between games --- */
-async function syncLiveWallet(){
-  try{
-    // wait for persist readiness if not yet
-    if (window.IZZA_PERSIST?.ready) await IZZA_PERSIST.ready;
-    if (!window.IZZA_PERSIST?.getWallet) return;
-
-    const live = await IZZA_PERSIST.getWallet();
-    if (!live) return;
-
-    // update coins
-    if (typeof live.coins === 'number'){
-      localStorage.setItem('izzaCoins', String(live.coins|0));
-      document.getElementById('coins').textContent = String(live.coins|0);
-    }
-
-    // update craft credits
-    if (typeof live.craftingCredits === 'number'){
-      writeCraftAll(live.craftingCredits|0);
-      document.getElementById('craft').textContent = String(live.craftingCredits|0);
-    }
-
-  }catch(e){ console.warn('runner sync wallet failed', e); }
+function writeCraftAll(v){
+  const n=Math.max(0,v|0);
+  for(const k of CRAFT_KEYS) localStorage.setItem(k,String(n));
+  try{ window.dispatchEvent(new Event('izza-crafting-changed')); }catch(_){}
 }
-
-/* --- HYDRATE SHARED WALLET ON ENTRY (now includes live sync) --- */
-async function hydrateWalletOnEntry(){
+function readCoinsLS(){ return (parseInt(localStorage.getItem('izzaCoins')||'0',10)|0); }
+function writeCoinsLS(v){
+  const n=(v|0);
+  localStorage.setItem('izzaCoins', String(n));
   try{
-    // optional handoff (recent in-memory sync)
-    const raw = sessionStorage.getItem('izzaWalletHandoff');
-    if (raw){
-      const s = JSON.parse(raw);
-      if (s && s.ts && Date.now() - s.ts < 120000){
-        localStorage.setItem('izzaCoins', String(s.coins|0));
-        localStorage.setItem('izzaCrafting', String(s.craft|0));
-      }
-    }
-
-    // wait for persist to be ready
-    if (window.IZZA_PERSIST?.ready) await IZZA_PERSIST.ready;
-
-    // load base snapshot
-    if (window.IZZA_PERSIST?.load) await IZZA_PERSIST.load();
-
-    // hydrate leaderboard
-    if (window.IZZA_LEADERBOARD?.hydrate) await IZZA_LEADERBOARD.hydrate();
-
-    // 🔥 pull latest wallet data from persist
-    await syncLiveWallet();
-
-    // render HUD
-    renderWalletFromLS();
-  }catch(e){ console.warn('runner hydrate failed', e); }
+    const w = { coins:n, updatedAt:Date.now(), u:(window.izzaUserKey?.get?.()||null) };
+    localStorage.setItem('izzaWallet', JSON.stringify(w));
+  }catch(_){}
+  try{ document.cookie = `izzaCoins=${encodeURIComponent(String(n))}; Path=/; Max-Age=${60*60*24*365}; SameSite=None; Secure`; }catch(_){}
 }
-
-/* --- SAVE UPDATED WALLET ON EXIT --- */
-async function persistWalletOnExit(){
+function consumeWalletHandoff(maxAgeMs=120000){
+  try{
+    const raw=sessionStorage.getItem('izzaWalletHandoff'); if(!raw) return null;
+    const s=JSON.parse(raw);
+    if(!s||!s.ts||(Date.now()-s.ts)>maxAgeMs) return null;
+    if(s.user){
+      const u=s.user.toString().trim().replace(/^@+/, '').toLowerCase();
+      window.__IZZA_PROFILE__=Object.assign({},window.__IZZA_PROFILE__,{username:u});
+      window.izzaUserKey={get:()=>u};
+      try{ localStorage.setItem('izzaUserU',u); localStorage.setItem('piAuthUser',JSON.stringify({username:u})); }catch(_){}
+    }
+    localStorage.setItem('izzaCoins', String(s.coins|0));
+    localStorage.setItem('izzaCrafting', String(s.craft|0));
+    return { coins:s.coins|0, craft:s.craft|0 };
+  }catch(_){ return null; }
+}
+async function persistWalletAndSave(){
   try{
     writeCraftAll(readCraftAny());
-    if (window.IZZA_PERSIST?.save) await IZZA_PERSIST.save();
-    if (window.IZZA_PERSIST?.saveWallet) await IZZA_PERSIST.saveWallet(); // 🔥 ensures final sync
-  }catch(e){ console.warn('runner save failed', e); }
+    if(window.IZZA_PERSIST && typeof IZZA_PERSIST.save==='function'){ await IZZA_PERSIST.save(); }
+    if(window.IZZA_PERSIST && typeof IZZA_PERSIST.saveWallet==='function'){ await IZZA_PERSIST.saveWallet(); }
+  }catch(_){}
+}
+function paintCoinsHUDFromLS(){
+  document.getElementById('coins').textContent = String(readCoinsLS());
+  document.getElementById('craft').textContent = String(readCraftAny());
 }
 
-window.addEventListener('DOMContentLoaded', hydrateWalletOnEntry);
-window.addEventListener('pagehide', persistWalletOnExit);
-window.addEventListener('beforeunload', persistWalletOnExit);
+/* LIVE HUD sync */
+window.addEventListener('storage', (e)=>{
+  if(!e) return;
+  if(e.key==='izzaCoins' || e.key==='izzaWallet' || (e.key && CRAFT_KEYS.includes(e.key))){
+    paintCoinsHUDFromLS();
+  }
+}, {passive:true});
+window.addEventListener('izza-coins-changed', paintCoinsHUDFromLS, {passive:true});
+window.addEventListener('izza-wallet-changed', paintCoinsHUDFromLS, {passive:true});
 
-/* -------- Avatar builder (unchanged for visuals) -------- */
-const SPRITES={body:{default:"/static/game/sprites/body/default.png",street_a:"/static/game/sprites/body/street_a.png",street_b:"/static/game/sprites/body/street_b.png"},hair:{short:"/static/game/sprites/hair/short.png",buzz:"/static/game/sprites/hair/buzz.png",long:"/static/game/sprites/hair/long.png"},outfit:{street:"/static/game/sprites/outfit/street.png",athletic:"/static/game/sprites/outfit/athletic.png",luxury:"/static/game/sprites/outfit/luxury.png"}};
-const SKIN_BASE=["#F7D7C6","#E8BEA8","#D6A48E"];
-const SKIN_TO={light:["#FFE7D6","#F3C6A7","#D8A187"],medium:["#F1BD94","#D79A73","#B67955"],tan:["#E2A878","#C88756","#9F663C"],dark:["#B9825B","#9A6644","#714A31"],deep:["#8B5A3B","#432818"]};
-const FEMALE_DRESS_BASE=["#7AB6FF","#4E84E3","#2F5CB5"];
-const FEMALE_DRESS_TO={blue:["#7AB6FF","#4E84E3","#2F5CB5"],red:["#FF7A7A","#E24C4C","#B12F2F"],green:["#7DD68A","#4CB56B","#2F7F47"],purple:["#B796FF","#8C6BE0","#6A49B8"],yellow:["#FFE08A","#E7C45A","#B89433"],pink:["#FFA6D6","#E57CB2","#C45C96"],black:["#3A3AD3","#232326","#0E0E10"],white:["#FFFFFF","#E6E6E6","#C9C9C9"],brown:["#A87854","#7C563A","#593D29"],orange:["#FFB46A","#E4873A","#B65E1F"]};
-const HAIR_TO={black:["#2C2C31","#17171B","#0A0A0D"],brown:["#7A5336","#5C3E28","#3E2B1B"],blonde:["#FBE58F","#E5C35A","#B89433"],red:["#E65F35","#B54426","#8E321A"],white:["#FFFFFF","#E6E6E6","#C9C9C9"],blue:["#7AB6FF","#4E84E3","#2F5CB5"],green:["#7DD68A","#4CB56B","#2F7F47"],pink:["#FFA6D6","#E57CB2","#C45C96"]};
-function loadImg(src){return new Promise(res=>{const i=new Image();i.crossOrigin='anonymous';i.onload=()=>res(i);i.onerror=()=>res(null);i.src=src;});}
-const hexToRgb=h=>{const n=parseInt(h.replace('#',''),16);return {r:(n>>16)&255,g:(n>>8)&255,b:n&255};};
-const rgbToHex=({r,g,b})=>('#'+[r,g,b].map(v=>v.toString(16).padStart(2,'0')).join(''));
-const dist2=(a,b)=>{const dr=a.r-b.r,dg=a.g-b.g,db=a.b-b.b;return dr*dr+dg*dg+db*db;};
-const lum=(r,g,b)=>0.2126*r+0.7152*g+0.0722*b;
-function extractThreeToneRamp(img){const w=img.width,h=img.height,oc=document.createElement('canvas');oc.width=w;oc.height=h;const c=oc.getContext('2d',{willReadFrequently:true});c.imageSmoothingEnabled=false;c.drawImage(img,0,0);const d=c.getImageData(0,0,w,h).data,samples=[];for(let i=0;i<d.length;i+=4){if(d[i+3]<10)continue;const r=d[i],g=d[i+1],b=d[i+2];samples.push({r,g,b,L:lum(r,g,b)});}if(samples.length<10)return["#C8C8C8","#9C9C9C","#6E6E6E"];samples.sort((a,b)=>a.L-b.L);const pick=q=>{const idx=Math.max(0,Math.min(samples.length-1,Math.floor(q*(samples.length-1))));const s=samples[idx];return '#'+s.r.toString(16).padStart(2,'0')+s.g.toString(16).padStart(2,'0')+s.b.toString(16).padStart(2,'0');};return[pick(0.2),pick(0.55),pick(0.85)];}
-function paletteSwap(img,fromRampHex,toRampHex,tolerance=2000){const from=fromRampHex.map(hexToRgb),to=toRampHex.map(hexToRgb);const w=img.width,h=img.height,oc=document.createElement('canvas');oc.width=w;oc.height=h;const c=oc.getContext('2d',{willReadFrequently:true});c.imageSmoothingEnabled=false;c.drawImage(img,0,0);const id=c.getImageData(0,0,w,h),d=id.data;let changed=0;for(let i=0;i<d.length;i+=4){if(d[i+3]===0)continue;const p={r:d[i],g:d[i+1],b:d[i+2]};let best=-1,score=1e9;for(let k=0;k<from.length;k++){const s=dist2(p,from[k]);if(s<score){score=s;best=k;}}if(score<=tolerance){const t=to[best]||to[1]||to[0];if(d[i]!==t.r||d[i+1]!==t.g||d[i+2]!==t.b)changed++;d[i]=t.r;d[i+1]=t.g;d[i+2]=t.b;} }c.putImageData(id,0,0);return {canvas:oc,changedPixels:changed};}
-function overlayTint(img,hex,strength=1.0){const w=img.width,h=img.height,oc=document.createElement('canvas');oc.width=w;oc.height=h;const c=oc.getContext('2d',{willReadFrequently:true});c.imageSmoothingEnabled=false;c.drawImage(img,0,0);const id=c.getImageData(0,0,w,h),d=id.data,t=hexToRgb(hex);function ov(a,b){a/=255;b/=255;const o=(a<.5)?(2*a*b):(1-2*(1-a)*(1-b));return Math.round(o*255);}for(let i=0;i<d.length;i+=4){if(d[i+3]===0)continue;const r=ov(d[i],t.r),g=ov(d[i+1],t.g),b=ov(d[i+2],t.b);d[i]=Math.round(d[i]*(1-strength)+r*strength);d[i+1]=Math.round(d[i+1]*(1-strength)+g*strength);d[i+2]=Math.round(d[i+2]*(1-strength)+b*strength);}c.putImageData(id,0,0);return oc;}
-function _invRead(){try{const iz=(window.IZZA&&IZZA.api&&IZZA.api.getInventory&&IZZA.api.getInventory())||null;if(iz)return JSON.parse(JSON.stringify(iz));}catch(_){ }try{return JSON.parse(localStorage.getItem('izzaInventory')||'{}');}catch(_){return{};}}
-function _isEquipped(entry){return !!(entry&&(entry.equipped===true||entry.equip===true||(typeof entry.equippedCount==='number'&&entry.equippedCount>0))); }
-function _equippedIn(slot){const inv=_invRead();for(const k in inv){const it=inv[k];if(!it)continue;if((it.slot||'').toLowerCase()===slot&&_isEquipped(it)){const svg=(it.overlaySvg&&String(it.overlaySvg).trim())||(it.iconSvg&&String(it.iconSvg).trim())||'';return{key:k,it,svg};}}return null;}
-const BOX=Object.freeze({head:{w:44,h:44,ox:48,oy:24,scale:1.12},chest:{w:46,h:46,ox:48,oy:56,scale:1.15},arms:{w:56,h:44,ox:48,oy:46,scale:1.15},legs:{w:54,h:46,ox:48,oy:74,scale:1.18},hands:{w:64,h:46,ox:60,oy:64,scale:1.34}});
-const BASE_SZ=96;
-function _scaleBox(b,k){return{w:Math.round((b.w||0)*k),h:Math.round((b.h||0)*k),ox:Math.round((b.ox||0)*k),oy:Math.round((b.oy||0)*k),scale:b.scale};}
-const _svgCache=new Map();
-function _svgToImg(svg){if(!svg)return null;if(_svgCache.has(svg))return _svgCache.get(svg);const img=new Image();img.decoding='async';img.src='data:image/svg+xml;utf8,'+encodeURIComponent(svg);_svgCache.set(svg,img);return img;}
-function _drawOverlay(ctx,svg,box,per=1,flip=false){if(!svg)return false;const img=_svgToImg(svg);if(!img||!img.complete)return false;ctx.save();ctx.imageSmoothingEnabled=false;ctx.translate(box.ox|0,box.oy|0);if(flip)ctx.scale(-1,1);const w=Math.max(8,box.w|0),h=Math.max(8,box.h|0);const s=(box.scale||1)*(per||1);if(s!==1)ctx.scale(s,s);try{ctx.drawImage(img,-w/2,-h/2,w,h);}catch(_){ }ctx.restore();return true;}
-async function buildAvatarCanvas(dstCtx,size,profile){const DW=size,DH=size,X=0,Y=0;const type=profile.body_type||'male',tone=profile.skin_tone||'light',theme=profile.sprite_skin||'default';const outfitKey=profile.outfit||'street',hairKey=profile.hair||'short',hairCol=profile.hair_color||'black';const femaleOut=profile.female_outfit_color||'blue';let body=null;if(type==='female'){const femaleWide=`/static/game/sprites/body/${theme}__female_wide.png`;const femaleSlim=`/static/game/sprites/body/${theme}__female.png`;body=await loadImg(femaleWide)||await loadImg(femaleSlim);}if(!body){body=await loadImg(SPRITES.body[theme]||SPRITES.body.default);}const hair=await loadImg(SPRITES.hair[hairKey]||SPRITES.hair.short);const outfit=(type==='female')?null:(await loadImg(SPRITES.outfit[outfitKey]||SPRITES.outfit.street));let bodyCanvas;if(body){const targetSkin=SKIN_TO[tone]||SKIN_TO.light;const swapped=paletteSwap(body,SKIN_BASE,targetSkin,4000);bodyCanvas=swapped.canvas;if(swapped.changedPixels<8){bodyCanvas=overlayTint(body,targetSkin[1],0.98);}}if(type==='female'&&bodyCanvas){const targetDress=FEMALE_DRESS_TO[femaleOut]||FEMALE_DRESS_TO.blue;const reDress=paletteSwap(bodyCanvas,FEMALE_DRESS_BASE,targetDress,4000);bodyCanvas=reDress.canvas;if(reDress.changedPixels<6){bodyCanvas=overlayTint(bodyCanvas,targetDress[1],0.85);}}dstCtx.clearRect(0,0,DW,DH);if(bodyCanvas)dstCtx.drawImage(bodyCanvas,X,Y,DW,DH);if(outfit)dstCtx.drawImage(outfit,X,Y,DW,DH);if(hair){const detected=extractThreeToneRamp(hair),target=HAIR_TO[hairCol]||HAIR_TO.black;const swap=paletteSwap(hair,detected,target,4000);let hairCanvas=swap.canvas;if(swap.changedPixels<8){hairCanvas=overlayTint(hairCanvas,target[1],1.0);}const hairY=(type==='female'&&hairKey==='buzz')?(Y-4):Y;dstCtx.drawImage(hairCanvas,X,hairY,DW,DH);}}
-async function buildAvatarCanvasWithGear(dstCtx,size,profile){await buildAvatarCanvas(dstCtx,size,profile);const k=(size>0?size/BASE_SZ:1);const head=_equippedIn('head'),chest=_equippedIn('chest'),arms=_equippedIn('arms'),legs=_equippedIn('legs'),hands=_equippedIn('hands');if(legs){_drawOverlay(dstCtx,legs.svg,_scaleBox(BOX.legs,k),1);}if(chest){_drawOverlay(dstCtx,chest.svg,_scaleBox(BOX.chest,k),1);}if(arms){_drawOverlay(dstCtx,arms.svg,_scaleBox(BOX.arms,k),1);}if(head){_drawOverlay(dstCtx,head.svg,_scaleBox(BOX.head,k),1);}if(hands){_drawOverlay(dstCtx,hands.svg,_scaleBox(BOX.hands,k),1);}}
-function sampleAverageColorInEllipse(ctx,cx,cy,rx,ry){const w=ctx.canvas.width,h=ctx.canvas.height;const xmin=Math.max(0,Math.floor(cx-rx)),xmax=Math.min(w-1,Math.ceil(cx+rx));const ymin=Math.max(0,Math.floor(cy-ry)),ymax=Math.min(h-1,Math.ceil(cy+ry));let r=0,g=0,b=0,n=0;const id=ctx.getImageData(xmin,ymin,(xmax-xmin+1),(ymax-ymin+1)),d=id.data;const rx2=rx*rx,ry2=ry*ry;for(let y=0;y<=ymax-ymin;y++){for(let x=0;x<=xmax-xmin;x++){const dx=x+xmin-cx,dy=y+ymin-cy;if((dx*dx)/rx2+(dy*dy)/ry2>1)continue;const i=(y*(xmax-xmin+1)+x)*4;const a=d[i+3];if(a<8)continue;r+=d[i];g+=d[i+1];b+=d[i+2];n++;}}if(n===0)return null;return rgbToHex({r:Math.round(r/n),g:Math.round(g/n),b:Math.round(b/n)});}
-async function buildBackAvatar(size){const profile=JSON.parse(localStorage.getItem('izzaCharacter')||'{}');const src=document.createElement('canvas');src.width=src.height=size;const sctx=src.getContext('2d',{willReadFrequently:true});sctx.imageSmoothingEnabled=false;await buildAvatarCanvas(sctx,size,profile);const k=(size>0?size/BASE_SZ:1);const head=_equippedIn('head'),chest=_equippedIn('chest'),arms=_equippedIn('arms'),legs=_equippedIn('legs');if(legs){_drawOverlay(sctx,legs.svg,_scaleBox(BOX.legs,k),1);}if(chest){_drawOverlay(sctx,chest.svg,_scaleBox(BOX.chest,k),1);}if(arms){_drawOverlay(sctx,arms.svg,_scaleBox(BOX.arms,k),1);}if(head){_drawOverlay(sctx,head.svg,_scaleBox(BOX.head,k),1);}const cx=size*0.52,cy=size*0.28,rx=size*0.18,ry=size*0.15;let fillCol=null;if(head&&head.svg)fillCol=sampleAverageColorInEllipse(sctx,cx,cy,rx,ry);if(!fillCol){const hairTone=(HAIR_TO[(profile.hair_color||'black')]||HAIR_TO.black);fillCol=hairTone[1];}const back=document.createElement('canvas');back.width=back.height=size;const bctx=back.getContext('2d',{willReadFrequently:true});bctx.imageSmoothingEnabled=false;bctx.save();bctx.scale(-1,1);bctx.drawImage(src,-size,0,size,size);bctx.restore();bctx.save();bctx.globalCompositeOperation='destination-out';bctx.beginPath();bctx.ellipse(cx,cy,rx,ry,0,0,Math.PI*2);bctx.fill();bctx.restore();bctx.save();bctx.globalCompositeOperation='source-over';bctx.fillStyle=fillCol;bctx.beginPath();bctx.ellipse(cx,cy,rx,ry,0,0,Math.PI*2);bctx.fill();bctx.restore();return back;}
+/* Snapshot hydrate on entry (prime City like Basketball) */
+async function hydrateWalletOnEntry(){
+  try{
+    const handoff=consumeWalletHandoff();
+    if(handoff){ document.getElementById('coins').textContent=String(handoff.coins|0); document.getElementById('craft').textContent=String(readCraftAny()); }
+    // Prime City snapshot silently (lets City/Arena read latest)
+    try{
+      const src=withAuth('/izza-game/play?prime=1&silent=1');
+      const f=document.createElement('iframe');
+      Object.assign(f.style,{position:'fixed',width:'0',height:'0',opacity:'0',pointerEvents:'none',border:'0'});
+      f.src=src; document.body.appendChild(f);
+      await new Promise(r=>setTimeout(r,500));
+    }catch(_){}
 
-/* -----------------------------
+    if(window.IZZA_PERSIST?.load) await IZZA_PERSIST.load();
+  }catch(_){}
+  paintCoinsHUDFromLS();
+}
+
+/* ------------------------------
    AUDIO
-------------------------------*/
-const audio={ctx:null,bg:null,gain:null,muted:false,ensure(){if(this.ctx)return;const ctx=new (window.AudioContext||window.webkitAudioContext)();const gain=ctx.createGain();gain.gain.value=0.7;gain.connect(ctx.destination);this.ctx=ctx;this.gain=gain;},blip({f1=440,f2=880,dur=0.18}={}){if(this.muted)return;this.ensure();const t=this.ctx.currentTime;const o=this.ctx.createOscillator();o.type='triangle';const g=this.ctx.createGain();g.gain.setValueAtTime(0.0001,t);o.connect(g);g.connect(this.gain);o.frequency.setValueAtTime(f1,t);o.frequency.exponentialRampToValueAtTime(f2,t+dur*0.8);g.gain.exponentialRampToValueAtTime(0.6,t+0.02);g.gain.exponentialRampToValueAtTime(0.0001,t+dur);o.start(t);o.stop(t+dur);},thump({f=110,dur=0.2}={}){if(this.muted)return;this.ensure();const t=this.ctx.currentTime;const o=this.ctx.createOscillator();o.type='sine';const g=this.ctx.createGain();o.connect(g);g.connect(this.gain);o.frequency.setValueAtTime(f,t);g.gain.setValueAtTime(0.7,t);o.frequency.exponentialRampToValueAtTime(55,t+dur);g.gain.exponentialRampToValueAtTime(0.0001,t+dur);o.start(t);o.stop(t+dur);},async bgm(){if(this.muted)return;this.ensure();if(this.bg){try{this.bg.stop();}catch(_){ }this.bg=null;}try{const res=await fetch('/static/game/audio/izza_runner_theme.mp3',{cache:'force-cache'});const buf=await res.arrayBuffer();const ab=await this.ctx.decodeAudioData(buf);const src=this.ctx.createBufferSource();src.buffer=ab;src.loop=true;src.connect(this.gain);src.start();this.bg=src;}catch(_){ }},setMuted(flag){this.muted=!!flag;if(!this.ctx)return;this.gain.gain.setTargetAtTime(this.muted?0:0.7,this.ctx.currentTime,0.05);}};
-document.getElementById('muteBtn').addEventListener('click', ()=>{audio.setMuted(!audio.muted);document.getElementById('muteBtn').textContent=audio.muted?'🔈 Muted':'🔊 Sound';});
+-------------------------------*/
+const audio={ctx:null,bg:null,gain:null,muted:false,ensure(){if(this.ctx)return;const ctx=new (window.AudioContext||window.webkitAudioContext)();const gain=ctx.createGain();gain.gain.value=0.7;gain.connect(ctx.destination);this.ctx=ctx;this.gain=gain;},blip({f1=440,f2=880,dur=0.18}={}){if(this.muted)return;this.ensure();const t=this.ctx.currentTime;const o=this.ctx.createOscillator();o.type='triangle';const g=this.ctx.createGain();g.gain.setValueAtTime(0.0001,t);o.connect(g);g.connect(this.gain);o.frequency.setValueAtTime(f1,t);o.frequency.exponentialRampToValueAtTime(f2,t+dur*0.8);g.gain.exponentialRampToValueAtTime(0.6,t+0.02);g.gain.exponentialRampToValueAtTime(0.0001,t+dur);o.start(t);o.stop(t+dur);},thump({f=110,dur=0.2}={}){if(this.muted)return;this.ensure();const t=this.ctx.currentTime;const o=this.ctx.createOscillator();o.type='sine';const g=this.ctx.createGain();o.connect(g);g.connect(this.gain);o.frequency.setValueAtTime(f,t);g.gain.setValueAtTime(0.7,t);o.frequency.exponentialRampToValueAtTime(55,t+dur);g.gain.exponentialRampToValueAtTime(0.0001,t+dur);o.start(t);o.stop(t+dur);},async bgm(){if(this.muted)return;this.ensure();if(this.bg){try{this.bg.stop();}catch(_){ }this.bg=null;}try{const res=await fetch('/static/game/audio/izza_runner_theme.mp3',{cache:'force-cache'});const buf=await res.arrayBuffer();const ab=await this.ctx.decodeAudioData(buf);const src=this.ctx.createBufferSource();src.buffer=ab;src.loop=true;src.connect(this.gain);src.start();this.bg=src;}catch(_){ }},setMuted(flag){this.muted=!!flag;if(!this.ctx)return;this.gain.gain.setTargetAtTime(this.muted?0:0.7,this.ctx.currentTime,0.05);localStorage.setItem('izzaMute', this.muted?'1':'0');}};
+document.getElementById('muteBtn').addEventListener('click', ()=>{
+  const next = !(localStorage.getItem('izzaMute')==='1');
+  audio.setMuted(next);
+  document.getElementById('muteBtn').textContent = next ? '🔈 Muted' : '🔊 Sound';
+});
 
-/* -----------------------------
+/* ------------------------------
    THREE.js GAME — Meadow
-------------------------------*/
+-------------------------------*/
 const canvas=document.getElementById('gameCanvas');
 const renderer=new THREE.WebGLRenderer({canvas,antialias:true,alpha:true});
 renderer.setPixelRatio(Math.min(2,window.devicePixelRatio||1));
@@ -302,7 +279,7 @@ const camera=new THREE.PerspectiveCamera(55,innerWidth/innerHeight,0.1,2000);
 camera.position.set(0,1.05,3.8);
 scene.fog=new THREE.Fog(0xbfe8ff,22,80);
 
-/* Texture loader + helpers (PNG-based skins) */
+/* Texture loader + helpers */
 const texLoader = new THREE.TextureLoader();
 function loadTex(path, repeatX=1, repeatY=1){
   const t = texLoader.load(path);
@@ -322,7 +299,7 @@ function loadTex(path, repeatX=1, repeatY=1){
 }
 
 /* Ground — textured grass */
-const GRASS_TEX = loadTex('/static/game/textures/grass.png', 16, 200); // replace with final art later
+const GRASS_TEX = loadTex('/static/game/textures/grass.png', 16, 200);
 const ground=new THREE.Mesh(
   new THREE.PlaneGeometry(40,2000),
   new THREE.MeshLambertMaterial({map:GRASS_TEX})
@@ -330,7 +307,7 @@ const ground=new THREE.Mesh(
 ground.rotation.x=-Math.PI/2;ground.position.z=-1000;scene.add(ground);
 
 /* Path — textured segments (moving track) */
-const TRACK_TEX = loadTex('/static/game/textures/track.png', 1, 1); // final art later
+const TRACK_TEX = loadTex('/static/game/textures/track.png', 1, 1);
 const PATH_SEGMENTS=[],PATH_SPACING=5.0,PATH_COUNT=90,PATH_LOOP=PATH_SPACING*PATH_COUNT;
 (function buildPath(){
   const mat=new THREE.MeshBasicMaterial({map:TRACK_TEX, transparent:true, alphaTest:0.01});
@@ -370,9 +347,9 @@ const OLD_TOWN_GATE_PNG = '/static/game/textures/old_town_gate.png';
 
 /* Spawning — tuned spacing (scales with speed) */
 const TRACK_LOOP=900;
-const BASE_OBSTACLE_SPACING=42;       // wider base spacing
-const INITIAL_SPREAD_EXTRA=16;        // safer early runway
-const MIN_OBSTACLE_GAP=18;            // never stack obstacles too close
+const BASE_OBSTACLE_SPACING=42;
+const INITIAL_SPREAD_EXTRA=16;
+const MIN_OBSTACLE_GAP=18;
 const COIN_CHANCE=0.6;
 const OBSTACLE_CHANCE=0.55;
 
@@ -391,14 +368,14 @@ function makeBillboard(path, w, h){
   const mesh = new THREE.Mesh(new THREE.PlaneGeometry(w,h), mat);
   mesh.material.depthWrite = false;
   mesh.material.side = THREE.DoubleSide;
-  mesh.userData.billboard = true; // will face the camera each frame
+  mesh.userData.billboard = true;
   return mesh;
 }
 
 function makeBale(z){
   const group = new THREE.Group();
 
-  // --- simple 3D body behind the PNG (keeps 3D look) ---
+  // 3D body
   const bodyGeo = new THREE.BoxGeometry(1.10, 0.55, 0.55);
   const HAY3D_TEX = texLoader.load('/static/game/textures/hay3D.png');
   HAY3D_TEX.wrapS = HAY3D_TEX.wrapT = THREE.RepeatWrapping;
@@ -409,18 +386,18 @@ function makeBale(z){
     metalness: 0.0
   });
   const body = new THREE.Mesh(bodyGeo, bodyMat);
-  body.position.set(0, 0.275, -0.08); // push back slightly so PNG sits in front
+  body.position.set(0, 0.275, -0.08);
   body.castShadow = false; body.receiveShadow = false;
   body.renderOrder = 1;
   group.add(body);
 
-  // Visual: billboard PNG (full image)
+  // Visual billboard
   const img = makeBillboard(HAY_BALE_PNG, 1.4, 0.9);
   img.position.set(0,0.45,0);
-  img.renderOrder = 2;               // draw after the body
+  img.renderOrder = 2;
   group.add(img);
 
-  // --- Invisible collision proxy (taller + centered higher) ---
+  // Collision proxy
   const proxy = new THREE.Mesh(
     new THREE.BoxGeometry(1.10, 0.90, 1.20),
     new THREE.MeshBasicMaterial({visible:false})
@@ -440,12 +417,10 @@ function makeBale(z){
 function makeGate(z){
   const group = new THREE.Group();
 
-  // Visual: billboard PNG for the Old Town saloon entry sign
   const img = makeBillboard(OLD_TOWN_GATE_PNG, 2.4, 1.3);
   img.position.set(0,0.82,0);
   group.add(img);
 
-  // Collision proxy (requires slide)
   const proxy = new THREE.Mesh(new THREE.BoxGeometry(1.8,0.38,0.9), new THREE.MeshBasicMaterial({visible:false}));
   proxy.position.set(0,0.82,0);
   group.add(proxy);
@@ -470,7 +445,7 @@ function spawnObstacle(z){
   scene.add(node); obstacles.push(node);
 }
 
-/* initial stretch with bigger spacing */
+/* initial stretch */
 let zCursor=-35;
 for(let i=0;i<38;i++){
   if(Math.random()<COIN_CHANCE) spawnCoin(zCursor-6);
@@ -478,18 +453,8 @@ for(let i=0;i<38;i++){
   zCursor -= (BASE_OBSTACLE_SPACING + INITIAL_SPREAD_EXTRA + Math.random()*10);
 }
 
-/* keep some coins ahead */
-function spawnCoinsAheadBuffer(){
-  const ahead=coins.filter(c=>c.position.z< -40).length;
-  for(let k=ahead;k<8;k++) spawnCoin(-160 - Math.random()*520);
-}
-spawnCoinsAheadBuffer();
-
-  function coinTargetCount(){
-  // Base of 8 coins visible ahead; scale gently with speed.
-  // You can tune the 18 to show more/less growth.
-  return 8 + Math.floor(vel * 18);
-}
+/* coins ahead buffer */
+function coinTargetCount(){ return 8 + Math.floor(vel * 18); }
 function topUpCoins(){
   const need = coinTargetCount();
   const haveAhead = coins.filter(c => c.position.z < -40).length;
@@ -499,13 +464,34 @@ function topUpCoins(){
 }
 
 /* Game state */
-const ACCEL = 0.00014;  // slower ramp-up than 0.00025
+const ACCEL = 0.00014;
 let running=false,over=false;
-let vel=0.18;            // starting scroll speed
+let vel=0.18;
 let dist=0;
 let sessionIzza=0;       // value gained (25 per pickup)
 let best=parseInt(localStorage.getItem('runnerHighScore')||'0',10)||0;
 const scoreEl=document.getElementById('scoreEl');
+
+/* Wallet run-baseline + craft compute (parity with DASH) */
+let WALLET_READY=false;
+let runStartCoins=0;
+let craftsGrantedThisRun=0;
+function setRunBaseline(){
+  WALLET_READY=true;
+  const hudVal = parseInt((document.getElementById('coins').textContent||'').trim(),10);
+  runStartCoins = Number.isFinite(hudVal) && hudVal>=0 ? hudVal : (readCoinsLS()||0);
+}
+function maybeGrantCraftCredits(){
+  const gained = Math.max(0, readCoinsLS() - runStartCoins);
+  const shouldHave = Math.floor(gained / 1000);
+  if(shouldHave > craftsGrantedThisRun){
+    const delta = shouldHave - craftsGrantedThisRun;
+    writeCraftAll(readCraftAny() + delta);
+    craftsGrantedThisRun = shouldHave;
+    try{ window.dispatchEvent(new Event('izza-crafting-changed')); }catch(_){}
+    paintCoinsHUDFromLS();
+  }
+}
 
 /* Jump / Slide */
 let jumpT=0,slideT=0;
@@ -525,16 +511,14 @@ function aabbHit(px,py,pz,bx,by,bz,sx,sy,sz){
   return Math.abs(px-bx) < (sx/2) && Math.abs(py-by) < (sy/2) && Math.abs(pz-bz) < (sz/2);
 }
 
-/* Wallet */
-function addCoins(n){const cur=parseInt(localStorage.getItem('izzaCoins')||'0',10)||0;const next=Math.max(0,cur+(n|0));localStorage.setItem('izzaCoins',String(next));window.dispatchEvent(new Event('izza-coins-changed'));document.getElementById('coins').textContent=String(next);}
-function addCraftingCreditsFromIzza(total){
-  const gain = Math.floor(total / 1000);
-  if (gain<=0) return 0;
-  const cur = readCraftAny();
-  const next = cur + gain;
-  writeCraftAll(next);
-  document.getElementById('craft').textContent = String(next);
-  return gain;
+/* Coins -> wallet (don’t save every pickup; persist on end/exit) */
+function addCoins(n){
+  const cur=readCoinsLS();
+  const next=Math.max(0,cur+(n|0));
+  writeCoinsLS(next);
+  try{ window.dispatchEvent(new Event('izza-coins-changed')); }catch(_){}
+  try{ window.dispatchEvent(new CustomEvent('izza-wallet-changed', { detail:{ coins:next, crafting:readCraftAny() } })); }catch(_){}
+  document.getElementById('coins').textContent=String(next);
 }
 
 /* Leaderboard */
@@ -543,8 +527,8 @@ async function submitLeaderboard(score){
     if (window.IZZA_LEADERBOARD?.submit){
       await IZZA_LEADERBOARD.submit({ game:'runner', score: Math.max(0, score|0), hi: Math.max(0, best|0) });
     } else {
-      await fetch('/izza-game/api/leaderboard/submit', {
-        method:'POST',
+      await fetch(withAuth('/izza-game/api/leaderboard/submit'), {
+        method:'POST',credentials:'include',
         headers:{'content-type':'application/json'},
         body:JSON.stringify({ game:'runner', score:score|0 })
       });
@@ -555,9 +539,18 @@ async function submitLeaderboard(score){
 /* Start / Over UX */
 const startOverlay = document.getElementById('startOverlay');
 const overOverlay  = document.getElementById('overOverlay');
-document.getElementById('startBtn').onclick = ()=>{
-  startOverlay.classList.remove('show');
+document.getElementById('startBtn').onclick = async ()=>{
+  // hydrate + baseline exactly like Basketball/DASH
+  await hydrateWalletOnEntry();
+  setRunBaseline();
+
+  // resume audio (respect saved mute)
+  const savedMute = (localStorage.getItem('izzaMute')==='1');
+  audio.setMuted(savedMute);
+  document.getElementById('muteBtn').textContent = savedMute ? '🔈 Muted' : '🔊 Sound';
   audio.bgm().catch(()=>{});
+
+  startOverlay.classList.remove('show');
   running = true; over=false;
 };
 document.getElementById('lbBtn').onclick = ()=>{ location.href = withAuth('/izza-game/minigames#leaderboard'); };
@@ -565,6 +558,17 @@ document.getElementById('overLbBtn').onclick = ()=>{ document.getElementById('lb
 document.getElementById('retryBtn').onclick = ()=>{ location.href = withAuth(location.pathname); };
 document.getElementById('exitBtn').href = withAuth('/izza-game/minigames');
 document.getElementById('backArcadeBtn').href = withAuth('/izza-game/minigames');
+
+/* Save-before-leave on exit links (parity with DASH) */
+['exitBtn','backArcadeBtn'].forEach(id=>{
+  const a=document.getElementById(id);
+  if(!a) return;
+  a.addEventListener('click', async (e)=>{
+    e.preventDefault();
+    try{ await persistWalletAndSave(); }catch(_){}
+    location.href = a.href;
+  }, {passive:false});
+});
 
 /* Sparkle */
 const sparkleMat = new THREE.PointsMaterial({ size:0.06, color:0xfff2b0 });
@@ -590,6 +594,7 @@ function sparkle(x,y,z){
 
 /* Main loop */
 let last = performance.now();
+const tmpVec = new THREE.Vector3();
 function tick(now){
   requestAnimationFrame(tick);
   const dt = Math.min(40, now - last) / 16.666;
@@ -599,21 +604,17 @@ function tick(now){
 
   if (!running || over) return;
 
-  // speed up slightly (tunable)
-vel += ACCEL * dt;
+  // speed up
+  vel += ACCEL * dt;
 
-  // Move only things flagged to scroll (path, coins, obstacles) and billboard them toward camera
+  // Move only things flagged to scroll + billboard faces camera
   scene.traverse(obj=>{
     if (obj===player || obj===camera || obj===ground) return;
 
-    // Scroll world pieces
     if ((obj.isMesh || obj.isGroup || obj.isPoints) && obj.userData && obj.userData.scroll === true){
       obj.position.z += vel * dt * 1.3;
     }
-
-    // Make billboard meshes face camera (hay bales / gate PNG planes)
     if (obj.userData && obj.userData.billboard){
-      // keep upright: match camera on XZ, preserve Y
       tmpVec.set(camera.position.x, obj.position.y, camera.position.z);
       obj.lookAt(tmpVec);
     }
@@ -621,9 +622,7 @@ vel += ACCEL * dt;
 
   // recycle path
   for (const seg of PATH_SEGMENTS){
-    if (seg.position.z > 6){
-      seg.position.z -= PATH_LOOP;
-    }
+    if (seg.position.z > 6){ seg.position.z -= PATH_LOOP; }
   }
 
   dist += vel * dt * 3.0;
@@ -650,6 +649,7 @@ vel += ACCEL * dt;
       sessionIzza += 25;
       audio.blip({f1:760,f2:1350,dur:0.12}); sparkle(c.position.x,c.position.y,c.position.z);
       scene.remove(c); coins.splice(i,1);
+      maybeGrantCraftCredits(); // update craft if we crossed a 1000-coin boundary
     }
   }
   if (Math.random()<0.03) topUpCoins();
@@ -659,7 +659,6 @@ vel += ACCEL * dt;
     const o = obstacles[i]; if (!o) continue;
 
     if (o.position.z > 8){
-      // widen gap as speed grows (vel factor), plus randomness
       let extraGap = BASE_OBSTACLE_SPACING + INITIAL_SPREAD_EXTRA + (vel*45) + Math.random()*36;
       let newZ = o.position.z - (TRACK_LOOP + extraGap);
       let guard=0;
@@ -668,28 +667,21 @@ vel += ACCEL * dt;
       continue;
     }
 
-    // collision using stored bounds + posture
     if (o.userData && o.userData.bounds){
       const b=o.userData.bounds;
       const hitAABB = aabbHit(0, player.position.y, 0.2, o.position.x||0, b.cy, o.position.z, b.sx, b.sy, b.sz);
       const isBale = (o.userData.kind==='low');
       const isGate = (o.userData.kind==='high');
-
       const postureBad = (isBale && player.position.y < 1.05) || (isGate && player.position.y > 0.60);
-
-      if (hitAABB && postureBad){
-        gameOver();
-        return;
-      }
+      if (hitAABB && postureBad){ gameOver(); return; }
     }
   }
 }
-const tmpVec = new THREE.Vector3();
 requestAnimationFrame(tick);
 
-/* Game over — show overlay first, persist in background */
+/* Game over — compute run delta and persist */
 function gameOver(){
-  if (over) return;               // guard against double-trigger
+  if (over) return;
   over = true; 
   running = false;
 
@@ -697,26 +689,25 @@ function gameOver(){
   best = Math.max(best|0, finalScore);
   localStorage.setItem('runnerHighScore', String(best));
 
-  const gainedCC = addCraftingCreditsFromIzza(sessionIzza);
+  // compute run delta from baseline
+  const totalCoins = readCoinsLS();
+  const runCoins = Math.max(0, totalCoins - runStartCoins);
 
-  // ✅ Update UI immediately (don’t block on network)
-  const stats = `Distance: ${finalScore} • IZZA gained: ${sessionIzza} • Best: ${best}${gainedCC>0?` • +${gainedCC} CC`:''}`;
+  // craft credits also summarized (already granted via maybeGrantCraftCredits)
+  const stats = `Distance: ${finalScore} • IZZA gained: ${runCoins} • Best: ${best}${craftsGrantedThisRun>0?` • +${craftsGrantedThisRun} CC`:''}`;
   const statsEl = document.getElementById('overStats');
   if (statsEl) statsEl.textContent = stats;
 
   const overlay = document.getElementById('overOverlay');
   if (overlay) overlay.classList.add('show');
 
-  // 🔄 Persist & leaderboard in the background
+  // persist + leaderboard in background
   (async ()=>{
-    try{
-      if (window.IZZA_PERSIST?.save) await IZZA_PERSIST.save();
-      if (window.IZZA_PERSIST?.saveWallet) await IZZA_PERSIST.saveWallet();
-    }catch(e){ console.warn('runner save failed', e); }
-
-    try{ await submitLeaderboard(best); }catch(e){ console.warn('lb submit failed', e); }
+    try{ await persistWalletAndSave(); }catch(_){}
+    try{ await submitLeaderboard(best); }catch(_){}
   })();
 }
+
 /* Resize */
 window.addEventListener('resize', ()=>{
   camera.aspect = innerWidth/innerHeight; camera.updateProjectionMatrix();
@@ -736,6 +727,42 @@ window.addEventListener('izza-inventory-changed', async ()=>{
   const fresh = await buildBackAvatar(96);
   backTex.image = fresh; backTex.needsUpdate = true;
 }, {passive:true});
+
+/* Persist on hide/vis change so Arena/City immediately see totals */
+window.addEventListener('pagehide', ()=>{ persistWalletAndSave().catch(()=>{}); }, {passive:true});
+window.addEventListener('visibilitychange', ()=>{ if(document.visibilityState==='hidden'){ persistWalletAndSave().catch(()=>{}); } }, {passive:true});
+
+/* -----------------------------------
+   AVATAR / SPRITES HELPERS (unchanged)
+------------------------------------*/
+const SPRITES={body:{default:"/static/game/sprites/body/default.png",street_a:"/static/game/sprites/body/street_a.png",street_b:"/static/game/sprites/body/street_b.png"},hair:{short:"/static/game/sprites/hair/short.png",buzz:"/static/game/sprites/hair/buzz.png",long:"/static/game/sprites/hair/long.png"},outfit:{street:"/static/game/sprites/outfit/street.png",athletic:"/static/game/sprites/outfit/athletic.png",luxury:"/static/game/sprites/outfit/luxury.png"}};
+const SKIN_BASE=["#F7D7C6","#E8BEA8","#D6A48E"];
+const SKIN_TO={light:["#FFE7D6","#F3C6A7","#D8A187"],medium:["#F1BD94","#D79A73","#B67955"],tan:["#E2A878","#C88756","#9F663C"],dark:["#B9825B","#9A6644","#714A31"],deep:["#8B5A3B","#432818"]};
+const FEMALE_DRESS_BASE=["#7AB6FF","#4E84E3","#2F5CB5"];
+const FEMALE_DRESS_TO={blue:["#7AB6FF","#4E84E3","#2F5CB5"],red:["#FF7A7A","#E24C4C","#B12F2F"],green:["#7DD68A","#4CB56B","#2F7F47"],purple:["#B796FF","#8C6BE0","#6A49B8"],yellow:["#FFE08A","#E7C45A","#B89433"],pink:["#FFA6D6","#E57CB2","#C45C96"],black:["#3A3AD3","#232326","#0E0E10"],white:["#FFFFFF","#E6E6E6","#C9C9C9"],brown:["#A87854","#7C563A","#593D29"],orange:["#FFB46A","#E4873A","#B65E1F"]};
+const HAIR_TO={black:["#2C2C31","#17171B","#0A0A0D"],brown:["#7A5336","#5C3E28","#3E2B1B"],blonde:["#FBE58F","#E5C35A","#B89433"],red:["#E65F35","#B54426","#8E321A"],white:["#FFFFFF","#E6E6E6","#C9C9C9"],blue:["#7AB6FF","#4E84E3","#2F5CB5"],green:["#7DD68A","#4CB56B","#2F7F47"],pink:["#FFA6D6","#E57CB2","#C45C96"]};
+function loadImg(src){return new Promise(res=>{const i=new Image();i.crossOrigin='anonymous';i.onload=()=>res(i);i.onerror=()=>res(null);i.src=src;});}
+const hexToRgb=h=>{const n=parseInt(h.replace('#',''),16);return {r:(n>>16)&255,g:(n>>8)&255,b:n&255};};
+const rgbToHex=({r,g,b})=>('#'+[r,g,b].map(v=>v.toString(16).padStart(2,'0')).join(''));
+const dist2=(a,b)=>{const dr=a.r-b.r,dg=a.g-b.g,db=a.b-b.b;return dr*dr+dg*dg+db*db;};
+const lum=(r,g,b)=>0.2126*r+0.7152*g+0.0722*b;
+function extractThreeToneRamp(img){const w=img.width,h=img.height,oc=document.createElement('canvas');oc.width=w;oc.height=h;const c=oc.getContext('2d',{willReadFrequently:true});c.imageSmoothingEnabled=false;c.drawImage(img,0,0);const d=c.getImageData(0,0,w,h).data,samples=[];for(let i=0;i<d.length;i+=4){if(d[i+3]<10)continue;const r=d[i],g=d[i+1],b=d[i+2];samples.push({r,g,b,L:lum(r,g,b)});}if(samples.length<10)return["#C8C8C8","#9C9C9C","#6E6E6E"];samples.sort((a,b)=>a.L-b.L);const pick=q=>{const idx=Math.max(0,Math.min(samples.length-1,Math.floor(q*(samples.length-1))));const s=samples[idx];return '#'+s.r.toString(16).padStart(2,'0')+s.g.toString(16).padStart(2,'0')+s.b.toString(16).padStart(2,'0');};return[pick(0.2),pick(0.55),pick(0.85)];}
+function paletteSwap(img,fromRampHex,toRampHex,tolerance=2000){const from=fromRampHex.map(hexToRgb),to=toRampHex.map(hexToRgb);const w=img.width,h=img.height,oc=document.createElement('canvas');oc.width=w;oc.height=h;const c=oc.getContext('2d',{willReadFrequently:true});c.imageSmoothingEnabled=false;c.drawImage(img,0,0);const id=c.getImageData(0,0,w,h),d=id.data;let changed=0;for(let i=0;i<d.length;i+=4){if(d[i+3]===0)continue;const p={r:d[i],g:d[i+1],b:d[i+2]};let best=-1,score=1e9;for(let k=0;k<from.length;k++){const s=dist2(p,from[k]);if(s<score){score=s;best=k;}}if(score<=tolerance){const t=to[best]||to[1]||to[0];if(d[i]!==t.r||d[i+1]!==t.g||d[i+2]!==t.b)changed++;d[i]=t.r;d[i+1]=t.g;d[i+2]=t.b;} }c.putImageData(id,0,0);return {canvas:oc,changedPixels:changed};}
+function overlayTint(img,hex,strength=1.0){const w=img.width,h=img.height,oc=document.createElement('canvas');oc.width=w;oc.height=h;const c=oc.getContext('2d',{willReadFrequently:true});c.imageSmoothingEnabled=false;c.drawImage(img,0,0);const id=c.getImageData(0,0,w,h),d=id.data,t=hexToRgb(hex);function ov(a,b){a/=255;b/=255;const o=(a<.5)?(2*a*b):(1-2*(1-a)*(1-b));return Math.round(o*255);}for(let i=0;i<d.length;i+=4){if(d[i+3]===0)continue;const r=ov(d[i],t.r),g=ov(d[i+1],t.g),b=ov(d[i+2],t.b);d[i]=Math.round(d[i]*(1-strength)+r*strength);d[i+1]=Math.round(d[i+1]*(1-strength)+g*strength);d[i+2]=Math.round(d[i+2]*(1-strength)+b*strength);}c.putImageData(id,0,0);return oc;}
+function _invRead(){try{const iz=(window.IZZA&&IZZA.api&&IZZA.api.getInventory&&IZZA.api.getInventory())||null;if(iz)return JSON.parse(JSON.stringify(iz));}catch(_){ }try{return JSON.parse(localStorage.getItem('izzaInventory')||'{}');}catch(_){return{};}}
+function _isEquipped(entry){return !!(entry&&(entry.equipped===true||entry.equip===true||(typeof entry.equippedCount==='number'&&entry.equippedCount>0))); }
+function _equippedIn(slot){const inv=_invRead();for(const k in inv){const it=inv[k];if(!it)continue;if((it.slot||'').toLowerCase()===slot&&_isEquipped(it)){const svg=(it.overlaySvg&&String(it.overlaySvg).trim())||(it.iconSvg&&String(it.iconSvg).trim())||'';return{key:k,it,svg};}}return null;}
+const BOX=Object.freeze({head:{w:44,h:44,ox:48,oy:24,scale:1.12},chest:{w:46,h:46,ox:48,oy:56,scale:1.15},arms:{w:56,h:44,ox:48,oy:46,scale:1.15},legs:{w:54,h:46,ox:48,oy:74,scale:1.18},hands:{w:64,h:46,ox:60,oy:64,scale:1.34}});
+const BASE_SZ=96;
+function _scaleBox(b,k){return{w:Math.round((b.w||0)*k),h:Math.round((b.h||0)*k),ox:Math.round((b.ox||0)*k),oy:Math.round((b.oy||0)*k),scale:b.scale};}
+const _svgCache=new Map();
+function _svgToImg(svg){if(!svg)return null;if(_svgCache.has(svg))return _svgCache.get(svg);const img=new Image();img.decoding='async';img.src='data:image/svg+xml;utf8,'+encodeURIComponent(svg);_svgCache.set(svg,img);return img;}
+function _drawOverlay(ctx,svg,box,per=1,flip=false){if(!svg)return false;const img=_svgToImg(svg);if(!img||!img.complete)return false;ctx.save();ctx.imageSmoothingEnabled=false;ctx.translate(box.ox|0,box.oy|0);if(flip)ctx.scale(-1,1);const w=Math.max(8,box.w|0),h=Math.max(8,box.h|0);const s=(box.scale||1)*(per||1);if(s!==1)ctx.scale(s,s);try{ctx.drawImage(img,-w/2,-h/2,w,h);}catch(_){ }ctx.restore();return true;}
+async function buildAvatarCanvas(dstCtx,size,profile){const DW=size,DH=size,X=0,Y=0;const type=profile.body_type||'male',tone=profile.skin_tone||'light',theme=profile.sprite_skin||'default';const outfitKey=profile.outfit||'street',hairKey=profile.hair||'short',hairCol=profile.hair_color||'black';const femaleOut=profile.female_outfit_color||'blue';let body=null;if(type==='female'){const femaleWide=`/static/game/sprites/body/${theme}__female_wide.png`;const femaleSlim=`/static/game/sprites/body/${theme}__female.png`;body=await loadImg(femaleWide)||await loadImg(femaleSlim);}if(!body){body=await loadImg(SPRITES.body[theme]||SPRITES.body.default);}const hair=await loadImg(SPRITES.hair[hairKey]||SPRITES.hair.short);const outfit=(type==='female')?null:(await loadImg(SPRITES.outfit[outfitKey]||SPRITES.outfit.street));let bodyCanvas;if(body){const targetSkin=SKIN_TO[tone]||SKIN_TO.light;const swapped=paletteSwap(body,SKIN_BASE,targetSkin,4000);bodyCanvas=swapped.canvas;if(swapped.changedPixels<8){bodyCanvas=overlayTint(body,targetSkin[1],0.98);}}if(type==='female'&&bodyCanvas){const targetDress=FEMALE_DRESS_TO[femaleOut]||FEMALE_DRESS_TO.blue;const reDress=paletteSwap(bodyCanvas,FEMALE_DRESS_BASE,targetDress,4000);bodyCanvas=reDress.canvas;if(reDress.changedPixels<6){bodyCanvas=overlayTint(bodyCanvas,targetDress[1],0.85);}}dstCtx.clearRect(0,0,DW,DH);if(bodyCanvas)dstCtx.drawImage(bodyCanvas,X,Y,DW,DH);if(outfit)dstCtx.drawImage(outfit,X,Y,DW,DH);if(hair){const detected=extractThreeToneRamp(hair),target=HAIR_TO[hairCol]||HAIR_TO.black;const swap=paletteSwap(hair,detected,target,4000);let hairCanvas=swap.canvas;if(swap.changedPixels<8){hairCanvas=overlayTint(hairCanvas,target[1],1.0);}const hairY=(type==='female'&&hairKey==='buzz')?(Y-4):Y;dstCtx.drawImage(hairCanvas,X,hairY,DW,DH);}}
+async function buildAvatarCanvasWithGear(dstCtx,size,profile){await buildAvatarCanvas(dstCtx,size,profile);const k=(size>0?size/BASE_SZ:1);const head=_equippedIn('head'),chest=_equippedIn('chest'),arms=_equippedIn('arms'),legs=_equippedIn('legs'),hands=_equippedIn('hands');if(legs){_drawOverlay(dstCtx,legs.svg,_scaleBox(BOX.legs,k),1);}if(chest){_drawOverlay(dstCtx,chest.svg,_scaleBox(BOX.chest,k),1);}if(arms){_drawOverlay(dstCtx,arms.svg,_scaleBox(BOX.arms,k),1);}if(head){_drawOverlay(dstCtx,head.svg,_scaleBox(BOX.head,k),1);}if(hands){_drawOverlay(dstCtx,hands.svg,_scaleBox(BOX.hands,k),1);}}
+function sampleAverageColorInEllipse(ctx,cx,cy,rx,ry){const w=ctx.canvas.width,h=ctx.canvas.height;const xmin=Math.max(0,Math.floor(cx-rx)),xmax=Math.min(w-1,Math.ceil(cx+rx));const ymin=Math.max(0,Math.floor(cy-ry)),ymax=Math.min(h-1,Math.ceil(cy+ry));let r=0,g=0,b=0,n=0;const id=ctx.getImageData(xmin,ymin,(xmax-xmin+1),(ymax-ymin+1)),d=id.data;const rx2=rx*rx,ry2=ry*ry;for(let y=0;y<=ymax-ymin;y++){for(let x=0;x<=xmax-xmin;x++){const dx=x+xmin-cx,dy=y+ymin-cy;if((dx*dx)/rx2+(dy*dy)/ry2>1)continue;const i=(y*(xmax-xmin+1)+x)*4;const a=d[i+3];if(a<8)continue;r+=d[i];g+=d[i+1];b+=d[i+2];n++;}}if(n===0)return null;return rgbToHex({r:Math.round(r/n),g:Math.round(g/n),b:Math.round(b/n)});}
+async function buildBackAvatar(size){const profile=JSON.parse(localStorage.getItem('izzaCharacter')||'{}');const src=document.createElement('canvas');src.width=src.height=size;const sctx=src.getContext('2d',{willReadFrequently:true});sctx.imageSmoothingEnabled=false;await buildAvatarCanvas(sctx,size,profile);const k=(size>0?size/BASE_SZ:1);const head=_equippedIn('head'),chest=_equippedIn('chest'),arms=_equippedIn('arms'),legs=_equippedIn('legs');if(legs){_drawOverlay(sctx,legs.svg,_scaleBox(BOX.legs,k),1);}if(chest){_drawOverlay(sctx,chest.svg,_scaleBox(BOX.chest,k),1);}if(arms){_drawOverlay(sctx,arms.svg,_scaleBox(BOX.arms,k),1);}if(head){_drawOverlay(sctx,head.svg,_scaleBox(BOX.head,k),1);}const cx=size*0.52,cy=size*0.28,rx=size*0.18,ry=size*0.15;let fillCol=null;if(head&&head.svg)fillCol=sampleAverageColorInEllipse(sctx,cx,cy,rx,ry);if(!fillCol){const hairTone=(HAIR_TO[(profile.hair_color||'black')]||HAIR_TO.black);fillCol=hairTone[1];}const back=document.createElement('canvas');back.width=back.height=size;const bctx=back.getContext('2d',{willReadFrequently:true});bctx.imageSmoothingEnabled=false;bctx.save();bctx.scale(-1,1);bctx.drawImage(src,-size,0,size,size);bctx.restore();bctx.save();bctx.globalCompositeOperation='destination-out';bctx.beginPath();bctx.ellipse(cx,cy,rx,ry,0,0,Math.PI*2);bctx.fill();bctx.restore();bctx.save();bctx.globalCompositeOperation='source-over';bctx.fillStyle=fillCol;bctx.beginPath();bctx.ellipse(cx,cy,rx,ry,0,0,Math.PI*2);bctx.fill();bctx.restore();return back;}
 </script>
 </body>
 </html>
+<!-- build: 2025-10-15 (RUNNER wallet parity with Basketball/DASH: handoff+LS baseline at start, coins delta tracked, craft grants per 1000 gained, save on end/exit/pagehide) -->
