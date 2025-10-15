@@ -383,7 +383,7 @@
       if(samples.length<10) return ["#C8C8C8","#9C9C9C","#6E6E6E"];
       samples.sort((a,b)=>a.L-b.L);
       const pick=q=>{ const idx=Math.max(0,Math.min(samples.length-1,Math.floor(q*(samples.length-1)))); const s=samples[idx];
-        return '#'+s.r.toString(16).padStart(2,'0')+s.g.toString(16).padStart(2,'0')+s.b.toString(16).padStart(2,'0'); };
+        return '#'+s.r.toString(16).padStart(2,'0')+s.g.toString(16).padStart(2,'0')+s.b.toString(16,'0'); };
       return [pick(0.2),pick(0.55),pick(0.85)];
     }
 
@@ -728,6 +728,47 @@ window.addEventListener('izza-inventory-changed', refreshArenaCursor, { passive:
     }
     (function normalizeCraft(){ writeCraftAll(readCraftAny()); })();
 
+    // NEW: resilient coin reader so Arena shows coins even if visiting here first
+    function readCoinsAny(){
+      let n = parseInt(localStorage.getItem('izzaCoins')||'0',10) || 0;
+      try{
+        const w = JSON.parse(localStorage.getItem('izzaWallet')||'null');
+        if (w && Number.isFinite(w.coins)) n = Math.max(n, w.coins|0);
+      }catch(_){}
+      try{
+        const b = JSON.parse(localStorage.getItem('izzaBalance')||'null');
+        if (b && Number.isFinite(b.coins)) n = Math.max(n, b.coins|0);
+      }catch(_){}
+      return n|0;
+    }
+    function writeCoinsLS(v){
+      const n = (v|0);
+      localStorage.setItem('izzaCoins', String(n));
+      try{
+        const w = { coins:n, updatedAt:Date.now(), u:(window.izzaUserKey?.get?.()||null) };
+        localStorage.setItem('izzaWallet', JSON.stringify(w));
+      }catch(_){}
+      try{ document.cookie = `izzaCoins=${encodeURIComponent(String(n))}; Path=/; Max-Age=${60*60*24*365}; SameSite=None; Secure`; }catch(_){}
+    }
+    // NEW: support wallet handoff like games do (so a game -> arena refresh shows instantly)
+    function consumeWalletHandoff(maxAgeMs=120000){
+      try{
+        const raw = sessionStorage.getItem('izzaWalletHandoff'); if(!raw) return null;
+        const s = JSON.parse(raw);
+        if(!s || !s.ts || (Date.now()-s.ts)>maxAgeMs) return null;
+        if(s.user){
+          const u = s.user.toString().trim().replace(/^@+/, '').toLowerCase();
+          window.__IZZA_PROFILE__ = Object.assign({}, window.__IZZA_PROFILE__, { username:u });
+          window.izzaUserKey = { get:()=>u };
+          try{ localStorage.setItem('izzaUserU',u); localStorage.setItem('piAuthUser',JSON.stringify({username:u})); }catch(_){}
+        }
+        writeCoinsLS(s.coins|0);
+        writeCraftAll(s.craft|0);
+        try{ window.dispatchEvent(new Event('izza-wallet-changed')); }catch(_){}
+        return { coins:s.coins|0, craft:s.craft|0 };
+      }catch(_){ return null; }
+    }
+
     /* --- Wait for izza-persist to be ready --- */
     function waitForPersistReady({timeout=3000, interval=40} = {}){
       return new Promise((res)=> {
@@ -804,7 +845,7 @@ window.addEventListener('izza-inventory-changed', refreshArenaCursor, { passive:
                   return;
                 }
                 // Also succeed on LS delta
-                const coins = Number(localStorage.getItem('izzaCoins')||'0')|0;
+                const coins = readCoinsAny();
                 const craft = readCraftAny()|0;
                 if (coins>0 || craft>0){ finish('iframe-poll-ls'); }
               }catch(_){}
@@ -813,9 +854,9 @@ window.addEventListener('izza-inventory-changed', refreshArenaCursor, { passive:
         }, {once:true});
 
         // LocalStorage baseline polling (Safari quirk)
-        const baseline = { coins: Number(localStorage.getItem('izzaCoins')||'0')|0, craft: readCraftAny()|0 };
+        const baseline = { coins: readCoinsAny(), craft: readCraftAny()|0 };
         lsTimer = setInterval(()=>{
-          const now = { coins: Number(localStorage.getItem('izzaCoins')||'0')|0, craft: readCraftAny()|0 };
+          const now = { coins: readCoinsAny(), craft: readCraftAny()|0 };
           if (now.coins !== baseline.coins || now.craft !== baseline.craft){
             finish('ls-poll');
           }
@@ -840,8 +881,7 @@ window.addEventListener('izza-inventory-changed', refreshArenaCursor, { passive:
     }
 
     function readLocalWallet(){
-      const coins = Number.isFinite(Number(localStorage.getItem('izzaCoins')))
-        ? Number(localStorage.getItem('izzaCoins')) : 0;
+      const coins = readCoinsAny();
       const craft = readCraftAny();
       return { coins, crafting: craft };
     }
@@ -852,6 +892,7 @@ window.addEventListener('izza-inventory-changed', refreshArenaCursor, { passive:
       if (!obj) return;
       let coins = Number(obj.coins)||0;
       let crafting = Number(obj.crafting)||0;
+      // keep last-known nonzero to prevent flicker-to-zero on first paint
       if (coins === 0 && LAST_WALLET.coins > 0) coins = LAST_WALLET.coins;
       if (crafting === 0 && LAST_WALLET.crafting > 0) crafting = LAST_WALLET.crafting;
       if (elCoins) { elCoins.textContent = String(coins); elCoins.removeAttribute('data-loading'); }
@@ -880,12 +921,20 @@ window.addEventListener('izza-inventory-changed', refreshArenaCursor, { passive:
         const profilePre = await ensureCharacter();
         try{ localStorage.setItem('izzaCharacter', JSON.stringify(profilePre)); }catch(_){}
 
+        // NEW: accept wallet handoff from last game BEFORE we do any paints
+        try{
+          const hand = consumeWalletHandoff();
+          if (hand){
+            renderWallet({ coins: hand.coins|0, crafting: readCraftAny()|0 });
+          }
+        }catch(_){}
+
         // Wait for the prime if we started it; then hydrate from snapshot
         try{ await primePromise; }catch(_){}
         try{ await hydrateFromSnapshot(); }catch(_){}
         if (shouldPrime){ try{ sessionStorage.setItem(SESSION_PRIME_KEY, '1'); }catch(_){ } }
 
-        // Paint wallet from LS
+        // Paint wallet from LS (uses resilient readers, avoids 0-on-first-visit)
         renderWallet(readLocalWallet());
 
         // IMPORTANT: fetch fresh character again AFTER snapshot so we get equipped items/armoury
@@ -917,7 +966,7 @@ window.addEventListener('izza-inventory-changed', refreshArenaCursor, { passive:
             try{ j = await r.json(); }catch(_){}
             const parsed = parseWalletResponse(j);
             try{
-              localStorage.setItem('izzaCoins', String(Number(parsed.coins)||0));
+              writeCoinsLS(Number(parsed.coins)||0);
               writeCraftAll(Number(parsed.crafting)||0);
               window.dispatchEvent(new Event('izza-coins-changed'));
               window.dispatchEvent(new Event('izza-crafting-changed'));
@@ -949,7 +998,7 @@ window.addEventListener('izza-inventory-changed', refreshArenaCursor, { passive:
         // Update if LS changes in another tab/page
         window.addEventListener('storage', (e)=>{
           if (!e) return;
-          if (e.key==='izzaCoins' || CRAFT_KEYS.includes(e.key)) {
+          if (e.key==='izzaCoins' || e.key==='izzaWallet' || CRAFT_KEYS.includes(e.key)) {
             renderWallet(readLocalWallet());
           }
         }, { passive:true });
