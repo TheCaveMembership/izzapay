@@ -968,14 +968,23 @@ async function start(){
   // avatar (+ retry once after a short delay)
   await refreshAvatar(); setTimeout(refreshAvatar, 400);
 
-  // audio
+    // audio — guarantee playback after user gesture
   try{
     const AudioCtx = window.AudioContext || window.webkitAudioContext;
     window.audioCtx = window.audioCtx || new AudioCtx();
     await audioCtx.resume();
     initAudio();
-    bgmEl.volume=0.25; bgmEl.muted=(localStorage.getItem('izzaMute')==='1'); bgmEl.currentTime=0; bgmEl.play().catch(()=>{});
-  }catch(_){}
+
+    bgmEl.currentTime = 0;
+    bgmEl.volume = 0.25;
+    bgmEl.muted = (localStorage.getItem('izzaMute') === '1');
+    await bgmEl.play().catch(err => {
+      console.warn('BGM play blocked, waiting for gesture', err);
+      document.body.addEventListener('pointerdown', () => {
+        bgmEl.play().catch(()=>{});
+      }, { once: true });
+    });
+  }catch(err){ console.warn('audio init failed', err); }
 
   // 3D
   initThree();
