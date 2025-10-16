@@ -1,146 +1,269 @@
 <!doctype html>
-<html>
+<html lang="en">
 <head>
   <meta charset="utf-8">
   <title>Create Your Character — IZZA GAME</title>
-  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
   <link rel="stylesheet" href="/static/themes.css">
   <style>
-    body{font-family:Arial,Helvetica,sans-serif;background:var(--bg);color:var(--txt);margin:0}
-    .wrap{max-width:980px;margin:0 auto;padding:16px}
+    html,body{max-width:100%;overflow-x:hidden}
+    :root{
+      --bg:#000; --txt:#e8f1ff; --muted:#9fb0d6; --line:#1d2540;
+      --piPurple1:#7a44ff; --piPurple2:#b784ff;
+      --gold1:#ffcf4d; --gold2:#ffb23a;
+      --glow-gold:0 0 26px rgba(255,207,77,.45), 0 0 64px rgba(255,178,58,.25);
+      --glow-purple:0 0 28px rgba(183,132,255,.35), 0 0 64px rgba(122,68,255,.25);
+      --ring:0 0 0 2px rgba(183,132,255,.28);
+      --dim:#5f6d90;
+    }
+    body{
+      font-family:Inter,Arial,Helvetica,sans-serif;background:#000;color:var(--txt);margin:0;
+      text-align:center;
+    }
+
+    .wrap{max-width:1100px;margin:0 auto;padding:16px 16px 160px}
+    @media (min-width:720px){ .wrap{padding:24px 24px 180px} }
+
+    /* Top bar: centered BROWSE STORES */
+    .topbar{
+      display:flex;align-items:center;justify-content:center;
+      padding:12px 0; position:sticky; top:0; z-index:50;
+      background:rgba(0,0,0,.9); backdrop-filter:blur(10px); border-bottom:1px solid var(--line);
+    }
+
+    /* Buttons (map .ip-btn to the Home Screen look without changing classes) */
+    .ip-btn, .btn{
+      display:inline-flex;align-items:center;justify-content:center;gap:8px;
+      padding:14px 18px;border-radius:14px;font-weight:700;letter-spacing:.2px;cursor:pointer;text-decoration:none;
+      border:1px solid transparent;transition:transform .15s ease,box-shadow .15s ease,filter .15s ease;
+      font-size:clamp(14px,3.7vw,18px); white-space:nowrap;
+      background:linear-gradient(180deg,var(--piPurple1),var(--piPurple2));color:#fff;box-shadow:var(--glow-purple);
+    }
+    .ip-btn:focus-visible,.btn:focus-visible{outline:none;box-shadow:var(--ring)}
+    .ip-btn:hover,.btn:hover{transform:translateY(-1px)} .ip-btn:active,.btn:active{transform:translateY(0)}
+    .ip-btn.ghost{background:transparent;color:#cfe0ff;border-color:#2a3550}
+    .ip-btn.ghost:hover{border-color:#3f4e79}
+
+    .btn.gold{background:linear-gradient(180deg,var(--gold1),var(--gold2));color:#1a1400;box-shadow:var(--glow-gold)}
+    .btn.ghost{background:transparent;color:#cfe0ff;border-color:#2a3550}
+    .btn.ghost:hover{border-color:#3f4e79}
+    .btn.upper{text-transform:uppercase;letter-spacing:.6px}
+
+    /* Headings & copy */
+    h1{
+      margin:16px 0 6px;
+      font-size:clamp(26px,8.5vw,56px);
+      line-height:1.05; letter-spacing:.4px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;
+    }
+    h2{margin:28px 0 4px;font-size:22px}
+    p{color:var(--muted);margin:8px 0 16px}
+
+    /* Sections & chips */
+    .section{padding:18px 0}
+    .pillrow{display:flex;justify-content:center;gap:8px;flex-wrap:wrap;margin:10px 0}
+    .pill{background:#0b0f1f;border:1px solid #222b4a;color:#cfe0ff;border-radius:999px;padding:6px 10px;font-size:12px}
+
+    /* Rails */
+    .rail{position:fixed;top:0;bottom:0;width:12px;z-index:0;pointer-events:none}
+    .rail.left{left:0;background:linear-gradient(180deg,transparent 0%,rgba(255,207,77,.18) 20%,rgba(255,178,58,.2) 55%,transparent 100%)}
+    .rail.right{right:0;background:linear-gradient(180deg,transparent 0%,rgba(183,132,255,.16) 20%,rgba(122,68,255,.22) 55%,transparent 100%)}
+
+    /* Reveal */
+    .reveal{opacity:0;transform:translateY(18px);transition:opacity .5s ease,transform .5s ease}
+    .reveal.show{opacity:1;transform:translateY(0)}
+
+    /* IZZA PAY logo under hero words */
+    .hero-logo{height:clamp(58px,12vw,110px);margin:10px auto 8px;display:block;filter:drop-shadow(0 0 10px rgba(255,255,255,.06))}
+    /* Mobile: nudge logo right same as Home */
+    @media (max-width: 768px){
+      #s-hero-create .hero-logo{
+        display:block;
+        margin:10px auto 8px;
+        transform: translateX(91px);
+      }
+    }
+
+    /* Card + grid re-skin (keep original structure/IDs) */
+    .card{background:var(--card);border:1px solid var(--line);border-radius:14px;padding:16px;margin-top:14px;text-align:left}
     .grid{display:grid;grid-template-columns:360px 1fr;gap:16px}
-    @media (max-width:860px){ .grid{grid-template-columns:1fr} }
-    .card{background:var(--card);border:1px solid var(--line);border-radius:14px;padding:16px;margin-top:14px}
-    label{display:block;margin:8px 0 4px}
-    select{width:100%;padding:8px;border-radius:8px;border:1px solid var(--line);background:var(--chip-bg);color:var(--txt)}
+    @media (max-width:860px){ .grid{grid-template-columns:1fr} .card{text-align:center} }
+    label{display:block;margin:8px 0 4px;text-align:left}
+    select{width:100%;padding:10px;border-radius:10px;border:1px solid var(--line);background:var(--chip-bg);color:var(--txt)}
     .muted{color:var(--muted)}
+    .note{font-size:13px}
+
     .preview-wrap{display:flex;flex-direction:column;gap:10px}
+    .row{display:flex;gap:10px;flex-wrap:wrap;align-items:center;justify-content:center}
     .stage{
       width:320px;height:320px;border-radius:12px;border:1px solid var(--line);
       background:
-        linear-gradient(0deg, rgba(0,0,0,.08) 1px, transparent 1px) 0 0/20px 20px,
-        linear-gradient(90deg, rgba(0,0,0,.08) 1px, transparent 1px) 0 0/20px 20px,
+        linear-gradient(0deg, rgba(255,255,255,.035) 1px, transparent 1px) 0 0/20px 20px,
+        linear-gradient(90deg, rgba(255,255,255,.035) 1px, transparent 1px) 0 0/20px 20px,
         #10202b;
       display:flex;align-items:center;justify-content:center;margin:0 auto;
+      box-shadow:0 10px 30px rgba(0,0,0,.45);
     }
     canvas{image-rendering:pixelated;image-rendering:crisp-edges}
-    .row{display:flex;gap:10px;flex-wrap:wrap;align-items:center}
-    .pill{display:inline-flex;align-items:center;gap:6px;border:1px solid var(--line);border-radius:999px;padding:6px 10px;font-size:12px;background:var(--chip-bg)}
-    .note{font-size:13px}
+
+    .btns{margin-top:12px;display:flex;gap:10px;flex-wrap:wrap;justify-content:center}
     .danger{color:#ff9aa2}
-    .btns{margin-top:12px;display:flex;gap:10px;flex-wrap:wrap}
-    /* tiny helper for hide/show of fields */
     .hide{display:none}
   </style>
 </head>
 <body class="cw-blue theme-a">
+  <!-- rails -->
+  <div class="rail left"  id="railL" aria-hidden="true"></div>
+  <div class="rail right" id="railR" aria-hidden="true"></div>
+
   <div class="wrap">
-    <div class="card">
-      <div class="grid">
-        <!-- Left: Live Preview -->
-        <div class="preview-wrap">
-          <h1 style="margin:0 0 6px">Create Your Character</h1>
-          <div class="row">
-            <span class="pill">8-bit retro • top-down</span>
-            <span class="pill">IZZA City starter look</span>
-          </div>
-          <div class="stage">
-            <canvas id="avatar" width="160" height="160" aria-label="Live character preview"></canvas>
-          </div>
-          <p class="muted note" id="presetLabel"></p>
-        </div>
+    <!-- Topbar -->
+    <div class="topbar">
+      <a class="btn ghost upper" href="/explore">BROWSE STORES</a>
+    </div>
 
-        <!-- Right: Form -->
-        <div>
-          <form id="charForm" method="post">
-            {% if t %}
-              <input type="hidden" name="t" value="{{ t }}">
-            {% endif %}
+    <!-- HERO -->
+    <section class="section" id="s-hero-create">
+      <h1 class="reveal">BUILD • SELL • PLAY</h1>
+      <img src="/static/izzapay-word.svg" alt="IZZA PAY" class="hero-logo reveal">
+      <p class="reveal">Craft your starter look, then dive into IZZA City & Arcade. Style upgrades come later via in-game shops.</p>
+      <div class="pillrow reveal">
+        <span class="pill">8-bit top-down</span>
+        <span class="pill">Starter appearance</span>
+        <span class="pill">Locks after save</span>
+      </div>
+    </section>
 
-            <label>Body Type</label>
-            <select id="body_type" name="body_type">
-              <option value="male">Male</option>
-              <option value="female">Female</option>
-              <option value="neutral">Prefer not to say</option>
-            </select>
-
-            <label>Skin Tone</label>
-            <select id="skin_tone" name="skin_tone">
-              <option value="light">Light</option>
-              <option value="medium">Medium</option>
-              <option value="tan">Tan</option>
-              <option value="dark">Dark</option>
-              <option value="deep">Deep</option>
-            </select>
-
-            <!-- Sleeve/Vest block (hidden/disabled for female) -->
-            <div id="block_male">
-              <label>Sleeve Color</label>
-              <select name="sprite_skin" id="sprite_skin">
-                <option value="default">Default</option>
-                <option value="street_a">Street A</option>
-                <option value="street_b">Street B</option>
-              </select>
-
-              <label>Vest Color</label>
-              <select name="outfit" id="outfit">
-                <option value="street">Street</option>
-                <option value="athletic">Athletic</option>
-                <option value="luxury">Luxury</option>
-              </select>
+    <!-- CHARACTER CREATION (original structure/IDs preserved) -->
+    <section class="section reveal">
+      <div class="card">
+        <div class="grid">
+          <!-- Left: Live Preview -->
+          <div class="preview-wrap">
+            <h2 style="margin:0 0 6px">Create Your Character</h2>
+            <div class="row">
+              <span class="pill">IZZA City starter</span>
+              <span class="pill">Preview updates live</span>
             </div>
+            <div class="stage">
+              <canvas id="avatar" width="160" height="160" aria-label="Live character preview"></canvas>
+            </div>
+            <p class="muted note" id="presetLabel"></p>
+          </div>
 
-            <!-- Female-only: dress/outfit color -->
-            <div id="block_female" class="hide">
-              <label>Outfit Color</label>
-              <select id="female_outfit_color" name="female_outfit_color">
-                <option value="blue">Blue</option>
-                <option value="red">Red</option>
-                <option value="green">Green</option>
-                <option value="purple">Purple</option>
-                <option value="yellow">Yellow</option>
-                <option value="pink">Pink</option>
+          <!-- Right: Form -->
+          <div>
+            <form id="charForm" method="post">
+              {% if t %}
+                <input type="hidden" name="t" value="{{ t }}">
+              {% endif %}
+
+              <label>Body Type</label>
+              <select id="body_type" name="body_type">
+                <option value="male">Male</option>
+                <option value="female">Female</option>
+                <option value="neutral">Prefer not to say</option>
+              </select>
+
+              <label>Skin Tone</label>
+              <select id="skin_tone" name="skin_tone">
+                <option value="light">Light</option>
+                <option value="medium">Medium</option>
+                <option value="tan">Tan</option>
+                <option value="dark">Dark</option>
+                <option value="deep">Deep</option>
+              </select>
+
+              <!-- Sleeve/Vest block (hidden/disabled for female) -->
+              <div id="block_male">
+                <label>Sleeve Color</label>
+                <select name="sprite_skin" id="sprite_skin">
+                  <option value="default">Default</option>
+                  <option value="street_a">Street A</option>
+                  <option value="street_b">Street B</option>
+                </select>
+
+                <label>Vest Color</label>
+                <select name="outfit" id="outfit">
+                  <option value="street">Street</option>
+                  <option value="athletic">Athletic</option>
+                  <option value="luxury">Luxury</option>
+                </select>
+              </div>
+
+              <!-- Female-only: dress/outfit color -->
+              <div id="block_female" class="hide">
+                <label>Outfit Color</label>
+                <select id="female_outfit_color" name="female_outfit_color">
+                  <option value="blue">Blue</option>
+                  <option value="red">Red</option>
+                  <option value="green">Green</option>
+                  <option value="purple">Purple</option>
+                  <option value="yellow">Yellow</option>
+                  <option value="pink">Pink</option>
+                  <option value="black">Black</option>
+                  <option value="white">White</option>
+                  <option value="brown">Brown</option>
+                  <option value="orange">Orange</option>
+                </select>
+              </div>
+
+              <label>Hair Style</label>
+              <select name="hair" id="hair">
+                <option value="short">Short</option>
+                <option value="buzz">Buzz</option>
+                <option value="long">Long</option>
+              </select>
+
+              <label>Hair Color</label>
+              <select id="hair_color" name="hair_color">
                 <option value="black">Black</option>
-                <option value="white">White</option>
                 <option value="brown">Brown</option>
-                <option value="orange">Orange</option>
+                <option value="blonde">Blonde</option>
+                <option value="red">Red</option>
+                <option value="white">White</option>
+                <option value="blue">Blue</option>
+                <option value="green">Green</option>
+                <option value="pink">Pink</option>
               </select>
-            </div>
 
-            <label>Hair Style</label>
-            <select name="hair" id="hair">
-              <option value="short">Short</option>
-              <option value="buzz">Buzz</option>
-              <option value="long">Long</option>
-            </select>
+              <div class="btns">
+                <button class="ip-btn" type="submit">Save and Enter IZZA</button>
+                <a class="ip-btn ghost" href="/">Cancel</a>
+              </div>
 
-            <label>Hair Color</label>
-            <select id="hair_color" name="hair_color">
-              <option value="black">Black</option>
-              <option value="brown">Brown</option>
-              <option value="blonde">Blonde</option>
-              <option value="red">Red</option>
-              <option value="white">White</option>
-              <option value="blue">Blue</option>
-              <option value="green">Green</option>
-              <option value="pink">Pink</option>
-            </select>
-
-            <div class="btns">
-              <button class="ip-btn" type="submit">Save and Enter IZZA</button>
-              <a class="ip-btn ghost" href="/">Cancel</a>
-            </div>
-
-            <p class="muted note" style="margin-top:8px">
-              Once saved, your base appearance is <strong>locked</strong>. You can still change style
-              and flair later via in-game merch (barbers, outfitters, mods).
-            </p>
-          </form>
+              <p class="muted note" style="margin-top:8px">
+                Once saved, your base appearance is <strong>locked</strong>. You can still change style
+                and flair later via in-game merch (barbers, outfitters, mods).
+              </p>
+            </form>
+          </div>
         </div>
       </div>
-    </div>
+    </section>
   </div>
 
+  <!-- Scroll reveal + rail glow (same behavior as Home) -->
+  <script>
+  (function(){
+    const io=new IntersectionObserver((entries)=>{
+      entries.forEach(e=>{ if(e.isIntersecting) e.target.classList.add('show'); });
+    },{threshold:.15});
+    document.querySelectorAll('.reveal').forEach(n=>io.observe(n));
+
+    const L=document.getElementById('railL'), R=document.getElementById('railR');
+    function onScroll(){
+      const doc=document.documentElement;
+      const max=doc.scrollHeight-doc.clientHeight;
+      const p=Math.max(0,Math.min(1,(doc.scrollTop||0)/(max||1)));
+      const g=8+44*p, a=0.18+0.35*p;
+      if(L) L.style.boxShadow=`0 0 ${g}px ${g/6}px rgba(255,207,77,${a})`;
+      if(R) R.style.boxShadow=`0 0 ${g}px ${g/6}px rgba(183,132,255,${a})`;
+    }
+    onScroll(); window.addEventListener('scroll', onScroll, {passive:true});
+  })();
+  </script>
+
+  <!-- ORIGINAL FUNCTIONALITY (unchanged) -->
   <script>
   (function(){
     const SPRITES = {
@@ -152,7 +275,7 @@
       hair: {
         short: "/static/game/sprites/hair/short.png",
         buzz:  "/static/game/sprites/hair/buzz.png",
-        long:  "/static/game/sprites/hair/long.png" // same for male/female
+        long:  "/static/game/sprites/hair/long.png"
       },
       outfit: {
         street:   "/static/game/sprites/outfit/street.png",
@@ -161,7 +284,6 @@
       }
     };
 
-    // --- Ramps ---------------------------------------------------------------
     const SKIN_BASE = ["#F7D7C6","#E8BEA8","#D6A48E"];
     const SKIN_TO = {
       light:  ["#FFE7D6","#F3C6A7","#D8A187"],
@@ -171,7 +293,6 @@
       deep:   ["#8B5A3B","#6A402A","#432818"]
     };
 
-    // Dress base = current female sprite’s blue ramp (approx.)
     const FEMALE_DRESS_BASE = ["#7AB6FF","#4E84E3","#2F5CB5"];
     const FEMALE_DRESS_TO = {
       blue:   ["#7AB6FF","#4E84E3","#2F5CB5"],
@@ -197,7 +318,6 @@
       pink:   ["#FFA6D6","#E57CB2","#C45C96"]
     };
 
-    // --- DOM -----------------------------------------------------------------
     const selType = document.getElementById('body_type');
     const selTone = document.getElementById('skin_tone');
     const selSkin = document.getElementById('sprite_skin');
@@ -215,7 +335,6 @@
     const form = document.getElementById('charForm');
     ctx.imageSmoothingEnabled = false;
 
-    // --- utils ---------------------------------------------------------------
     function loadImg(src){ return new Promise(res=>{ const i=new Image(); i.crossOrigin='anonymous'; i.onload=()=>res(i); i.onerror=()=>res(null); i.src=src; }); }
     const hexToRgb = h => { const n=parseInt(h.replace('#',''),16); return {r:(n>>16)&255,g:(n>>8)&255,b:n&255}; };
     const dist2 = (a,b)=>{const dr=a.r-b.r,dg=a.g-b.g,db=a.b-b.b;return dr*dr+dg*dg+db*db;};
@@ -293,16 +412,14 @@
       const isFemale = (selType.value === 'female');
       blockMale.classList.toggle('hide', isFemale);
       blockFemale.classList.toggle('hide', !isFemale);
-      // keep selects enabled/disabled to avoid accidental submission
       selSkin.disabled = false;
       selOut.disabled  = false;
     }
 
-    // --- draw ----------------------------------------------------------------
     async function draw(){
       toggleBlocks();
 
-      // bg
+      const ctx = cvs.getContext('2d');
       ctx.clearRect(0,0,cvs.width,cvs.height);
       const g = ctx.createRadialGradient(80,80,10,80,80,90);
       g.addColorStop(0,"rgba(255,255,255,.08)"); g.addColorStop(1,"rgba(0,0,0,0)");
@@ -310,7 +427,6 @@
 
       const DW=96,DH=96,X=(cvs.width-DW)/2,Y=(cvs.height-DH)/2;
 
-      // choose base body sprite
       const theme=selSkin.value;
       const isFemale=(selType.value==='female');
 
@@ -323,17 +439,14 @@
       }
       if(!body) body=await loadImg(SPRITES.body[theme]||SPRITES.body.default);
 
-      // hair
       let hairURL=SPRITES.hair[selHair.value]||SPRITES.hair.short;
       let hair=await loadImg(hairURL);
 
-      // outfit (only for non-female)
       let outfit=null;
       if(!isFemale){
         outfit=await loadImg(SPRITES.outfit[selOut.value]||SPRITES.outfit.street);
       }
 
-      // --- skin tint first ---
       let bodyCanvas;
       if(body){
         const targetSkin = SKIN_TO[selTone.value]||SKIN_TO.light;
@@ -344,25 +457,20 @@
         }
       }
 
-      // --- female dress tint (if female) ---
       if(isFemale && bodyCanvas){
         const targetDress = FEMALE_DRESS_TO[selFemaleOutfit.value] || FEMALE_DRESS_TO.blue;
         const reDress = paletteSwap(bodyCanvas, FEMALE_DRESS_BASE, targetDress, 4000);
         bodyCanvas = reDress.canvas;
         if(reDress.changedPixels < 6){
-          // strong fallback so it’s clearly different
           bodyCanvas = overlayTint(bodyCanvas, targetDress[1], 0.85);
         }
       }
 
-      // draw body
       if(bodyCanvas) ctx.drawImage(bodyCanvas, X, Y, DW, DH);
       else { ctx.fillStyle="#41d1a7"; ctx.fillRect(X,Y,DW,DH); }
 
-      // outfit (skip for female)
       if(outfit){ ctx.drawImage(outfit, X, Y, DW, DH); }
 
-      // hair (keep “approved” approach)
       if(hair){
         const detected = extractThreeToneRamp(hair);
         const target   = HAIR_TO[selHairColor.value]||HAIR_TO.black;
@@ -377,7 +485,6 @@
         ctx.fillStyle="#f2d16b"; ctx.fillRect(X+28,Y+6,40,22);
       }
 
-      // label
       preset.textContent =
         `Body: ${selType.value} • Skin: ${selTone.value} • Hair: ${selHair.value} (${selHairColor.value})` +
         (isFemale ? ` • Outfit: ${selFemaleOutfit.value}` : ` • Vest: ${selOut.value} • Sleeves: ${selSkin.value}`);
@@ -391,7 +498,6 @@
     [selType, selTone, selSkin, selOut, selFemaleOutfit, selHair, selHairColor]
       .forEach(el=> el.addEventListener('change', draw));
 
-    // initial
     toggleBlocks();
     draw();
   })();
