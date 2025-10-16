@@ -153,8 +153,8 @@
     </div>
   </div>
 
-  <!-- Optional chill bgm (muted by default until user gesture) -->
-  <audio id="bgm" src="/static/game/audio/dash_bgm.mp3" preload="none" loop></audio>
+  <!-- bgm: now with playsinline -->
+  <audio id="bgm" src="/static/game/audio/dash_bgm.mp3" preload="none" loop playsinline></audio>
 
 <script>
 /* =======================
@@ -937,8 +937,32 @@ async function refreshAvatar(){
   }catch(_){}
 }
 
-/* ======== Start: mirror Basketball flow exactly for wallet snapshot ======== */
+/* ======== Start: ensure BGM starts on user gesture ======== */
 async function start(){
+  /* 0) BGM FIRST — inside the click handler, before any awaits */
+  try{
+    const savedMute = (localStorage.getItem('izzaMute') === '1');
+    bgmEl.muted = savedMute;
+    bgmEl.volume = desiredBgmVol;
+    bgmEl.currentTime = 0;
+    const p = bgmEl.play();
+    if (p && typeof p.catch === 'function') {
+      p.catch(()=> {
+        // if blocked, start on next user tap
+        document.body.addEventListener('pointerdown', () => {
+          bgmEl.play().catch(()=>{});
+        }, { once:true });
+      });
+    }
+  }catch(_){}
+
+  // Init/resume SFX after triggering BGM (still within gesture turn)
+  try{
+    initAudio();
+    if (audioCtx && audioCtx.state === 'suspended') { audioCtx.resume().catch(()=>{}); }
+    if(master){ master.gain.value = (localStorage.getItem('izzaMute')==='1') ? 0 : desiredMasterGain; }
+  }catch(_){}
+
   try{
     // 1) Consume handoff first (if coming from City/Arena)
     const handoff=_walletBB.consumeWalletHandoff();
@@ -967,24 +991,6 @@ async function start(){
 
   // avatar (+ retry once after a short delay)
   await refreshAvatar(); setTimeout(refreshAvatar, 400);
-
-    // audio — guarantee playback after user gesture
-  try{
-    const AudioCtx = window.AudioContext || window.webkitAudioContext;
-    window.audioCtx = window.audioCtx || new AudioCtx();
-    await audioCtx.resume();
-    initAudio();
-
-    bgmEl.currentTime = 0;
-    bgmEl.volume = 0.25;
-    bgmEl.muted = (localStorage.getItem('izzaMute') === '1');
-    await bgmEl.play().catch(err => {
-      console.warn('BGM play blocked, waiting for gesture', err);
-      document.body.addEventListener('pointerdown', () => {
-        bgmEl.play().catch(()=>{});
-      }, { once: true });
-    });
-  }catch(err){ console.warn('audio init failed', err); }
 
   // 3D
   initThree();
@@ -1040,6 +1046,13 @@ window.addEventListener('izza-coins-changed', ()=>paintCoinsHUDFromLS(), {passiv
 window.addEventListener('izza-wallet-changed', ()=>paintCoinsHUDFromLS(), {passive:true});
 window.addEventListener('pageshow', ()=>{ try{ paintCoinsHUDFromLS(); }catch(_){} }, {passive:true});
 
+/* extra: if iOS suspends audio, resume on visibility return */
+document.addEventListener('visibilitychange', ()=>{
+  if(document.visibilityState==='visible'){
+    if(bgmEl && !bgmEl.muted && bgmEl.paused){ bgmEl.play().catch(()=>{}); }
+  }
+},{passive:true});
+
 /* prevent long-press menu only inside the game display (not the START card) */
 document.getElementById('gl').addEventListener('contextmenu', e=>e.preventDefault(), {passive:false});
 document.getElementById('arena').addEventListener('selectstart', e=>{
@@ -1052,4 +1065,4 @@ window.addEventListener('visibilitychange', ()=>{ if(document.visibilityState===
 </script>
 </body>
 </html>
-<!-- build: 2025-10-15 (DASH wallet parity with Basketball: handoff+LS baseline, prime iframe, apply/save on exit; keeps async equipped overlays) -->
+<!-- build: 2025-10-15 — audio start moved to top of start(); playsinline; gesture fallback; parity with Basketball -->
