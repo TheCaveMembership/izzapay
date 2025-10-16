@@ -867,7 +867,6 @@ function loop(t){
 function tickTimer(){
   if(ended) return;
   timeLeft--; timeEl.textContent=timeLeft;
-  try{ bleep('tick'); }catch(_){}
   if(timeLeft<=0){
     showMsg('TIME OUT','miss');
     showEndOverlay();
