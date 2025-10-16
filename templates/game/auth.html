@@ -71,13 +71,14 @@
     /* Message and error */
     .err{color:#ff9aa2;white-space:pre-wrap}
 
-    /* Keep mobile nudge consistent with home if you want it */
-    @media (max-width:768px){
-      #s-auth .hero-logo{
-        display:block;
-        margin:10px auto 8px;
-      }
-    }
+    /* Mobile: nudge the IZZA PAY logo to the right (same as home) */
+@media (max-width: 768px){
+  #s-auth .hero-logo{
+    display:block;
+    margin:10px auto 8px;   /* stays centered baseline */
+    transform: translateX(91px); /* push right to match home */
+  }
+}
   </style>
   <script src="https://sdk.minepi.com/pi-sdk.js"></script>
 </head>
