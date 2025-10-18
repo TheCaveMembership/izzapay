@@ -1,5 +1,5 @@
 # db.py
-import os, sqlite3, threading
+import os, sqlite3, threading, time
 
 # --- Persistent locations (works on Render or locally) ---
 DATA_ROOT = os.getenv("DATA_ROOT", "/var/data/izzapay")
@@ -17,15 +17,32 @@ def _ensure_dirs():
 
 def conn():
     _ensure_dirs()
-    # Allow use across threads if needed; each request should still open/close its own conn.
-    cx = sqlite3.connect(DB_PATH, check_same_thread=False, detect_types=sqlite3.PARSE_DECLTYPES)
-    cx.row_factory = sqlite3.Row
-    # Sensible defaults for a web app on SQLite
-    cx.execute("PRAGMA foreign_keys=ON;")
-    cx.execute("PRAGMA journal_mode=WAL;")
-    cx.execute("PRAGMA synchronous=NORMAL;")
-    cx.execute(f"PRAGMA busy_timeout={BUSY_TIMEOUT_MS};")
-    return cx
+    try:
+        cx = sqlite3.connect(DB_PATH, check_same_thread=False, detect_types=sqlite3.PARSE_DECLTYPES)
+        cx.row_factory = sqlite3.Row
+        cx.execute("PRAGMA foreign_keys=ON;")
+        cx.execute("PRAGMA journal_mode=WAL;")
+        cx.execute("PRAGMA synchronous=NORMAL;")
+        cx.execute(f"PRAGMA busy_timeout={BUSY_TIMEOUT_MS};")
+        return cx
+    except sqlite3.DatabaseError:
+        # File might be corrupt — rename it safely and recreate
+        try:
+            if os.path.exists(DB_PATH):
+                with open(DB_PATH, "rb") as f:
+                    magic = f.read(16)
+                if magic != b"SQLite format 3\x00":
+                    os.rename(DB_PATH, f"{DB_PATH}.bad.{int(time.time())}")
+        except Exception as e:
+            print("DB recovery skipped:", e)
+        # retry after rename (new DB auto-created)
+        cx = sqlite3.connect(DB_PATH, check_same_thread=False, detect_types=sqlite3.PARSE_DECLTYPES)
+        cx.row_factory = sqlite3.Row
+        cx.execute("PRAGMA foreign_keys=ON;")
+        cx.execute("PRAGMA journal_mode=WAL;")
+        cx.execute("PRAGMA synchronous=NORMAL;")
+        cx.execute(f"PRAGMA busy_timeout={BUSY_TIMEOUT_MS};")
+        return cx
 
 def init_db():
     _ensure_dirs()
