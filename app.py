@@ -1593,12 +1593,28 @@ def auth_exchange():
             return {"ok": False, "error": "invalid_payload"}, 400
 
         # Verify token with Pi
-        r = requests.get(f"{PI_API_BASE}/v2/me",
-                         headers={"Authorization": f"Bearer {token}"}, timeout=10)
-        if r.status_code != 200:
-            if not request.is_json:
-                return redirect("/signin?fresh=1")
-            return {"ok": False, "error": "token_invalid"}, 401
+        # >>> DEBUG: show exactly which base we are calling and current flags
+try:
+    print("AUTH_EXCHANGE_ENV",
+          {"PI_API_BASE": PI_API_BASE, "PI_SANDBOX": PI_SANDBOX})
+except Exception:
+    pass
+
+r = requests.get(f"{PI_API_BASE}/v2/me",
+                 headers={"Authorization": f"Bearer {token}"},
+                 timeout=10)
+
+# >>> DEBUG: log status and a tiny body snippet
+try:
+    body_snip = (r.text or "")[:160]
+    print("AUTH_EXCHANGE_PI_ME", {"status": r.status_code, "body": body_snip})
+except Exception:
+    pass
+
+if r.status_code != 200:
+    if not request.is_json:
+        return redirect("/signin?fresh=1")
+    return {"ok": False, "error": "token_invalid"}, 401
 
         # Upsert user
         with conn() as cx:
