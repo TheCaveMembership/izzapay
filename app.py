@@ -1093,6 +1093,20 @@ def get_bearer_token_from_request() -> str | None:
     if auth and auth.lower().startswith("bearer "):
         return auth.split(" ", 1)[1].strip()
     return None
+    # Hydrate Flask session from short-lived bearer token (works even if cookies get blocked)
+@app.before_request
+def _hydrate_session_from_token_main():
+    try:
+        if "user_id" not in session:
+            tok = get_bearer_token_from_request()
+            if tok:
+                uid = verify_login_token(tok)
+                if uid:
+                    session["user_id"] = uid
+                    session.permanent = True
+    except Exception:
+        # don’t break the request if something goes wrong
+        pass
 
 # ----------------- HELPERS -----------------
 def _redeem_and_issue_credit(cx, user_id: int, code: str):
