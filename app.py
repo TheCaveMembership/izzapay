@@ -108,12 +108,20 @@ except Exception:
     PI_USD_RATE = 0.0
 
 # ----------------- APP -----------------
+# after: app = Flask(__name__)
 app = Flask(__name__)
-# Run DB init once the app exists. Using before_first_request keeps
-# Gunicorn import-time clean and avoids hard-failing on import.
-@app.before_first_request
+
+_init_done = False
+
+@app.before_request
 def _run_init_once():
-    init_app_startup()
+    global _init_done
+    if _init_done:
+        return
+    try:
+        init_app_startup()   # the function we wrote that does ensure_schema, ensure_voucher_tables, ensure_app_tables, setup_backups
+    finally:
+        _init_done = True
 
 # ----------------- PERSISTENT DATA ROOT -----------------
 DATA_ROOT   = os.getenv("DATA_ROOT", "/var/data/izzapay")
