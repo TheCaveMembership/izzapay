@@ -81,38 +81,7 @@ def ensure_voucher_tables():
             cx.execute("ALTER TABLE mint_codes ADD COLUMN value_ic INTEGER")
 
 # Create the “already-claimed” ledger once on boot (not inside other functions)
-with conn() as cx:
-    cx.execute("""
-      CREATE TABLE IF NOT EXISTS crafting_credit_claims(
-        order_id   INTEGER PRIMARY KEY,   -- 1 row per order, prevents duplicates
-        user_id    INTEGER NOT NULL,
-        claimed_at INTEGER NOT NULL
-      )
-    """)
-with conn() as cx:
-    cx.execute("""
-        CREATE TABLE IF NOT EXISTS collectible_claims(
-          id INTEGER PRIMARY KEY AUTOINCREMENT,
-          order_id INTEGER NOT NULL,
-          user_id INTEGER NOT NULL,
-          claimed_at INTEGER NOT NULL
-        )
-    """)
 
-with conn() as cx:
-    cx.execute("""
-      CREATE TABLE IF NOT EXISTS dynamic_overrides(
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        user_id INTEGER NOT NULL,
-        link_id TEXT NOT NULL,
-        price_pi REAL NOT NULL,
-        ctx TEXT,
-        created_at INTEGER NOT NULL,
-        UNIQUE(user_id, link_id)
-      )
-    """)
-    
-    cx.execute("CREATE UNIQUE INDEX IF NOT EXISTS uniq_collectible_claims ON collectible_claims(order_id, user_id)")
 # ----------------- ENV -----------------
 load_dotenv()
 PI_SANDBOX    = os.getenv("PI_SANDBOX", "false").lower() == "true"
@@ -140,6 +109,11 @@ except Exception:
 
 # ----------------- APP -----------------
 app = Flask(__name__)
+# Run DB init once the app exists. Using before_first_request keeps
+# Gunicorn import-time clean and avoids hard-failing on import.
+@app.before_first_request
+def _run_init_once():
+    init_app_startup()
 
 # ----------------- PERSISTENT DATA ROOT -----------------
 DATA_ROOT   = os.getenv("DATA_ROOT", "/var/data/izzapay")
@@ -191,6 +165,108 @@ def setup_backups():
     if db_path and os.path.exists(db_path):
         _backup_now(db_path, backups_dir)
         _prune_old_backups(backups_dir, keep=10)
+
+# --- Safety: verify the db file looks like SQLite; if not, quarantine it
+def _db_path_or_none():
+    try:
+        with conn() as cx:
+            info = cx.execute("PRAGMA database_list").fetchone()
+            if info and ("file" in info.keys()):
+                return info["file"] or None
+    except Exception:
+        return None
+    return None
+
+def _looks_like_sqlite(path: str) -> bool:
+    try:
+        if not path or not os.path.exists(path) or os.path.isdir(path):
+            return False
+        with open(path, "rb") as f:
+            sig = f.read(16)
+        return sig == b"SQLite format 3\x00"
+    except Exception:
+        return False
+
+def _quarantine_bad_db(path: str):
+    try:
+        bad_dir = os.path.join(os.getenv("DATA_ROOT", "/var/data/izzapay"), "baddb")
+        os.makedirs(bad_dir, exist_ok=True)
+        ts = datetime.utcnow().strftime("%Y%m%d-%H%M%S")
+        dest = os.path.join(bad_dir, f"bad-{ts}.bin")
+        shutil.move(path, dest)
+        return dest
+    except Exception:
+        return None
+
+# --- Move your top-level table creation into a single function
+def ensure_app_tables():
+    with conn() as cx:
+        # previously: crafting_credit_claims
+        cx.execute("""
+            CREATE TABLE IF NOT EXISTS crafting_credit_claims(
+              order_id   INTEGER PRIMARY KEY,
+              user_id    INTEGER NOT NULL,
+              claimed_at INTEGER NOT NULL
+            )
+        """)
+
+        # previously: collectible_claims
+        cx.execute("""
+            CREATE TABLE IF NOT EXISTS collectible_claims(
+              id INTEGER PRIMARY KEY AUTOINCREMENT,
+              order_id INTEGER NOT NULL,
+              user_id INTEGER NOT NULL,
+              claimed_at INTEGER NOT NULL
+            )
+        """)
+
+        # previously: dynamic_overrides (+ index)
+        cx.execute("""
+            CREATE TABLE IF NOT EXISTS dynamic_overrides(
+              id INTEGER PRIMARY KEY AUTOINCREMENT,
+              user_id INTEGER NOT NULL,
+              link_id TEXT NOT NULL,
+              price_pi REAL NOT NULL,
+              ctx TEXT,
+              created_at INTEGER NOT NULL,
+              UNIQUE(user_id, link_id)
+            )
+        """)
+        cx.execute("""
+            CREATE UNIQUE INDEX IF NOT EXISTS uniq_collectible_claims
+            ON collectible_claims(order_id, user_id)
+        """)
+
+# --- One place to run all startup DB work
+def init_app_startup():
+    # 0) if DB file is junk, quarantine it so we can boot
+    db_path = _db_path_or_none()
+    if db_path and os.path.exists(db_path) and not _looks_like_sqlite(db_path):
+        _quarantine_bad_db(db_path)
+
+    # 1) base schema from db.ensure_schema (your import already handles missing function)
+    try:
+        ensure_schema()
+    except Exception as e:
+        app.logger.exception("ensure_schema failed")
+
+    # 2) your voucher tables (idempotent)
+    try:
+        ensure_voucher_tables()
+    except Exception:
+        app.logger.exception("ensure_voucher_tables failed")
+
+    # 3) the tables we moved from top-level
+    try:
+        ensure_app_tables()
+    except Exception:
+        app.logger.exception("ensure_app_tables failed")
+
+    # 4) optional backup (only if the DB exists and is real)
+    try:
+        setup_backups()
+    except Exception:
+        app.logger.info("setup_backups skipped or failed benignly")
 
 # ----------------- BLUEPRINTS & HELPERS -----------------
 crafting_api = Blueprint("crafting_api", __name__, url_prefix="/api/crafting")
