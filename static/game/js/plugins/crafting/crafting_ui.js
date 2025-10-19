@@ -5,7 +5,7 @@
 const GAME_BASE = 'https://izzagame.onrender.com';
 // IZZA Pay side (checkout, voucher codes, Pi approval/complete)
 const PAY_BASE  = 'https://izzapay.onrender.com';
-const SINGLE_MINT_LINK_ID = 'cc35e0f8'; // your single-use mint item
+const SINGLE_MINT_LINK_ID = '668d0a9e'; // your single-use mint item
 // Build absolute URLs to the correct origin
 const gameApi = (p) => `${GAME_BASE}${String(p || '').replace(/^\/+/, '/')}`;
 const payApi  = (p) => `${PAY_BASE}${String(p || '').replace(/^\/+/, '/')}`;
