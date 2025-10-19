@@ -1588,6 +1588,8 @@ def auth_exchange():
         username = user.get("username")
         token = data.get("accessToken")
         if (not uid) or (not username) or (not token):
+            try: print("AUTH_EXCHANGE_BAD_PAYLOAD", {"uid": uid, "username": username, "has_token": bool(token)})
+            except Exception: pass
             if not request.is_json:
                 return redirect("/signin?fresh=1")
             return {"ok": False, "error": "invalid_payload"}, 400
@@ -1617,38 +1619,122 @@ def auth_exchange():
                 return redirect("/signin?fresh=1")
             return {"ok": False, "error": "token_invalid"}, 401
 
-        # Upsert user
-        with conn() as cx:
-            row = cx.execute("SELECT * FROM users WHERE pi_uid=?", (uid,)).fetchone()
-            if not row:
-                cx.execute(
-                    "INSERT INTO users(pi_uid, pi_username, role, created_at) VALUES(?, ?, 'buyer', ?)",
-                    (uid, username, int(time.time()))
-                )
-                row = cx.execute("SELECT * FROM users WHERE pi_uid=?", (uid,)).fetchone()
-
-        # Create session
+        # ----- token valid; everything below is our app logic -----
         try:
-            session["user_id"] = row["id"]
-            session.permanent = True
-        except Exception:
-            pass
+            try:
+                print("AUTH_EXCHANGE_PAYLOAD", {"uid": uid, "username": username})
+            except Exception:
+                pass
 
-        # Mint app token and build redirect
-        tok = mint_login_token(row["id"])
-        separator = "&" if "?" in next_path else "?"
-        target = f"{next_path}{separator}t={tok}"
+            # Inspect/patch the users table schema (idempotent)
+            with conn() as cx:
+                try:
+                    cols = [row["name"] for row in cx.execute("PRAGMA table_info(users)").fetchall()]
+                    print("AUTH_EXCHANGE_USERS_COLS", cols)
+                except Exception as e:
+                    print("AUTH_EXCHANGE_USERS_COLS_ERR", repr(e))
+                    cols = []
 
-        if not request.is_json:
-            return redirect(target)
+                # Minimal columns we rely on in this flow
+                if "pi_uid" not in cols:
+                    print("AUTH_EXCHANGE_MIGRATE_ADD_PI_UID")
+                    cx.execute("ALTER TABLE users ADD COLUMN pi_uid TEXT")
+                    cols.append("pi_uid")
+                if "pi_username" not in cols:
+                    print("AUTH_EXCHANGE_MIGRATE_ADD_PI_USERNAME")
+                    cx.execute("ALTER TABLE users ADD COLUMN pi_username TEXT")
+                    cols.append("pi_username")
+                if "role" not in cols:
+                    cx.execute("ALTER TABLE users ADD COLUMN role TEXT")
+                    cols.append("role")
+                if "created_at" not in cols:
+                    cx.execute("ALTER TABLE users ADD COLUMN created_at INTEGER")
+                    cols.append("created_at")
+                if "ic_credits" not in cols:
+                    cx.execute("ALTER TABLE users ADD COLUMN ic_credits INTEGER DEFAULT 0")
+                    cols.append("ic_credits")
 
-        return {"ok": True, "redirect": target, "token": tok}, 200
+            # Upsert user
+            with conn() as cx:
+                row = None
+                try:
+                    row = cx.execute("SELECT * FROM users WHERE pi_uid=?", (uid,)).fetchone()
+                except Exception as e:
+                    print("AUTH_EXCHANGE_SELECT_BY_UID_ERR", repr(e))
 
-    except Exception:
+                if not row:
+                    # Try by username if pi_uid was previously missing
+                    try:
+                        alt = cx.execute("SELECT * FROM users WHERE pi_username=?", (username,)).fetchone()
+                    except Exception as e:
+                        print("AUTH_EXCHANGE_SELECT_BY_USERNAME_ERR", repr(e))
+                        alt = None
+
+                    if alt:
+                        # Backfill missing pi_uid on existing record
+                        try:
+                            cx.execute("UPDATE users SET pi_uid=? WHERE id=?", (uid, alt["id"]))
+                            row = cx.execute("SELECT * FROM users WHERE id=?", (alt["id"],)).fetchone()
+                            print("AUTH_EXCHANGE_BACKFILL_UID_ON_EXISTING", {"id": int(row["id"])})
+                        except Exception as e:
+                            print("AUTH_EXCHANGE_BACKFILL_ERR", repr(e))
+
+                if not row:
+                    # Insert fresh if still not found
+                    cx.execute(
+                        "INSERT INTO users(pi_uid, pi_username, role, created_at) VALUES(?, ?, 'buyer', ?)",
+                        (uid, username, int(time.time()))
+                    )
+                    row = cx.execute("SELECT * FROM users WHERE pi_uid=?", (uid,)).fetchone()
+
+            # Log resulting DB row id
+            try:
+                print("AUTH_EXCHANGE_DB_ROW", {
+                    "id": int(row["id"]),
+                    "pi_uid": row.get("pi_uid") if hasattr(row, "get") else row["pi_uid"],
+                    "pi_username": row.get("pi_username") if hasattr(row, "get") else row["pi_username"]
+                })
+            except Exception as e:
+                print("AUTH_EXCHANGE_DB_ROW_ERR", repr(e))
+
+            # Create session
+            try:
+                session["user_id"] = row["id"]
+                session.permanent = True
+                print("AUTH_EXCHANGE_SESSION_OK", {"user_id": int(row["id"])})
+            except Exception as e:
+                print("AUTH_EXCHANGE_SESSION_ERR", repr(e))
+                raise
+
+            # Mint app token and build redirect
+            tok = mint_login_token(row["id"])
+            separator = "&" if "?" in next_path else "?"
+            target = f"{next_path}{separator}t={tok}"
+            print("AUTH_EXCHANGE_REDIRECT", {"target": target})
+
+            if not request.is_json:
+                return redirect(target)
+            return {"ok": True, "redirect": target, "token": tok}, 200
+
+        except Exception as e:
+            # SHOW the exact reason we are bouncing
+            import traceback
+            print("AUTH_EXCHANGE_FATAL", repr(e))
+            try:
+                traceback.print_exc()
+            except Exception:
+                pass
+            if not request.is_json:
+                return redirect("/signin?fresh=1")
+            return {"ok": False, "error": "server_error"}, 500
+
+    except Exception as e:
+        # Outer guard: keep the legacy behavior, but log
+        try: print("AUTH_EXCHANGE_OUTER_FATAL", repr(e))
+        except Exception: pass
         if not request.is_json:
             return redirect("/signin?fresh=1")
         return {"ok": False, "error": "server_error"}, 500
-
 # ----------------- MERCHANT DASHBOARD -----------------
 @app.get("/dashboard")
 def dashboard():
