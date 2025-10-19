@@ -1592,7 +1592,7 @@ def auth_exchange():
                 return redirect("/signin?fresh=1")
             return {"ok": False, "error": "invalid_payload"}, 400
 
-        # >>> DEBUG: show which base we are calling and current flags
+        # >>> DEBUG: show exactly which base we are calling and current flags
         try:
             print("AUTH_EXCHANGE_ENV", {"PI_API_BASE": PI_API_BASE, "PI_SANDBOX": PI_SANDBOX})
         except Exception:
@@ -1622,8 +1622,7 @@ def auth_exchange():
             row = cx.execute("SELECT * FROM users WHERE pi_uid=?", (uid,)).fetchone()
             if not row:
                 cx.execute(
-                    """INSERT INTO users(pi_uid, pi_username, role, created_at)
-                       VALUES(?, ?, 'buyer', ?)""",
+                    "INSERT INTO users(pi_uid, pi_username, role, created_at) VALUES(?, ?, 'buyer', ?)",
                     (uid, username, int(time.time()))
                 )
                 row = cx.execute("SELECT * FROM users WHERE pi_uid=?", (uid,)).fetchone()
