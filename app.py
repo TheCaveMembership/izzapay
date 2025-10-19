@@ -125,7 +125,7 @@ DEFAULT_ADMIN_EMAIL = os.getenv("DEFAULT_ADMIN_EMAIL", "info@izzapay.shop")
 LIBRE_EP      = os.getenv("LIBRE_EP", "https://izzatranslate.onrender.com").rstrip("/")
 # ⚠️ Single-use crafting credit identifier.
 # This MUST equal the product’s items.link_id (the bit in /checkout/<link_id>)
-SINGLE_CREDIT_LINK_ID = "cc35e0f8"
+SINGLE_CREDIT_LINK_ID = "668d0a9e"
 COIN_PER_PI = 2000  # must match the game economy
 # top of file (ENV)
 CREDIT_PI_VALUE = float(os.getenv("CREDIT_PI_VALUE", "0.70"))  # each credit is worth up to 0.70π
