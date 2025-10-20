@@ -1,2 +1,2 @@
-stellar-sdk==8.2.3
+stellar-sdk==12.3.0
 python-dotenv==1.0.1
