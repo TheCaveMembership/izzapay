@@ -1001,133 +1001,151 @@ def require_admin():
         return urow  # return the original Row for downstream code
     abort(403)      # Block non-admins
 
-# ---- DB bootstrap (lazy, safe, idempotent) -------------------
-from flask import current_app
-from db import conn
+# ----------------- DB & SCHEMA -----------------
+init_db()
+setup_backups()
+ensure_schema()
 
-def run_startup_migrations():
-    # init and backups were previously called at import time
+# --- Users & merchants table patches ---
+with conn() as cx:
+    # users table patch for in-game credits
+    u_cols = {r["name"] for r in cx.execute("PRAGMA table_info(users)")}
+    if "ic_credits" not in u_cols:
+        cx.execute("ALTER TABLE users ADD COLUMN ic_credits INTEGER DEFAULT 0")
+
+    # merchants patches
+    m_cols = {r["name"] for r in cx.execute("PRAGMA table_info(merchants)")}
+    if "pi_wallet_address" not in m_cols:
+        cx.execute("ALTER TABLE merchants ADD COLUMN pi_wallet_address TEXT")
+    if "pi_handle" not in m_cols:
+        cx.execute("ALTER TABLE merchants ADD COLUMN pi_handle TEXT")
+    if "colorway" not in m_cols:
+        cx.execute("ALTER TABLE merchants ADD COLUMN colorway TEXT")
+
+# --- Carts & cart_items must ALWAYS exist (not gated on colorway) ---
+with conn() as cx:
+    cx.execute("""
+        CREATE TABLE IF NOT EXISTS carts(
+          id TEXT PRIMARY KEY,
+          merchant_id INTEGER NOT NULL,
+          created_at INTEGER NOT NULL
+        )
+    """)
+    cx.execute("""
+        CREATE TABLE IF NOT EXISTS cart_items(
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          cart_id TEXT NOT NULL,
+          item_id INTEGER NOT NULL,
+          qty INTEGER NOT NULL
+        )
+    """)
+
+with conn() as cx:
+    it_cols = {r["name"] for r in cx.execute("PRAGMA table_info(items)")}
+    if "description" not in it_cols:
+        cx.execute("ALTER TABLE items ADD COLUMN description TEXT")
+    if "fulfillment_kind" not in it_cols:
+        cx.execute("ALTER TABLE items ADD COLUMN fulfillment_kind TEXT DEFAULT 'physical'")
+    if "crafted_item_id" not in it_cols:
+        cx.execute("ALTER TABLE items ADD COLUMN crafted_item_id TEXT")
+    # ⬇️ NEW: persist inline SVG for crafted items
+    if "svg_code" not in it_cols:
+        cx.execute("ALTER TABLE items ADD COLUMN svg_code TEXT")
+
+    # sessions table patches (ALWAYS run; do NOT nest under crafted_item_id)
+    scols = {r["name"] for r in cx.execute("PRAGMA table_info(sessions)")}
+    if "pi_payment_id" not in scols:
+        cx.execute("ALTER TABLE sessions ADD COLUMN pi_payment_id TEXT")
+    if "cart_id" not in scols:
+        cx.execute("ALTER TABLE sessions ADD COLUMN cart_id TEXT")
+    if "line_items_json" not in scols:
+        cx.execute("ALTER TABLE sessions ADD COLUMN line_items_json TEXT")
+    if "user_id" not in scols:
+        cx.execute("ALTER TABLE sessions ADD COLUMN user_id INTEGER")
+
+    # orders table patches
+    ocols = {r["name"] for r in cx.execute("PRAGMA table_info(orders)")}
+    if "buyer_user_id" not in ocols:
+        cx.execute("ALTER TABLE orders ADD COLUMN buyer_user_id INTEGER")
+
+    # payout_requests throttle log (one row per request)
+    cx.execute("""
+        CREATE TABLE IF NOT EXISTS payout_requests(
+          id INTEGER PRIMARY KEY,
+          merchant_id INTEGER NOT NULL,
+          requested_at INTEGER NOT NULL,
+          FOREIGN KEY(merchant_id) REFERENCES merchants(id)
+        )
+    """)
+    cx.execute("CREATE INDEX IF NOT EXISTS idx_payout_requests_merchant_time ON payout_requests(merchant_id, requested_at)")
+
+ensure_schema()
+with conn() as cx:
+    cx.execute("""
+        CREATE TABLE IF NOT EXISTS crafted_items(
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          user_id INTEGER NOT NULL,
+          name TEXT NOT NULL,
+          sku TEXT,
+          image TEXT,
+          meta_json TEXT,
+          created_at INTEGER NOT NULL
+        )
+    """)
+    cx.execute("CREATE INDEX IF NOT EXISTS idx_crafted_items_user ON crafted_items(user_id)")
+# Detect if orders.created_at exists (for 30-day filters)
+with conn() as cx:
+    _ORDERS_COLS = {r["name"] for r in cx.execute("PRAGMA table_info(orders)")}
+HAS_ORDER_CREATED_AT = ("created_at" in _ORDERS_COLS)
+
+# ----------------- SHORT-LIVED BEARER TOKENS -----------------
+TOKEN_TTL = 60 * 10
+def _b64url(b: bytes) -> str:
+    return base64.urlsafe_b64encode(b).rstrip(b"=").decode("ascii")
+def _b64url_dec(s: str) -> bytes:
+    pad = "=" * (-len(s) % 4)
+    return base64.urlsafe_b64decode(s + pad)
+def mint_login_token(user_id: int, ttl: int = TOKEN_TTL) -> str:
+    payload = {"uid": user_id, "exp": int(time.time()) + ttl, "v": 1}
+    body = _b64url(json.dumps(payload, separators=(",", ":")).encode("utf-8"))
+    key_bytes = app.secret_key if isinstance(app.secret_key, bytes) else app.secret_key.encode("utf-8")
+    sig = hmac.new(key_bytes, body.encode("utf-8"), hashlib.sha256).digest()
+    return body + "." + _b64url(sig)
+def verify_login_token(token: str):
     try:
-        init_db()
-    except Exception as e:
-        current_app.logger.warning("init_db skipped: %s", e)
+        body, sig = token.split(".")
+        key_bytes = app.secret_key if isinstance(app.secret_key, bytes) else app.secret_key.encode("utf-8")
+        want = hmac.new(key_bytes, body.encode("utf-8"), hashlib.sha256).digest()
+        if not hmac.compare_digest(_b64url(want), sig):
+            return None
+        payload = json.loads(_b64url_dec(body))
+        if payload.get("exp", 0) < int(time.time()):
+            return None
+        return int(payload.get("uid"))
+    except Exception:
+        return None
+def get_bearer_token_from_request() -> str | None:
+    t = request.args.get("t") or request.form.get("t")
+    if t: return t.strip()
+    auth = request.headers.get("Authorization", "")
+    if auth and auth.lower().startswith("bearer "):
+        return auth.split(" ", 1)[1].strip()
+    return None
+    # Hydrate Flask session from short-lived bearer token (works even if cookies get blocked)
+@app.before_request
+def _hydrate_session_from_token_main():
     try:
-        setup_backups()
-    except Exception as e:
-        current_app.logger.warning("setup_backups skipped: %s", e)
+        if "user_id" not in session:
+            tok = get_bearer_token_from_request()
+            if tok:
+                uid = verify_login_token(tok)
+                if uid:
+                    session["user_id"] = uid
+                    session.permanent = True
+    except Exception:
+        # don’t break the request if something goes wrong
+        pass
 
-    # schema ensure
-    try:
-        ensure_schema()
-    except Exception as e:
-        current_app.logger.warning("ensure_schema skipped: %s", e)
-
-    # --- Users & merchants table patches ---
-    with conn() as cx:
-        # users table
-        u_cols = {r["name"] for r in cx.execute("PRAGMA table_info(users)")}
-        if "ic_credits" not in u_cols:
-            cx.execute("ALTER TABLE users ADD COLUMN ic_credits INTEGER DEFAULT 0")
-
-        # merchants patches
-        m_cols = {r["name"] for r in cx.execute("PRAGMA table_info(merchants)")}
-        if "pi_wallet_address" not in m_cols:
-            cx.execute("ALTER TABLE merchants ADD COLUMN pi_wallet_address TEXT")
-        if "pi_handle" not in m_cols:
-            cx.execute("ALTER TABLE merchants ADD COLUMN pi_handle TEXT")
-        if "colorway" not in m_cols:
-            cx.execute("ALTER TABLE merchants ADD COLUMN colorway TEXT")
-
-    # carts & items tables must always exist
-    with conn() as cx:
-        cx.execute("""
-            CREATE TABLE IF NOT EXISTS carts(
-              id TEXT PRIMARY KEY,
-              merchant_id INTEGER NOT NULL,
-              created_at INTEGER NOT NULL
-            )
-        """)
-        cx.execute("""
-            CREATE TABLE IF NOT EXISTS cart_items(
-              id INTEGER PRIMARY KEY AUTOINCREMENT,
-              cart_id TEXT NOT NULL,
-              item_id INTEGER NOT NULL,
-              qty INTEGER NOT NULL
-            )
-        """)
-
-    with conn() as cx:
-        it_cols = {r["name"] for r in cx.execute("PRAGMA table_info(items)")}
-        if "description" not in it_cols:
-            cx.execute("ALTER TABLE items ADD COLUMN description TEXT")
-        if "fulfillment_kind" not in it_cols:
-            cx.execute("ALTER TABLE items ADD COLUMN fulfillment_kind TEXT DEFAULT 'physical'")
-        if "crafted_item_id" not in it_cols:
-            cx.execute("ALTER TABLE items ADD COLUMN crafted_item_id TEXT")
-        if "svg_code" not in it_cols:
-            cx.execute("ALTER TABLE items ADD COLUMN svg_code TEXT")
-
-        # sessions patches
-        scols = {r["name"] for r in cx.execute("PRAGMA table_info(sessions)")}
-        if "pi_payment_id" not in scols:
-            cx.execute("ALTER TABLE sessions ADD COLUMN pi_payment_id TEXT")
-        if "cart_id" not in scols:
-            cx.execute("ALTER TABLE sessions ADD COLUMN cart_id TEXT")
-        if "line_items_json" not in scols:
-            cx.execute("ALTER TABLE sessions ADD COLUMN line_items_json TEXT")
-        if "user_id" not in scols:
-            cx.execute("ALTER TABLE sessions ADD COLUMN user_id INTEGER")
-
-        # orders patches
-        ocols = {r["name"] for r in cx.execute("PRAGMA table_info(orders)")}
-        if "buyer_user_id" not in ocols:
-            cx.execute("ALTER TABLE orders ADD COLUMN buyer_user_id INTEGER")
-
-        # payout_requests throttle log
-        cx.execute("""
-            CREATE TABLE IF NOT EXISTS payout_requests(
-              id INTEGER PRIMARY KEY,
-              merchant_id INTEGER NOT NULL,
-              requested_at INTEGER NOT NULL,
-              FOREIGN KEY(merchant_id) REFERENCES merchants(id)
-            )
-        """)
-        cx.execute("""
-            CREATE INDEX IF NOT EXISTS idx_payout_requests_merchant_time
-            ON payout_requests(merchant_id, requested_at)
-        """)
-
-    ensure_schema()  # safe to call repeatedly
-    with conn() as cx:
-        cx.execute("""
-            CREATE TABLE IF NOT EXISTS crafted_items(
-              id INTEGER PRIMARY KEY AUTOINCREMENT,
-              user_id INTEGER NOT NULL,
-              name TEXT NOT NULL,
-              sku TEXT,
-              image TEXT,
-              meta_json TEXT,
-              created_at INTEGER NOT NULL
-            )
-        """)
-        cx.execute("CREATE INDEX IF NOT EXISTS idx_crafted_items_user ON crafted_items(user_id)")
-
-    # cache presence of created_at on orders (if you still need it globally)
-    global HAS_ORDER_CREATED_AT
-    with conn() as cx:
-        _ORDERS_COLS = {r["name"] for r in cx.execute("PRAGMA table_info(orders)")}
-    HAS_ORDER_CREATED_AT = ("created_at" in _ORDERS_COLS)
-
-@app.before_first_request
-def _run_startup_migrations():
-    try:
-        run_startup_migrations()
-        current_app.logger.info("Startup migrations completed")
-    except Exception as e:
-        current_app.logger.exception("Startup migrations failed: %s", e)
-
-    
-        
 # ----------------- HELPERS -----------------
 def _redeem_and_issue_credit(cx, user_id: int, code: str):
     import time
