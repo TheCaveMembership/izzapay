@@ -102,32 +102,70 @@
     .wrapaddr{word-break:break-all; overflow-wrap:anywhere}
 
     /* Side badge (mark + stacked label UNDER it, no outer box) */
-    .side-badge{
-      display:flex; flex-direction:column; align-items:center; gap:8px;
-      padding:0; border:none; background:none;
-      margin-left:auto;            /* push badge towards the right */
-      margin-right:10px;
-      text-align:center;
-    }
-    .side-badge .mark-wrap{
-      width:84px;height:84px;border-radius:18px;display:flex;align-items:center;justify-content:center;
-      background: radial-gradient(60% 60% at 50% 40%, rgba(183,132,255,.42), rgba(183,132,255,.20));
-      box-shadow: 0 0 22px rgba(183,132,255,.45), 0 0 70px rgba(122,68,255,.32);
-      animation: pulse 2.2s ease-in-out infinite;
-    }
-    .side-badge .mark-wrap img{width:50px;height:50px;display:block}
-    @keyframes pulse{
-      0%,100% { transform: scale(1);    box-shadow: 0 0 22px rgba(183,132,255,.45), 0 0 70px rgba(122,68,255,.32); }
-      50%     { transform: scale(1.07); box-shadow: 0 0 30px rgba(183,132,255,.65), 0 0 100px rgba(122,68,255,.42); }
-    }
-    .side-badge .arcade{
-      font-weight:900; letter-spacing:.8px; text-transform:uppercase;
-      font-size:14px; line-height:1.15;
-      text-shadow: 0 0 12px rgba(183,132,255,.35);
-    }
-    .side-badge .hint{
-      color:var(--muted); font-size:11px; line-height:1.1;
-    }
+.side-badge{
+  display:flex;
+  flex-direction:column;
+  align-items:center;
+  gap:8px;
+  padding:0;
+  border:none;
+  background:none;
+  margin-left:auto;           /* keeps to right edge */
+  margin-right:24px;          /* nudged slightly left from previous 10px */
+  text-align:center;
+}
+
+.side-badge .mark-wrap{
+  width:84px;
+  height:84px;
+  border-radius:18px;
+  display:flex;
+  align-items:center;
+  justify-content:center;
+  background: radial-gradient(60% 60% at 50% 40%, rgba(183,132,255,.42), rgba(183,132,255,.20));
+  box-shadow: 0 0 22px rgba(183,132,255,.45), 0 0 70px rgba(122,68,255,.32);
+  animation: pulse 2.2s ease-in-out infinite;
+  cursor:pointer;             /* clickable now */
+  text-decoration:none;       /* remove link underline */
+}
+.side-badge .mark-wrap:focus-visible{
+  outline: 2px solid rgba(183,132,255,.6);
+  outline-offset: 3px;
+}
+
+.side-badge .mark-wrap img{
+  width:50px;
+  height:50px;
+  display:block;
+}
+
+@keyframes pulse{
+  0%,100% {
+    transform: scale(1);
+    box-shadow: 0 0 22px rgba(183,132,255,.45),
+                0 0 70px rgba(122,68,255,.32);
+  }
+  50% {
+    transform: scale(1.07);
+    box-shadow: 0 0 30px rgba(183,132,255,.65),
+                0 0 100px rgba(122,68,255,.42);
+  }
+}
+
+.side-badge .arcade{
+  font-weight:900;
+  letter-spacing:.8px;
+  text-transform:uppercase;
+  font-size:14px;
+  line-height:1.15;
+  text-shadow: 0 0 12px rgba(183,132,255,.35);
+}
+
+.side-badge .hint{
+  color:var(--muted);
+  font-size:11px;
+  line-height:1.1;
+}
 
     .two{margin-top:12px;display:grid;gap:10px;grid-template-columns:1fr 1fr}
     @media (max-width:480px){ .two{grid-template-columns:1fr} }
@@ -209,9 +247,12 @@
 
           <!-- Glow/pulse mark with stacked label beneath (larger + pushed right) -->
           <div class="side-badge">
-            <div class="mark-wrap">
-              <img src="/static/izzapay-mark.svg" alt="IZZA mark">
-            </div>
+            <a class="mark-wrap"
+   href="{{ APP_BASE_URL or '/' }}"
+   title="Back to Home"
+   onclick="try{history.back();}catch(_){/*fallback*/}">
+  <img src="/static/izzapay-mark.svg" alt="IZZA mark">
+</a>
             <div class="arcade">Spin the coin</div>
             <div class="hint">(to refresh data)</div>
           </div>
