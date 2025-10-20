@@ -159,8 +159,20 @@ def serve_assets(filename):
     return send_from_directory(directory, filename)
 
 # ---- Add this right here ----
-@app.get("/trust")
-def trust_redirect():
+# ---- TRUST PAGE + LOGGING ----
+
+@app.post("/_log")
+def _client_log():
+    try:
+        data = request.get_json(silent=True) or {}
+        print("TRUST_EVT", data)
+    except Exception as e:
+        print("TRUST_EVT_ERR", repr(e))
+    return {"ok": True}
+
+@app.get("/trust/open")
+def trust_https_redirect():
+    # 302 to the custom scheme (some mobile webviews allow this pattern)
     url = (
         "web+stellar:changeTrust"
         "?asset_code=IZZA"
@@ -169,42 +181,20 @@ def trust_redirect():
         "&network_passphrase=Pi%20Testnet"
         "&origin_domain=izzapay.onrender.com"
     )
+    return redirect(url, code=302)
 
-    html = """<!doctype html><meta charset="utf-8">
-    <title>Add IZZA Trustline</title>
-    <meta name="viewport" content="width=device-width,initial-scale=1">
-    <body style="background:#0b0b0f;color:#fff;display:flex;align-items:center;justify-content:center;height:100vh;text-align:center;font-family:system-ui,-apple-system,Segoe UI,Roboto,sans-serif">
-      <div>
-        <h1 style="margin:0 0 16px;font-weight:700">Add IZZA trustline</h1>
-        <p style="margin:0 0 12px">Open in <b>Pi Browser</b> and tap the button:</p>
-
-        <p>
-          <a id="open" href="{0}" target="_top"
-             style="display:inline-block;padding:12px 18px;border:1px solid #ffd166;border-radius:10px;color:#ffd166;text-decoration:none;font-weight:600">
-             Add IZZA in Pi Wallet
-          </a>
-        </p>
-
-        <p style="opacity:.8;margin-top:12px">
-          If nothing happens, long-press the button and choose “Open”.
-        </p>
-
-        <script>
-          // Ensure click navigates the top window (Pi Browser may iframe apps)
-          document.getElementById('open').addEventListener('click', function (e) {{
-            try {{
-              e.preventDefault();
-              (window.top || window).location.href = "{0}";
-            }} catch (err) {{
-              // fallback to normal href
-              window.location.href = "{0}";
-            }}
-          }});
-        </script>
-      </div>
-    </body>""".format(url)
-
-    return Response(html, mimetype="text/html")
+@app.get("/trust")
+def trust_page():
+    url = (
+        "web+stellar:changeTrust"
+        "?asset_code=IZZA"
+        "&asset_issuer=GDKS3KFAM5RBBTSYTFUEHHN7GYRPHV7A6K2BI44LL3QQKXCA6ODBCS57"
+        "&limit=922337203685.4775807"
+        "&network_passphrase=Pi%20Testnet"
+        "&origin_domain=izzapay.onrender.com"
+    )
+    # Render the template so JS can use {{ url }}
+    return render_template("trust.html", url=url)
 
 # ----------------- PERSISTENT DATA ROOT -----------------
 DATA_ROOT   = os.getenv("DATA_ROOT", "/var/data/izzapay")
