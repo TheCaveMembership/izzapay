@@ -5,65 +5,41 @@
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <title>Add IZZA Trustline</title>
     <style>
-      body {
-        font-family: system-ui, -apple-system, Segoe UI, Roboto, sans-serif;
-        background:#000; color:#fff; text-align:center; padding:10% 16px;
-      }
-      a.btn {
-        display:inline-block; padding:12px 22px; border-radius:10px;
-        color:#111; text-decoration:none; font-weight:700;
-        background:linear-gradient(90deg,#7a44ff,#b784ff);
-        box-shadow:0 0 15px rgba(183,132,255,.4);
-      }
-      .ghost {
-        display:inline-block; padding:10px 16px; border:1px solid #b784ff;
-        border-radius:10px; color:#b784ff; text-decoration:none; font-weight:600; margin-top:8px;
-      }
-      pre {
-        text-align:left; background:#0b0b0f; padding:10px; border-radius:8px;
-        color:#ccc; max-width:680px; margin:16px auto 0; white-space:pre-wrap;
-      }
+      body { font-family: system-ui, -apple-system, Segoe UI, Roboto, sans-serif;
+             background:#000; color:#fff; text-align:center; padding:10% 16px; }
+      a.btn { display:inline-block; padding:12px 22px; border-radius:10px;
+              color:#111; text-decoration:none; font-weight:700;
+              background:linear-gradient(90deg,#7a44ff,#b784ff);
+              box-shadow:0 0 15px rgba(183,132,255,.4); }
+      .ghost { display:inline-block; padding:10px 16px; border:1px solid #b784ff;
+               border-radius:10px; color:#b784ff; text-decoration:none; font-weight:600; margin-top:8px; }
+      pre { text-align:left; background:#0b0b0f; padding:10px; border-radius:8px;
+            color:#ccc; max-width:680px; margin:16px auto 0; white-space:pre-wrap; }
     </style>
   </head>
-  <!-- keep i18n injector off so it won't touch the deep link text -->
   <body data-no-global-i18n="1">
     <h1>IZZA Token Trustline</h1>
     <p>Open in <b>Pi Browser</b>, then tap a button below.</p>
 
-    <!-- Primary: HTTPS hop that updates the TOP frame, then 302 -> web+stellar -->
-    <p>
-      <a id="btn-https" class="btn" href="/trust/open" target="_top" rel="noopener">
-        Open with Pi Wallet
-      </a>
-    </p>
+    <!-- Top-level navigation to the launcher page -->
+    <p><a id="btn-open" class="btn" href="/trust/open" target="_top" rel="noopener">Open with Pi Wallet</a></p>
 
-    <!-- Secondary: direct deep link, still targets TOP (may work on some UAs) -->
-    <p>
-      <a id="btn-direct" class="ghost" href="{{ url }}" target="_top" rel="noopener">
-        Open Direct (fallback)
-      </a>
-    </p>
-
-    <p>
-      <a id="btn-copy" class="ghost" href="#">Copy Deep Link</a>
-    </p>
+    <!-- Fallbacks -->
+    <p><a id="btn-copy" class="ghost" href="#">Copy Deep Link</a></p>
 
     <pre id="dbg">Log:</pre>
 
     <script>
+      // deep link used for the copy fallback
       const deepLink = {{ url|tojson }};
       const dbg = document.getElementById('dbg');
       function msg(s){ try{ dbg.textContent += "\n" + s; }catch(e){} }
       function log(kind, extra){
-        try {
-          fetch('/_log', {
-            method:'POST',
-            headers:{'Content-Type':'application/json'},
-            body:JSON.stringify(Object.assign({kind}, extra||{}))
-          });
-        } catch(e){}
+        try { fetch('/_log', {method:'POST', headers:{'Content-Type':'application/json'},
+               body:JSON.stringify(Object.assign({kind}, extra||{}))}); } catch(e){}
       }
 
+      // Boot info
       (function(){
         const ua = navigator.userAgent || '';
         const inTop = (window === window.top);
@@ -72,24 +48,22 @@
         log('trust_client_boot', {ua, inIframe: !inTop});
       })();
 
-      document.getElementById('btn-https').addEventListener('click', () => {
-        log('trust_click', {button:'https_redirect'});
-      });
-
-      document.getElementById('btn-direct').addEventListener('click', () => {
-        log('trust_click', {button:'direct_top'});
-      });
-
-      document.getElementById('btn-copy').addEventListener('click', async (e)=>{
+      // Copy fallback
+      document.getElementById('btn-copy').addEventListener('click', async function(e){
         e.preventDefault();
         try {
           await navigator.clipboard.writeText(deepLink);
-          msg("Copied. On iOS, pasting in the address bar won’t work; tap a button instead.");
+          msg("Copied. Paste into the Pi Browser address bar and tap Go.");
           log('trust_click', {button:'copy', copied:true});
-        } catch {
-          msg("Copy failed. Long-press a button and choose Copy Link.");
+        } catch(e) {
+          msg("Copy failed. Long-press the Open button and choose Copy Link.");
           log('trust_click', {button:'copy', copied:false});
         }
+      });
+
+      // Log open click (navigation handled by the anchor natively)
+      document.getElementById('btn-open').addEventListener('click', function(){
+        log('trust_click', {button:'https_redirect'});
       });
     </script>
   </body>
