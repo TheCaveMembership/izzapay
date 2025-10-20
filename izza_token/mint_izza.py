@@ -1,11 +1,16 @@
 import os
 from decimal import Decimal
 from dotenv import load_dotenv
+
 from stellar_sdk import (
-    Server, Keypair, TransactionBuilder, Asset,
-    SetOptions, Payment, ChangeTrust, StrKey
+    Server,
+    Keypair,
+    TransactionBuilder,
+    Asset,
+    StrKey,
 )
 from stellar_sdk.exceptions import NotFoundError
+from stellar_sdk.operation.set_options import AuthorizationFlag
 
 load_dotenv()
 
@@ -16,7 +21,7 @@ def getenv(name, default=None, required=False):
         raise RuntimeError(f"Missing required env var: {name}")
     return v.strip() if isinstance(v, str) else v
 
-HORIZON_URL        = getenv("HORIZON_URL", required=True)            # e.g. https://api.testnet.minepi.com
+HORIZON_URL        = getenv("HORIZON_URL", required=True)            # e.g. https://api.testnet.minepi.com/horizon
 NETWORK_PASSPHRASE = getenv("NETWORK_PASSPHRASE", required=True)     # "Pi Network Testnet"
 
 ISSUER_PUB    = getenv("ISSUER_PUB", required=True)
@@ -39,10 +44,10 @@ print("HORIZON_URL:", HORIZON_URL)
 
 # ---- Validate keys early (catches hidden whitespace etc.) ----
 problems = []
-if not StrKey.is_valid_ed25519_public_key(ISSUER_PUB):        problems.append("ISSUER_PUB invalid")
-if not StrKey.is_valid_ed25519_public_key(DISTR_PUB):         problems.append("DISTR_PUB invalid")
-if not StrKey.is_valid_ed25519_secret_seed(ISSUER_SECRET):    problems.append("ISSUER_SECRET invalid")
-if not StrKey.is_valid_ed25519_secret_seed(DISTR_SECRET):     problems.append("DISTR_SECRET invalid")
+if not StrKey.is_valid_ed25519_public_key(ISSUER_PUB):     problems.append("ISSUER_PUB invalid")
+if not StrKey.is_valid_ed25519_public_key(DISTR_PUB):      problems.append("DISTR_PUB invalid")
+if not StrKey.is_valid_ed25519_secret_seed(ISSUER_SECRET): problems.append("ISSUER_SECRET invalid")
+if not StrKey.is_valid_ed25519_secret_seed(DISTR_SECRET):  problems.append("DISTR_SECRET invalid")
 if problems:
     raise ValueError("Env problems: " + ", ".join(problems))
 
@@ -91,11 +96,6 @@ def submit_and_print(tx):
     print("  Ledger:", resp.get("ledger"))
     return resp
 
-# ---- Flag constants (SDK removed named ones; these are the correct bit values)
-AUTH_REQUIRED_FLAG        = 1
-AUTH_REVOCABLE_FLAG       = 2
-AUTH_CLAWBACK_ENABLED_FLAG= 8
-
 def set_issuer_options():
     issuer_kp   = Keypair.from_secret(ISSUER_SECRET)
     issuer_acct = server.load_account(issuer_kp.public_key)
@@ -108,7 +108,11 @@ def set_issuer_options():
         )
         .append_set_options_op(
             home_domain=HOME_DOMAIN,
-            clear_flags=[AUTH_REQUIRED_FLAG, AUTH_REVOCABLE_FLAG, AUTH_CLAWBACK_ENABLED_FLAG]
+            clear_flags=[
+                AuthorizationFlag.AUTH_REQUIRED_FLAG,
+                AuthorizationFlag.AUTH_REVOCABLE_FLAG,
+                AuthorizationFlag.AUTH_CLAWBACK_ENABLED_FLAG,
+            ],
         )
         .set_timeout(120)
         .build()
