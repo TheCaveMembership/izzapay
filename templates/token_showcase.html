@@ -29,28 +29,22 @@
     @media (min-width:820px){ .wrap{padding:28px 24px 42px} }
 
     header{display:flex;align-items:center;gap:12px;flex-wrap:wrap}
-    /* Larger logo that works as a back button */
-    /* Bigger wordmark + push right on phones (same as home) */
-.logo{
-  height:clamp(56px, 12vw, 80px);  /* bigger */
-  width:auto;
-  display:inline-flex;align-items:center;justify-content:center;
-  cursor:pointer; user-select:none;
-}
-.logo img{
-  height:100%;
-  width:auto;
-  object-fit:contain;
-  background:transparent;
-}
 
-@media (max-width:768px){
-  /* mimic home page nudge */
-  .logo{ transform: translateX(91px); } /* adjust as needed */
-}
+    /* Bigger wordmark + push right on phones (same as home) */
+    .logo{
+      height:clamp(56px, 12vw, 80px);
+      width:auto;
+      display:inline-flex;align-items:center;justify-content:center;
+      cursor:pointer; user-select:none;
+    }
+    .logo img{height:100%; width:auto; object-fit:contain; background:transparent;}
+    @media (max-width:768px){
+      .logo{ transform: translateX(91px); }
+    }
+
     h1{margin:0;font-size:clamp(20px,4.8vw,28px);letter-spacing:.2px}
     p.lead{color:var(--muted);margin:4px 0 0;font-size:clamp(13px,3.4vw,14px)}
-    .spacer{flex:1 1 auto} /* keeps layout tidy without a Back button */
+    .spacer{flex:1 1 auto}
 
     /* Hero: 1 col on mobile, 2 cols on >= 880px */
     .hero{position:relative;margin-top:16px;display:grid;gap:14px;grid-template-columns:1fr}
@@ -67,12 +61,41 @@
     @media (min-width:980px){ .panel{padding:18px} }
 
     /* Token row */
-    .token-row{display:flex;gap:12px;align-items:center;flex-wrap:wrap}
+    .token-row{
+      display:flex;gap:12px;align-items:center;flex-wrap:wrap;
+      justify-content:space-between;
+    }
     .token-img{
       width:112px;height:112px;border-radius:14px;display:flex;align-items:center;justify-content:center;
       background:transparent; position:relative; isolation:isolate;
+      touch-action:manipulation;
     }
-    .token-img img{width:100%;height:100%;object-fit:contain;border-radius:14px}
+    .token-img img{
+      width:100%;height:100%;object-fit:contain;border-radius:14px;
+      will-change:transform;
+    }
+    .token-img img.spin{ animation: coinspin 900ms cubic-bezier(.2,.7,.3,1); }
+    @keyframes coinspin{ to{ transform: rotate(720deg); } }
+
+    /* Pulsing, glowing IZZA mark placed to the right of the coin */
+    .brand-mark{
+      flex:0 0 auto;
+      display:none; /* hidden on smallest screens to avoid crowding */
+      align-items:center; justify-content:center;
+      width:120px; height:120px; border-radius:16px;
+      background: radial-gradient(60% 60% at 50% 50%, rgba(183,132,255,.18), rgba(0,0,0,0) 70%);
+    }
+    @media (min-width:560px){ .brand-mark{ display:flex; } }
+    .brand-mark img{
+      width:80px; height:80px; object-fit:contain;
+      filter: drop-shadow(0 0 14px rgba(183,132,255,.45)) drop-shadow(0 0 30px rgba(122,68,255,.25));
+      animation: pulseGlow 3.8s ease-in-out infinite;
+    }
+    @keyframes pulseGlow{
+      0%   { transform: scale(1);   filter: drop-shadow(0 0 10px rgba(183,132,255,.35)) drop-shadow(0 0 18px rgba(122,68,255,.18)); }
+      50%  { transform: scale(1.06);filter: drop-shadow(0 0 18px rgba(183,132,255,.55)) drop-shadow(0 0 36px rgba(122,68,255,.32)); }
+      100% { transform: scale(1);   filter: drop-shadow(0 0 10px rgba(183,132,255,.35)) drop-shadow(0 0 18px rgba(122,68,255,.18)); }
+    }
 
     /* Animated web3 background behind the hero area */
     .bg-weave{
@@ -173,9 +196,15 @@
         <div class="bg-weave" aria-hidden="true"></div>
 
         <div class="token-row">
-          <div class="token-img">
-            <img src="{{ url_for('serve_assets', filename='izza.png') }}" alt="IZZA token">
+          <div class="token-img" id="coinBox">
+            <img id="coinImg" src="{{ url_for('serve_assets', filename='izza.png') }}" alt="IZZA token" aria-label="Spin to refresh">
           </div>
+
+          <!-- Glowing, pulsing IZZA mark -->
+          <div class="brand-mark" aria-hidden="true">
+            <img src="/static/izzapay-mark.svg" alt="IZZA mark">
+          </div>
+
           <div class="meta">
             <h2>IZZA <span style="opacity:.65">({{ ASSET_CODE }})</span></h2>
             <div class="small">Issuer: <span id="issuer" class="mono wrapaddr"></span></div>
@@ -327,6 +356,38 @@
   // QR for deep link (future use)
   const qrData = encodeURIComponent(DEEP_LINK);
   qrimg.src = `https://api.qrserver.com/v1/create-qr-code/?size=240x240&data=${qrData}`;
+
+  // Spin-to-refresh interaction (flick or tap)
+  const coinImg = document.getElementById('coinImg');
+  const coinBox = document.getElementById('coinBox');
+  let sx=0, sy=0, st=0, moved=false;
+
+  function triggerSpin(){
+    if (coinImg.classList.contains('spin')) return;
+    coinImg.classList.add('spin');
+    coinImg.addEventListener('animationend', ()=> {
+      coinImg.classList.remove('spin');
+      fetchSummary(); // refresh data after the spin finishes
+    }, {once:true});
+  }
+
+  // Tap to spin (desktop/mobile)
+  coinBox.addEventListener('click', ()=> triggerSpin());
+
+  // Flick to spin (mobile pointer gesture)
+  coinBox.addEventListener('pointerdown', (e)=>{
+    sx=e.clientX; sy=e.clientY; st=performance.now(); moved=false;
+  });
+  coinBox.addEventListener('pointermove', (e)=>{
+    const dx=Math.abs(e.clientX-sx), dy=Math.abs(e.clientY-sy);
+    if(dx>6 || dy>6) moved=true;
+  });
+  coinBox.addEventListener('pointerup', (e)=>{
+    const dt=performance.now()-st;
+    const dist=Math.hypot(e.clientX-sx, e.clientY-sy);
+    const isFlick = dist>30 && dt<400; // quick motion
+    if(isFlick) triggerSpin();
+  });
 
   // Fetch summary + recent ops
   async function fetchSummary(){
