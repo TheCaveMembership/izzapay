@@ -30,11 +30,24 @@
 
     header{display:flex;align-items:center;gap:12px;flex-wrap:wrap}
     /* Larger logo that works as a back button */
-    .logo{
-      width:170px;height:48px;display:inline-flex;align-items:center;justify-content:center;
-      cursor:pointer; user-select:none;
-    }
-    .logo img{width:100%;height:100%;object-fit:contain;background:transparent}
+    /* Bigger wordmark + push right on phones (same as home) */
+.logo{
+  height:clamp(56px, 12vw, 80px);  /* bigger */
+  width:auto;
+  display:inline-flex;align-items:center;justify-content:center;
+  cursor:pointer; user-select:none;
+}
+.logo img{
+  height:100%;
+  width:auto;
+  object-fit:contain;
+  background:transparent;
+}
+
+@media (max-width:768px){
+  /* mimic home page nudge */
+  .logo{ transform: translateX(91px); } /* adjust as needed */
+}
     h1{margin:0;font-size:clamp(20px,4.8vw,28px);letter-spacing:.2px}
     p.lead{color:var(--muted);margin:4px 0 0;font-size:clamp(13px,3.4vw,14px)}
     .spacer{flex:1 1 auto} /* keeps layout tidy without a Back button */
