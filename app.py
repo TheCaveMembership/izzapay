@@ -144,7 +144,7 @@ app = Flask(__name__)
 # PUBLIC FILE SERVING ROUTES (.well-known and /assets/)
 # ======================================================
 
-from flask import send_from_directory
+from flask import send_from_directory, make_response, redirect, render_template, request
 
 # Serve Pi + Stellar TOML files
 @app.route('/.well-known/<path:filename>')
@@ -158,7 +158,6 @@ def serve_assets(filename):
     directory = os.path.join(app.root_path, 'static/assets')
     return send_from_directory(directory, filename)
 
-# ---- Add this right here ----
 # ---- TRUST PAGE + LOGGING ----
 
 @app.post("/_log")
@@ -170,10 +169,10 @@ def _client_log():
         print("TRUST_EVT_ERR", repr(e))
     return {"ok": True}
 
-from flask import make_response
 
 @app.get("/trust/open")
 def trust_https_redirect():
+    """Final HTTPS hop that triggers Pi Wallet deep link (web+stellar)."""
     url = (
         "web+stellar:changeTrust"
         "?asset_code=IZZA"
@@ -183,13 +182,15 @@ def trust_https_redirect():
         "&origin_domain=izzapay.onrender.com"
     )
     resp = redirect(url, code=302)
-    # deny embedding for this hop too
+    # optional: lock this redirect from being framed
     resp.headers["X-Frame-Options"] = "DENY"
     resp.headers["Content-Security-Policy"] = "frame-ancestors 'none'"
     return resp
 
+
 @app.get("/trust")
 def trust_page():
+    """Displays the IZZA Token Trustline helper page inside Pi Browser."""
     url = (
         "web+stellar:changeTrust"
         "?asset_code=IZZA"
@@ -200,11 +201,13 @@ def trust_page():
     )
     html = render_template("trust.html", url=url)
     resp = make_response(html)
-    # hard block any iframe parents (Pi’s app frame)
-    resp.headers["X-Frame-Options"] = "DENY"
-    resp.headers["Content-Security-Policy"] = "frame-ancestors 'none'"
-    return resp
 
+    # ✅ allow embedding (so it renders inside Pi Browser frame)
+    # DO NOT block frame ancestors here, or you’ll get a blank screen
+    resp.headers["X-Frame-Options"] = "ALLOWALL"
+    resp.headers["Content-Security-Policy"] = "frame-ancestors *"
+
+    return resp
 # ----------------- PERSISTENT DATA ROOT -----------------
 DATA_ROOT   = os.getenv("DATA_ROOT", "/var/data/izzapay")
 os.makedirs(DATA_ROOT, exist_ok=True)
