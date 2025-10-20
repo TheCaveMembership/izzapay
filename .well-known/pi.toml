@@ -1,0 +1,34 @@
+# /.well-known/stellar.toml  (copy the same to /.well-known/pi.toml)
+VERSION = "2.5.0"
+NETWORK_PASSPHRASE = "Pi Testnet"
+ACCOUNTS = ["GDKS3KFAM5RBBTSYTFUEHHN7GYRPHV7A6K2BI44LL3QQKXCA6ODBCS57"]
+
+# (optional but nice) allow web apps/wallets to fetch this file
+# If your platform doesn’t let you set headers globally, you can serve this file
+# with: Access-Control-Allow-Origin: *
+
+CURRENCIES = [
+  { 
+    code = "IZZA",
+    issuer = "GDKS3KFAM5RBBTSYTFUEHHN7GYRPHV7A6K2BI44LL3QQKXCA6ODBCS57",
+    name = "Izza Pay Token",
+    desc = "Utility token for Izza Pay demo on Pi Testnet.",
+    image = "https://izzapay.onrender.com/assets/izza.png",
+    conditions = "Test asset. No real value. For development only.",
+    status = "test",
+    is_asset_anchored = false,
+    display_decimals = 7
+  }
+]
+
+DOCUMENTATION = {
+  ORG_NAME = "Izza Pay",
+  ORG_URL = "https://izzapay.onrender.com",
+  ORG_DESCRIPTION = "Demo payment app and token on Pi Testnet.",
+  ORG_TWITTER = "izzapay",
+  ORG_GITHUB = "izzapay"
+}
+
+PRINCIPALS = [
+  { name = "Issuer Account", email = "dev@izzapay.onrender.com", github = "izzapay" }
+]
