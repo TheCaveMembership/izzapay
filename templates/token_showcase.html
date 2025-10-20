@@ -105,23 +105,24 @@
     .side-badge{
       display:flex; flex-direction:column; align-items:center; gap:8px;
       padding:0; border:none; background:none;
-      margin-left:6px; margin-right:6px;
+      margin-left:auto;            /* push badge towards the right */
+      margin-right:10px;
       text-align:center;
     }
     .side-badge .mark-wrap{
-      width:56px;height:56px;border-radius:14px;display:flex;align-items:center;justify-content:center;
-      background: radial-gradient(60% 60% at 50% 40%, rgba(183,132,255,.38), rgba(183,132,255,.18));
-      box-shadow: 0 0 18px rgba(183,132,255,.35), 0 0 36px rgba(122,68,255,.25);
+      width:84px;height:84px;border-radius:18px;display:flex;align-items:center;justify-content:center;
+      background: radial-gradient(60% 60% at 50% 40%, rgba(183,132,255,.42), rgba(183,132,255,.20));
+      box-shadow: 0 0 22px rgba(183,132,255,.45), 0 0 70px rgba(122,68,255,.32);
       animation: pulse 2.2s ease-in-out infinite;
     }
-    .side-badge .mark-wrap img{width:34px;height:34px;display:block}
+    .side-badge .mark-wrap img{width:50px;height:50px;display:block}
     @keyframes pulse{
-      0%,100% { transform: scale(1);    box-shadow: 0 0 18px rgba(183,132,255,.35), 0 0 36px rgba(122,68,255,.25); }
-      50%     { transform: scale(1.06); box-shadow: 0 0 24px rgba(183,132,255,.55), 0 0 64px rgba(122,68,255,.35); }
+      0%,100% { transform: scale(1);    box-shadow: 0 0 22px rgba(183,132,255,.45), 0 0 70px rgba(122,68,255,.32); }
+      50%     { transform: scale(1.07); box-shadow: 0 0 30px rgba(183,132,255,.65), 0 0 100px rgba(122,68,255,.42); }
     }
     .side-badge .arcade{
       font-weight:900; letter-spacing:.8px; text-transform:uppercase;
-      font-size:12px; line-height:1.15;
+      font-size:14px; line-height:1.15;
       text-shadow: 0 0 12px rgba(183,132,255,.35);
     }
     .side-badge .hint{
@@ -145,10 +146,10 @@
     .mini .ico{
       width:36px;height:36px;border-radius:8px;
       display:flex;align-items:center;justify-content:center;
-      background:rgba(255,255,255,.04); /* default for Asset/Issuer */
+      background:rgba(255,255,255,.04); /* neutral default */
       font-size:18px; line-height:1;
     }
-    /* Purple box specifically for Origin + Network (same size as others) */
+    /* Purple box (gradient) */
     .mini .ico.purple{
       background:linear-gradient(180deg,var(--accent1),var(--accent2));
       box-shadow:0 0 10px rgba(183,132,255,.25);
@@ -206,7 +207,7 @@
             <img id="coinImg" src="{{ url_for('serve_assets', filename='izza.png') }}" alt="IZZA token">
           </div>
 
-          <!-- Glow/pulse mark with stacked label beneath -->
+          <!-- Glow/pulse mark with stacked label beneath (larger + pushed right) -->
           <div class="side-badge">
             <div class="mark-wrap">
               <img src="/static/izzapay-mark.svg" alt="IZZA mark">
@@ -251,16 +252,18 @@
             </div>
           </div>
 
+          <!-- Issuer now has a PURPLE icon background -->
           <div class="mini">
-            <div class="ico"><img src="{{ url_for('serve_assets', filename='izza.png') }}" alt=""></div>
+            <div class="ico purple"><img src="{{ url_for('serve_assets', filename='izza.png') }}" alt=""></div>
             <div>
               <div class="small-muted">Issuer</div>
               <div id="issuer-compact" class="mono" style="font-size:12px"></div>
             </div>
           </div>
 
+          <!-- Origin now uses the neutral (non-purple) style -->
           <div class="mini">
-            <div class="ico purple">🧬</div>
+            <div class="ico">🧬</div>
             <div>
               <div class="small-muted">Origin</div>
               <div class="mono" style="font-size:12px">izzapay.onrender.com</div>
