@@ -10,10 +10,15 @@ from stellar_sdk import (
 )
 from stellar_sdk.exceptions import NotFoundError
 
-# Try import new-style flags if available
+# Try to import AuthorizationFlag, but verify its attributes exist
 try:
     from stellar_sdk.operation.set_options import AuthorizationFlag
-    USE_ENUM_FLAGS = True
+    if all(hasattr(AuthorizationFlag, n) for n in [
+        "AUTH_REQUIRED_FLAG", "AUTH_REVOCABLE_FLAG", "AUTH_CLAWBACK_ENABLED_FLAG"
+    ]):
+        USE_ENUM_FLAGS = True
+    else:
+        USE_ENUM_FLAGS = False
 except ImportError:
     USE_ENUM_FLAGS = False
 
@@ -110,7 +115,6 @@ def set_issuer_options():
             AuthorizationFlag.AUTH_CLAWBACK_ENABLED_FLAG,
         ]
     else:
-        # fallback for older SDKs (numerical bit values)
         clear_flags = [1, 2, 8]
 
     tx = (
