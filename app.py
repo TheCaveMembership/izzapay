@@ -269,6 +269,38 @@ def trust_page():
         pass
 
     return resp
+
+# Token showcase route (add to app.py)
+@app.get("/token/izza")
+def token_showcase():
+    """
+    Showcase page for the IZZA test token.
+    Renders templates/token_showcase.html with a few handy vars.
+    """
+    issuer = "GDKS3KFAM5RBBTSYTFUEHHN7GYRPHV7A6K2BI44LL3QQKXCA6ODBCS57"
+    distributor = "GAIXMJ22FKXXGDPQMZWR3GL24PM5UEPUCFNK4FSMJOZ3HTGPXSEQZ5AF"
+    asset_code = "IZZA"
+    # Pi testnet API base (keeps same URLs you used)
+    api_base = "https://api.testnet.minepi.com"
+    # token deep link for wallets (kept URL-encoded JS-friendly)
+    deep_link = (
+        "web+stellar:changeTrust"
+        "?asset_code=IZZA"
+        f"&asset_issuer={issuer}"
+        "&limit=922337203685.4775807"
+        "&network_passphrase=Pi%20Testnet"
+        "&origin_domain=izzapay.onrender.com"
+    )
+    return render_template(
+        "token_showcase.html",
+        ISSUER=issuer,
+        DISTRIBUTOR=distributor,
+        ASSET_CODE=asset_code,
+        API_BASE=api_base,
+        DEEP_LINK=deep_link,
+        APP_BASE_URL=APP_BASE_URL
+    )
+
 # ----------------- PERSISTENT DATA ROOT -----------------
 DATA_ROOT   = os.getenv("DATA_ROOT", "/var/data/izzapay")
 os.makedirs(DATA_ROOT, exist_ok=True)
