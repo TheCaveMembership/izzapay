@@ -634,6 +634,11 @@ try:
     app.register_blueprint(merchant_api)
 except Exception:
     pass
+
+@app.route("/trust")
+def trust_redirect():
+    return render_template("trust.html")
+
     
 @app.get("/api/collectibles")
 def collectibles_list():
