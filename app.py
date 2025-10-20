@@ -175,20 +175,30 @@ def trust_redirect():
     <meta name="viewport" content="width=device-width,initial-scale=1">
     <body style="background:#0b0b0f;color:#fff;display:flex;align-items:center;justify-content:center;height:100vh;text-align:center;font-family:system-ui,-apple-system,Segoe UI,Roboto,sans-serif">
       <div>
-        <h1 style="margin:0 0 16px;font-weight:700">Opening Pi Wallet…</h1>
-        <p style="margin:0 0 12px">If nothing happens, tap the button:</p>
-        <p><a id="open" href="{0}" 
-              style="display:inline-block;padding:12px 18px;border:1px solid #ffd166;border-radius:10px;color:#ffd166;text-decoration:none;font-weight:600">
-              Add IZZA trustline
-        </a></p>
-        <p style="opacity:.8;margin-top:10px">Open this inside <b>Pi Browser</b>.</p>
+        <h1 style="margin:0 0 16px;font-weight:700">Add IZZA trustline</h1>
+        <p style="margin:0 0 12px">Open in <b>Pi Browser</b> and tap the button:</p>
+
+        <p>
+          <a id="open" href="{0}" target="_top"
+             style="display:inline-block;padding:12px 18px;border:1px solid #ffd166;border-radius:10px;color:#ffd166;text-decoration:none;font-weight:600">
+             Add IZZA in Pi Wallet
+          </a>
+        </p>
+
+        <p style="opacity:.8;margin-top:12px">
+          If nothing happens, long-press the button and choose “Open”.
+        </p>
+
         <script>
-          // Auto-open after short delay
-          setTimeout(function(){{ try{{ window.location.href = "{0}"; }}catch(e){{}} }}, 800);
-          // Ensure user-gesture navigation
+          // Ensure click navigates the top window (Pi Browser may iframe apps)
           document.getElementById('open').addEventListener('click', function (e) {{
-            e.preventDefault();
-            window.location.href = "{0}";
+            try {{
+              e.preventDefault();
+              (window.top || window).location.href = "{0}";
+            }} catch (err) {{
+              // fallback to normal href
+              window.location.href = "{0}";
+            }}
           }});
         </script>
       </div>
