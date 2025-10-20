@@ -108,14 +108,19 @@ def set_issuer_options():
     issuer_kp   = Keypair.from_secret(ISSUER_SECRET)
     issuer_acct = server.load_account(issuer_kp.public_key)
 
+    # Determine how to represent flags based on SDK
     if USE_ENUM_FLAGS:
-        clear_flags = [
-            AuthorizationFlag.AUTH_REQUIRED_FLAG,
-            AuthorizationFlag.AUTH_REVOCABLE_FLAG,
-            AuthorizationFlag.AUTH_CLAWBACK_ENABLED_FLAG,
-        ]
+        try:
+            clear_flags = [
+                AuthorizationFlag.AUTH_REQUIRED_FLAG,
+                AuthorizationFlag.AUTH_REVOCABLE_FLAG,
+                AuthorizationFlag.AUTH_CLAWBACK_ENABLED_FLAG,
+            ]
+        except Exception:
+            clear_flags = AuthorizationFlag(11)
     else:
-        clear_flags = [1, 2, 8]
+        # Fallback to combined integer bitmask
+        clear_flags = 11  # 1 + 2 + 8
 
     tx = (
         TransactionBuilder(
