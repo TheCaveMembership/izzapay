@@ -5,6 +5,11 @@ from stellar_sdk import Server, Keypair, Network, TransactionBuilder, Asset, Set
 
 load_dotenv()
 
+print("Loaded environment:")
+print("ISSUER_PUB:", os.environ.get("ISSUER_PUB"))
+print("DISTR_PUB:", os.environ.get("DISTR_PUB"))
+print("HORIZON_URL:", os.environ.get("HORIZON_URL"))
+
 HORIZON_URL = os.environ["HORIZON_URL"]
 NETWORK_PASSPHRASE = os.environ["NETWORK_PASSPHRASE"]
 
