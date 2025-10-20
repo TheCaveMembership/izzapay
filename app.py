@@ -140,6 +140,23 @@ except Exception:
 
 # ----------------- APP -----------------
 app = Flask(__name__)
+# ======================================================
+# PUBLIC FILE SERVING ROUTES (.well-known and /assets/)
+# ======================================================
+
+from flask import send_from_directory
+
+# Serve Pi + Stellar TOML files
+@app.route('/.well-known/<path:filename>')
+def well_known(filename):
+    directory = os.path.join(app.root_path, '.well-known')
+    return send_from_directory(directory, filename, mimetype='text/plain')
+
+# Serve static token and asset files (like izza.png)
+@app.route('/assets/<path:filename>')
+def serve_assets(filename):
+    directory = os.path.join(app.root_path, 'static/assets')
+    return send_from_directory(directory, filename)
 
 # ----------------- PERSISTENT DATA ROOT -----------------
 DATA_ROOT   = os.getenv("DATA_ROOT", "/var/data/izzapay")
