@@ -9,43 +9,30 @@
              background:#000; color:#fff; text-align:center; padding:10% 16px; }
       a.btn { display:inline-block; padding:12px 22px; border-radius:10px;
               color:#111; text-decoration:none; font-weight:700;
-              background:linear-gradient(90deg,#ffd166,#ffe29a); }
-      .ghost { display:inline-block; padding:10px 16px; border:1px solid #ffd166;
-               border-radius:10px; color:#ffd166; text-decoration:none; font-weight:600;
-               margin-top:8px; }
+              background:linear-gradient(90deg,#7a44ff,#b784ff); box-shadow:0 0 15px rgba(183,132,255,.4); }
+      .ghost { display:inline-block; padding:10px 16px; border:1px solid #b784ff;
+               border-radius:10px; color:#b784ff; text-decoration:none; font-weight:600; margin-top:8px; }
       pre { text-align:left; background:#0b0b0f; padding:10px; border-radius:8px;
             color:#ccc; max-width:680px; margin:16px auto 0; white-space:pre-wrap; }
     </style>
   </head>
-  <body>
+  <body data-no-global-i18n="1">
     <h1>IZZA Token Trustline</h1>
     <p>Open in <b>Pi Browser</b>, then tap a button below.</p>
 
-    <p>
-      <a id="btn-direct" class="btn" href="#">Open with Pi Wallet</a>
-    </p>
-    <p>
-      <a id="btn-https" class="ghost" href="/trust/open" target="_top">Try HTTPS Redirect</a>
-    </p>
-    <p>
-      <a id="btn-copy" class="ghost" href="#">Copy Deep Link</a>
-    </p>
+    <p><a id="btn-direct" class="btn" href="#">Open with Pi Wallet</a></p>
+    <p><a id="btn-https" class="ghost" href="/trust/open" target="_top">Try HTTPS Redirect</a></p>
+    <p><a id="btn-copy" class="ghost" href="#">Copy Deep Link</a></p>
 
     <pre id="dbg">Log:</pre>
 
     <script>
       const deepLink = {{ url|tojson }};
       const dbg = document.getElementById('dbg');
-
       function msg(s){ try{ dbg.textContent += "\n" + s; }catch(e){} }
       function log(kind, extra){
-        try {
-          fetch('/_log', {
-            method:'POST',
-            headers:{'Content-Type':'application/json'},
-            body:JSON.stringify(Object.assign({kind}, extra||{}))
-          });
-        } catch(e){}
+        try { fetch('/_log', {method:'POST', headers:{'Content-Type':'application/json'},
+               body:JSON.stringify(Object.assign({kind}, extra||{}))}); } catch(e){}
       }
 
       // Boot info
@@ -63,15 +50,12 @@
         log('trust_click', {button:'direct', step:'top.href'});
         msg("Direct: navigating top to web+stellar...");
         try { (window.top || window).location.href = deepLink; } catch(e) {}
-
-        // Chain a couple of fallbacks (still near same gesture on many UAs)
         setTimeout(()=>{ try{ log('trust_click',{button:'direct',step:'replace'}); location.replace(deepLink); }catch(e){} }, 50);
         setTimeout(()=>{ try{ log('trust_click',{button:'direct',step:'open_self'}); window.open(deepLink,'_self'); }catch(e){} }, 100);
       });
 
       document.getElementById('btn-https').addEventListener('click', function(){
         log('trust_click', {button:'https_redirect'});
-        // No preventDefault → real navigation to /trust/open (302 → web+stellar)
       });
 
       document.getElementById('btn-copy').addEventListener('click', async function(e){
@@ -86,7 +70,7 @@
         }
       });
 
-      // Optional gentle auto attempt (ignored by iOS without gesture, but harmless)
+      // Gentle auto-attempt (harmless if blocked)
       setTimeout(() => {
         log('trust_auto_nav', {via:'setTimeout'});
         try { window.location.href = deepLink; } catch(e){}
