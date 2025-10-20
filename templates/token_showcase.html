@@ -1,0 +1,335 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>IZZA Token — Testnet Showcase</title>
+  <meta name="description" content="IZZA (test) — token showcase for IZZA PAY / IZZA Game" />
+
+  <style>
+    :root{
+      --bg:#050308; --panel:#0b0b10; --muted:#9aa0b1; --accent1:#7a44ff; --accent2:#b784ff;
+      --glass: rgba(255,255,255,0.03);
+      --card-radius:14px;
+      --mono: ui-monospace, SFMono-Regular, Menlo, Monaco, "Roboto Mono", monospace;
+    }
+    html,body{height:100%;margin:0;background:linear-gradient(180deg,#000000 0%, #03010a 60%); color:#fff; font-family:system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial; -webkit-font-smoothing:antialiased;}
+    .wrap{max-width:1100px;margin:28px auto;padding:28px;}
+    header{display:flex;align-items:center;gap:16px}
+    .logo { width:72px;height:72px;border-radius:16px;background:linear-gradient(90deg,var(--accent1),var(--accent2));display:inline-flex;align-items:center;justify-content:center;box-shadow:0 6px 30px rgba(139,94,255,0.12); }
+    .logo img{width:56px;height:56px;object-fit:contain;border-radius:10px;background:transparent;}
+    h1{margin:0;font-size:22px;letter-spacing:0.2px}
+    p.lead{color:var(--muted);margin:6px 0 0;font-size:14px}
+
+    /* hero */
+    .hero{display:grid;grid-template-columns:1fr 420px;gap:22px;margin-top:22px;align-items:start}
+    .panel { background: linear-gradient(180deg, rgba(255,255,255,0.02), rgba(255,255,255,0.01)); border-radius:var(--card-radius); padding:18px; box-shadow: 0 2px 20px rgba(0,0,0,0.6); }
+    .left .big { display:flex; gap:18px; align-items:center; }
+    .token-big { width:140px;height:140px;border-radius:20px;background:linear-gradient(90deg,var(--accent1),var(--accent2));display:flex;align-items:center;justify-content:center;box-shadow:0 8px 40px rgba(119,88,255,0.12)}
+    .token-big img{width:96px;height:96px;object-fit:contain;}
+    .meta { flex:1 }
+    .meta h2{margin:0;font-size:20px}
+    .meta .small{color:var(--muted);margin-top:6px;font-size:13px}
+    .row{display:flex;gap:10px;flex-wrap:wrap;margin-top:14px}
+    .btn { display:inline-block;padding:10px 14px;border-radius:10px;font-weight:700;text-decoration:none;color:#111;background:linear-gradient(90deg,var(--accent1),var(--accent2));box-shadow:0 6px 20px rgba(167,126,255,0.12); }
+    .ghost { display:inline-block;padding:10px 12px;border-radius:10px;border:1px solid rgba(255,255,255,0.06);color:var(--muted);text-decoration:none; font-weight:600;background:transparent; }
+
+    /* right column */
+    .right .card-title{display:flex;justify-content:space-between;align-items:center;margin-bottom:8px}
+    .stat { background:var(--glass); padding:12px;border-radius:12px;text-align:center }
+    .stat strong{display:block;font-size:20px}
+    .small-muted{color:var(--muted); font-size:13px}
+
+    /* details grid */
+    .grid{display:grid; grid-template-columns:repeat(2,1fr); gap:14px; margin-top:14px}
+    .mini{display:flex;gap:10px;align-items:center}
+    .mini img{width:36px;height:36px;border-radius:8px;background:rgba(255,255,255,0.02);padding:4px}
+
+    /* repeated token pattern */
+    .pattern { margin-top:20px; display:flex;flex-wrap:wrap; gap:8px; }
+    .pattern .icon{width:48px;height:48px;border-radius:8px;background:linear-gradient(90deg,var(--accent1),var(--accent2));display:inline-flex;align-items:center;justify-content:center;opacity:0.95}
+    .pattern .icon img{width:26px;height:26px;object-fit:contain;}
+
+    /* lower area */
+    .lower{display:grid;grid-template-columns:1fr 420px;gap:18px;margin-top:20px}
+    .card pre{background:transparent;border-radius:8px;padding:12px;color:#cfd6ff;overflow:auto;font-family:var(--mono);font-size:13px}
+    .info-row{display:flex;gap:10px;align-items:center;justify-content:space-between}
+
+    footer{margin-top:22px;color:var(--muted);font-size:13px;text-align:center}
+    @media (max-width:980px){ .hero,.lower{grid-template-columns:1fr} .right{order:2} .token-big{margin:0 auto} .panel{padding:14px} }
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <header>
+      <div class="logo" aria-hidden="true"><img src="{{ url_for('serve_assets', filename='izza.png') }}" alt="IZZA"></div>
+      <div>
+        <h1>IZZA — Test Token Showcase</h1>
+        <p class="lead">A demonstration of the IZZA test token: issuer, distributor, balances and operations on Pi Testnet.</p>
+      </div>
+      <div style="margin-left:auto">
+        <a class="ghost" href="{{ APP_BASE_URL or '/' }}" title="Home">Back</a>
+      </div>
+    </header>
+
+    <section class="hero">
+      <div class="panel left">
+        <div class="big">
+          <div class="token-big"><img src="{{ url_for('serve_assets', filename='izza.png') }}" alt="IZZA token"></div>
+          <div class="meta">
+            <h2>IZZA <span style="opacity:.7">({{ ASSET_CODE }})</span></h2>
+            <div class="small">Issuer: <span id="issuer" class="mono"></span></div>
+            <div class="small">Distributor: <span id="distributor" class="mono"></span></div>
+
+            <div class="row">
+              <a id="open-wallet" class="btn" href="/trust/open" target="_blank" rel="noopener">Open in Pi Wallet</a>
+              <a id="copy-deeplink" class="ghost" href="#">Copy deep link</a>
+            </div>
+
+            <div class="pattern" id="pattern">
+              <!-- repeated small icons injected by JS -->
+            </div>
+
+          </div>
+        </div>
+
+        <div style="margin-top:16px">
+          <div class="card-title"><strong>Summary</strong><span class="small-muted" id="last-updated">…</span></div>
+          <div class="row">
+            <div class="stat" style="flex:1">
+              <span class="small-muted">Distributor balance (IZZA)</span>
+              <strong id="dist-balance">—</strong>
+            </div>
+            <div class="stat" style="flex:1">
+              <span class="small-muted">Holders / trustlines</span>
+              <strong id="trust-count">—</strong>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <aside class="panel right">
+        <div class="card-title">
+          <strong>Quick details</strong>
+          <span class="small-muted">Pi Testnet</span>
+        </div>
+
+        <div class="grid">
+          <div class="mini">
+            <img src="{{ url_for('serve_assets', filename='izza.png') }}" alt="">
+            <div>
+              <div class="small-muted">Asset</div>
+              <strong>{{ ASSET_CODE }}</strong>
+            </div>
+          </div>
+
+          <div class="mini">
+            <img src="{{ url_for('serve_assets', filename='izza.png') }}" alt="">
+            <div>
+              <div class="small-muted">Issuer</div>
+              <div id="issuer-compact" class="mono"></div>
+            </div>
+          </div>
+
+          <div class="mini">
+            <div style="width:36px;height:36px;border-radius:8px;background:linear-gradient(90deg,var(--accent2),var(--accent1));display:flex;align-items:center;justify-content:center">🏷️</div>
+            <div>
+              <div class="small-muted">Origin</div>
+              <div class="mono">izzapay.onrender.com</div>
+            </div>
+          </div>
+
+          <div class="mini">
+            <div style="width:36px;height:36px;border-radius:8px;background:rgba(255,255,255,0.02);display:flex;align-items:center;justify-content:center">🔬</div>
+            <div>
+              <div class="small-muted">Network</div>
+              <div class="mono">Pi Testnet</div>
+            </div>
+          </div>
+        </div>
+
+        <hr style="margin:12px 0;border:none;border-top:1px solid rgba(255,255,255,0.03)">
+
+        <div class="info-row" style="margin-bottom:10px">
+          <div>
+            <div class="small-muted">Distributor</div>
+            <div id="d-short" class="mono"></div>
+          </div>
+          <div style="text-align:right">
+            <div class="small-muted">Scan to add</div>
+            <!-- QR via external quick service (falls back to copy) -->
+            <img id="qrimg" src="" alt="QR" width="88" height="88" style="border-radius:10px">
+          </div>
+        </div>
+
+        <div>
+          <div class="small-muted">Recent activity</div>
+          <div id="recentOps" style="margin-top:8px;font-size:13px;color:var(--muted)">Loading…</div>
+        </div>
+
+      </aside>
+    </section>
+
+    <section class="lower">
+      <div class="panel">
+        <h3 style="margin:0 0 8px 0">Raw data & quick links</h3>
+        <p class="small-muted">Click each link to open the Pi Testnet Horizon endpoints directly.</p>
+
+        <div style="margin-top:8px;display:flex;gap:8px;flex-wrap:wrap">
+          <a class="ghost" id="link-account" href="#" target="_blank">Distributor account</a>
+          <a class="ghost" id="link-payments" href="#" target="_blank">Payments</a>
+          <a class="ghost" id="link-ops" href="#" target="_blank">Operations</a>
+          <a class="ghost" id="link-assets" href="#" target="_blank">Asset lookup</a>
+        </div>
+
+        <div style="margin-top:12px">
+          <pre id="rawOut">Loading data…</pre>
+        </div>
+      </div>
+
+      <div class="panel">
+        <h3 style="margin:0 0 8px 0">Developer notes</h3>
+        <div class="small-muted">Issuer / distributor details and last operations from Pi Testnet. This page is a showcase and diagnostic view for the token.</div>
+
+        <div style="margin-top:10px">
+          <div class="small-muted">Deep Link</div>
+          <pre style="margin-top:8px" id="deepPre" class="mono"></pre>
+        </div>
+      </div>
+    </section>
+
+    <footer>IZZA PAY — Testnet showcase · Built for demo & diagnostics</footer>
+  </div>
+
+<script>
+(() => {
+  // passed from server (Jinja)
+  const ASSET_CODE = "{{ ASSET_CODE }}";
+  const ISSUER = "{{ ISSUER }}";
+  const DISTRIBUTOR = "{{ DISTRIBUTOR }}";
+  const API_BASE = "{{ API_BASE }}";
+  const DEEP_LINK = "{{ DEEP_LINK }}";
+
+  // DOM refs
+  const issuerEl = document.getElementById('issuer');
+  const distributorEl = document.getElementById('distributor');
+  const distBalanceEl = document.getElementById('dist-balance');
+  const trustCountEl = document.getElementById('trust-count');
+  const recentOpsEl = document.getElementById('recentOps');
+  const rawOut = document.getElementById('rawOut');
+  const lastUpdated = document.getElementById('last-updated');
+  const dshort = document.getElementById('d-short');
+  const qrimg = document.getElementById('qrimg');
+  const deepPre = document.getElementById('deepPre');
+
+  // init UI values
+  issuerEl.textContent = ISSUER;
+  distributorEl.textContent = DISTRIBUTOR;
+  document.getElementById('issuer-compact').textContent = ISSUER.slice(0,6) + '…' + ISSUER.slice(-6);
+  document.getElementById('d-short').textContent = DISTRIBUTOR.slice(0,8) + '…' + DISTRIBUTOR.slice(-6);
+  deepPre.textContent = DEEP_LINK;
+
+  // pattern icons
+  const pattern = document.getElementById('pattern');
+  for(let i=0;i<8;i++){
+    const ic = document.createElement('div'); ic.className='icon';
+    const img = document.createElement('img'); img.src = "{{ url_for('serve_assets', filename='izza.png') }}";
+    img.alt = 'IZZA'; ic.appendChild(img); pattern.appendChild(ic);
+  }
+
+  // Quick external links
+  const accountUrl = `${API_BASE}/accounts/${DISTRIBUTOR}`;
+  document.getElementById('link-account').href = accountUrl;
+  document.getElementById('link-payments').href = `${accountUrl}/payments`;
+  document.getElementById('link-ops').href = `${accountUrl}/operations`;
+  document.getElementById('link-assets').href = `${API_BASE}/assets?asset_code=${encodeURIComponent(ASSET_CODE)}&asset_issuer=${encodeURIComponent(ISSUER)}`;
+
+  // QR (quick external QR generator)
+  // Encode the DEEP_LINK (URL-encode)
+  const qrData = encodeURIComponent(DEEP_LINK);
+  qrimg.src = `https://api.qrserver.com/v1/create-qr-code/?size=180x180&data=${qrData}`;
+
+  // copy deep link
+  document.getElementById('copy-deeplink').addEventListener('click', async (e) => {
+    e.preventDefault();
+    try { await navigator.clipboard.writeText(DEEP_LINK); alert('Deep link copied to clipboard. Paste into Pi Browser address bar or scan QR.'); }
+    catch(e){ alert('Copy failed — use long-press on Open button to copy link.'); }
+    fetch('/_log', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({kind:'copy_deep_link'})});
+  });
+
+  // Open wallet button logs
+  document.getElementById('open-wallet').addEventListener('click', () => {
+    fetch('/_log', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({kind:'open_wallet_clicked'})});
+  });
+
+  // fetch distributor account + asset info
+  async function fetchAll(){
+    lastUpdated.textContent = 'fetching…';
+    try {
+      const [acctRes, assetRes, holdersRes] = await Promise.all([
+        fetch(`${API_BASE}/accounts/${DISTRIBUTOR}`),
+        fetch(`${API_BASE}/assets?asset_code=${encodeURIComponent(ASSET_CODE)}&asset_issuer=${encodeURIComponent(ISSUER)}`),
+        fetch(`${API_BASE}/accounts?asset=${encodeURIComponent(ASSET_CODE)}:${encodeURIComponent(ISSUER)}`)
+      ]);
+
+      const acctJson = acctRes.ok ? await acctRes.json() : null;
+      const assetJson = assetRes.ok ? await assetRes.json() : null;
+      const holdersJson = holdersRes.ok ? await holdersRes.json() : null;
+
+      // Distributor balance: find the asset line in balances
+      let izzaBal = '0';
+      if (acctJson && acctJson.balances) {
+        const line = acctJson.balances.find(b => b.asset_type !== 'native' && b.asset_code === ASSET_CODE && b.asset_issuer === ISSUER);
+        izzaBal = line ? line.balance : '0';
+      }
+      distBalanceEl.textContent = izzaBal;
+
+      // trust holder count (accounts list)
+      let count = 0;
+      if (holdersJson && holdersJson._embedded && holdersJson._embedded.records) {
+        count = holdersJson._embedded.records.length || 0;
+      }
+      trustCountEl.textContent = count;
+
+      // recent ops (operations on distributor)
+      const opsRes = await fetch(`${API_BASE}/accounts/${DISTRIBUTOR}/operations?limit=6&order=desc`);
+      let opsJson = opsRes.ok ? await opsRes.json() : null;
+      let opsHtml = '';
+      if (opsJson && opsJson._embedded && opsJson._embedded.records.length) {
+        opsJson._embedded.records.forEach(op => {
+          const t = op.type || op.type_i || 'op';
+          const when = op.created_at ? new Date(op.created_at).toLocaleString() : '';
+          const desc = (op.asset_code ? `${op.asset_code}` : (op.asset ? op.asset : 'native')) + (op.to ? ` → ${op.to.slice(0,8)}…` : '');
+          opsHtml += `<div style="margin-bottom:8px"><strong style="display:block">${t}</strong><span class="small-muted">${desc}</span><div class="small-muted" style="margin-top:6px;font-size:12px">${when}</div></div>`;
+        });
+      } else {
+        opsHtml = '<div class="small-muted">No recent ops found</div>';
+      }
+      recentOpsEl.innerHTML = opsHtml;
+
+      // raw JSON pretty print
+      const combined = {
+        account: acctJson,
+        asset: assetJson,
+        holders: holdersJson,
+        recent_ops: opsJson
+      };
+      rawOut.textContent = JSON.stringify(combined, null, 2);
+
+      lastUpdated.textContent = new Date().toLocaleTimeString();
+    } catch (err) {
+      rawOut.textContent = 'Error fetching testnet data: ' + String(err);
+      recentOpsEl.textContent = 'Error loading recent activity';
+      distBalanceEl.textContent = '—';
+      trustCountEl.textContent = '—';
+      lastUpdated.textContent = 'error';
+    }
+  }
+
+  // initial fetch
+  fetchAll();
+
+})();
+</script>
+</body>
+</html>
