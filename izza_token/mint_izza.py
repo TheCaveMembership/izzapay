@@ -60,17 +60,14 @@ server = Server(HORIZON_URL)
 asset  = Asset(ASSET_CODE, ISSUER_PUB)
 
 def get_base_fee() -> int:
-    """
-    Use Horizon’s suggested fee, apply a safety multiplier, and enforce a sane floor.
-    Returns stroops (int).
-    """
+    """Pick a safe base fee in stroops."""
     if BASE_FEE_OVERRIDE:
         return int(BASE_FEE_OVERRIDE)
     try:
         suggested = server.fetch_base_fee()  # stroops per op
     except Exception:
-        suggested = 100  # fallback to Stellar classic min
-    # Pi Testnet often needs more; multiply and floor at 10_000 stroops (0.001 Pi) per op
+        suggested = 100
+    # Pi Testnet tends to need more; multiply and floor.
     return max(int(suggested * 20), 10_000)
 
 def horizon_account_exists(pubkey: str) -> bool:
@@ -118,15 +115,15 @@ def set_issuer_options():
     issuer_kp   = Keypair.from_secret(ISSUER_SECRET)
     issuer_acct = server.load_account(issuer_kp.public_key)
 
+    # Use ONE combined bitmask, not a list
     if USE_ENUM_FLAGS:
-        clear_flags = [
-            AuthorizationFlag.AUTH_REQUIRED_FLAG,
-            AuthorizationFlag.AUTH_REVOCABLE_FLAG,
-            AuthorizationFlag.AUTH_CLAWBACK_ENABLED_FLAG,
-        ]
+        clear_flags = (
+            AuthorizationFlag.AUTH_REQUIRED_FLAG
+            | AuthorizationFlag.AUTH_REVOCABLE_FLAG
+            | AuthorizationFlag.AUTH_CLAWBACK_ENABLED_FLAG
+        )
     else:
-        # older SDK expects raw ints won’t be cast here; so pass via kwargs name that accepts list[int]
-        clear_flags = [1, 2, 8]
+        clear_flags = 11  # 1 + 2 + 8
 
     tx = (
         TransactionBuilder(
