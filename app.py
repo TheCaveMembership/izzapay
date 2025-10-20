@@ -167,14 +167,29 @@ def trust_redirect():
         "&asset_issuer=GDKS3KFAM5RBBTSYTFUEHHN7GYRPHV7A6K2BI44LL3QQKXCA6ODBCS57"
         "&limit=922337203685.4775807"
         "&network_passphrase=Pi%20Testnet"
+        "&origin_domain=izzapay.onrender.com"
     )
     html = f"""<!doctype html><meta charset="utf-8">
-    <meta http-equiv="refresh" content="0;url={url}">
-    <body style="background:#0b0b0f;color:#fff;display:flex;align-items:center;justify-content:center;height:100vh;text-align:center;">
+    <title>Add IZZA Trustline</title>
+    <meta name="viewport" content="width=device-width,initial-scale=1">
+    <body style="background:#0b0b0f;color:#fff;display:flex;align-items:center;justify-content:center;height:100vh;text-align:center;font-family:system-ui,-apple-system,Segoe UI,Roboto,sans-serif">
       <div>
-        <h1>Opening Pi Wallet…</h1>
-        <p>If nothing happens, <a href="{url}" style="color:#ffd166">tap here</a>.</p>
-        <p style="opacity:.8">Open inside <b>Pi Browser</b>.</p>
+        <h1 style="margin:0 0 16px;font-weight:700">Opening Pi Wallet…</h1>
+        <p style="margin:0 0 12px">If nothing happens, tap the button:</p>
+        <p><a id="open" href="{url}" 
+              style="display:inline-block;padding:12px 18px;border:1px solid #ffd166;border-radius:10px;color:#ffd166;text-decoration:none;font-weight:600">
+              Add IZZA trustline
+        </a></p>
+        <p style="opacity:.8;margin-top:10px">Open this inside <b>Pi Browser</b>.</p>
+        <script>
+          // Try auto-open after a short delay; still requires user tap as fallback.
+          setTimeout(function(){ try{{ window.location.href = "{url}"; }}catch(e){{}} }, 800);
+          // Ensure a real user-gesture navigation on click (iOS is picky)
+          document.getElementById('open').addEventListener('click', function (e) {{
+            e.preventDefault();
+            window.location.href = "{url}";
+          }});
+        </script>
       </div>
     </body>"""
     return Response(html, mimetype="text/html")
