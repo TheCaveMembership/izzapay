@@ -1,0 +1,43 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Add IZZA Trustline</title>
+    <style>
+      body {
+        font-family: system-ui, sans-serif;
+        background: #000;
+        color: #fff;
+        text-align: center;
+        padding-top: 10%;
+      }
+      a {
+        display: inline-block;
+        background: linear-gradient(90deg, #7a44ff, #b784ff);
+        color: white;
+        padding: 12px 22px;
+        border-radius: 6px;
+        font-weight: 600;
+        text-decoration: none;
+        box-shadow: 0 0 15px rgba(183,132,255,.4);
+      }
+    </style>
+  </head>
+  <body>
+    <h1>IZZA Token Trustline</h1>
+    <p>Tap below to add IZZA to your Pi Testnet wallet:</p>
+
+    <a id="trustLink" href="#">
+      Add Trustline
+    </a>
+
+    <script>
+      const trustURL = "web+stellar:changeTrust?asset_code=IZZA&asset_issuer=GDKS3KFAM5RBBTSYTFUEHHN7GYRPHV7A6K2BI44LL3QQKXCA6ODBCS57&limit=922337203685.4775807&network_passphrase=Pi%20Testnet";
+      document.getElementById("trustLink").href = trustURL;
+
+      // Automatically redirect after short delay (helps Pi Browser trigger it)
+      setTimeout(() => { window.location.href = trustURL; }, 2000);
+    </script>
+  </body>
+</html>
