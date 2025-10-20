@@ -28,8 +28,8 @@
     @media (min-width:820px){ .wrap{padding:28px 24px 42px} }
 
     header{display:flex;align-items:center;gap:12px;flex-wrap:wrap}
-    .logo{width:64px;height:64px;border-radius:12px;display:inline-flex;align-items:center;justify-content:center}
-    .logo img{width:100%;height:100%;object-fit:contain;border-radius:12px;background:transparent}
+    .logo{width:124px;height:40px;display:inline-flex;align-items:center;justify-content:center}
+    .logo img{width:100%;height:100%;object-fit:contain;background:transparent}
     h1{margin:0;font-size:clamp(20px,4.8vw,28px);letter-spacing:.2px}
     p.lead{color:var(--muted);margin:4px 0 0;font-size:clamp(13px,3.4vw,14px)}
     .back{margin-left:auto}
@@ -61,10 +61,8 @@
     .token-img{
       width:112px;height:112px; border-radius:14px;
       display:flex;align-items:center;justify-content:center;
-      /* no purple box; image floats on animated background */
       background:transparent;
-      position:relative;
-      isolation:isolate;
+      position:relative; isolation:isolate;
     }
     .token-img img{width:100%;height:100%;object-fit:contain;border-radius:14px}
 
@@ -79,20 +77,16 @@
       overflow:hidden;
     }
     .bg-weave::after{
-      /* subtle animated stripes */
       content:""; position:absolute; inset:0;
       background:
-        repeating-linear-gradient( 110deg,
+        repeating-linear-gradient(110deg,
           rgba(255,255,255,.04) 0px, rgba(255,255,255,.04) 1px,
-          rgba(255,255,255,0) 1px, rgba(255,255,255,0) 8px );
+          rgba(255,255,255,0) 1px, rgba(255,255,255,0) 8px);
       mix-blend-mode:overlay;
       animation: drift 12s linear infinite;
       opacity:.35;
     }
-    @keyframes drift {
-      0%   { transform: translate3d(-30px,0,0) }
-      100% { transform: translate3d(30px,0,0) }
-    }
+    @keyframes drift { 0%{transform:translate3d(-30px,0,0)} 100%{transform:translate3d(30px,0,0)} }
 
     .meta h2{margin:0 0 4px 0;font-size:clamp(18px,4.6vw,22px)}
     .small{color:var(--muted);font-size:clamp(12px,3.2vw,13px)}
@@ -103,9 +97,7 @@
       display:grid; gap:10px;
       grid-template-columns:1fr 1fr;
     }
-    @media (max-width:480px){
-      .two{grid-template-columns:1fr} /* wrap cleanly on small phones */
-    }
+    @media (max-width:480px){ .two{grid-template-columns:1fr} }
     .stat{background:var(--glass); border:1px solid rgba(255,255,255,.06); border-radius:12px; padding:10px}
     .stat .label{color:var(--muted); font-size:12px}
     .stat strong{display:block;margin-top:4px;font-size:clamp(16px,4.8vw,18px)}
@@ -114,18 +106,20 @@
     .card-title{display:flex;justify-content:space-between;align-items:center;margin-bottom:8px}
     .small-muted{color:var(--muted);font-size:13px}
 
-    .grid{
-      display:grid; gap:10px;
-      grid-template-columns:1fr 1fr;
-    }
-    @media (max-width:480px){
-      .grid{grid-template-columns:1fr}
-    }
+    .grid{display:grid; gap:10px; grid-template-columns:1fr 1fr;}
+    @media (max-width:480px){ .grid{grid-template-columns:1fr} }
+
     .mini{display:flex;gap:10px;align-items:center}
     .mini .ico{
       width:36px;height:36px;border-radius:8px;
       display:flex;align-items:center;justify-content:center;
-      background:rgba(255,255,255,.04);
+      background:rgba(255,255,255,.04); /* default for Asset/Issuer */
+      font-size:18px;
+    }
+    /* Purple box specifically for Origin + Network */
+    .mini .ico.purple{
+      background:linear-gradient(180deg,var(--accent1),var(--accent2));
+      box-shadow:0 0 20px rgba(183,132,255,.35);
     }
     .mini img{width:26px;height:26px;object-fit:contain}
 
@@ -137,12 +131,25 @@
       display:grid; gap:12px;
       grid-template-columns:1fr;
     }
-    @media (min-width:880px){
-      .lower{grid-template-columns:minmax(0,1fr) 370px}
-    }
+    @media (min-width:880px){ .lower{grid-template-columns:minmax(0,1fr) 370px} }
 
     .btnrow{display:flex;gap:8px;flex-wrap:wrap}
     .linkbtn{display:inline-block;padding:10px 12px;border-radius:10px;border:1px solid rgba(255,255,255,0.08);color:#cfe0ff;text-decoration:none;font-weight:600}
+
+    /* Recent activity dropdown */
+    details.activity{margin-top:12px}
+    details.activity > summary{
+      list-style:none; cursor:pointer;
+      padding:10px 12px; border-radius:10px;
+      background:rgba(255,255,255,.04);
+      border:1px solid rgba(255,255,255,.08);
+      font-weight:600;
+    }
+    details.activity[open] > summary{background:rgba(255,255,255,.06)}
+    .ops{margin-top:10px}
+    .op{margin-bottom:10px}
+    .op .t{display:block;font-weight:700}
+    .op .m{color:var(--muted);font-size:12px;margin-top:4px}
 
     footer{margin-top:16px;color:var(--muted);font-size:13px;text-align:center}
   </style>
@@ -151,7 +158,7 @@
   <div class="wrap">
     <header>
       <div class="logo" aria-hidden="true">
-        <img src="{{ url_for('serve_assets', filename='izza.png') }}" alt="IZZA">
+        <img src="/static/izzapay-word.svg" alt="IZZA PAY">
       </div>
       <div>
         <h1>IZZA — Test Token Showcase</h1>
@@ -190,7 +197,7 @@
         </div>
       </div>
 
-      <!-- RIGHT: quick details + QR -->
+      <!-- RIGHT: quick details + QR + activity dropdown -->
       <aside class="panel">
         <div class="card-title">
           <strong>Quick details</strong>
@@ -215,7 +222,7 @@
           </div>
 
           <div class="mini">
-            <div class="ico">🏷️</div>
+            <div class="ico purple">🏷️</div>
             <div>
               <div class="small-muted">Origin</div>
               <div class="mono" style="font-size:12px">izzapay.onrender.com</div>
@@ -223,7 +230,7 @@
           </div>
 
           <div class="mini">
-            <div class="ico">🔬</div>
+            <div class="ico purple">🔬</div>
             <div>
               <div class="small-muted">Network</div>
               <div class="mono" style="font-size:12px">Pi Testnet</div>
@@ -246,6 +253,12 @@
             </div>
           </div>
         </div>
+
+        <!-- Recent activity dropdown -->
+        <details class="activity">
+          <summary>Recent activity</summary>
+          <div class="ops" id="recentOps">Loading…</div>
+        </details>
       </aside>
     </section>
 
@@ -297,6 +310,7 @@
   const dshort         = document.getElementById('d-short');
   const qrimg          = document.getElementById('qrimg');
   const deepPre        = document.getElementById('deepPre');
+  const recentOpsEl    = document.getElementById('recentOps');
 
   // Init text
   issuerEl.textContent = ISSUER;
@@ -312,19 +326,22 @@
   document.getElementById('link-ops').href      = `${accountUrl}/operations`;
   document.getElementById('link-assets').href   = `${API_BASE}/assets?asset_code=${encodeURIComponent(ASSET_CODE)}&asset_issuer=${encodeURIComponent(ISSUER)}`;
 
-  // QR (pointing at the deep link; will become useful when Pi enables it)
+  // QR for deep link (future use)
   const qrData = encodeURIComponent(DEEP_LINK);
   qrimg.src = `https://api.qrserver.com/v1/create-qr-code/?size=240x240&data=${qrData}`;
 
-  // Fetch distributor account + holders count + (optionally) recent ops count
+  // Fetch summary + recent ops
   async function fetchSummary(){
     try{
-      const [acctRes, holdersRes] = await Promise.all([
+      const [acctRes, holdersRes, opsRes] = await Promise.all([
         fetch(`${API_BASE}/accounts/${DISTRIBUTOR}`),
-        fetch(`${API_BASE}/accounts?asset=${encodeURIComponent(ASSET_CODE)}:${encodeURIComponent(ISSUER)}`)
+        fetch(`${API_BASE}/accounts?asset=${encodeURIComponent(ASSET_CODE)}:${encodeURIComponent(ISSUER)}`),
+        fetch(`${API_BASE}/accounts/${DISTRIBUTOR}/operations?limit=6&order=desc`)
       ]);
+
       const acctJson = acctRes.ok ? await acctRes.json() : null;
       const holders  = holdersRes.ok ? await holdersRes.json() : null;
+      const opsJson  = opsRes.ok ? await opsRes.json() : null;
 
       // Distributor balance for IZZA
       let izzaBal = '0';
@@ -334,15 +351,33 @@
       }
       distBalanceEl.textContent = izzaBal;
 
-      // simple trustline count (records length)
+      // trustline count
       let count = 0;
       if (holders && holders._embedded && holders._embedded.records) {
         count = holders._embedded.records.length || 0;
       }
       trustCountEl.textContent = count;
+
+      // recent ops list (dropdown)
+      let opsHtml = '';
+      const recs = opsJson && opsJson._embedded ? opsJson._embedded.records : [];
+      if (recs && recs.length){
+        recs.forEach(op=>{
+          const t = op.type || 'operation';
+          const when = op.created_at ? new Date(op.created_at).toLocaleString() : '';
+          const msg = (op.asset_code ? op.asset_code : (op.asset || 'native')) +
+                      (op.to ? ` → ${op.to.slice(0,8)}…` : '');
+          opsHtml += `<div class="op"><span class="t">${t}</span><div class="m">${msg}</div><div class="m">${when}</div></div>`;
+        });
+      } else {
+        opsHtml = '<div class="m">No recent activity.</div>';
+      }
+      recentOpsEl.innerHTML = opsHtml;
+
     } catch(e){
       distBalanceEl.textContent = '—';
       trustCountEl.textContent  = '—';
+      recentOpsEl.textContent   = 'Error loading recent activity';
     }
   }
 
