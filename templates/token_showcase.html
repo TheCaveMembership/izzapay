@@ -27,8 +27,8 @@
       font-family:system-ui,-apple-system,"Segoe UI",Roboto,"Helvetica Neue",Arial;
       -webkit-font-smoothing:antialiased;
       max-width:100%;
-      overflow-x:hidden;           /* prevent sideways scroll (no white sides) */
-      overscroll-behavior-x:none;  /* stop horizontal overscroll glow */
+      overflow-x:hidden;
+      overscroll-behavior-x:none;
     }
     .wrap{max-width:1000px;margin:0 auto;padding:18px 16px 28px}
     @media (min-width:420px){ .wrap{padding:22px 18px 36px} }
@@ -48,6 +48,27 @@
     h1{margin:0;font-size:clamp(20px,4.8vw,28px);letter-spacing:.2px}
     p.lead{color:var(--muted);margin:4px 0 0;font-size:clamp(13px,3.4vw,14px)}
     .spacer{flex:1 1 auto}
+
+    /* ===== NEW: top-centered CTA under the logo ===== */
+    .top-cta{
+      width:100%;
+      text-align:center;
+      margin-top:8px;
+    }
+    .cta{
+      display:inline-flex;align-items:center;gap:10px;
+      padding:12px 16px;
+      border-radius:12px;
+      border:1px solid rgba(255,255,255,.10);
+      background:linear-gradient(180deg,rgba(122,68,255,.25),rgba(183,132,255,.12));
+      box-shadow:0 0 18px rgba(122,68,255,.28), 0 0 60px rgba(183,132,255,.18) inset;
+      color:#fff; text-decoration:none; font-weight:800; letter-spacing:.3px;
+      cursor:pointer;
+      transition: transform .12s ease, box-shadow .12s ease;
+    }
+    .cta:hover{ transform: translateY(-1px); box-shadow:0 0 26px rgba(122,68,255,.40), 0 0 80px rgba(183,132,255,.28) inset;}
+    .cta:active{ transform: translateY(0); }
+    .cta img{width:20px;height:20px}
 
     /* Hero: 1 col on mobile, 2 cols on >= 880px */
     .hero{position:relative;margin-top:16px;display:grid;gap:14px;grid-template-columns:1fr}
@@ -69,7 +90,7 @@
       width:112px;height:112px;border-radius:14px;
       display:flex;align-items:center;justify-content:center;
       background:transparent; position:relative; isolation:isolate;
-      touch-action:pan-y; /* allow vertical scroll; we'll handle horizontal flick */
+      touch-action:pan-y;
     }
     .token-img img{width:100%;height:100%;object-fit:contain;border-radius:14px; backface-visibility:hidden;}
 
@@ -102,73 +123,27 @@
     .wrapaddr{word-break:break-all; overflow-wrap:anywhere}
 
     /* Side badge (mark + stacked label UNDER it, no outer box) */
-.side-badge{
-  display:flex;
-  flex-direction:column;
-  align-items:center;
-  gap:8px;
-  padding:0;
-  border:none;
-  background:none;
-  margin-left:auto;
-  margin-right:20px;     /* moved slightly more left */
-  margin-top:18px;       /* lowered slightly */
-  text-align:center;
-  position:relative;
-  top:8px;               /* fine-tune downward placement */
-}
-
-.side-badge .mark-wrap{
-  width:84px;
-  height:84px;
-  border-radius:18px;
-  display:flex;
-  align-items:center;
-  justify-content:center;
-  background: radial-gradient(60% 60% at 50% 40%, rgba(183,132,255,.42), rgba(183,132,255,.20));
-  box-shadow: 0 0 22px rgba(183,132,255,.45), 0 0 70px rgba(122,68,255,.32);
-  animation: pulse 2.2s ease-in-out infinite;
-  cursor:pointer;
-  text-decoration:none;
-}
-.side-badge .mark-wrap:focus-visible{
-  outline: 2px solid rgba(183,132,255,.6);
-  outline-offset: 3px;
-}
-
-.side-badge .mark-wrap img{
-  width:50px;
-  height:50px;
-  display:block;
-}
-
-@keyframes pulse{
-  0%,100% {
-    transform: scale(1);
-    box-shadow: 0 0 22px rgba(183,132,255,.45),
-                0 0 70px rgba(122,68,255,.32);
-  }
-  50% {
-    transform: scale(1.07);
-    box-shadow: 0 0 30px rgba(183,132,255,.65),
-                0 0 100px rgba(122,68,255,.42);
-  }
-}
-
-.side-badge .arcade{
-  font-weight:900;
-  letter-spacing:.8px;
-  text-transform:uppercase;
-  font-size:14px;
-  line-height:1.15;
-  text-shadow: 0 0 12px rgba(183,132,255,.35);
-}
-
-.side-badge .hint{
-  color:var(--muted);
-  font-size:11px;
-  line-height:1.1;
-}
+    .side-badge{
+      display:flex; flex-direction:column; align-items:center; gap:8px;
+      padding:0; border:none; background:none;
+      margin-left:auto; margin-right:20px; margin-top:18px; text-align:center;
+      position:relative; top:8px;
+    }
+    .side-badge .mark-wrap{
+      width:84px; height:84px; border-radius:18px;
+      display:flex; align-items:center; justify-content:center;
+      background: radial-gradient(60% 60% at 50% 40%, rgba(183,132,255,.42), rgba(183,132,255,.20));
+      box-shadow: 0 0 22px rgba(183,132,255,.45), 0 0 70px rgba(122,68,255,.32);
+      animation: pulse 2.2s ease-in-out infinite; cursor:pointer; text-decoration:none;
+    }
+    .side-badge .mark-wrap:focus-visible{ outline: 2px solid rgba(183,132,255,.6); outline-offset: 3px; }
+    .side-badge .mark-wrap img{ width:50px; height:50px; display:block; }
+    @keyframes pulse{
+      0%,100% { transform: scale(1); box-shadow: 0 0 22px rgba(183,132,255,.45), 0 0 70px rgba(122,68,255,.32); }
+      50% { transform: scale(1.07); box-shadow: 0 0 30px rgba(183,132,255,.65), 0 0 100px rgba(122,68,255,.42); }
+    }
+    .side-badge .arcade{ font-weight:900; letter-spacing:.8px; text-transform:uppercase; font-size:14px; line-height:1.15; text-shadow: 0 0 12px rgba(183,132,255,.35); }
+    .side-badge .hint{ color:var(--muted); font-size:11px; line-height:1.1; }
 
     .two{margin-top:12px;display:grid;gap:10px;grid-template-columns:1fr 1fr}
     @media (max-width:480px){ .two{grid-template-columns:1fr} }
@@ -187,10 +162,9 @@
     .mini .ico{
       width:36px;height:36px;border-radius:8px;
       display:flex;align-items:center;justify-content:center;
-      background:rgba(255,255,255,.04); /* neutral default */
+      background:rgba(255,255,255,.04);
       font-size:18px; line-height:1;
     }
-    /* Purple box (gradient) */
     .mini .ico.purple{
       background:linear-gradient(180deg,var(--accent1),var(--accent2));
       box-shadow:0 0 10px rgba(183,132,255,.25);
@@ -206,7 +180,6 @@
     .btnrow{display:flex;gap:8px;flex-wrap:wrap}
     .linkbtn{display:inline-block;padding:10px 12px;border-radius:10px;border:1px solid rgba(255,255,255,0.08);color:#cfe0ff;text-decoration:none;font-weight:600}
 
-    /* Recent activity dropdown */
     details.activity{margin-top:12px}
     details.activity > summary{
       list-style:none; cursor:pointer; padding:10px 12px; border-radius:10px;
@@ -219,6 +192,67 @@
     .op .m{color:var(--muted);font-size:12px;margin-top:4px}
 
     footer{margin-top:16px;color:var(--muted);font-size:13px;text-align:center}
+
+    /* ===== NEW: Roadmap Modal ===== */
+    .modal-backdrop{
+      position:fixed; inset:0; background:rgba(0,0,0,.55);
+      display:none; z-index:999;
+      backdrop-filter:saturate(140%) blur(2px);
+    }
+    .modal{
+      position:fixed; inset:0; display:none; z-index:1000;
+      align-items:center; justify-content:center; padding:24px;
+    }
+    .modal[open], .modal-backdrop[open]{ display:flex; }
+    .modal-card{
+      width:min(980px, 96vw);
+      max-height:86vh; overflow:auto;
+      border-radius:18px;
+      background:linear-gradient(180deg, rgba(10,8,18,.9), rgba(6,5,12,.96));
+      border:1px solid rgba(255,255,255,.08);
+      box-shadow:0 40px 120px rgba(0,0,0,.55), 0 0 80px rgba(122,68,255,.35) inset;
+      animation:pop .18s ease-out;
+    }
+    @keyframes pop { from{ transform:translateY(10px) scale(.98); opacity:.6 } to{ transform:none; opacity:1 } }
+    .modal-header{
+      position:sticky; top:0; z-index:2;
+      display:flex; align-items:center; gap:12px; justify-content:space-between;
+      padding:14px 16px; background:rgba(8,6,14,.85); border-bottom:1px solid rgba(255,255,255,.06);
+      backdrop-filter: blur(6px);
+    }
+    .modal-title{
+      display:flex; align-items:center; gap:10px; font-weight:900; letter-spacing:.4px;
+      text-transform:uppercase;
+    }
+    .modal-title img{ width:26px; height:26px }
+    .close-btn{
+      appearance:none; border:none; cursor:pointer;
+      border-radius:10px; padding:8px 10px; font-weight:800;
+      color:#fff; background:rgba(255,255,255,.06);
+    }
+    .modal-body{ padding:16px }
+    .pill{
+      display:inline-block; padding:8px 10px; border-radius:999px;
+      background:linear-gradient(180deg,var(--accent1),var(--accent2));
+      font-size:12px; font-weight:800; letter-spacing:.3px; box-shadow:0 0 16px rgba(183,132,255,.35);
+    }
+    .road-grid{ display:grid; gap:12px; grid-template-columns:1fr; }
+    @media (min-width:860px){ .road-grid{ grid-template-columns: 1.2fr .8fr; } }
+    .blox{
+      background:rgba(255,255,255,.04);
+      border:1px solid rgba(255,255,255,.08);
+      border-radius:14px; padding:14px;
+    }
+    .blox h4{ margin:0 0 8px 0; font-size:16px; letter-spacing:.2px }
+    .blox p{ margin:6px 0; color:#cfe0ff }
+    .list{ margin:8px 0 0 0; padding:0 0 0 18px; color:#cfe0ff }
+    .list li{ margin:6px 0 }
+    .grid-2{ display:grid; gap:10px; grid-template-columns:1fr 1fr }
+    .statline{ display:flex; align-items:center; justify-content:space-between; gap:10px; padding:8px 10px; border-radius:10px; background:rgba(255,255,255,.04); border:1px solid rgba(255,255,255,.06) }
+    .mini-mark{ width:28px; height:28px; border-radius:8px; display:flex; align-items:center; justify-content:center; background:linear-gradient(180deg,var(--accent1),var(--accent2)); box-shadow:0 0 10px rgba(183,132,255,.25) }
+    .img-row{ display:flex; gap:10px; flex-wrap:wrap }
+    .img-row img{ width:100px; height:100px; border-radius:12px; object-fit:cover; background:#000; }
+
   </style>
 </head>
 <body>
@@ -235,6 +269,15 @@
         <p class="lead">Issuer, distributor, balances and activity on Pi Testnet.</p>
       </div>
       <div class="spacer"></div>
+
+      <!-- ===== NEW: top-centered CTA under the wordmark ===== -->
+      <div class="top-cta" style="grid-column:1 / -1; width:100%">
+        <button id="roadmapBtn" class="cta" type="button" aria-haspopup="dialog" aria-controls="roadmapModal">
+          <img src="/static/izzapay-mark.svg" alt="" aria-hidden="true">
+          View IZZA Token Mainnet Roadmap
+        </button>
+      </div>
+      <!-- ===== /NEW ===== -->
     </header>
 
     <section class="hero">
@@ -251,11 +294,11 @@
           <!-- Glow/pulse mark with stacked label beneath (larger + pushed right) -->
           <div class="side-badge">
             <a class="mark-wrap"
-   href="{{ APP_BASE_URL or '/' }}"
-   title="Back to Home"
-   onclick="try{history.back();}catch(_){/*fallback*/}">
-  <img src="/static/izzapay-mark.svg" alt="IZZA mark">
-</a>
+               href="{{ APP_BASE_URL or '/' }}"
+               title="Back to Home"
+               onclick="try{history.back();}catch(_){/*fallback*/}">
+              <img src="/static/izzapay-mark.svg" alt="IZZA mark">
+            </a>
             <div class="arcade">Spin the coin</div>
             <div class="hint">(to refresh data)</div>
           </div>
@@ -296,7 +339,6 @@
             </div>
           </div>
 
-          <!-- Issuer now has a PURPLE icon background -->
           <div class="mini">
             <div class="ico purple"><img src="{{ url_for('serve_assets', filename='izza.png') }}" alt=""></div>
             <div>
@@ -305,7 +347,6 @@
             </div>
           </div>
 
-          <!-- Origin now uses the neutral (non-purple) style -->
           <div class="mini">
             <div class="ico">🧬</div>
             <div>
@@ -339,7 +380,6 @@
           </div>
         </div>
 
-        <!-- Recent activity dropdown -->
         <details class="activity">
           <summary>Recent activity</summary>
           <div class="ops" id="recentOps">Loading…</div>
@@ -348,7 +388,6 @@
     </section>
 
     <section class="lower">
-      <!-- Left: quick links -->
       <div class="panel">
         <h3 style="margin:0 0 8px 0">Raw data & quick links</h3>
         <p class="small-muted" style="margin:4px 0 10px">Open Pi Testnet Horizon endpoints directly.</p>
@@ -360,7 +399,6 @@
         </div>
       </div>
 
-      <!-- Right: developer notes + deep link -->
       <div class="panel">
         <h3 style="margin:0 0 8px 0">Developer notes</h3>
         <div class="small-muted" style="margin-bottom:10px">
@@ -376,6 +414,86 @@
 
     <footer>IZZA PAY — Testnet showcase · Built for demo & diagnostics</footer>
   </div>
+
+  <!-- ===== NEW: Modal Backdrop + Roadmap Modal ===== -->
+  <div class="modal-backdrop" id="modalBackdrop" hidden></div>
+  <div class="modal" id="roadmapModal" role="dialog" aria-modal="true" aria-labelledby="roadmapTitle" hidden>
+    <div class="modal-card">
+      <div class="modal-header">
+        <div class="modal-title">
+          <img src="/static/izzapay-mark.svg" alt="">
+          <span id="roadmapTitle">IZZA Token — Mainnet Roadmap</span>
+        </div>
+        <button class="close-btn" type="button" id="closeModalBtn">Close</button>
+      </div>
+      <div class="modal-body">
+        <span class="pill">Total Supply Target: 33.33 Billion (Mainnet)</span>
+
+        <div class="road-grid" style="margin-top:12px">
+          <div class="blox">
+            <h4>Why a Token at All?</h4>
+            <p>IZZA Coins power gameplay. <strong>IZZA Token</strong> powers the ecosystem.</p>
+            <ul class="list">
+              <li><strong>Governance</strong>: Vote on new mini-games, IZZA City expansions, creator marketplace rules.</li>
+              <li><strong>Staking</strong>: Stake tokens to earn boosted Crafting Credits / seasonal IZZA Coin boosts.</li>
+              <li><strong>Access</strong>: Token-gated drops, rare blueprints, early creator tools.</li>
+              <li><strong>Biz Utility</strong>: Merchant fee discounts and premium IZZA Pay tiers for holders.</li>
+              <li><strong>Dev Listing</strong>: Arcade listings prioritized via stake + quality score.</li>
+            </ul>
+
+            <div class="img-row" style="margin-top:10px">
+              <img src="{{ url_for('serve_assets', filename='izza.png') }}" alt="IZZA coin">
+              <img src="/static/izzapay-mark.svg" alt="IZZA mark">
+              <img src="/static/izzapay-word.svg" alt="IZZA word">
+            </div>
+          </div>
+
+          <div class="blox">
+            <h4>Economy Layering</h4>
+            <div class="grid-2">
+              <div class="statline"><div class="mini-mark"><img src="{{ url_for('serve_assets', filename='izza.png') }}" alt="" style="width:18px;height:18px"></div><div><strong>IZZA Coins</strong><div class="small" style="color:var(--muted)">Soft in-game currency</div></div></div>
+              <div class="statline"><div class="mini-mark">💎</div><div><strong>Crafting Credits</strong><div class="small" style="color:var(--muted)">Premium consumable via Pi</div></div></div>
+              <div class="statline"><div class="mini-mark">🗳️</div><div><strong>IZZA Token</strong><div class="small" style="color:var(--muted)">Scarce, stake + govern</div></div></div>
+            </div>
+            <p style="margin-top:10px">Peg reference stays for in-game economics (2,000 Coins ≈ 1 Pi). Token remains <em>non-inflationary</em> with utility via staking + access.</p>
+          </div>
+        </div>
+
+        <div class="blox" style="margin-top:12px">
+          <h4>Distribution Plan (Illustrative)</h4>
+          <div class="grid-2">
+            <ul class="list">
+              <li><strong>40%</strong> Growth: public sale + staking rewards</li>
+              <li><strong>25%</strong> Ecosystem: new games, marketplace, tools</li>
+              <li><strong>20%</strong> Team: 12-month cliff, 36-month vest</li>
+              <li><strong>10%</strong> Partners: merchants, collabs</li>
+              <li><strong>5%</strong> Community: airdrops for early testers</li>
+            </ul>
+            <p style="margin:4px 0 0 0;color:#cfe0ff">
+              Vesting & emissions published on-chain. Staking yields are dynamic and balanced vs. arcade earnings to avoid inflation shocks.
+            </p>
+          </div>
+        </div>
+
+        <div class="blox" style="margin-top:12px">
+          <h4>Launch Roadmap</h4>
+          <ul class="list">
+            <li><strong>Phase 1 — Testnet Live</strong>: Issuer/distributor diagnostics, faucet & trustlines, IZZA City + Arcade earn loop validated.</li>
+            <li><strong>Phase 2 — Staking Beta</strong>: Token staking → soft boosts to Crafting Credit earnings, seasonal badges, holder quests.</li>
+            <li><strong>Phase 3 — Governance v1</strong>: On-chain votes for new Arcade titles, blueprint rarity schedules, and marketplace fees.</li>
+            <li><strong>Phase 4 — Merchant Utility</strong>: IZZA Pay fee rebates for holders, business dashboards with token-gated promos.</li>
+            <li><strong>Phase 5 — Mainnet Mint (33.33B)</strong>: Final supply + vesting on chain, liquidity bootstrapping, cross-ecosystem creator drops.</li>
+          </ul>
+        </div>
+
+        <div class="blox" style="margin-top:12px">
+          <h4>Value Loop</h4>
+          <p>Players earn Coins → buy Crafting Credits (via Pi) → craft & trade → creators/merchants thrive. <strong>IZZA Token</strong> captures upside by governing, staking, and unlocking the best parts of the ecosystem.</p>
+        </div>
+      </div>
+    </div>
+  </div>
+  <!-- ===== /NEW ===== -->
 
 <script>
 (() => {
@@ -429,11 +547,10 @@
     const dx = (p.clientX - startX);
     const dt = Math.max(1, performance.now() - startT);
     const speed = Math.abs(dx) / dt; // px per ms
-    if (speed > 0.4) { // flick threshold
+    if (speed > 0.4) {
       coin.classList.remove('spin-anim'); // restart animation
       void coin.offsetWidth;
       coin.classList.add('spin-anim');
-      // refresh summary after spin completes
       setTimeout(fetchSummary, 1100);
     }
   }
@@ -494,6 +611,41 @@
   }
 
   fetchSummary();
+
+  // ===== NEW: Modal wiring (open/close + accessibility) =====
+  const roadmapBtn   = document.getElementById('roadmapBtn');
+  const modal        = document.getElementById('roadmapModal');
+  const backdrop     = document.getElementById('modalBackdrop');
+  const closeModalBtn= document.getElementById('closeModalBtn');
+  let lastFocus = null;
+
+  function openModal(){
+    lastFocus = document.activeElement;
+    modal.hidden = false; backdrop.hidden = false;
+    modal.setAttribute('open',''); backdrop.setAttribute('open','');
+    document.body.style.overflow = 'hidden';
+    closeModalBtn.focus();
+  }
+  function closeModal(){
+    modal.removeAttribute('open'); backdrop.removeAttribute('open');
+    modal.hidden = true; backdrop.hidden = true;
+    document.body.style.overflow = '';
+    if (lastFocus && lastFocus.focus) lastFocus.focus();
+  }
+  roadmapBtn.addEventListener('click', openModal);
+  closeModalBtn.addEventListener('click', closeModal);
+  backdrop.addEventListener('click', closeModal);
+  window.addEventListener('keydown', (e)=>{ if(e.key === 'Escape') closeModal(); });
+  // trap focus basic
+  modal.addEventListener('keydown', (e)=>{
+    if(e.key !== 'Tab') return;
+    const f = modal.querySelectorAll('button, [href], input, select, textarea, [tabindex]:not([tabindex="-1"])');
+    if(!f.length) return;
+    const first = f[0], last = f[f.length - 1];
+    if(e.shiftKey && document.activeElement === first){ last.focus(); e.preventDefault(); }
+    else if(!e.shiftKey && document.activeElement === last){ first.focus(); e.preventDefault(); }
+  });
+  // ===== /NEW =====
 })();
 </script>
 </body>
