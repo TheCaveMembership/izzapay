@@ -1,7 +1,6 @@
 import os
 from decimal import Decimal
 from dotenv import load_dotenv
-
 from stellar_sdk import (
     Server,
     Keypair,
@@ -10,7 +9,13 @@ from stellar_sdk import (
     StrKey,
 )
 from stellar_sdk.exceptions import NotFoundError
-from stellar_sdk.operation.set_options import AuthorizationFlag
+
+# Try import new-style flags if available
+try:
+    from stellar_sdk.operation.set_options import AuthorizationFlag
+    USE_ENUM_FLAGS = True
+except ImportError:
+    USE_ENUM_FLAGS = False
 
 load_dotenv()
 
@@ -21,8 +26,8 @@ def getenv(name, default=None, required=False):
         raise RuntimeError(f"Missing required env var: {name}")
     return v.strip() if isinstance(v, str) else v
 
-HORIZON_URL        = getenv("HORIZON_URL", required=True)            # e.g. https://api.testnet.minepi.com/horizon
-NETWORK_PASSPHRASE = getenv("NETWORK_PASSPHRASE", required=True)     # "Pi Network Testnet"
+HORIZON_URL        = getenv("HORIZON_URL", required=True)
+NETWORK_PASSPHRASE = getenv("NETWORK_PASSPHRASE", required=True)
 
 ISSUER_PUB    = getenv("ISSUER_PUB", required=True)
 ISSUER_SECRET = getenv("ISSUER_SECRET", required=True)
@@ -33,16 +38,15 @@ ASSET_CODE  = getenv("ASSET_CODE", "IZZA")
 MINT_AMOUNT = getenv("MINT_AMOUNT", "1000000.0000000")
 HOME_DOMAIN = getenv("HOME_DOMAIN", "izzapay.onrender.com")
 
-# Optional: use a funded test wallet to create/fund new accounts
 FUNDING_SECRET       = getenv("FUNDING_SECRET", "")
-FUNDING_STARTING_BAL = getenv("FUNDING_STARTING_BALANCE", "5")  # in native
+FUNDING_STARTING_BAL = getenv("FUNDING_STARTING_BALANCE", "5")
 
 print("Loaded environment:")
 print("ISSUER_PUB:", ISSUER_PUB)
-print("DISTR_PUB:",  DISTR_PUB)
+print("DISTR_PUB:", DISTR_PUB)
 print("HORIZON_URL:", HORIZON_URL)
 
-# ---- Validate keys early (catches hidden whitespace etc.) ----
+# ---- Validate keys ----
 problems = []
 if not StrKey.is_valid_ed25519_public_key(ISSUER_PUB):     problems.append("ISSUER_PUB invalid")
 if not StrKey.is_valid_ed25519_public_key(DISTR_PUB):      problems.append("DISTR_PUB invalid")
@@ -62,14 +66,12 @@ def horizon_account_exists(pubkey: str) -> bool:
         return False
 
 def maybe_create_account(target_pub: str):
-    """Create & fund target account if FUNDING_SECRET is provided and target doesn't exist."""
     if horizon_account_exists(target_pub):
         return
     if not FUNDING_SECRET:
         raise RuntimeError(
-            f"Account {target_pub} is not found on-chain.\n"
-            f"→ Fund/activate it first on Pi Testnet, then re-run.\n"
-            f"  Or send a CreateAccount from your Pi Test Wallet."
+            f"Account {target_pub} not found.\n"
+            f"Fund it manually on the Pi Testnet, then re-run."
         )
     funder_kp   = Keypair.from_secret(FUNDING_SECRET)
     funder_acct = server.load_account(funder_kp.public_key)
@@ -96,10 +98,21 @@ def submit_and_print(tx):
     print("  Ledger:", resp.get("ledger"))
     return resp
 
+# ---- Set issuer options ----
 def set_issuer_options():
     issuer_kp   = Keypair.from_secret(ISSUER_SECRET)
     issuer_acct = server.load_account(issuer_kp.public_key)
-    # Ensure no auth gating + set home domain
+
+    if USE_ENUM_FLAGS:
+        clear_flags = [
+            AuthorizationFlag.AUTH_REQUIRED_FLAG,
+            AuthorizationFlag.AUTH_REVOCABLE_FLAG,
+            AuthorizationFlag.AUTH_CLAWBACK_ENABLED_FLAG,
+        ]
+    else:
+        # fallback for older SDKs (numerical bit values)
+        clear_flags = [1, 2, 8]
+
     tx = (
         TransactionBuilder(
             source_account=issuer_acct,
@@ -108,11 +121,7 @@ def set_issuer_options():
         )
         .append_set_options_op(
             home_domain=HOME_DOMAIN,
-            clear_flags=[
-                AuthorizationFlag.AUTH_REQUIRED_FLAG,
-                AuthorizationFlag.AUTH_REVOCABLE_FLAG,
-                AuthorizationFlag.AUTH_CLAWBACK_ENABLED_FLAG,
-            ],
+            clear_flags=clear_flags
         )
         .set_timeout(120)
         .build()
@@ -131,7 +140,7 @@ def distributor_change_trust():
         )
         .append_change_trust_op(
             asset=asset,
-            limit=str(Decimal("922337203685.4775807"))  # effectively max
+            limit=str(Decimal("922337203685.4775807"))
         )
         .set_timeout(120)
         .build()
@@ -160,7 +169,6 @@ def issuer_mint_payment():
     return submit_and_print(tx)
 
 if __name__ == "__main__":
-    # 0) Make sure accounts exist (or create them if FUNDING_SECRET provided)
     print("Checking accounts exist on-chain …")
     maybe_create_account(ISSUER_PUB)
     maybe_create_account(DISTR_PUB)
