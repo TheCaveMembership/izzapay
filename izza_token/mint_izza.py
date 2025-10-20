@@ -1,21 +1,15 @@
 import os
 from decimal import Decimal
 from dotenv import load_dotenv
-from stellar_sdk import (
-    Server,
-    Keypair,
-    TransactionBuilder,
-    Asset,
-    StrKey,
-)
+from stellar_sdk import Server, Keypair, TransactionBuilder, Asset, StrKey
 from stellar_sdk.exceptions import NotFoundError
 
-# Try to import AuthorizationFlag, but verify its attributes exist
+# Try to import AuthorizationFlag, but verify attributes exist
 try:
     from stellar_sdk.operation.set_options import AuthorizationFlag
-    if all(hasattr(AuthorizationFlag, n) for n in [
+    if all(hasattr(AuthorizationFlag, n) for n in (
         "AUTH_REQUIRED_FLAG", "AUTH_REVOCABLE_FLAG", "AUTH_CLAWBACK_ENABLED_FLAG"
-    ]):
+    )):
         USE_ENUM_FLAGS = True
     else:
         USE_ENUM_FLAGS = False
@@ -24,7 +18,6 @@ except ImportError:
 
 load_dotenv()
 
-# ---- Load & sanitize env ----
 def getenv(name, default=None, required=False):
     v = os.environ.get(name, default)
     if v is None and required:
@@ -46,12 +39,15 @@ HOME_DOMAIN = getenv("HOME_DOMAIN", "izzapay.onrender.com")
 FUNDING_SECRET       = getenv("FUNDING_SECRET", "")
 FUNDING_STARTING_BAL = getenv("FUNDING_STARTING_BALANCE", "5")
 
+# Optional manual override via env
+BASE_FEE_OVERRIDE = getenv("BASE_FEE", "")
+
 print("Loaded environment:")
 print("ISSUER_PUB:", ISSUER_PUB)
 print("DISTR_PUB:", DISTR_PUB)
 print("HORIZON_URL:", HORIZON_URL)
 
-# ---- Validate keys ----
+# Validate keys
 problems = []
 if not StrKey.is_valid_ed25519_public_key(ISSUER_PUB):     problems.append("ISSUER_PUB invalid")
 if not StrKey.is_valid_ed25519_public_key(DISTR_PUB):      problems.append("DISTR_PUB invalid")
@@ -62,6 +58,20 @@ if problems:
 
 server = Server(HORIZON_URL)
 asset  = Asset(ASSET_CODE, ISSUER_PUB)
+
+def get_base_fee() -> int:
+    """
+    Use Horizon’s suggested fee, apply a safety multiplier, and enforce a sane floor.
+    Returns stroops (int).
+    """
+    if BASE_FEE_OVERRIDE:
+        return int(BASE_FEE_OVERRIDE)
+    try:
+        suggested = server.fetch_base_fee()  # stroops per op
+    except Exception:
+        suggested = 100  # fallback to Stellar classic min
+    # Pi Testnet often needs more; multiply and floor at 10_000 stroops (0.001 Pi) per op
+    return max(int(suggested * 20), 10_000)
 
 def horizon_account_exists(pubkey: str) -> bool:
     try:
@@ -84,7 +94,7 @@ def maybe_create_account(target_pub: str):
         TransactionBuilder(
             source_account=funder_acct,
             network_passphrase=NETWORK_PASSPHRASE,
-            base_fee=200
+            base_fee=get_base_fee(),
         )
         .append_create_account_op(
             destination=target_pub,
@@ -108,25 +118,21 @@ def set_issuer_options():
     issuer_kp   = Keypair.from_secret(ISSUER_SECRET)
     issuer_acct = server.load_account(issuer_kp.public_key)
 
-    # Determine how to represent flags based on SDK
     if USE_ENUM_FLAGS:
-        try:
-            clear_flags = [
-                AuthorizationFlag.AUTH_REQUIRED_FLAG,
-                AuthorizationFlag.AUTH_REVOCABLE_FLAG,
-                AuthorizationFlag.AUTH_CLAWBACK_ENABLED_FLAG,
-            ]
-        except Exception:
-            clear_flags = AuthorizationFlag(11)
+        clear_flags = [
+            AuthorizationFlag.AUTH_REQUIRED_FLAG,
+            AuthorizationFlag.AUTH_REVOCABLE_FLAG,
+            AuthorizationFlag.AUTH_CLAWBACK_ENABLED_FLAG,
+        ]
     else:
-        # Fallback to combined integer bitmask
-        clear_flags = 11  # 1 + 2 + 8
+        # older SDK expects raw ints won’t be cast here; so pass via kwargs name that accepts list[int]
+        clear_flags = [1, 2, 8]
 
     tx = (
         TransactionBuilder(
             source_account=issuer_acct,
             network_passphrase=NETWORK_PASSPHRASE,
-            base_fee=200
+            base_fee=get_base_fee(),
         )
         .append_set_options_op(
             home_domain=HOME_DOMAIN,
@@ -145,7 +151,7 @@ def distributor_change_trust():
         TransactionBuilder(
             source_account=distr_acct,
             network_passphrase=NETWORK_PASSPHRASE,
-            base_fee=200
+            base_fee=get_base_fee(),
         )
         .append_change_trust_op(
             asset=asset,
@@ -164,7 +170,7 @@ def issuer_mint_payment():
         TransactionBuilder(
             source_account=issuer_acct,
             network_passphrase=NETWORK_PASSPHRASE,
-            base_fee=200
+            base_fee=get_base_fee(),
         )
         .append_payment_op(
             destination=DISTR_PUB,
