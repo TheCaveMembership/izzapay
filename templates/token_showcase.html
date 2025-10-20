@@ -101,28 +101,31 @@
     .mono{font-family:var(--mono)}
     .wrapaddr{word-break:break-all; overflow-wrap:anywhere}
 
-    /* Side badge (goes in the blank space beside coin) */
+    /* Side badge (mark + stacked label UNDER it, no outer box) */
     .side-badge{
-      display:flex; align-items:center; gap:10px;
-      padding:10px 12px; border-radius:12px;
-      background:rgba(255,255,255,.04);
-      border:1px solid rgba(255,255,255,.08);
+      display:flex; flex-direction:column; align-items:center; gap:8px;
+      padding:0; border:none; background:none;
+      margin-left:6px; margin-right:6px;
+      text-align:center;
     }
     .side-badge .mark-wrap{
-      width:42px;height:42px;border-radius:10px;display:flex;align-items:center;justify-content:center;
+      width:56px;height:56px;border-radius:14px;display:flex;align-items:center;justify-content:center;
       background: radial-gradient(60% 60% at 50% 40%, rgba(183,132,255,.38), rgba(183,132,255,.18));
       box-shadow: 0 0 18px rgba(183,132,255,.35), 0 0 36px rgba(122,68,255,.25);
       animation: pulse 2.2s ease-in-out infinite;
     }
-    .side-badge .mark-wrap img{width:28px;height:28px;display:block}
+    .side-badge .mark-wrap img{width:34px;height:34px;display:block}
     @keyframes pulse{
       0%,100% { transform: scale(1);    box-shadow: 0 0 18px rgba(183,132,255,.35), 0 0 36px rgba(122,68,255,.25); }
       50%     { transform: scale(1.06); box-shadow: 0 0 24px rgba(183,132,255,.55), 0 0 64px rgba(122,68,255,.35); }
     }
     .side-badge .arcade{
       font-weight:900; letter-spacing:.8px; text-transform:uppercase;
-      font-size:12px; line-height:1.1;
+      font-size:12px; line-height:1.15;
       text-shadow: 0 0 12px rgba(183,132,255,.35);
+    }
+    .side-badge .hint{
+      color:var(--muted); font-size:11px; line-height:1.1;
     }
 
     .two{margin-top:12px;display:grid;gap:10px;grid-template-columns:1fr 1fr}
@@ -203,12 +206,13 @@
             <img id="coinImg" src="{{ url_for('serve_assets', filename='izza.png') }}" alt="IZZA token">
           </div>
 
-          <!-- Glow/pulse mark + arcade label (fills that blank space) -->
+          <!-- Glow/pulse mark with stacked label beneath -->
           <div class="side-badge">
             <div class="mark-wrap">
               <img src="/static/izzapay-mark.svg" alt="IZZA mark">
             </div>
             <div class="arcade">Spin the coin</div>
+            <div class="hint">(to refresh data)</div>
           </div>
 
           <!-- Meta -->
