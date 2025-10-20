@@ -169,29 +169,31 @@ def trust_redirect():
         "&network_passphrase=Pi%20Testnet"
         "&origin_domain=izzapay.onrender.com"
     )
-    html = f"""<!doctype html><meta charset="utf-8">
+
+    html = """<!doctype html><meta charset="utf-8">
     <title>Add IZZA Trustline</title>
     <meta name="viewport" content="width=device-width,initial-scale=1">
     <body style="background:#0b0b0f;color:#fff;display:flex;align-items:center;justify-content:center;height:100vh;text-align:center;font-family:system-ui,-apple-system,Segoe UI,Roboto,sans-serif">
       <div>
         <h1 style="margin:0 0 16px;font-weight:700">Opening Pi Wallet…</h1>
         <p style="margin:0 0 12px">If nothing happens, tap the button:</p>
-        <p><a id="open" href="{url}" 
+        <p><a id="open" href="{0}" 
               style="display:inline-block;padding:12px 18px;border:1px solid #ffd166;border-radius:10px;color:#ffd166;text-decoration:none;font-weight:600">
               Add IZZA trustline
         </a></p>
         <p style="opacity:.8;margin-top:10px">Open this inside <b>Pi Browser</b>.</p>
         <script>
-          // Try auto-open after a short delay; still requires user tap as fallback.
-          setTimeout(function(){ try{{ window.location.href = "{url}"; }}catch(e){{}} }, 800);
-          // Ensure a real user-gesture navigation on click (iOS is picky)
+          // Auto-open after short delay
+          setTimeout(function(){{ try{{ window.location.href = "{0}"; }}catch(e){{}} }}, 800);
+          // Ensure user-gesture navigation
           document.getElementById('open').addEventListener('click', function (e) {{
             e.preventDefault();
-            window.location.href = "{url}";
+            window.location.href = "{0}";
           }});
         </script>
       </div>
-    </body>"""
+    </body>""".format(url)
+
     return Response(html, mimetype="text/html")
 
 # ----------------- PERSISTENT DATA ROOT -----------------
