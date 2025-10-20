@@ -170,9 +170,10 @@ def _client_log():
         print("TRUST_EVT_ERR", repr(e))
     return {"ok": True}
 
+from flask import make_response
+
 @app.get("/trust/open")
 def trust_https_redirect():
-    # 302 to the custom scheme (some mobile webviews allow this pattern)
     url = (
         "web+stellar:changeTrust"
         "?asset_code=IZZA"
@@ -181,7 +182,11 @@ def trust_https_redirect():
         "&network_passphrase=Pi%20Testnet"
         "&origin_domain=izzapay.onrender.com"
     )
-    return redirect(url, code=302)
+    resp = redirect(url, code=302)
+    # deny embedding for this hop too
+    resp.headers["X-Frame-Options"] = "DENY"
+    resp.headers["Content-Security-Policy"] = "frame-ancestors 'none'"
+    return resp
 
 @app.get("/trust")
 def trust_page():
@@ -193,8 +198,12 @@ def trust_page():
         "&network_passphrase=Pi%20Testnet"
         "&origin_domain=izzapay.onrender.com"
     )
-    # Render the template so JS can use {{ url }}
-    return render_template("trust.html", url=url)
+    html = render_template("trust.html", url=url)
+    resp = make_response(html)
+    # hard block any iframe parents (Pi’s app frame)
+    resp.headers["X-Frame-Options"] = "DENY"
+    resp.headers["Content-Security-Policy"] = "frame-ancestors 'none'"
+    return resp
 
 # ----------------- PERSISTENT DATA ROOT -----------------
 DATA_ROOT   = os.getenv("DATA_ROOT", "/var/data/izzapay")
