@@ -110,9 +110,12 @@
   padding:0;
   border:none;
   background:none;
-  margin-left:auto;           /* keeps to right edge */
-  margin-right:24px;          /* nudged slightly left from previous 10px */
+  margin-left:auto;
+  margin-right:20px;     /* moved slightly more left */
+  margin-top:10px;       /* lowered slightly */
   text-align:center;
+  position:relative;
+  top:4px;               /* fine-tune downward placement */
 }
 
 .side-badge .mark-wrap{
@@ -125,8 +128,8 @@
   background: radial-gradient(60% 60% at 50% 40%, rgba(183,132,255,.42), rgba(183,132,255,.20));
   box-shadow: 0 0 22px rgba(183,132,255,.45), 0 0 70px rgba(122,68,255,.32);
   animation: pulse 2.2s ease-in-out infinite;
-  cursor:pointer;             /* clickable now */
-  text-decoration:none;       /* remove link underline */
+  cursor:pointer;
+  text-decoration:none;
 }
 .side-badge .mark-wrap:focus-visible{
   outline: 2px solid rgba(183,132,255,.6);
