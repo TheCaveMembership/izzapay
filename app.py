@@ -144,7 +144,8 @@ app = Flask(__name__)
 # PUBLIC FILE SERVING ROUTES (.well-known and /assets/)
 # ======================================================
 
-from flask import send_from_directory, make_response, redirect, render_template, request
+from flask import send_from_directory, make_response, redirect, render_template, render_template_string, request
+import os, json
 
 # Serve Pi + Stellar TOML files
 @app.route('/.well-known/<path:filename>')
@@ -169,11 +170,10 @@ def _client_log():
         print("TRUST_EVT_ERR", repr(e))
     return {"ok": True}
 
-
 @app.get("/trust/open")
 def trust_https_redirect():
-    """Final HTTPS hop that triggers Pi Wallet deep link (web+stellar)."""
-    url = (
+    # Deep link
+    deep = (
         "web+stellar:changeTrust"
         "?asset_code=IZZA"
         "&asset_issuer=GDKS3KFAM5RBBTSYTFUEHHN7GYRPHV7A6K2BI44LL3QQKXCA6ODBCS57"
@@ -181,12 +181,44 @@ def trust_https_redirect():
         "&network_passphrase=Pi%20Testnet"
         "&origin_domain=izzapay.onrender.com"
     )
-    resp = redirect(url, code=302)
-    # optional: lock this redirect from being framed
+
+    # Use render_template_string so we don't fight Python f-string braces
+    launcher_tpl = """<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Launching Pi Wallet…</title>
+  <meta http-equiv="refresh" content="0; url={{ deep }}">
+  <style>
+    body { font-family: system-ui, -apple-system, Segoe UI, Roboto, sans-serif; padding:24px; }
+    a.btn { display:inline-block; padding:10px 16px; border-radius:10px; background:#eee; text-decoration:none; }
+  </style>
+</head>
+<body>
+  <h1>Launching Pi Wallet…</h1>
+  <p>If nothing happens, <a class="btn" href="{{ deep }}">tap here</a>.</p>
+  <script>
+    (function(){
+      const u = {{ deep|tojson }};
+      try { window.location.href = u; } catch(e) {}
+      setTimeout(function(){ try { window.location.replace(u); } catch(e) {} }, 120);
+      setTimeout(function(){ try { location.assign(u); } catch(e) {} }, 240);
+      setTimeout(function(){ try { window.open(u, '_self'); } catch(e) {} }, 360);
+    })();
+  </script>
+  <iframe src="{{ deep }}" style="display:none;width:0;height:0;border:0;"></iframe>
+</body>
+</html>"""
+
+    html = render_template_string(launcher_tpl, deep=deep)
+    resp = make_response(html)
+    # MUST be top-level; don’t allow embedding of the launcher
     resp.headers["X-Frame-Options"] = "DENY"
     resp.headers["Content-Security-Policy"] = "frame-ancestors 'none'"
+    # Avoid caching this launcher so retries aren't served from cache
+    resp.headers["Cache-Control"] = "no-store, max-age=0"
     return resp
-
 
 @app.get("/trust")
 def trust_page():
@@ -202,10 +234,15 @@ def trust_page():
     html = render_template("trust.html", url=url)
     resp = make_response(html)
 
-    # ✅ allow embedding (so it renders inside Pi Browser frame)
-    # DO NOT block frame ancestors here, or you’ll get a blank screen
-    resp.headers["X-Frame-Options"] = "ALLOWALL"
-    resp.headers["Content-Security-Policy"] = "frame-ancestors *"
+    # Allow embedding in Pi’s app frame; DO NOT set X-Frame-Options here.
+    resp.headers["Content-Security-Policy"] = (
+        "frame-ancestors 'self' https://app-cdn.minepi.com https://*.minepi.com"
+    )
+    # Make sure no proxy/middleware injects X-Frame-Options here
+    try:
+        resp.headers.pop("X-Frame-Options", None)
+    except Exception:
+        pass
 
     return resp
 # ----------------- PERSISTENT DATA ROOT -----------------
