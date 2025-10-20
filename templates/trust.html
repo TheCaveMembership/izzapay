@@ -5,26 +5,48 @@
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <title>Add IZZA Trustline</title>
     <style>
-      body { font-family: system-ui, -apple-system, Segoe UI, Roboto, sans-serif;
-             background:#000; color:#fff; text-align:center; padding:10% 16px; }
-      a.btn { display:inline-block; padding:12px 22px; border-radius:10px;
-              color:#111; text-decoration:none; font-weight:700;
-              background:linear-gradient(90deg,#7a44ff,#b784ff);
-              box-shadow:0 0 15px rgba(183,132,255,.4); }
-      .ghost { display:inline-block; padding:10px 16px; border:1px solid #b784ff;
-               border-radius:10px; color:#b784ff; text-decoration:none; font-weight:600; margin-top:8px; }
-      pre { text-align:left; background:#0b0b0f; padding:10px; border-radius:8px;
-            color:#ccc; max-width:680px; margin:16px auto 0; white-space:pre-wrap; }
+      body {
+        font-family: system-ui, -apple-system, Segoe UI, Roboto, sans-serif;
+        background:#000; color:#fff; text-align:center; padding:10% 16px;
+      }
+      a.btn {
+        display:inline-block; padding:12px 22px; border-radius:10px;
+        color:#111; text-decoration:none; font-weight:700;
+        background:linear-gradient(90deg,#7a44ff,#b784ff);
+        box-shadow:0 0 15px rgba(183,132,255,.4);
+      }
+      .ghost {
+        display:inline-block; padding:10px 16px; border:1px solid #b784ff;
+        border-radius:10px; color:#b784ff; text-decoration:none; font-weight:600; margin-top:8px;
+      }
+      pre {
+        text-align:left; background:#0b0b0f; padding:10px; border-radius:8px;
+        color:#ccc; max-width:680px; margin:16px auto 0; white-space:pre-wrap;
+      }
     </style>
   </head>
+  <!-- keep i18n injector off so it won't touch the deep link text -->
   <body data-no-global-i18n="1">
     <h1>IZZA Token Trustline</h1>
     <p>Open in <b>Pi Browser</b>, then tap a button below.</p>
 
-    <!-- IMPORTANT: give iOS a plain top-level anchor to the custom scheme -->
-    <p><a id="btn-direct" class="btn" href="{{ url }}" target="_top">Open with Pi Wallet</a></p>
-    <p><a id="btn-https" class="ghost" href="/trust/open" target="_top">Try HTTPS Redirect</a></p>
-    <p><a id="btn-copy" class="ghost" href="#">Copy Deep Link</a></p>
+    <!-- Primary: HTTPS hop that updates the TOP frame, then 302 -> web+stellar -->
+    <p>
+      <a id="btn-https" class="btn" href="/trust/open" target="_top" rel="noopener">
+        Open with Pi Wallet
+      </a>
+    </p>
+
+    <!-- Secondary: direct deep link, still targets TOP (may work on some UAs) -->
+    <p>
+      <a id="btn-direct" class="ghost" href="{{ url }}" target="_top" rel="noopener">
+        Open Direct (fallback)
+      </a>
+    </p>
+
+    <p>
+      <a id="btn-copy" class="ghost" href="#">Copy Deep Link</a>
+    </p>
 
     <pre id="dbg">Log:</pre>
 
@@ -42,7 +64,6 @@
         } catch(e){}
       }
 
-      // Boot info
       (function(){
         const ua = navigator.userAgent || '';
         const inTop = (window === window.top);
@@ -51,37 +72,25 @@
         log('trust_client_boot', {ua, inIframe: !inTop});
       })();
 
-      // Also wire the main button for JS-driven attempts (keeps prior fallbacks)
-      document.getElementById('btn-direct').addEventListener('click', function(e){
-        // Don't preventDefault: we want the native navigation too.
-        log('trust_click', {button:'direct', step:'top.href'});
-        msg("Direct: navigating top to web+stellar...");
-        try { (window.top || window).location.href = deepLink; } catch(e) {}
-        setTimeout(()=>{ try{ log('trust_click',{button:'direct',step:'replace'}); location.replace(deepLink); }catch(e){} }, 50);
-        setTimeout(()=>{ try{ log('trust_click',{button:'direct',step:'open_self'}); window.open(deepLink,'_self'); }catch(e){} }, 100);
-      });
-
-      document.getElementById('btn-https').addEventListener('click', function(){
+      document.getElementById('btn-https').addEventListener('click', () => {
         log('trust_click', {button:'https_redirect'});
       });
 
-      document.getElementById('btn-copy').addEventListener('click', async function(e){
+      document.getElementById('btn-direct').addEventListener('click', () => {
+        log('trust_click', {button:'direct_top'});
+      });
+
+      document.getElementById('btn-copy').addEventListener('click', async (e)=>{
         e.preventDefault();
         try {
           await navigator.clipboard.writeText(deepLink);
-          msg("Copied. Paste into the Pi Browser address bar and tap Go.");
+          msg("Copied. On iOS, pasting in the address bar won’t work; tap a button instead.");
           log('trust_click', {button:'copy', copied:true});
-        } catch(e) {
+        } catch {
           msg("Copy failed. Long-press a button and choose Copy Link.");
           log('trust_click', {button:'copy', copied:false});
         }
       });
-
-      // Gentle auto-attempt (harmless if blocked)
-      setTimeout(() => {
-        log('trust_auto_nav', {via:'setTimeout'});
-        try { window.location.href = deepLink; } catch(e){}
-      }, 1200);
     </script>
   </body>
 </html>
