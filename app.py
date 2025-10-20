@@ -144,7 +144,7 @@ app = Flask(__name__)
 # PUBLIC FILE SERVING ROUTES (.well-known and /assets/)
 # ======================================================
 
-from flask import send_from_directory, make_response, redirect, render_template, render_template_string, request
+from flask import send_from_directory, make_response, redirect, render_template, request
 import os, json
 
 # Serve Pi + Stellar TOML files
@@ -182,42 +182,66 @@ def trust_https_redirect():
         "&origin_domain=izzapay.onrender.com"
     )
 
-    # Use render_template_string so we don't fight Python f-string braces
-    launcher_tpl = """<!doctype html>
+    # HTML launcher with multiple techniques; no f-string curlies, all closed.
+    html = """
+<!doctype html>
 <html lang="en">
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Launching Pi Wallet…</title>
-  <meta http-equiv="refresh" content="0; url={{ deep }}">
+  <meta http-equiv="refresh" content="0; url=%(deep)s">
   <style>
     body { font-family: system-ui, -apple-system, Segoe UI, Roboto, sans-serif; padding:24px; }
     a.btn { display:inline-block; padding:10px 16px; border-radius:10px; background:#eee; text-decoration:none; }
+    .hint { color:#555; margin-top:12px; }
   </style>
 </head>
 <body>
   <h1>Launching Pi Wallet…</h1>
-  <p>If nothing happens, <a class="btn" href="{{ deep }}">tap here</a>.</p>
+  <p>If nothing happens, <a id="tap" class="btn" href="%(deep)s">tap here</a>.</p>
+  <p class="hint">Stay in <b>Pi Browser</b>. Some browsers won’t open custom links from the address bar.</p>
+
   <script>
     (function(){
-      const u = {{ deep|tojson }};
+      var u = %(deep_json)s;
+
+      // 1) top-level navigate
       try { window.location.href = u; } catch(e) {}
-      setTimeout(function(){ try { window.location.replace(u); } catch(e) {} }, 120);
-      setTimeout(function(){ try { location.assign(u); } catch(e) {} }, 240);
-      setTimeout(function(){ try { window.open(u, '_self'); } catch(e) {} }, 360);
+
+      // 2) replace (some iOS versions prefer this)
+      setTimeout(function(){ try { window.location.replace(u); } catch(e) {} }, 100);
+
+      // 3) programmatic anchor click (another gesture path)
+      setTimeout(function(){
+        try {
+          var a = document.createElement('a');
+          a.setAttribute('href', u);
+          a.style.display = 'none';
+          document.body.appendChild(a);
+          a.click();
+          setTimeout(function(){ a.remove(); }, 500);
+        } catch(e) {}
+      }, 200);
+
+      // 4) open in same tab
+      setTimeout(function(){ try { window.open(u, '_self'); } catch(e) {} }, 300);
     })();
   </script>
-  <iframe src="{{ deep }}" style="display:none;width:0;height:0;border:0;"></iframe>
-</body>
-</html>"""
 
-    html = render_template_string(launcher_tpl, deep=deep)
+  <!-- 5) hidden iframe (some webviews still honor this) -->
+  <iframe src="%(deep)s" style="display:none;width:0;height:0;border:0;"></iframe>
+</body>
+</html>
+""" % {
+        "deep": deep,
+        "deep_json": json.dumps(deep)
+    }
+
     resp = make_response(html)
     # MUST be top-level; don’t allow embedding of the launcher
     resp.headers["X-Frame-Options"] = "DENY"
     resp.headers["Content-Security-Policy"] = "frame-ancestors 'none'"
-    # Avoid caching this launcher so retries aren't served from cache
-    resp.headers["Cache-Control"] = "no-store, max-age=0"
     return resp
 
 @app.get("/trust")
@@ -234,11 +258,11 @@ def trust_page():
     html = render_template("trust.html", url=url)
     resp = make_response(html)
 
-    # Allow embedding in Pi’s app frame; DO NOT set X-Frame-Options here.
+    # Allow this page to be embedded in Pi’s app frame (no X-Frame-Options here).
     resp.headers["Content-Security-Policy"] = (
         "frame-ancestors 'self' https://app-cdn.minepi.com https://*.minepi.com"
     )
-    # Make sure no proxy/middleware injects X-Frame-Options here
+    # Ensure proxies don’t inject X-Frame-Options
     try:
         resp.headers.pop("X-Frame-Options", None)
     except Exception:
