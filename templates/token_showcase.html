@@ -265,35 +265,79 @@
   max-width: calc((100% - 10px) / 2); /* EXACT width of a single column (grid gap is 10px) */
 }
 
-    /* Reusable roadmap glow chip — tune per instance with CSS vars */
-    .glow{
-      --sz: 92px;
-      --img: 54px;
-      --offset-x: 0px;
-      --offset-y: 0px;
-      position:relative; width:var(--sz); height:var(--sz);
-      border-radius:50%; margin:16px auto 0;
-      display:flex; align-items:center; justify-content:center;
-      transform: translate(var(--offset-x), var(--offset-y));
-    }
-    .glow::before{
-      content:""; position:absolute; inset:calc(-0.18 * var(--sz));
-      border-radius:inherit; pointer-events:none;
-      animation:pulse 2.2s ease-in-out infinite;
-      background: radial-gradient(circle at 50% 50%, var(--g1) 0%, var(--g2) 45%, transparent 72%);
-      box-shadow: 0 0 calc(0.36 * var(--sz)) var(--s1), 0 0 calc(1.0 * var(--sz)) var(--s2);
-    }
-    .glow img{ width:var(--img); height:var(--img); border-radius:12px; position:relative; z-index:1; }
+    /* Reusable roadmap glow chip — matches main coin pulse (no dark base) */
+.glow{
+  --sz: 92px;
+  --img: 54px;
+  --offset-x: 0px;
+  --offset-y: 0px;
+  position:relative;
+  width:var(--sz);
+  height:var(--sz);
+  border-radius:50%;
+  margin:16px auto 0;
+  display:flex;
+  align-items:center;
+  justify-content:center;
+  transform: translate(var(--offset-x), var(--offset-y));
+  isolation:isolate; /* keeps glow separate from dark bg */
+}
 
-    .glow.violet{ --g1: rgba(var(--violet1),.40); --g2: rgba(var(--violet1),.10); --s1: rgba(var(--violet1),.45); --s2: rgba(var(--violet2),.30); }
-    .glow.gold  { --g1: rgba(var(--gold),.42);   --g2: rgba(var(--gold),.12);   --s1: rgba(var(--gold),.45);   --s2: rgba(var(--gold),.32); }
+/* no black ring — pure transparent pulse */
+.glow::before{
+  content:"";
+  position:absolute;
+  top:50%; left:50%;
+  width:calc(var(--sz) * 1.2);
+  height:calc(var(--sz) * 1.2);
+  transform:translate(-50%, -50%);
+  border-radius:50%;
+  pointer-events:none;
+  animation:pulse 2.2s ease-in-out infinite;
+  background: radial-gradient(50% 50% at 50% 50%,
+              var(--g1) 0%,
+              var(--g2) 45%,
+              rgba(255,185,30,0) 70%);
+  box-shadow:
+    0 0 calc(0.3 * var(--sz)) var(--s1),
+    0 0 calc(0.8 * var(--sz)) var(--s2) inset;
+  z-index:-1;
+}
 
-    @keyframes pulse{ 0%,100%{transform:scale(1)} 50%{transform:scale(1.07)} }
+/* gold + violet variants tuned for glow only (no fill color) */
+.glow.violet{
+  --g1: rgba(183,132,255,.35);
+  --g2: rgba(122,68,255,.18);
+  --s1: rgba(183,132,255,.40);
+  --s2: rgba(122,68,255,.22);
+}
+.glow.gold{
+  --g1: rgba(255,210,90,.35);
+  --g2: rgba(255,185,30,.18);
+  --s1: rgba(255,196,56,.40);
+  --s2: rgba(255,180,0,.22);
+}
 
-    /* stack for roadmap chips */
-    .glow-stack{
-      margin-top:12px; display:flex; flex-direction:column; align-items:center; gap:18px;
-    }
+.glow img{
+  width:var(--img);
+  height:var(--img);
+  border-radius:12px;
+  position:relative;
+  z-index:1;
+}
+
+@keyframes pulse{
+  0%,100%{transform:scale(1)}
+  50%{transform:scale(1.07)}
+}
+
+.glow-stack{
+  margin-top:12px;
+  display:flex;
+  flex-direction:column;
+  align-items:center;
+  gap:18px;
+}
   </style>
 </head>
 <body>
@@ -530,18 +574,15 @@
 
               <!-- Smaller, tidy glow chips -->
               <div class="glow-stack" style="margin-top:14px;">
-                <div class="glow violet"
-                     style="--sz: 45px; --img: 48px; --offset-x: 0px; --offset-y: -4px;">
-                  <img src="/static/izzapay-mark.svg" alt="">
-                </div>
-                <div class="glow gold"
-                     style="--sz: 40px; --img: 52px; --offset-x: 0px; --offset-y: -2px;">
-                  <img src="{{ url_for('serve_assets', filename='izza.png') }}" alt="IZZA coin">
-                </div>
-              </div>
-            </div>
-          </div>
-        </div>
+  <div class="glow violet"
+       style="--sz: 56px; --img: 42px; --offset-y: 4px;">
+    <img src="/static/izzapay-mark.svg" alt="">
+  </div>
+  <div class="glow gold"
+       style="--sz: 60px; --img: 50px; --offset-y: 8px;">
+    <img src="{{ url_for('serve_assets', filename='izza.png') }}" alt="IZZA coin">
+  </div>
+</div>
 
         <div class="blox" style="margin-top:12px">
           <h4>Launch Roadmap</h4>
