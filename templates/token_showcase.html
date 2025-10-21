@@ -18,9 +18,9 @@
       --mono: ui-monospace, SFMono-Regular, Menlo, Monaco, "Roboto Mono", monospace;
 
       /* glow palettes */
-      --gold: 255,205,96;     /* coin glows */
-      --violet1: 183,132,255; /* IZZA mark glow outer */
-      --violet2: 122,68,255;  /* IZZA mark glow inner */
+      --gold: 255,205,96;
+      --violet1: 183,132,255;
+      --violet2: 122,68,255;
     }
 
     html,body{
@@ -91,24 +91,26 @@
     .token-img img{
       width:100%;height:100%;object-fit:contain;border-radius:14px;backface-visibility:hidden;position:relative;z-index:1;
     }
+    /* perfectly centered, SMALLER, and nudged up-left */
     .token-img::before{
       content:"";
       position:absolute;
-      top:  calc(50% + var(--pulse-offset-y, -12px));  /* moves glow up */
-left: calc(50% + var(--pulse-offset-x, -34px));  /* moves glow left */
-width: var(--pulse-size, 160px);
-height: var(--pulse-size, 160px);
+      top:  calc(50% + var(--pulse-offset-y, -16px));
+      left: calc(50% + var(--pulse-offset-x, -36px));
+      width: var(--pulse-size, 140px);
+      height: var(--pulse-size, 140px);
       transform: translate(-50%, -50%);
       border-radius:50%;
       background: radial-gradient(50% 50% at 50% 50%,
                   rgba(255,210,90,.35) 0%,
                   rgba(255,185,30,.18) 45%,
                   rgba(255,185,30,0) 70%);
+      /* softer halo so it reads smaller */
       box-shadow:
-        0 0 55px 10px rgba(255,196,56,.45),
-        0 0 140px 40px rgba(255,180,0,.25) inset;
-      animation: pulse 2.2s ease-in-out infinite; /* matches purple pulse timing */
-      z-index: -1; /* sits behind the coin */
+        0 0 30px 6px rgba(255,196,56,.40),
+        0 0 60px 20px rgba(255,180,0,.22) inset;
+      animation: pulse 2.2s ease-in-out infinite;
+      z-index: -1;
       pointer-events:none;
     }
 
@@ -232,15 +234,15 @@ height: var(--pulse-size, 160px);
     .img-row{display:flex;gap:10px;flex-wrap:wrap}
     .img-row img{width:100px;height:100px;border-radius:12px;object-fit:cover;background:transparent}
 
-    /* center the third economy card */
+    /* center the third economy card (same style, just centered) */
     .center-span{grid-column:1 / -1;justify-self:center;max-width:420px;width:100%}
 
     /* Reusable roadmap glow chip — tune per instance with CSS vars */
     .glow{
-      --sz: 92px;       /* overall chip size (glow area) */
-      --img: 54px;      /* inner image size */
-      --offset-x: 0px;  /* nudge horizontally */
-      --offset-y: 0px;  /* nudge vertically */
+      --sz: 92px;
+      --img: 54px;
+      --offset-x: 0px;
+      --offset-y: 0px;
       position:relative; width:var(--sz); height:var(--sz);
       border-radius:50%; margin:16px auto 0;
       display:flex; align-items:center; justify-content:center;
@@ -258,7 +260,9 @@ height: var(--pulse-size, 160px);
     .glow.violet{ --g1: rgba(var(--violet1),.40); --g2: rgba(var(--violet1),.10); --s1: rgba(var(--violet1),.45); --s2: rgba(var(--violet2),.30); }
     .glow.gold  { --g1: rgba(var(--gold),.42);   --g2: rgba(var(--gold),.12);   --s1: rgba(var(--gold),.45);   --s2: rgba(var(--gold),.32); }
 
-    /* stack to hold the two chips; you can nudge the whole block with margin-top */
+    @keyframes pulse{ 0%,100%{transform:scale(1)} 50%{transform:scale(1.07)} }
+
+    /* stack for roadmap chips */
     .glow-stack{
       margin-top:12px; display:flex; flex-direction:column; align-items:center; gap:18px;
     }
@@ -267,13 +271,11 @@ height: var(--pulse-size, 160px);
 <body>
   <div class="wrap">
     <header>
-      <!-- Top IZZA PAY logo still goes home -->
       <a class="logo" href="{{ APP_BASE_URL or '/' }}" title="Back"
          onclick="try{history.back();}catch(_){/*fallback*/}">
         <img src="/static/izzapay-word.svg" alt="IZZA PAY">
       </a>
 
-      <!-- CTA under the logo -->
       <div class="top-cta" style="grid-column:1 / -1; width:100%">
         <button id="roadmapBtn" class="cta" type="button" aria-haspopup="dialog" aria-controls="roadmapModal">
           <img src="/static/izzapay-mark.svg" alt="" aria-hidden="true">
@@ -294,19 +296,19 @@ height: var(--pulse-size, 160px);
         <div class="bg-weave" aria-hidden="true"></div>
 
         <div class="token-row">
-          <!-- TUNE the main gold glow here via CSS vars -->
+          <!-- Main coin image with SMALLER glow. Tweak only these 3 vars if desired. -->
           <div
             class="token-img"
             id="coinWrap"
             style="
-              --pulse-size: 270px;     /* ← tweak size */
-              --pulse-offset-x: -6px;  /* ← tweak left/right */
-              --pulse-offset-y: 30px;  /* ← tweak up/down */
+              --pulse-size: 140px;   /* size of glow */
+              --pulse-offset-x: -36px; /* left/right (negative = left) */
+              --pulse-offset-y: -16px; /* up/down (negative = up) */
             ">
             <img id="coinImg" src="{{ url_for('serve_assets', filename='izza.png') }}" alt="IZZA token">
           </div>
 
-          <!-- Pulsing mark opens the roadmap modal (unchanged) -->
+          <!-- Pulsing mark opens the roadmap modal -->
           <div class="side-badge">
             <button id="badgeOpen" class="mark-wrap" type="button" title="Open Mainnet Roadmap">
               <img src="/static/izzapay-mark.svg" alt="IZZA mark">
@@ -469,6 +471,7 @@ height: var(--pulse-size, 160px);
                 <div class="mini-mark">💎</div>
                 <div><strong>Crafting Credits</strong><div class="small" style="color:var(--muted)">Premium consumable via Pi</div></div>
               </div>
+              <!-- Same card, centered under the two -->
               <div class="statline center-span">
                 <div class="mini-mark"><img src="{{ url_for('serve_assets', filename='izza.png') }}" alt="" style="width:18px;height:18px"></div>
                 <div style="text-align:center;width:100%">
@@ -496,16 +499,14 @@ height: var(--pulse-size, 160px);
                 Vesting &amp; emissions published on-chain. Staking yields are dynamic and balanced vs. arcade earnings to avoid inflation shocks.
               </p>
 
-              <!-- TUNE the two modal chips below with per-instance vars -->
+              <!-- Smaller, tidy glow chips -->
               <div class="glow-stack" style="margin-top:14px;">
-                <!-- IZZA mark (violet) -->
                 <div class="glow violet"
-                     style="--sz: 110px; --img: 60px; --offset-x: 0px; --offset-y: 6px;"> <!-- ← tweak -->
+                     style="--sz: 86px; --img: 48px; --offset-x: 0px; --offset-y: -4px;">
                   <img src="/static/izzapay-mark.svg" alt="">
                 </div>
-                <!-- Coin (gold) -->
                 <div class="glow gold"
-                     style="--sz: 120px; --img: 66px; --offset-x: 0px; --offset-y: 2px;"> <!-- ← tweak -->
+                     style="--sz: 92px; --img: 52px; --offset-x: 0px; --offset-y: -2px;">
                   <img src="{{ url_for('serve_assets', filename='izza.png') }}" alt="IZZA coin">
                 </div>
               </div>
@@ -632,7 +633,7 @@ height: var(--pulse-size, 160px);
   }
   fetchSummary();
 
-  // Modal wiring (CTA + pulsing badge both open modal)
+  // Modal wiring
   const roadmapBtn    = document.getElementById('roadmapBtn');
   const badgeOpen     = document.getElementById('badgeOpen');
   const modal         = document.getElementById('roadmapModal');
