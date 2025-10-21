@@ -94,10 +94,10 @@
     .token-img::before{
       content:"";
       position:absolute;
-      width: var(--pulse-size, 260px);  /* default diameter */
-      height: var(--pulse-size, 260px);
-      top:  calc(50% + var(--pulse-offset-y, 34px));
-      left: calc(50% + var(--pulse-offset-x, -8px));
+      top:  calc(50% + var(--pulse-offset-y, -12px));  /* moves glow up */
+left: calc(50% + var(--pulse-offset-x, -34px));  /* moves glow left */
+width: var(--pulse-size, 160px);
+height: var(--pulse-size, 160px);
       transform: translate(-50%, -50%);
       border-radius:50%;
       background: radial-gradient(50% 50% at 50% 50%,
