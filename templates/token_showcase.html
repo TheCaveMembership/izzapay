@@ -85,6 +85,17 @@
     @keyframes coinspin{to{transform:rotateY(720deg)}}
     .spin-anim{animation:coinspin 1.1s ease-in-out}
 
+    /* GOLD pulse behind big coin (main page) */
+    .coin-pulse{
+      position:absolute; left:50%; top:50%; transform:translate(-50%,-50%);
+      width:150px; height:150px; border-radius:50%;
+      pointer-events:none; z-index:0;
+      background:
+        radial-gradient(60% 60% at 50% 45%, rgba(255,215,128,.55), rgba(255,172,28,.24) 60%, rgba(255,172,28,0) 70%);
+      box-shadow:0 0 30px rgba(255,200,80,.45), 0 0 120px rgba(255,172,28,.30);
+      animation:pulse 2.2s ease-in-out infinite;
+    }
+
     .bg-weave{
       position:absolute; inset:-4px; z-index:-1; border-radius:20px;
       background:
@@ -108,7 +119,7 @@
     .mono{font-family:var(--mono)}
     .wrapaddr{word-break:break-all; overflow-wrap:anywhere}
 
-    /* pulsing badge beside coin (now opens roadmap) */
+    /* pulsing badge beside coin (opens roadmap) */
     .side-badge{
       display:flex;flex-direction:column;align-items:center;gap:8px;
       padding:0;border:none;background:none;
@@ -207,18 +218,31 @@
     .img-row{display:flex;gap:10px;flex-wrap:wrap}
     .img-row img{width:100px;height:100px;border-radius:12px;object-fit:cover;background:transparent}
 
-    /* center the third economy card */
-    .center-span{grid-column:1 / -1;justify-self:center;max-width:420px;width:100%}
+    /* center the third economy card; same width as one column */
+    .center-span{
+      grid-column:1 / -1; justify-self:center;
+      width: calc((100% - 10px)/2);   /* match a single column width (gap=10px) */
+    }
 
-    /* small pulsing mark for distribution section */
-    .pulse-mark{
-      width:64px;height:64px;border-radius:14px;margin-top:10px;
+    /* PURE glow pulses (no boxes) for modal */
+    .pulse-stack{display:flex;flex-direction:column;align-items:center;justify-content:center;transform:translate(8px,6px)}
+    .purple-glow, .gold-glow{
+      border-radius:50%;
       display:flex;align-items:center;justify-content:center;
-      background: radial-gradient(60% 60% at 50% 40%, rgba(183,132,255,.42), rgba(183,132,255,.20));
-      box-shadow: 0 0 18px rgba(183,132,255,.45), 0 0 60px rgba(122,68,255,.32);
       animation:pulse 2.2s ease-in-out infinite;
     }
-    .pulse-mark img{width:36px;height:36px}
+    .purple-glow{
+      width:74px;height:74px;
+      background:radial-gradient(60% 60% at 50% 45%, rgba(183,132,255,.55), rgba(122,68,255,.22) 62%, rgba(122,68,255,0) 72%);
+      box-shadow:0 0 26px rgba(183,132,255,.45), 0 0 100px rgba(122,68,255,.30);
+    }
+    .purple-glow img{width:40px;height:40px}
+    .gold-glow{
+      width:82px;height:82px;margin-top:12px;
+      background:radial-gradient(60% 60% at 50% 45%, rgba(255,215,128,.55), rgba(255,172,28,.24) 60%, rgba(255,172,28,0) 70%);
+      box-shadow:0 0 30px rgba(255,200,80,.45), 0 0 120px rgba(255,172,28,.30);
+    }
+    .gold-glow img{width:46px;height:46px}
   </style>
 </head>
 <body>
@@ -252,6 +276,8 @@
 
         <div class="token-row">
           <div class="token-img" id="coinWrap">
+            <!-- GOLD glow behind big coin -->
+            <div class="coin-pulse" aria-hidden="true"></div>
             <img id="coinImg" src="{{ url_for('serve_assets', filename='izza.png') }}" alt="IZZA token">
           </div>
 
@@ -307,7 +333,7 @@
             </div>
           </div>
 
-          <div class="mini">
+        <div class="mini">
             <div class="ico">🧬</div>
             <div>
               <div class="small-muted">Origin</div>
@@ -422,7 +448,7 @@
                 <div><strong>Crafting Credits</strong><div class="small" style="color:var(--muted)">Premium consumable via Pi</div></div>
               </div>
 
-              <!-- IZZA Token centered under the two -->
+              <!-- IZZA Token centered under the two (same size as each card) -->
               <div class="statline center-span">
                 <div class="mini-mark"><img src="{{ url_for('serve_assets', filename='izza.png') }}" alt="" style="width:18px;height:18px"></div>
                 <div style="text-align:center;width:100%">
@@ -450,9 +476,15 @@
               <p style="margin:4px 0 0 0;color:#cfe0ff">
                 Vesting &amp; emissions published on-chain. Staking yields are dynamic and balanced vs. arcade earnings to avoid inflation shocks.
               </p>
-              <!-- pulsing IZZA mark underneath -->
-              <div class="pulse-mark" aria-hidden="true">
-                <img src="/static/izzapay-mark.svg" alt="">
+
+              <!-- Centered, slightly lower/right purple pulse, then gold coin pulse (no boxes) -->
+              <div class="pulse-stack" aria-hidden="true">
+                <div class="purple-glow">
+                  <img src="/static/izzapay-mark.svg" alt="">
+                </div>
+                <div class="gold-glow">
+                  <img src="{{ url_for('serve_assets', filename='izza.png') }}" alt="">
+                </div>
               </div>
             </div>
           </div>
