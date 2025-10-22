@@ -90,26 +90,58 @@
 
     /* Hidden iframe for silent priming */
     #izzaPrimeFrame{ position:fixed; width:0; height:0; opacity:0; pointer-events:none; inset:auto auto 0 0; border:0 }
-
+/* Lock the page when the modal is open */
+body.no-scroll { overflow: hidden; }
     /* ===== Leaderboard modal styles (added) ===== */
-    .lb-modal{position:fixed;inset:0;background:rgba(0,0,0,.5);display:none;z-index:9999;align-items:flex-end}
-    .lb-modal.show{display:flex}
-    .lb-sheet{width:100%;max-width:1100px;margin:0 auto;background:var(--card);border:1px solid var(--line);border-radius:14px 14px 0 0;padding:12px 12px 16px}
-    .lb-head{display:flex;align-items:center;justify-content:space-between;gap:8px}
-    .lb-close{line-height:1;padding:6px 10px}
-    .lb-controls{display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin:10px 0}
-    .lb-label{font-size:12px;color:var(--muted)}
-    .lb-select{padding:6px 10px;border-radius:8px;border:1px solid var(--line);background:var(--chip-bg);color:inherit}
-    .lb-tabs{display:flex;gap:6px;flex-wrap:wrap}
-    .lb-tab{border:1px solid var(--line);background:var(--chip-bg);padding:6px 10px;border-radius:999px;cursor:pointer}
-    .lb-tab.is-active{outline:2px solid rgba(255,255,255,.1)}
-    .lb-body{margin-top:8px}
-    .lb-table{width:100%;border-collapse:collapse}
-    .lb-table th,.lb-table td{padding:8px;border-bottom:1px solid var(--line);text-align:left;font-size:14px}
-    .lb-table th{font-size:12px;color:var(--muted);font-weight:600}
-    .lb-row-me{background:rgba(255,255,255,.03)}
-    .lb-empty{border:1px dashed var(--line);border-radius:8px;padding:12px;text-align:center}
-    .lb-extra{margin-top:12px;padding-top:8px;border-top:1px solid var(--line)}
+.lb-modal{position:fixed;inset:0;background:rgba(0,0,0,.5);display:none;z-index:9999;align-items:flex-end}
+.lb-modal.show{display:flex}
+
+/* ⬇ add these properties to make the sheet a flex column & height-capped */
+.lb-sheet{
+  width:100%;
+  max-width:1100px;
+  margin:0 auto;
+  background:var(--card);
+  border:1px solid var(--line);
+  border-radius:14px 14px 0 0;
+  padding:12px 12px 16px;
+  max-height:88vh;              /* NEW */
+  display:flex;                 /* NEW */
+  flex-direction:column;        /* NEW */
+}
+
+.lb-head{display:flex;align-items:center;justify-content:space-between;gap:8px}
+.lb-close{line-height:1;padding:6px 10px}
+.lb-controls{display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin:10px 0}
+.lb-label{font-size:12px;color:var(--muted)}
+.lb-select{padding:6px 10px;border-radius:8px;border:1px solid var(--line);background:var(--chip-bg);color:inherit}
+.lb-tabs{display:flex;gap:6px;flex-wrap:wrap}
+.lb-tab{border:1px solid var(--line);background:var(--chip-bg);padding:6px 10px;border-radius:999px;cursor:pointer}
+.lb-tab.is-active{outline:2px solid rgba(255,255,255,.1)}
+
+/* ⬇ make the table area scrollable inside the sheet */
+.lb-body{
+  margin-top:8px;
+  flex:1 1 auto;                /* NEW */
+  min-height:0;                 /* NEW */
+  overflow:auto;                /* NEW */
+  -webkit-overflow-scrolling:touch; /* NEW (iOS smooth) */
+}
+
+.lb-table{width:100%;border-collapse:collapse}
+.lb-table th,.lb-table td{padding:8px;border-bottom:1px solid var(--line);text-align:left;font-size:14px}
+.lb-table th{font-size:12px;color:var(--muted);font-weight:600}
+.lb-row-me{background:rgba(255,255,255,.03)}
+.lb-empty{border:1px dashed var(--line);border-radius:8px;padding:12px;text-align:center}
+
+/* Optional: if the chase section can grow tall, also constrain it */
+.lb-chase{
+  max-height:40vh;              /* NEW */
+  overflow:auto;                /* NEW */
+  -webkit-overflow-scrolling:touch; /* NEW */
+}
+
+.lb-extra{margin-top:12px;padding-top:8px;border-top:1px solid var(--line)}
   </style>
 </head>
 <body class="cw-blue theme-a">
@@ -1026,31 +1058,36 @@ window.addEventListener('izza-inventory-changed', refreshArenaCursor, { passive:
       if(!elModal||!elOpen||!elClose||!elBody||!elTabs||!elGame) return;
 
       function open(){
-        elModal.classList.add('show');
-        loadAndRender(true);
-        renderPoliceChase();   // render IZZA City chase leaderboard
-      }
+  elModal.classList.add('show');
+  document.body.classList.add('no-scroll');   // lock background scroll
+  loadAndRender(true);
+  renderPoliceChase();                        // IZZA City chase leaderboard
+}
 
-      elTabs.addEventListener('click', (e)=>{
-        const b = e.target.closest('[data-period]'); if(!b) return;
-        period = b.getAttribute('data-period');
-        elTabs.querySelectorAll('.lb-tab').forEach(x=>x.classList.toggle('is-active', x===b));
-        loadAndRender();
-        renderPoliceChase();   // refresh chase block when tabs change
-      }, {passive:true});
-      // Also refresh when game dropdown changes
-elGame.addEventListener('change', ()=>{
-  loadAndRender();      // reload leaderboard for the newly selected game
+elTabs.addEventListener('click', (e)=>{
+  const b = e.target.closest('[data-period]'); if(!b) return;
+  period = b.getAttribute('data-period');
+  elTabs.querySelectorAll('.lb-tab').forEach(x=>x.classList.toggle('is-active', x===b));
+  loadAndRender();
+  renderPoliceChase();                        // refresh chase block when tabs change
 }, {passive:true});
 
-      function close(){ elModal.classList.remove('show'); }
-      elOpen.addEventListener('click', open, {passive:true});
-      elClose.addEventListener('click', close, {passive:true});
-      elModal.addEventListener('click', (e)=>{ if(e.target===elModal) close(); }, {passive:true});
-      document.addEventListener('keydown', (e)=>{ if(e.key==='Escape') close(); }, {passive:true});
+// Also refresh when game dropdown changes
+elGame.addEventListener('change', ()=>{
+  loadAndRender();                            // reload leaderboard for the selected game
+}, {passive:true});
 
-      let period = 'day'; // default
-      
+function close(){
+  elModal.classList.remove('show');
+  document.body.classList.remove('no-scroll'); // unlock background scroll
+}
+
+elOpen.addEventListener('click', open, {passive:true});
+elClose.addEventListener('click', close, {passive:true});
+elModal.addEventListener('click', (e)=>{ if(e.target===elModal) close(); }, {passive:true});
+document.addEventListener('keydown', (e)=>{ if(e.key==='Escape') close(); }, {passive:true});
+
+let period = 'day'; // default
 
       /* ---------- Local ledger helpers: makes your own scores show up ---------- */
       function meUsername(){
