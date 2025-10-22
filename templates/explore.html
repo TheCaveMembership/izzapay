@@ -135,7 +135,12 @@
             <div class="row" style="justify-content:space-between">
               <div class="row" style="min-width:0">
                 {% if s.logo_url %}
-                  <img class="logo" src="/uimg?src={{ s.logo_url | urlencode }}" alt="{{ s.business_name }} logo">
+                  {% set u = (s.logo_url or '') | trim %}
+<img class="logo"
+     src="{% if u.startswith('/media/') or u.startswith('/') %}{{ u }}
+          {% elif u.startswith('http://') or u.startswith('https://') %}/uimg?src={{ u|urlencode }}
+          {% else %}{{ u }}{% endif %}"
+     alt="{{ s.business_name }} logo">
                 {% else %}
                   <div class="logo" style="display:flex;align-items:center;justify-content:center;font-weight:800;color:var(--muted)">
                     {{ (s.business_name or 'S')[:1] }}
@@ -166,8 +171,14 @@
       {{ p.svg_code | safe }}
     </div>
   {% elif p.image_url %}
-    <img class="thumb" src="/uimg?src={{ p.image_url | urlencode }}" alt="{{ p.title }}">
-  {% endif %}
+  {% set u = (p.image_url or '') | trim %}
+  <img class="thumb"
+       src="{% if u.startswith('/media/') or u.startswith('/') %}{{ u }}
+            {% elif u.startswith('http://') or u.startswith('https://') %}/uimg?src={{ u|urlencode }}
+            {% else %}{{ u }}{% endif %}"
+       alt="{{ p.title }}">
+{% endif %}
+  
   {% if sold_out %}
     <div class="soldout-banner">Sold Out</div>
   {% endif %}
