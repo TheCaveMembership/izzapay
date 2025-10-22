@@ -62,8 +62,15 @@
     <div class="card">
       <div class="row" style="align-items:center">
         {% if i and i.logo_url %}
-          <img src="/uimg?src={{ i.logo_url | urlencode }}" alt="" style="height:36px;border-radius:6px;border:1px solid var(--line)">
-        {% endif %}
+  {% set u = (i.logo_url or '') | trim %}
+  <img
+    src="{% if u.startswith('/media/') or u.startswith('/static/') or u.startswith('/') 
+             or u.startswith('https://izzapay.onrender.com/media/') %}{{ u }}
+          {% elif u.startswith('http://') or u.startswith('https://') %}/uimg?src={{ u|urlencode }}
+          {% else %}{{ u }}{% endif %}"
+    alt=""
+    style="height:36px;border-radius:6px;border:1px solid var(--line)">
+{% endif %}
         <div>
           <div style="font-weight:800">{{ (i.business_name if i else (m.business_name if m is defined and m else '')) or 'Store' }}</div>
           <div class="muted">{{ i.title if i else 'Cart total' }}</div>
@@ -92,7 +99,13 @@
                   {% if r_svg %}
                     {{ r_svg | safe }}
                   {% elif r_img %}
-                    <img src="/uimg?src={{ r_img | urlencode }}" alt="">
+  {% set u = (r_img or '') | trim %}
+  <img
+    src="{% if u.startswith('/media/') or u.startswith('/static/') or u.startswith('/') 
+             or u.startswith('https://izzapay.onrender.com/media/') %}{{ u }}
+          {% elif u.startswith('http://') or u.startswith('https://') %}/uimg?src={{ u|urlencode }}
+          {% else %}{{ u }}{% endif %}"
+    alt="">
                   {% endif %}
                 </div>
                 <div style="flex:1">
@@ -109,7 +122,13 @@
                 {% if i_svg %}
                   {{ i_svg | safe }}
                 {% elif i_img %}
-                  <img src="/uimg?src={{ i_img | urlencode }}" alt="">
+  {% set u = (i_img or '') | trim %}
+  <img
+    src="{% if u.startswith('/media/') or u.startswith('/static/') or u.startswith('/') 
+             or u.startswith('https://izzapay.onrender.com/media/') %}{{ u }}
+          {% elif u.startswith('http://') or u.startswith('https://') %}/uimg?src={{ u|urlencode }}
+          {% else %}{{ u }}{% endif %}"
+    alt="">
                 {% endif %}
               </div>
               <div style="flex:1">
