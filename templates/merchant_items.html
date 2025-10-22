@@ -274,6 +274,7 @@
             <tbody>
             {% for it in items %}
               <tr>
+                <td>
   {% set svg = (it.svg_code or '') | trim %}
 {% set img = (it.image_url or '') | trim %}
 <td>
@@ -281,14 +282,8 @@
     {% if svg %}
       {{ svg | safe }}
     {% elif img %}
-      {% set is_http = img.startswith('http://') or img.startswith('https://') %}
-{% set is_local = img.startswith('/media/') %}
-<img
-  src="{% if is_local %}{{ img }}{% elif is_http %}/uimg?src={{ img | urlencode }}{% else %}{{ img }}{% endif %}"
-  alt=""
-  loading="lazy"
-  referrerpolicy="no-referrer"
-  onerror="this.replaceWith((()=>{const s=document.createElement('span');s.className='muted';s.style.fontSize='12px';s.textContent='—';return s;})())">
+      <img src="/uimg?src={{ img | urlencode }}" alt="" loading="lazy" referrerpolicy="no-referrer"
+           onerror="this.replaceWith((()=>{const s=document.createElement('span');s.className='muted';s.style.fontSize='12px';s.textContent='—';return s;})())">
     {% else %}
       <span class="muted" style="font-size:12px">—</span>
     {% endif %}
