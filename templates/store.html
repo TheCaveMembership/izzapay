@@ -97,8 +97,14 @@
 
   <div class="top">
     {% if m.logo_url %}
-      <img class="logo" src="/uimg?src={{ m.logo_url | urlencode }}" alt="">
-    {% endif %}
+  {% set u = (m.logo_url or '') | trim %}
+  <img class="logo"
+       src="{% if u.startswith('/media/') or u.startswith('/static/') or u.startswith('/') 
+                or u.startswith('https://izzapay.onrender.com/media/') %}{{ u }}
+             {% elif u.startswith('http://') or u.startswith('https://') %}/uimg?src={{ u|urlencode }}
+             {% else %}{{ u }}{% endif %}"
+       alt="">
+{% endif %}
     <div class="grow">
       <div class="header">
         <div>
@@ -131,7 +137,13 @@
           {% if svg %}
             {{ svg | safe }}
           {% elif img %}
-            <img src="/uimg?src={{ img | urlencode }}" alt="">
+  {% set u = (img or '') | trim %}
+  <img
+    src="{% if u.startswith('/media/') or u.startswith('/static/') or u.startswith('/') 
+             or u.startswith('https://izzapay.onrender.com/media/') %}{{ u }}
+          {% elif u.startswith('http://') or u.startswith('https://') %}/uimg?src={{ u|urlencode }}
+          {% else %}{{ u }}{% endif %}"
+    alt="">
           {% else %}
             <div style="width:100%;height:100%;background:#cbd5e1"></div>
           {% endif %}
