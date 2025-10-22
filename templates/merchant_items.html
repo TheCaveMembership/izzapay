@@ -274,22 +274,16 @@
             <tbody>
             {% for it in items %}
               <tr>
-  {# --- Image cell --- #}
-{% set svg = (it.svg_code or '') | trim %}
-{% set img_raw = (it.image_url or '') | trim %}
+                <td>
+  {% set svg = (it.svg_code or '') | trim %}
+{% set img = (it.image_url or '') | trim %}
 <td>
   <div class="itimg {% if svg %}is-svg{% endif %}" data-no-i18n="1">
     {% if svg %}
       {{ svg | safe }}
-    {% elif img_raw %}
-      {# If the value is already proxied, use it as-is; otherwise wrap through /uimg #}
-      {% set already_proxied = img_raw.startswith('/uimg?src=') %}
-      <img
-        src="{{ already_proxied and img_raw or ('/uimg?src=' ~ (img_raw | urlencode)) }}"
-        alt=""
-        loading="lazy"
-        referrerpolicy="no-referrer"
-        onerror="this.replaceWith((()=>{const s=document.createElement('span');s.className='muted';s.style.fontSize='12px';s.textContent='—';return s;})())">
+    {% elif img %}
+      <img src="/uimg?src={{ img | urlencode }}" alt="" loading="lazy" referrerpolicy="no-referrer"
+           onerror="this.replaceWith((()=>{const s=document.createElement('span');s.className='muted';s.style.fontSize='12px';s.textContent='—';return s;})())">
     {% else %}
       <span class="muted" style="font-size:12px">—</span>
     {% endif %}
