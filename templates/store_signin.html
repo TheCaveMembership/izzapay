@@ -42,8 +42,14 @@
   <div class="card">
     <div class="brand">
       {% if logo_url %}
-        <img src="/uimg?src={{ logo_url | urlencode }}" alt="">
-      {% endif %}
+  {% set u = (logo_url or '') | trim %}
+  <img
+    src="{% if u.startswith('/media/') or u.startswith('/static/') or u.startswith('/') 
+             or u.startswith('https://izzapay.onrender.com/media/') %}{{ u }}
+          {% elif u.startswith('http://') or u.startswith('https://') %}/uimg?src={{ u|urlencode }}
+          {% else %}{{ u }}{% endif %}"
+    alt="{{ store_name or slug }}">
+{% endif %}
       <div>
         <h1>Sign in with Pi</h1>
         <p class="sub">
