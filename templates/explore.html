@@ -137,7 +137,8 @@
                 {% if s.logo_url %}
                   {% set u = (s.logo_url or '') | trim %}
 <img class="logo"
-     src="{% if u.startswith('/media/') or u.startswith('/') %}{{ u }}
+     src="{% if u.startswith('/media/') or u.startswith('/static/') or u.startswith('/') 
+              or u.startswith('https://izzapay.onrender.com/media/') %}{{ u }}
           {% elif u.startswith('http://') or u.startswith('https://') %}/uimg?src={{ u|urlencode }}
           {% else %}{{ u }}{% endif %}"
      alt="{{ s.business_name }} logo">
@@ -172,11 +173,12 @@
     </div>
   {% elif p.image_url %}
   {% set u = (p.image_url or '') | trim %}
-  <img class="thumb"
-       src="{% if u.startswith('/media/') or u.startswith('/') %}{{ u }}
-            {% elif u.startswith('http://') or u.startswith('https://') %}/uimg?src={{ u|urlencode }}
-            {% else %}{{ u }}{% endif %}"
-       alt="{{ p.title }}">
+<img class="thumb"
+     src="{% if u.startswith('/media/') or u.startswith('/static/') or u.startswith('/') 
+              or u.startswith('https://izzapay.onrender.com/media/') %}{{ u }}
+          {% elif u.startswith('http://') or u.startswith('https://') %}/uimg?src={{ u|urlencode }}
+          {% else %}{{ u }}{% endif %}"
+     alt="{{ p.title }}">
 {% endif %}
   
   {% if sold_out %}
