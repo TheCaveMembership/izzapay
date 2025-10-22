@@ -3913,78 +3913,103 @@ _TRANSPARENT_PNG = base64.b64decode(
 def uimg():
     src = (request.args.get("src") or "").strip()
     if not src:
-        return Response(_TRANSPARENT_PNG, headers={"Content-Type": "image/png", "Cache-Control": "public, max-age=86400"})
+        # return 1×1 PNG placeholder if missing
+        return Response(_TRANSPARENT_PNG, headers={
+            "Content-Type": "image/png",
+            "Cache-Control": "public, max-age=86400"
+        })
 
-    # NEW: allow safe data: URLs directly (used by dashboard previews)
+    # ---- Allow data: URLs directly (used by dashboard previews) ----
     if src.startswith("data:"):
         try:
             header, body = src.split(",", 1)
             ctype = header.split(":", 1)[1].split(";", 1)[0].lower()
             if ctype not in ("image/svg+xml", "image/png", "image/jpeg", "image/webp", "image/gif"):
-                return Response(_TRANSPARENT_PNG, headers={"Content-Type": "image/png", "Cache-Control": "public, max-age=86400"})
-            if ";base64" in header.lower():
-                raw = base64.b64decode(body)
-            else:
-                raw = body.encode("utf-8")
-            # light SVG sanitize
+                raise ValueError("unsupported data URL type")
+            raw = base64.b64decode(body) if ";base64" in header.lower() else body.encode("utf-8")
             if ctype == "image/svg+xml":
                 import re
                 txt = raw.decode("utf-8", errors="ignore")
                 txt = re.sub(r"<\s*script\b[^>]*>.*?<\s*/\s*script\s*>", "", txt, flags=re.I | re.S)
                 txt = re.sub(r"\son[a-z]+\s*=\s*['\"][^'\"]*['\"]", "", txt, flags=re.I)
                 raw = txt.encode("utf-8")
-            return Response(raw, headers={"Content-Type": ctype, "Cache-Control": "public, max-age=60"})
+            return Response(raw, headers={
+                "Content-Type": ctype,
+                "Cache-Control": "public, max-age=60"
+            })
         except Exception:
-            return Response(_TRANSPARENT_PNG, headers={"Content-Type": "image/png", "Cache-Control": "public, max-age=86400"})
+            return Response(_TRANSPARENT_PNG, headers={
+                "Content-Type": "image/png",
+                "Cache-Control": "public, max-age=86400"
+            })
 
+    # ---- Parse the URL safely ----
     try:
         u = urlparse(src)
     except Exception:
-        return Response(_TRANSPARENT_PNG, headers={"Content-Type": "image/png", "Cache-Control": "public, max-age=86400"})
+        return Response(_TRANSPARENT_PNG, headers={
+            "Content-Type": "image/png",
+            "Cache-Control": "public, max-age=86400"
+        })
 
-    # Local file paths: allow /static and /media
+    # ---- LOCAL FILE PATHS (STATIC / MEDIA) ----
     if not u.scheme and src.startswith(("/static/", "/media/")):
-        # Map /static to the app's static folder; /media to UPLOAD_DIR
         if src.startswith("/static/"):
             base_root = app.static_folder or os.path.join(os.path.dirname(__file__), "static")
             rel_path = src[len("/static/"):]
         else:
             base_root = UPLOAD_DIR
             rel_path = src[len("/media/"):]
+
         safe_base = os.path.abspath(base_root)
         safe_path = os.path.abspath(os.path.normpath(os.path.join(safe_base, rel_path)))
         if not safe_path.startswith(safe_base) or not os.path.exists(safe_path):
-            return Response(_TRANSPARENT_PNG, headers={"Content-Type": "image/png", "Cache-Control": "public, max-age=86400"})
+            return Response(_TRANSPARENT_PNG, headers={
+                "Content-Type": "image/png",
+                "Cache-Control": "public, max-age=86400"
+            })
+
         try:
             ctype = mimetypes.guess_type(safe_path)[0] or "image/png"
         except Exception:
             ctype = "image/png"
+
         with open(safe_path, "rb") as f:
             data = f.read()
-        return Response(data, headers={"Content-Type": ctype, "Cache-Control": "public, max-age=86400"})
+        return Response(data, headers={
+            "Content-Type": ctype,
+            "Cache-Control": "public, max-age=86400"
+        })
 
-    # HTTPS only for external
+    # ---- SAME-ORIGIN ABSOLUTE URL (e.g., https://izzapay.onrender.com/media/...) ----
     if u.scheme in ("http", "https"):
-        if u.scheme != "https":
-            # Only allow cleartext if it is our own host (defensive)
-            try:
-                app_host = urlparse(APP_BASE_URL).netloc
-            except Exception:
-                app_host = request.host
-            if u.netloc != app_host:
-                return Response(_TRANSPARENT_PNG, headers={"Content-Type": "image/png", "Cache-Control": "public, max-age=86400"})
         try:
-            r = requests.get(src, stream=True, timeout=10, headers={"User-Agent": "izzapay-image-proxy"})
-            if r.status_code != 200:
-                return Response(_TRANSPARENT_PNG, headers={"Content-Type": "image/png", "Cache-Control": "public, max-age=86400"})
-            ctype = r.headers.get("Content-Type", "image/png")
-            data = r.content
-            return Response(data, headers={"Content-Type": ctype, "Cache-Control": "public, max-age=86400"})
+            app_host = urlparse(APP_BASE_URL).netloc or request.host
         except Exception:
-            return Response(_TRANSPARENT_PNG, headers={"Content-Type": "image/png", "Cache-Control": "public, max-age=86400"})
+            app_host = request.host
+        if u.netloc and u.netloc.lower().startswith(app_host.lower()) and u.path.startswith(("/media/", "/static/")):
+            # Redirect directly to local path instead of proxying
+            return redirect(u.path, code=302)
 
-    return Response(_TRANSPARENT_PNG, headers={"Content-Type": "image/png", "Cache-Control": "public, max-age=86400"})
+        # ---- Remote fetch fallback (proxy external HTTPS only) ----
+        if u.scheme == "https" or (u.scheme == "http" and u.netloc == app_host):
+            try:
+                r = requests.get(src, stream=True, timeout=10, headers={"User-Agent": "izzapay-image-proxy"})
+                if r.status_code != 200:
+                    raise ValueError("bad status")
+                ctype = r.headers.get("Content-Type", "image/png")
+                return Response(r.content, headers={
+                    "Content-Type": ctype,
+                    "Cache-Control": "public, max-age=86400"
+                })
+            except Exception:
+                pass
 
+    # ---- Fallback: return 1×1 transparent pixel ----
+    return Response(_TRANSPARENT_PNG, headers={
+        "Content-Type": "image/png",
+        "Cache-Control": "public, max-age=86400"
+    })
 
 # ----------------- POLICIES / STATIC PAGES -----------------
 @app.get("/validation-key.txt")
