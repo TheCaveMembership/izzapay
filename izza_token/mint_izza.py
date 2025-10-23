@@ -180,6 +180,91 @@ def issuer_mint_payment():
     tx.sign(issuer_kp)
     return submit_and_print(tx)
 
+# ==================== DEX OFFER HELPERS (ADD HERE) ====================
+
+from stellar_sdk import Asset as _AssetAlias  # not strictly needed; Asset.native() already imported
+
+def create_sell_offer(amount_izza: str, price_pi_per_izza: str):
+    """
+    Post a single sell offer: SELL IZZA for native (Pi) at a fixed price.
+    amount_izza: how many IZZA to sell in this offer
+    price_pi_per_izza: quoted as Pi per 1 IZZA (e.g., '0.001')
+    """
+    distr_kp   = Keypair.from_secret(DISTR_SECRET)
+    distr_acct = server.load_account(distr_kp.public_key)
+
+    tx = (
+        TransactionBuilder(
+            source_account=distr_acct,
+            network_passphrase=NETWORK_PASSPHRASE,
+            base_fee=get_base_fee(),
+        )
+        .append_manage_sell_offer_op(
+            selling=asset,                 # IZZA (your asset)
+            buying=Asset.native(),         # buy Pi (native)
+            amount=str(Decimal(amount_izza)),
+            price=str(Decimal(price_pi_per_izza)),
+            offer_id=0                     # 0 = create new offer
+        )
+        .set_timeout(180)
+        .build()
+    )
+    tx.sign(distr_kp)
+    resp = submit_and_print(tx)
+    print(f"📈 Posted offer: {amount_izza} IZZA @ {price_pi_per_izza} Pi")
+    return resp
+
+def seed_sale_ladder(total_amount: int,
+                     chunk_amount: int = 10_000,
+                     start_price: Decimal = Decimal("0.0005"),
+                     step: Decimal = Decimal("0.001")):
+    """
+    Seed a ladder of offers so that for each 'chunk_amount' sold, the next
+    remaining offer is +step Pi higher.
+    """
+    remaining = int(total_amount)
+    i = 0
+    while remaining > 0:
+        this_chunk = min(chunk_amount, remaining)
+        price = start_price + (step * i)
+        create_sell_offer(amount_izza=str(this_chunk), price_pi_per_izza=str(price))
+        remaining -= this_chunk
+        i += 1
+    print("✅ Sale ladder seeded.")
+
+def cancel_all_izza_offers():
+    """Cancel all existing IZZA sell offers from the distributor."""
+    distr_kp = Keypair.from_secret(DISTR_SECRET)
+    offers = server.offers().seller(distr_kp.public_key).call()["_embedded"]["records"]
+    izza_offers = [o for o in offers
+                   if o.get("selling", {}).get("asset_code") == ASSET_CODE
+                   and o.get("selling", {}).get("asset_issuer") == ISSUER_PUB]
+
+    if not izza_offers:
+        print("No IZZA offers to cancel.")
+        return
+
+    distr_acct = server.load_account(distr_kp.public_key)
+    tb = TransactionBuilder(
+        source_account=distr_acct,
+        network_passphrase=NETWORK_PASSPHRASE,
+        base_fee=get_base_fee(),
+    )
+    for o in izza_offers:
+        tb.append_manage_sell_offer_op(
+            selling=asset,
+            buying=Asset.native(),
+            amount="0",                  # amount=0 => cancel existing offer
+            price=o["price"],            # must include a price even when canceling
+            offer_id=int(o["id"])
+        )
+    tx = tb.set_timeout(180).build()
+    tx.sign(distr_kp)
+    submit_and_print(tx)
+    print(f"🧹 Canceled {len(izza_offers)} IZZA offers.")
+
+# ================== END DEX OFFER HELPERS (STOP ADDING) ==================
+
 if __name__ == "__main__":
     print("Checking accounts exist on-chain …")
     maybe_create_account(ISSUER_PUB)
@@ -194,6 +279,16 @@ if __name__ == "__main__":
     print("Step 3/3: Mint payment issuer → distributor …")
     issuer_mint_payment()
 
-    print("\nAll done. Verify balances at:")
+    # --- Step 4: Seed public sale ladder (Growth allocation) ---
+    # 400,000 IZZA total, 10,000 per rung, start at 0.0005 Pi and +0.001 each step
+    print("Step 4/4: Seed DEX sale ladder …")
+    seed_sale_ladder(
+        total_amount=400_000,
+        chunk_amount=10_000,
+        start_price=Decimal("0.0005"),
+        step=Decimal("0.001")
+    )
+
+    print("\nAll done. Verify balances/offers at:")
     print(f"  Issuer:      {HORIZON_URL}/accounts/{ISSUER_PUB}")
     print(f"  Distributor: {HORIZON_URL}/accounts/{DISTR_PUB}")
