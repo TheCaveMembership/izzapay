@@ -352,7 +352,7 @@
           </div>
         </div>
 
-        <div class="two" style="margin-top:12px">
+                <div class="two" style="margin-top:12px">
           <div class="stat">
             <div class="label">Distributor balance (IZZA)</div>
             <strong id="dist-balance">—</strong>
@@ -362,7 +362,14 @@
             <strong id="trust-count">—</strong>
           </div>
         </div>
-      </div>
+
+        <!-- Order book launcher (inside the panel) -->
+        <div class="top-cta" style="margin-top:10px">
+          <button id="orderbookBtn" class="cta" type="button" aria-haspopup="dialog" aria-controls="orderbookModal">
+            📊 Live Order Book
+          </button>
+        </div>
+      </div> <!-- end left panel -->
 
       <!-- RIGHT: quick details + QR + activity dropdown -->
       <aside class="panel">
@@ -562,6 +569,66 @@
     </div>
   </div>
 
+  <!-- Backdrop reused -->
+<div class="modal" id="orderbookModal" role="dialog" aria-modal="true" aria-labelledby="orderbookTitle" hidden>
+  <div class="modal-card">
+    <div class="modal-header">
+      <div class="modal-title">
+        <img src="/static/izzapay-mark.svg" alt="">
+        <span id="orderbookTitle">IZZA / Pi — Order Book</span>
+      </div>
+      <div style="display:flex;gap:8px;align-items:center">
+        <a id="addTrustBtn" class="close-btn" style="text-decoration:none" target="_blank" rel="noopener">Add Trustline (SEP-7)</a>
+        <button class="close-btn" type="button" id="closeOrderbookBtn">Close</button>
+      </div>
+    </div>
+    <div class="modal-body">
+      <div class="row" style="margin-bottom:12px">
+        <div class="pill">Best Ask: <span id="obBestAsk">–</span> Pi</div>
+        <div class="pill">Best Bid: <span id="obBestBid">–</span> Pi</div>
+        <div class="pill">Spread: <span id="obSpread">–</span></div>
+        <div class="pill">Total Asks: <span id="obSumAsks">–</span> IZZA</div>
+        <div class="pill">Updated: <span id="obUpdated">–</span></div>
+      </div>
+
+      <div class="grid" style="gap:12px">
+        <div class="blox">
+          <h4 style="margin:0 0 8px 0">Sell Orders (Asks) — price in Pi</h4>
+          <table id="asksTbl" style="width:100%;border-collapse:collapse">
+            <thead>
+              <tr>
+                <th style="text-align:left;padding:8px;border-bottom:1px solid rgba(255,255,255,.08)">Price (Pi)</th>
+                <th style="text-align:right;padding:8px;border-bottom:1px solid rgba(255,255,255,.08)">Amount (IZZA)</th>
+                <th style="text-align:right;padding:8px;border-bottom:1px solid rgba(255,255,255,.08)">Total (Pi)</th>
+              </tr>
+            </thead>
+            <tbody></tbody>
+          </table>
+        </div>
+
+        <div class="blox">
+          <h4 style="margin:0 0 8px 0">Buy Orders (Bids) — price in Pi</h4>
+          <table id="bidsTbl" style="width:100%;border-collapse:collapse">
+            <thead>
+              <tr>
+                <th style="text-align:left;padding:8px;border-bottom:1px solid rgba(255,255,255,.08)">Price (Pi)</th>
+                <th style="text-align:right;padding:8px;border-bottom:1px solid rgba(255,255,255,.08)">Amount (IZZA)</th>
+                <th style="text-align:right;padding:8px;border-bottom:1px solid rgba(255,255,255,.08)">Total (Pi)</th>
+              </tr>
+            </thead>
+            <tbody></tbody>
+          </table>
+        </div>
+      </div>
+
+      <div class="small-muted" style="margin-top:10px">
+        Data source: Pi Testnet Horizon. Auto-refreshes every 10s.
+        <a id="rawOrderbookLink" target="_blank" rel="noopener" style="color:#8ab4ff">Raw JSON</a>
+      </div>
+    </div>
+  </div>
+</div>
+
 <script>
 (() => {
   // Jinja
@@ -700,7 +767,119 @@ wrap.classList.add('spin-anim');
     if(e.shiftKey && document.activeElement === first){ last.focus(); e.preventDefault(); }
     else if(!e.shiftKey && document.activeElement === last){ first.focus(); e.preventDefault(); }
   });
-})();
+    // ===== Order Book constants =====
+  const ORDERBOOK_URL = `${API_BASE}/order_book`
+    + `?selling_asset_type=credit_alphanum4`
+    + `&selling_asset_code=${encodeURIComponent(ASSET_CODE)}`
+    + `&selling_asset_issuer=${encodeURIComponent(ISSUER)}`
+    + `&buying_asset_type=native`;
+
+  // SEP-7 Change Trust (testnet)
+  const SEP7_TRUST = `web+stellar:changeTrust?`
+    + `asset_code=${encodeURIComponent(ASSET_CODE)}`
+    + `&asset_issuer=${encodeURIComponent(ISSUER)}`
+    + `&limit=922337203685.4775807`
+    + `&network_passphrase=${encodeURIComponent('Pi Testnet')}`;
+
+  // ===== Order Book modal wiring =====
+  const orderbookBtn      = document.getElementById('orderbookBtn');
+  const orderbookModal    = document.getElementById('orderbookModal');
+  const closeOrderbookBtn = document.getElementById('closeOrderbookBtn');
+  const rawOrderbookLink  = document.getElementById('rawOrderbookLink');
+  const addTrustBtn       = document.getElementById('addTrustBtn');
+
+  rawOrderbookLink.href = ORDERBOOK_URL;
+  addTrustBtn.href      = SEP7_TRUST;
+
+  function openOrderbook(){
+    orderbookModal.hidden = false; backdrop.hidden = false;
+    orderbookModal.setAttribute('open',''); backdrop.setAttribute('open','');
+    document.body.style.overflow = 'hidden';
+    closeOrderbookBtn.focus();
+    loadOrderbook();
+  }
+  function closeOrderbook(){
+    orderbookModal.removeAttribute('open'); backdrop.removeAttribute('open');
+    orderbookModal.hidden = true; backdrop.hidden = true;
+    document.body.style.overflow = '';
+  }
+
+  orderbookBtn.addEventListener('click', openOrderbook);
+  closeOrderbookBtn.addEventListener('click', closeOrderbook);
+
+  // Make backdrop close whichever modal is open
+  backdrop.addEventListener('click', () => {
+    if (!orderbookModal.hidden) closeOrderbook();
+    if (!modal.hidden)          closeModal();
+  });
+
+  // ===== Order Book loader =====
+  const obBestAsk = document.getElementById('obBestAsk');
+  const obBestBid = document.getElementById('obBestBid');
+  const obSpread  = document.getElementById('obSpread');
+  const obSumAsks = document.getElementById('obSumAsks');
+  const obUpdated = document.getElementById('obUpdated');
+
+  function num(x, dp=7){
+    const n = Number(x); if(!isFinite(n)) return '–';
+    return n.toLocaleString(undefined,{minimumFractionDigits:dp, maximumFractionDigits:dp});
+  }
+  function sum(arr, key){ return arr.reduce((a,b)=>a + Number(b[key]||0), 0); }
+
+  async function loadOrderbook(){
+    try{
+      const res  = await fetch(ORDERBOOK_URL, {cache:'no-store'});
+      const data = await res.json();
+
+      const asks = (data.asks || []).map(r => ({ price: Number(r.price), amount: Number(r.amount) }));
+      const bids = (data.bids || []).map(r => ({ price: Number(r.price), amount: Number(r.amount) }));
+
+      const bestAsk = asks.length ? Math.min(...asks.map(a=>a.price)) : null;
+      const bestBid = bids.length ? Math.max(...bids.map(b=>b.price)) : null;
+      const spread  = (bestAsk!=null && bestBid!=null) ? bestAsk - bestBid : null;
+
+      obBestAsk.textContent = bestAsk!=null ? num(bestAsk,4) : '–';
+      obBestBid.textContent = bestBid!=null ? num(bestBid,4) : '–';
+      obSpread.textContent  = spread!=null  ? num(spread,4)  : '–';
+      obSumAsks.textContent = asks.length ? num(sum(asks,'amount'),2) : '0';
+      obUpdated.textContent = new Date().toLocaleTimeString();
+
+      const asksBody = document.querySelector('#asksTbl tbody');
+      const bidsBody = document.querySelector('#bidsTbl tbody');
+      asksBody.innerHTML = ''; bidsBody.innerHTML = '';
+
+      asks.sort((a,b)=>a.price-b.price).slice(0,50).forEach(a=>{
+        const total = a.price * a.amount;
+        const tr = document.createElement('tr');
+        tr.innerHTML =
+          `<td style="text-align:left;padding:8px">${num(a.price,4)}</td>`+
+          `<td style="text-align:right;padding:8px">${num(a.amount,2)}</td>`+
+          `<td style="text-align:right;padding:8px">${num(total,4)}</td>`;
+        asksBody.appendChild(tr);
+      });
+
+      bids.sort((a,b)=>b.price-a.price).slice(0,50).forEach(b=>{
+        const total = b.price * b.amount;
+        const tr = document.createElement('tr');
+        tr.innerHTML =
+          `<td style="text-align:left;padding:8px">${num(b.price,4)}</td>`+
+          `<td style="text-align:right;padding:8px">${num(b.amount,2)}</td>`+
+          `<td style="text-align:right;padding:8px">${num(total,4)}</td>`;
+        bidsBody.appendChild(tr);
+      });
+    }catch(err){
+      console.error(err);
+    }
+  }
+
+  // Refresh every 10s while open
+  let obTimer = null;
+  orderbookBtn.addEventListener('click', ()=>{
+    if(obTimer) clearInterval(obTimer);
+    obTimer = setInterval(()=>{ if(!orderbookModal.hidden) loadOrderbook(); }, 10000);
+  });
+  closeOrderbookBtn.addEventListener('click', ()=>{ if(obTimer) clearInterval(obTimer); });
+})();  // <— keep the IIFE closing 
 </script>
 </body>
 </html>
