@@ -358,43 +358,46 @@
     ws.addEventListener('open', ()=>{ wsReady=true; });
     ws.addEventListener('close', ()=>{ wsReady=false; ws=null; if(reconnectT) clearTimeout(reconnectT); reconnectT=setTimeout(connectWS,1500); });
     ws.addEventListener('message',(evt)=>{
-      let msg=null; try{ msg=JSON.parse(evt.data);}catch{}
-      if(!msg) return;
+  let msg=null; try{ msg=JSON.parse(evt.data);}catch{}
+  if(!msg) return;
 
-      } else if (msg.type === 'presence') {
-  updatePresence(
-    msg.user,
-    (msg.active ?? msg.status ?? msg.online),
-    (msg.lastSeen ?? msg.last_seen)
-  );
+  // FIRST branch: presence
+  if (msg.type === 'presence') {
+    updatePresence(
+      (msg.user || msg.username),
+      (msg.active ?? msg.status ?? msg.online),
+      (msg.lastSeen ?? msg.last_seen)
+    );
 
-      }else if(msg.type==='queue.update' && ui.queueMsg){
-        const nice= msg.mode==='br10'?'Battle Royale (10)': msg.mode==='v1'?'1v1': msg.mode==='v2'?'2v2':'3v3';
-        const eta= msg.estMs!=null?` ~${Math.ceil(msg.estMs/1000)}s`:''; ui.queueMsg.textContent=`Queued for ${nice}… (${msg.pos||1} in line${eta})`;
+  } else if (msg.type === 'queue.update' && ui.queueMsg) {
+    const nice = msg.mode==='br10'?'Battle Royale (10)': msg.mode==='v1'?'1v1': msg.mode==='v2'?'2v2':'3v3';
+    const eta  = msg.estMs!=null?` ~${Math.ceil(msg.estMs/1000)}s`:'';
+    ui.queueMsg.textContent = `Queued for ${nice}… (${msg.pos||1} in line${eta})`;
 
-      }else if(msg.type==='match.found'){
-        startMatch({mode:msg.mode,matchId:msg.matchId,players:msg.players});
+  } else if (msg.type === 'match.found') {
+    startMatch({mode:msg.mode, matchId:msg.matchId, players:msg.players});
 
-      }else if(msg.type==='match.round.start'){
-        onRoundStart(msg);
+  } else if (msg.type === 'match.round.start') {
+    onRoundStart(msg);
 
-      }else if(msg.type==='match.round'){
-        if(!match || match.finished) return;
-        if(msg.matchId && match.id !== msg.matchId) return;
-        const w = msg.winner;
-        onRoundEnd({ roundId: msg.roundId || ('ws_'+Date.now()), winner: w });
+  } else if (msg.type === 'match.round') {
+    if(!match || match.finished) return;
+    if(msg.matchId && match.id !== msg.matchId) return;
+    const w = msg.winner;
+    onRoundEnd({ roundId: msg.roundId || ('ws_'+Date.now()), winner: w });
 
-      }else if(msg.type==='match.finish'){
-        if(msg.matchId && match && match.id!==msg.matchId) return;
-        if(msg.winner) finishMatch(msg.winner, 'server');
+  } else if (msg.type === 'match.finish') {
+    if(msg.matchId && match && match.id!==msg.matchId) return;
+    if(msg.winner) finishMatch(msg.winner, 'server');
 
-      // OPTIONAL: friend request via WS
-      }else if(msg.type==='friend.request'){
-        addNotification({ id: msg.id || ('fr_'+Date.now()), type:'friend', from: msg.from });
-      }else if(msg.type==='invite'){ // battle request
-        addNotification({ id: msg.id || ('inv_'+Date.now()), type:'battle', from: msg.from, mode: msg.mode });
-      }
-    });
+  } else if (msg.type === 'friend.request') {
+    addNotification({ id: msg.id || ('fr_'+Date.now()), type:'friend', from: msg.from });
+
+  } else if (msg.type === 'invite') {
+    addNotification({ id: msg.id || ('inv_'+Date.now()), type:'battle', from: msg.from, mode: msg.mode });
+  }
+});
+
   }
 
   // --- typing shield (unchanged) ---
