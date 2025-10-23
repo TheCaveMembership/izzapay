@@ -82,7 +82,7 @@
 
     .token-row{display:flex;gap:12px;align-items:center;flex-wrap:wrap}
 
-    /* Coin + GOLD glow beneath it (no box) */
+    /* Coin + GOLD glow beneath it (no box) — your original */
     .token-img{
       width:112px; height:112px; border-radius:14px;
       display:flex; align-items:center; justify-content:center;
@@ -206,16 +206,55 @@
     .modal-title img{width:26px;height:26px}
     .close-btn{appearance:none;border:none;cursor:pointer;border-radius:10px;padding:8px 10px;font-weight:800;color:#fff;background:rgba(255,255,255,.06)}
     .modal-body{padding:16px}
-    /* --- ROADMAP ONLY: keep images from blowing up --- */
-#roadmapModal .modal-body img { max-width: 100%; height: auto; }  /* safe default */
-#roadmapModal .img-row img {
-  width: 100px; height: 100px; object-fit: cover;
-  border-radius: 12px; background: transparent; max-width: 100%;
-}
-#roadmapModal .glow img { width: var(--img); height: var(--img); } /* keep chip sizes */
+
+    /* ===== RESTORE YOUR ORIGINAL ROADMAP STYLES (no overrides that change sizes) ===== */
     .pill{display:inline-block;padding:8px 10px;border-radius:999px;background:linear-gradient(180deg,var(--accent1),var(--accent2));font-size:12px;font-weight:800;letter-spacing:.3px;box-shadow:0 0 16px rgba(183,132,255,.35)}
+    .road-grid{display:grid;gap:12px;grid-template-columns:1fr}
+    @media (min-width:860px){.road-grid{grid-template-columns:1.2fr .8fr}}
     .blox{background:rgba(255,255,255,.04);border:1px solid rgba(255,255,255,.08);border-radius:14px;padding:14px}
     .blox h4{margin:0 0 8px 0;font-size:16px;letter-spacing:.2px}
+    .blox p{margin:6px 0;color:#cfe0ff}
+    .list{margin:8px 0 0 0;padding:0 0 0 18px;color:#cfe0ff}
+    .list li{margin:6px 0}
+    .grid-2{display:grid;gap:10px;grid-template-columns:1fr 1fr}
+    .statline{display:flex;align-items:center;justify-content:space-between;gap:10px;padding:8px 10px;border-radius:10px;background:rgba(255,255,255,.04);border:1px solid rgba(255,255,255,.06)}
+    .mini-mark{width:28px;height:28px;border-radius:8px;display:flex;align-items:center;justify-content:center;background:linear-gradient(180deg,var(--accent1),var(--accent2));box-shadow:0 0 10px rgba(183,132,255,.25)}
+    .img-row{display:flex;gap:10px;flex-wrap:wrap}
+    .img-row img{width:100px;height:100px;border-radius:12px;object-fit:cover;background:transparent}
+
+    /* make the IZZA Token card the same width as one grid column and center it */
+    .center-span{
+      grid-column: 1 / -1;          /* span both columns so we can center it */
+      justify-self: center;          /* center within the full row */
+      width: 100%;
+      max-width: calc((100% - 10px) / 2); /* EXACT width of a single column (grid gap is 10px) */
+    }
+
+    /* Reusable roadmap glow chip — tune per instance with CSS vars */
+    .glow{
+      --sz: 92px;
+      --img: 54px;
+      --offset-x: 0px;
+      --offset-y: 0px;
+      position:relative; width:var(--sz); height:var(--sz);
+      border-radius:50%; margin:16px auto 0;
+      display:flex; align-items:center; justify-content:center;
+      transform: translate(var(--offset-x), var(--offset-y));
+    }
+    .glow::before{
+      content:""; position:absolute; inset:calc(-0.18 * var(--sz));
+      border-radius:inherit; pointer-events:none;
+      animation:pulse 2.2s ease-in-out infinite;
+      background: radial-gradient(circle at 50% 50%, var(--g1) 0%, var(--g2) 45%, transparent 72%);
+      box-shadow: 0 0 calc(0.36 * var(--sz)) var(--s1), 0 0 calc(1.0 * var(--sz)) var(--s2);
+    }
+    .glow img{ width:var(--img); height:var(--img); border-radius:12px; position:relative; z-index:1; }
+
+    .glow.violet{ --g1: rgba(var(--violet1),.40); --g2: rgba(var(--violet1),.10); --s1: rgba(var(--violet1),.45); --s2: rgba(var(--violet2),.30); }
+    .glow.gold  { --g1: rgba(var(--gold),.42);   --g2: rgba(var(--gold),.12);   --s1: rgba(var(--gold),.45);   --s2: rgba(var(--gold),.32); }
+
+    /* stack for roadmap chips */
+    .glow-stack{ margin-top:12px; display:flex; flex-direction:column; align-items:center; gap:18px; }
 
     /* order book/price chart chrome */
     .ob-toolbar{display:flex;gap:8px;flex-wrap:wrap;align-items:center}
@@ -227,16 +266,8 @@
     /* mini help */
     .help{color:#cfe0ff;font-size:12px;opacity:.9}
 
-    /* center-span for roadmap card */
-    .road-grid{display:grid;gap:12px;grid-template-columns:1fr}
-    @media (min-width:860px){.road-grid{grid-template-columns:1.2fr .8fr}}
-    .grid-2{display:grid;gap:10px;grid-template-columns:1fr 1fr}
-    .statline{display:flex;align-items:center;justify-content:space-between;gap:10px;padding:8px 10px;border-radius:10px;background:rgba(255,255,255,.04);border:1px solid rgba(255,255,255,.06)}
-    .mini-mark{width:28px;height:28px;border-radius:8px;display:flex;align-items:center;justify-content:center;background:linear-gradient(180deg,var(--accent1),var(--accent2));box-shadow:0 0 10px rgba(183,132,255,.25)}
-    .img-row{display:flex;gap:10px;flex-wrap:wrap}
-    .img-row img{width:100px;height:100px;border-radius:12px;object-fit:cover;background:transparent}
-
-    .center-span{grid-column: 1 / -1; justify-self: center; width:100%; max-width: calc((100% - 10px) / 2);}
+    /* center-span for roadmap card (already above, kept here for clarity) */
+    /* (no extra overrides that alter sizes/positioning) */
 
     /* simple form */
     .field{display:flex;flex-direction:column;gap:6px;margin-bottom:10px}
@@ -473,7 +504,11 @@
               <li><strong>5%</strong> Community: airdrops for early testers</li>
             </ul>
             <div>
-              <p style="margin:4px 0 0 0;color:#cfe0ff">Vesting &amp; emissions published on-chain. Staking yields are dynamic and balanced vs. arcade earnings to avoid inflation shocks.</p>
+              <p style="margin:4px 0 0 0;color:#cfe0ff">
+                Vesting &amp; emissions published on-chain. Staking yields are dynamic and balanced vs. arcade earnings to avoid inflation shocks.
+              </p>
+
+              <!-- Smaller, tidy glow chips (unchanged sizes/positioning) -->
               <div class="glow-stack" style="margin-top:14px;">
                 <div class="glow violet" style="--sz: 45px; --img: 48px; --offset-x: 0px; --offset-y: -4px;">
                   <img src="/static/izzapay-mark.svg" alt="">
@@ -489,7 +524,7 @@
         <div class="blox" style="margin-top:12px">
           <h4>Launch Roadmap</h4>
           <ul class="list">
-            <li><strong>Phase 1 — Testnet Live</strong>: Issuer/distributor diagnostics, faucet & trustlines, IZZA City + Arcade earn loop validated.</li>
+            <li><strong>Phase 1 — Testnet Live</strong>: Issuer/distributor diagnostics, faucet &amp; trustlines, IZZA City + Arcade earn loop validated.</li>
             <li><strong>Phase 2 — Staking Beta</strong>: Token staking → soft boosts to Crafting Credit earnings, seasonal badges, holder quests.</li>
             <li><strong>Phase 3 — Governance v1</strong>: On-chain votes for new Arcade titles, blueprint rarity schedules, and marketplace fees.</li>
             <li><strong>Phase 4 — Merchant Utility</strong>: IZZA Pay fee rebates for holders, business dashboards with token-gated promos.</li>
@@ -499,7 +534,7 @@
 
         <div class="blox" style="margin-top:12px">
           <h4>Value Loop</h4>
-          <p>Players earn Coins → buy Crafting Credits (via Pi) → craft & trade → creators/merchants thrive. <strong>IZZA Token</strong> captures upside by governing, staking, and unlocking the best parts of the ecosystem.</p>
+          <p>Players earn Coins → buy Crafting Credits (via Pi) → craft &amp; trade → creators/merchants thrive. <strong>IZZA Token</strong> captures upside by governing, staking, and unlocking the best parts of the ecosystem.</p>
         </div>
       </div>
     </div>
@@ -680,7 +715,7 @@
   function end(e){
     const p = (e.changedTouches && e.changedTouches[0]) ? e.changedTouches[0] : e;
     const dx = (p.clientX - startX);
-    const dt = Math.max(1, performance.now() - startT);
+       const dt = Math.max(1, performance.now() - startT);
     const speed = Math.abs(dx) / dt;
     if (speed > 0.4) {
       wrap.classList.remove('spin-anim'); void wrap.offsetWidth; wrap.classList.add('spin-anim');
@@ -861,8 +896,7 @@
   }
   function stopObRefresh(){ if(obTimer) clearInterval(obTimer); obTimer=null; }
 
-  // ===== PRICE/VOLUME CHART (CoinGecko/CoinMarketCap style) =====
-  // Purple line for price; gold bars for volume; range toggles only affect the chart.
+  // ===== PRICE/VOLUME CHART =====
   const ctx = document.getElementById('izzaChart').getContext('2d');
   let izzaChart = null;
   let allPoints = []; // {t: Date, price: Number, vol: Number}
@@ -886,11 +920,7 @@
       const data = await res.json();
       const recs = (data._embedded && data._embedded.records) ? data._embedded.records : [];
 
-      // Map trades to points: price as Pi/IZZA, volume as IZZA
       allPoints = recs.map(r=>{
-        // Each trade record has: price.n / price.d referring to counter/base price
-        // Here base = IZZA (credit), counter = Pi (native)
-        // We want Pi per IZZA -> counter_amount / base_amount
         const izza = Number(r.base_amount);
         const pi   = Number(r.counter_amount);
         const price = (izza > 0) ? (pi / izza) : Number(r.price && r.price.n && r.price.d ? (r.price.n/r.price.d) : NaN);
@@ -900,7 +930,6 @@
       drawChart();
     }catch(e){
       console.warn('trades load failed', e);
-      // If trades fail once, keep the existing chart (if any)
     }
   }
 
@@ -937,7 +966,7 @@
             data: prices,
             yAxisID: 'y',
             tension: 0.3,
-            borderColor: '#7a44ff',     // violet
+            borderColor: '#7a44ff',
             backgroundColor: 'rgba(122,68,255,0.25)',
             pointRadius: 0,
             borderWidth: 2
@@ -947,7 +976,7 @@
             label: 'Volume (IZZA)',
             data: vols,
             yAxisID: 'y1',
-            backgroundColor: '#ffcd60', // gold
+            backgroundColor: '#ffcd60',
             borderWidth: 0
           }
         ]
@@ -979,7 +1008,6 @@
             mode: 'index',
             intersect: false,
             callbacks:{
-              // Format price/volume cleanly
               label: (ctx)=>{
                 const v = ctx.parsed.y;
                 if(ctx.dataset.yAxisID === 'y') return ` Price: ${Number(v).toFixed(6)} Pi`;
@@ -1053,20 +1081,15 @@
       const izza  = new StellarSdk.Asset(ASSET_CODE, ISSUER);
       const native= StellarSdk.Asset.native();
 
-      // Manage offer ops
       let op;
       if(side === 'SELL'){
-        // SELL IZZA for Pi
-        // price = Pi/IZZA
         op = StellarSdk.Operation.manageSellOffer({
           selling: izza,
           buying : native,
           amount : amount.toString(),
-          price  : price.toString()  // price = buying/selling
+          price  : price.toString()
         });
       }else{
-        // BUY IZZA with Pi
-        // manageBuyOffer wants buyAmount; offer price is Pi/IZZA
         op = StellarSdk.Operation.manageBuyOffer({
           buying : izza,
           selling: native,
@@ -1075,11 +1098,8 @@
         });
       }
 
-      // For a MARKET order demo: we’ll encode as a very wide price (still unsigned preview)
-      // Real wallets/exchanges usually simulate market order via aggressive price.
       if(otype === 'MARKET'){
-        if(side === 'SELL'){ op.price = (price*10).toString(); }
-        else               { op.price = (price*10).toString(); }
+        op.price = (price*10).toString();
       }
 
       const tx = new StellarSdk.TransactionBuilder(
@@ -1094,7 +1114,6 @@
       const uri = `${SEP7_PREFIX}xdr=${encodeURIComponent(xdr)}&network_passphrase=${encodeURIComponent(NETWORK_PASSPHRASE)}`;
 
       orderMsg.innerHTML = `Opening your wallet… If nothing happens, copy this URI into a wallet that supports <strong>SEP-7</strong>:<br><code style="word-break:break-all">${uri}</code>`;
-      // Attempt to open in a registered wallet handler
       window.location.href = uri;
 
     }catch(err){
@@ -1117,7 +1136,6 @@
   [modal, orderbookModal, placeOrderModal].forEach(trapFocus);
 
   // ===== Scroll helpers =====
-  // If an "Add Trustline" link in the Order Book is clicked, close the modal and jump to deep link section.
   const addTrustBtn = document.getElementById('addTrustBtn');
   addTrustBtn?.addEventListener('click', (ev)=>{
     ev.preventDefault();
