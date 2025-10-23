@@ -11,8 +11,9 @@
       --bg:#050308;
       --panel:#0b0b10;
       --muted:#9aa0b1;
-      --accent1:#7a44ff;
+      --accent1:#7a44ff;   /* violet line */
       --accent2:#b784ff;
+      --gold-hex:#ffcd60;  /* gold for volume/area */
       --glass: rgba(255,255,255,0.04);
       --card-radius:14px;
       --mono: ui-monospace, SFMono-Regular, Menlo, Monaco, "Roboto Mono", monospace;
@@ -52,7 +53,6 @@
     p.lead{color:var(--muted);margin:4px 0 0;font-size:clamp(13px,3.4vw,14px)}
     .spacer{flex:1 1 auto}
 
-    /* top-centered CTA just under the logo */
     .top-cta{width:100%;text-align:center;margin-top:8px}
     .cta{
       display:inline-flex;align-items:center;gap:10px;
@@ -83,65 +83,31 @@
     .token-row{display:flex;gap:12px;align-items:center;flex-wrap:wrap}
 
     /* Coin + GOLD glow beneath it (no box) */
-.token-img{
-  width:112px;
-  height:112px;
-  border-radius:14px;
-  display:flex;
-  align-items:center;
-  justify-content:center;
-  position:relative;
-  isolation:isolate;
-  touch-action:pan-y;
+    .token-img{
+      width:112px; height:112px; border-radius:14px;
+      display:flex; align-items:center; justify-content:center;
+      position:relative; isolation:isolate; touch-action:pan-y;
+      transform-style: preserve-3d;
+    }
+    .token-img img{ width:100%; height:100%; object-fit:contain; border-radius:14px; backface-visibility:hidden; position:relative; z-index:1; }
+    .token-img::before{
+      content:""; position:absolute;
+      top:  calc(50% + var(--pulse-offset-y, -16px));
+      left: calc(50% + var(--pulse-offset-x, -36px));
+      width: var(--pulse-size, 140px);
+      height: var(--pulse-size, 140px);
+      transform: translate(-50%, -50%); border-radius:50%;
+      background: radial-gradient(50% 50% at 50% 50%,
+                  rgba(255,210,90,.35) 0%,
+                  rgba(255,185,30,.18) 45%,
+                  rgba(255,185,30,0) 70%);
+      box-shadow: 0 0 30px 6px rgba(255,196,56,.40), 0 0 60px 20px rgba(255,180,0,.22) inset;
+      animation: pulse 2.2s ease-in-out infinite; z-index: -1; pointer-events:none;
+    }
+    @keyframes coinspin { to { transform: rotateY(720deg); } }
+    .spin-anim { animation: coinspin 1.1s ease-in-out; transform-origin: center; }
 
-  /* ✅ ensures the ::before (glow) rotates together with the coin */
-  transform-style: preserve-3d;
-}
-
-.token-img img{
-  width:100%;
-  height:100%;
-  object-fit:contain;
-  border-radius:14px;
-  backface-visibility:hidden;
-  position:relative;
-  z-index:1;
-}
-
-/* ✅ perfectly centered, smaller glow that spins with coin */
-.token-img::before{
-  content:"";
-  position:absolute;
-  top:  calc(50% + var(--pulse-offset-y, -16px));
-  left: calc(50% + var(--pulse-offset-x, -36px));
-  width: var(--pulse-size, 140px);
-  height: var(--pulse-size, 140px);
-  transform: translate(-50%, -50%);
-  border-radius:50%;
-  background: radial-gradient(50% 50% at 50% 50%,
-              rgba(255,210,90,.35) 0%,
-              rgba(255,185,30,.18) 45%,
-              rgba(255,185,30,0) 70%);
-  box-shadow:
-    0 0 30px 6px rgba(255,196,56,.40),
-    0 0 60px 20px rgba(255,180,0,.22) inset;
-  animation: pulse 2.2s ease-in-out infinite;
-  z-index: -1;
-  pointer-events:none;
-}
-
-/* ✅ rotation now applies to the entire token-img (coin + glow) */
-@keyframes coinspin {
-  to { transform: rotateY(720deg); }
-}
-
-.spin-anim {
-  animation: coinspin 1.1s ease-in-out;
-  transform-origin: center;
-}
-
-    .bg-weave{
-      position:absolute; inset:-4px; z-index:-1; border-radius:20px;
+    .bg-weave{position:absolute; inset:-4px; z-index:-1; border-radius:20px;
       background:
         radial-gradient(600px 220px at 10% -10%, rgba(122,68,255,.18), transparent 60%),
         radial-gradient(500px 200px at 110% 10%, rgba(183,132,255,.22), transparent 58%),
@@ -163,12 +129,9 @@
     .mono{font-family:var(--mono)}
     .wrapaddr{word-break:break-all; overflow-wrap:anywhere}
 
-    /* pulsing badge beside coin (opens roadmap) */
     .side-badge{
       display:flex;flex-direction:column;align-items:center;gap:8px;
-      padding:0;border:none;background:none;
-      margin-left:auto;margin-right:20px;margin-top:18px;text-align:center;
-      position:relative;top:8px;
+      padding:0;border:none;background:none;margin-left:auto;margin-right:20px;margin-top:18px;text-align:center;position:relative;top:8px;
     }
     .mark-wrap{
       width:84px;height:84px;border-radius:18px;display:flex;align-items:center;justify-content:center;
@@ -244,56 +207,38 @@
     .close-btn{appearance:none;border:none;cursor:pointer;border-radius:10px;padding:8px 10px;font-weight:800;color:#fff;background:rgba(255,255,255,.06)}
     .modal-body{padding:16px}
     .pill{display:inline-block;padding:8px 10px;border-radius:999px;background:linear-gradient(180deg,var(--accent1),var(--accent2));font-size:12px;font-weight:800;letter-spacing:.3px;box-shadow:0 0 16px rgba(183,132,255,.35)}
-    .road-grid{display:grid;gap:12px;grid-template-columns:1fr}
-    @media (min-width:860px){.road-grid{grid-template-columns:1.2fr .8fr}}
     .blox{background:rgba(255,255,255,.04);border:1px solid rgba(255,255,255,.08);border-radius:14px;padding:14px}
     .blox h4{margin:0 0 8px 0;font-size:16px;letter-spacing:.2px}
-    .blox p{margin:6px 0;color:#cfe0ff}
-    .list{margin:8px 0 0 0;padding:0 0 0 18px;color:#cfe0ff}
-    .list li{margin:6px 0}
+
+    /* order book/price chart chrome */
+    .ob-toolbar{display:flex;gap:8px;flex-wrap:wrap;align-items:center}
+    .seg{display:inline-flex;border:1px solid rgba(255,255,255,.1);border-radius:12px;overflow:hidden}
+    .seg button{background:transparent;border:0;color:#cfe0ff;font-weight:700;padding:6px 10px;cursor:pointer}
+    .seg button[aria-pressed="true"]{background:rgba(122,68,255,.33)}
+    .chart-wrap{background:rgba(255,255,255,.03);border:1px solid rgba(255,255,255,.08);border-radius:12px;padding:10px}
+
+    /* mini help */
+    .help{color:#cfe0ff;font-size:12px;opacity:.9}
+
+    /* center-span for roadmap card */
+    .road-grid{display:grid;gap:12px;grid-template-columns:1fr}
+    @media (min-width:860px){.road-grid{grid-template-columns:1.2fr .8fr}}
     .grid-2{display:grid;gap:10px;grid-template-columns:1fr 1fr}
     .statline{display:flex;align-items:center;justify-content:space-between;gap:10px;padding:8px 10px;border-radius:10px;background:rgba(255,255,255,.04);border:1px solid rgba(255,255,255,.06)}
     .mini-mark{width:28px;height:28px;border-radius:8px;display:flex;align-items:center;justify-content:center;background:linear-gradient(180deg,var(--accent1),var(--accent2));box-shadow:0 0 10px rgba(183,132,255,.25)}
     .img-row{display:flex;gap:10px;flex-wrap:wrap}
     .img-row img{width:100px;height:100px;border-radius:12px;object-fit:cover;background:transparent}
 
-    /* make the IZZA Token card the same width as one grid column and center it */
-.center-span{
-  grid-column: 1 / -1;          /* span both columns so we can center it */
-  justify-self: center;          /* center within the full row */
-  width: 100%;
-  max-width: calc((100% - 10px) / 2); /* EXACT width of a single column (grid gap is 10px) */
-}
+    .center-span{grid-column: 1 / -1; justify-self: center; width:100%; max-width: calc((100% - 10px) / 2);}
 
-    /* Reusable roadmap glow chip — tune per instance with CSS vars */
-    .glow{
-      --sz: 92px;
-      --img: 54px;
-      --offset-x: 0px;
-      --offset-y: 0px;
-      position:relative; width:var(--sz); height:var(--sz);
-      border-radius:50%; margin:16px auto 0;
-      display:flex; align-items:center; justify-content:center;
-      transform: translate(var(--offset-x), var(--offset-y));
-    }
-    .glow::before{
-      content:""; position:absolute; inset:calc(-0.18 * var(--sz));
-      border-radius:inherit; pointer-events:none;
-      animation:pulse 2.2s ease-in-out infinite;
-      background: radial-gradient(circle at 50% 50%, var(--g1) 0%, var(--g2) 45%, transparent 72%);
-      box-shadow: 0 0 calc(0.36 * var(--sz)) var(--s1), 0 0 calc(1.0 * var(--sz)) var(--s2);
-    }
-    .glow img{ width:var(--img); height:var(--img); border-radius:12px; position:relative; z-index:1; }
-
-    .glow.violet{ --g1: rgba(var(--violet1),.40); --g2: rgba(var(--violet1),.10); --s1: rgba(var(--violet1),.45); --s2: rgba(var(--violet2),.30); }
-    .glow.gold  { --g1: rgba(var(--gold),.42);   --g2: rgba(var(--gold),.12);   --s1: rgba(var(--gold),.45);   --s2: rgba(var(--gold),.32); }
-
-    @keyframes pulse{ 0%,100%{transform:scale(1)} 50%{transform:scale(1.07)} }
-
-    /* stack for roadmap chips */
-    .glow-stack{
-      margin-top:12px; display:flex; flex-direction:column; align-items:center; gap:18px;
-    }
+    /* simple form */
+    .field{display:flex;flex-direction:column;gap:6px;margin-bottom:10px}
+    .field input,.field select{background:rgba(255,255,255,.06);border:1px solid rgba(255,255,255,.12);color:#fff;padding:10px;border-radius:10px}
+    .row2{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+    @media (max-width:520px){ .row2{grid-template-columns:1fr} }
+    .tabbar{display:flex;gap:8px;margin-bottom:8px}
+    .tabbar button{border:1px solid rgba(255,255,255,.12);background:rgba(255,255,255,.04);padding:8px 10px;border-radius:10px;color:#fff;font-weight:800;cursor:pointer}
+    .tabbar button[aria-pressed="true"]{background:rgba(122,68,255,.33)}
   </style>
 </head>
 <body>
@@ -324,15 +269,8 @@
         <div class="bg-weave" aria-hidden="true"></div>
 
         <div class="token-row">
-          <!-- Main coin image with SMALLER glow. Tweak only these 3 vars if desired. -->
-          <div
-            class="token-img"
-            id="coinWrap"
-            style="
-              --pulse-size: 80px;   /* size of glow */
-              --pulse-offset-x: -42px; /* left/right (negative = left) */
-              --pulse-offset-y: -36px; /* up/down (negative = up) */
-            ">
+          <!-- Main coin image with SMALLER glow -->
+          <div class="token-img" id="coinWrap" style="--pulse-size: 80px; --pulse-offset-x: -42px; --pulse-offset-y: -36px;">
             <img id="coinImg" src="{{ url_for('serve_assets', filename='izza.png') }}" alt="IZZA token">
           </div>
 
@@ -352,7 +290,7 @@
           </div>
         </div>
 
-                <div class="two" style="margin-top:12px">
+        <div class="two" style="margin-top:12px">
           <div class="stat">
             <div class="label">Distributor balance (IZZA)</div>
             <strong id="dist-balance">—</strong>
@@ -363,11 +301,10 @@
           </div>
         </div>
 
-        <!-- Order book launcher (inside the panel) -->
-        <div class="top-cta" style="margin-top:10px">
-          <button id="orderbookBtn" class="cta" type="button" aria-haspopup="dialog" aria-controls="orderbookModal">
-            📊 Live Order Book
-          </button>
+        <!-- Order book + order UI launchers -->
+        <div class="top-cta" style="margin-top:10px; display:flex; gap:8px; justify-content:center; flex-wrap:wrap">
+          <button id="orderbookBtn" class="cta" type="button" aria-haspopup="dialog" aria-controls="orderbookModal">📊 Live Order Book</button>
+          <button id="orderBtn" class="cta" type="button" aria-haspopup="dialog" aria-controls="placeOrderModal">🧾 Place Testnet Order</button>
         </div>
       </div> <!-- end left panel -->
 
@@ -436,7 +373,7 @@
     </section>
 
     <section class="lower">
-      <div class="panel">
+      <div class="panel" id="linksPanel">
         <h3 style="margin:0 0 8px 0">Raw data & quick links</h3>
         <p class="small-muted" style="margin:4px 0 10px">Open Pi Testnet Horizon endpoints directly.</p>
         <div class="btnrow">
@@ -447,7 +384,7 @@
         </div>
       </div>
 
-      <div class="panel">
+      <div class="panel" id="deepSection">
         <h3 style="margin:0 0 8px 0">Developer notes</h3>
         <div class="small-muted" style="margin-bottom:10px">
           Issuer / distributor details and last operations from Pi Testnet. This page is a showcase and diagnostic view for the token.
@@ -480,8 +417,7 @@
         <div class="road-grid" style="margin-top:12px">
           <div class="blox">
             <h4>Why a Token at All?</h4>
-            <p>IZZA Coins power gameplay. 
-              </p><strong>IZZA Token</strong> powers the ecosystem.</p>
+            <p>IZZA Coins power gameplay. <strong>IZZA Token</strong> powers the ecosystem.</p>
             <ul class="list">
               <li><strong>Governance</strong>: Vote on new mini-games, IZZA City expansions, creator marketplace rules.</li>
               <li><strong>Staking</strong>: Stake tokens to earn boosted Crafting Credits / seasonal IZZA Coin boosts.</li>
@@ -507,7 +443,6 @@
                 <div class="mini-mark">💎</div>
                 <div><strong>Crafting Credits</strong><div class="small" style="color:var(--muted)">Premium consumable via Pi</div></div>
               </div>
-              <!-- Same card, centered under the two -->
               <div class="statline center-span">
                 <div class="mini-mark"><img src="{{ url_for('serve_assets', filename='izza.png') }}" alt="" style="width:18px;height:18px"></div>
                 <div style="text-align:center;width:100%">
@@ -531,18 +466,12 @@
               <li><strong>5%</strong> Community: airdrops for early testers</li>
             </ul>
             <div>
-              <p style="margin:4px 0 0 0;color:#cfe0ff">
-                Vesting &amp; emissions published on-chain. Staking yields are dynamic and balanced vs. arcade earnings to avoid inflation shocks.
-              </p>
-
-              <!-- Smaller, tidy glow chips -->
+              <p style="margin:4px 0 0 0;color:#cfe0ff">Vesting &amp; emissions published on-chain. Staking yields are dynamic and balanced vs. arcade earnings to avoid inflation shocks.</p>
               <div class="glow-stack" style="margin-top:14px;">
-                <div class="glow violet"
-                     style="--sz: 45px; --img: 48px; --offset-x: 0px; --offset-y: -4px;">
+                <div class="glow violet" style="--sz: 45px; --img: 48px; --offset-x: 0px; --offset-y: -4px;">
                   <img src="/static/izzapay-mark.svg" alt="">
                 </div>
-                <div class="glow gold"
-                     style="--sz: 40px; --img: 66px; --offset-x: 0px; --offset-y: 6px;">
+                <div class="glow gold" style="--sz: 40px; --img: 66px; --offset-x: 0px; --offset-y: 6px;">
                   <img src="{{ url_for('serve_assets', filename='izza.png') }}" alt="IZZA coin">
                 </div>
               </div>
@@ -569,65 +498,137 @@
     </div>
   </div>
 
-  <!-- Backdrop reused -->
-<div class="modal" id="orderbookModal" role="dialog" aria-modal="true" aria-labelledby="orderbookTitle" hidden>
-  <div class="modal-card">
-    <div class="modal-header">
-      <div class="modal-title">
-        <img src="/static/izzapay-mark.svg" alt="">
-        <span id="orderbookTitle">IZZA / Pi — Order Book</span>
-      </div>
-      <div style="display:flex;gap:8px;align-items:center">
-        <a id="addTrustBtn" class="close-btn" style="text-decoration:none" target="_blank" rel="noopener">Add Trustline (SEP-7)</a>
-        <button class="close-btn" type="button" id="closeOrderbookBtn">Close</button>
-      </div>
-    </div>
-    <div class="modal-body">
-      <div class="row" style="margin-bottom:12px">
-        <div class="pill">Best Ask: <span id="obBestAsk">–</span> Pi</div>
-        <div class="pill">Best Bid: <span id="obBestBid">–</span> Pi</div>
-        <div class="pill">Spread: <span id="obSpread">–</span></div>
-        <div class="pill">Total Asks: <span id="obSumAsks">–</span> IZZA</div>
-        <div class="pill">Updated: <span id="obUpdated">–</span></div>
-      </div>
-
-      <div class="grid" style="gap:12px">
-        <div class="blox">
-          <h4 style="margin:0 0 8px 0">Sell Orders (Asks) — price in Pi</h4>
-          <table id="asksTbl" style="width:100%;border-collapse:collapse">
-            <thead>
-              <tr>
-                <th style="text-align:left;padding:8px;border-bottom:1px solid rgba(255,255,255,.08)">Price (Pi)</th>
-                <th style="text-align:right;padding:8px;border-bottom:1px solid rgba(255,255,255,.08)">Amount (IZZA)</th>
-                <th style="text-align:right;padding:8px;border-bottom:1px solid rgba(255,255,255,.08)">Total (Pi)</th>
-              </tr>
-            </thead>
-            <tbody></tbody>
-          </table>
+  <!-- ORDER BOOK MODAL (reuses backdrop) -->
+  <div class="modal" id="orderbookModal" role="dialog" aria-modal="true" aria-labelledby="orderbookTitle" hidden>
+    <div class="modal-card">
+      <div class="modal-header">
+        <div class="modal-title">
+          <img src="/static/izzapay-mark.svg" alt="">
+          <span id="orderbookTitle">IZZA / Pi — Order Book</span>
         </div>
-
-        <div class="blox">
-          <h4 style="margin:0 0 8px 0">Buy Orders (Bids) — price in Pi</h4>
-          <table id="bidsTbl" style="width:100%;border-collapse:collapse">
-            <thead>
-              <tr>
-                <th style="text-align:left;padding:8px;border-bottom:1px solid rgba(255,255,255,.08)">Price (Pi)</th>
-                <th style="text-align:right;padding:8px;border-bottom:1px solid rgba(255,255,255,.08)">Amount (IZZA)</th>
-                <th style="text-align:right;padding:8px;border-bottom:1px solid rgba(255,255,255,.08)">Total (Pi)</th>
-              </tr>
-            </thead>
-            <tbody></tbody>
-          </table>
+        <div style="display:flex;gap:8px;align-items:center">
+          <a id="addTrustBtn" class="close-btn" style="text-decoration:none" href="#deepSection">Add Trustline (SEP-7)</a>
+          <button class="close-btn" type="button" id="closeOrderbookBtn">Close</button>
         </div>
       </div>
+      <div class="modal-body">
+        <!-- Chart toolbar -->
+        <div class="ob-toolbar" style="margin-bottom:10px">
+          <div class="seg" role="tablist" aria-label="Chart range">
+            <button class="rangeBtn" data-range="1D" aria-pressed="true">1D</button>
+            <button class="rangeBtn" data-range="1W">1W</button>
+            <button class="rangeBtn" data-range="1M">1M</button>
+            <button class="rangeBtn" data-range="1Y">1Y</button>
+            <button class="rangeBtn" data-range="ALL">ALL</button>
+          </div>
+          <span class="help">Purple = Price (Pi/IZZA), Gold = Volume</span>
+        </div>
 
-      <div class="small-muted" style="margin-top:10px">
-        Data source: Pi Testnet Horizon. Auto-refreshes every 10s.
-        <a id="rawOrderbookLink" target="_blank" rel="noopener" style="color:#8ab4ff">Raw JSON</a>
+        <div class="chart-wrap">
+          <canvas id="izzaChart" height="110"></canvas>
+        </div>
+
+        <div class="row" style="margin:12px 0">
+          <div class="pill">Best Ask: <span id="obBestAsk">–</span> Pi</div>
+          <div class="pill">Best Bid: <span id="obBestBid">–</span> Pi</div>
+          <div class="pill">Spread: <span id="obSpread">–</span></div>
+          <div class="pill">Total Asks: <span id="obSumAsks">–</span> IZZA</div>
+          <div class="pill">Updated: <span id="obUpdated">–</span></div>
+        </div>
+
+        <div class="grid" style="gap:12px">
+          <div class="blox">
+            <h4 style="margin:0 0 8px 0">Sell Orders (Asks) — price in Pi</h4>
+            <table id="asksTbl" style="width:100%;border-collapse:collapse">
+              <thead>
+                <tr>
+                  <th style="text-align:left;padding:8px;border-bottom:1px solid rgba(255,255,255,.08)">Price (Pi)</th>
+                  <th style="text-align:right;padding:8px;border-bottom:1px solid rgba(255,255,255,.08)">Amount (IZZA)</th>
+                  <th style="text-align:right;padding:8px;border-bottom:1px solid rgba(255,255,255,.08)">Total (Pi)</th>
+                </tr>
+              </thead>
+              <tbody></tbody>
+            </table>
+          </div>
+
+          <div class="blox">
+            <h4 style="margin:0 0 8px 0">Buy Orders (Bids) — price in Pi</h4>
+            <table id="bidsTbl" style="width:100%;border-collapse:collapse">
+              <thead>
+                <tr>
+                  <th style="text-align:left;padding:8px;border-bottom:1px solid rgba(255,255,255,.08)">Price (Pi)</th>
+                  <th style="text-align:right;padding:8px;border-bottom:1px solid rgba(255,255,255,.08)">Amount (IZZA)</th>
+                  <th style="text-align:right;padding:8px;border-bottom:1px solid rgba(255,255,255,.08)">Total (Pi)</th>
+                </tr>
+              </thead>
+              <tbody></tbody>
+            </table>
+          </div>
+        </div>
+
+        <div class="small-muted" style="margin-top:10px">
+          Data source: Pi Testnet Horizon. Auto-refreshes every 10s. <a id="rawOrderbookLink" target="_blank" rel="noopener" style="color:#8ab4ff">Raw JSON</a>
+        </div>
       </div>
     </div>
   </div>
-</div>
+
+  <!-- PLACE ORDER MODAL -->
+  <div class="modal" id="placeOrderModal" role="dialog" aria-modal="true" aria-labelledby="placeOrderTitle" hidden>
+    <div class="modal-card">
+      <div class="modal-header">
+        <div class="modal-title">
+          <img src="/static/izzapay-mark.svg" alt="">
+          <span id="placeOrderTitle">Place Testnet Order</span>
+        </div>
+        <button class="close-btn" type="button" id="closePlaceOrderBtn">Close</button>
+      </div>
+      <div class="modal-body">
+        <div class="help" style="margin-bottom:8px">
+          <strong>Note:</strong> Pi Wallet does not yet support direct order placement.
+          This demo will work in other wallets that support <strong>SEP-7</strong> transactions.
+        </div>
+
+        <div class="tabbar" role="tablist" aria-label="Side">
+          <button class="sideBtn" data-side="BUY" aria-pressed="true">BUY IZZA</button>
+          <button class="sideBtn" data-side="SELL">SELL IZZA</button>
+        </div>
+
+        <div class="tabbar" role="tablist" aria-label="Type">
+          <button class="typeBtn" data-type="LIMIT" aria-pressed="true">Limit</button>
+          <button class="typeBtn" data-type="MARKET">Market</button>
+        </div>
+
+        <form id="orderForm">
+          <div class="field">
+            <label>Public Key (your account)</label>
+            <input id="acctPub" type="text" placeholder="G... (testnet account)" required>
+          </div>
+
+          <div class="row2">
+            <div class="field">
+              <label>Price (Pi / IZZA)</label>
+              <input id="price" type="number" step="0.0000001" inputmode="decimal" placeholder="e.g. 0.005" required>
+            </div>
+            <div class="field">
+              <label>Amount (IZZA)</label>
+              <input id="amount" type="number" step="0.0000001" inputmode="decimal" placeholder="e.g. 2000" required>
+            </div>
+          </div>
+
+          <div class="field">
+            <button id="buildSep7" type="submit" class="cta" style="width:max-content">Open in SEP-7 Wallet</button>
+          </div>
+
+          <div class="help" id="orderMsg" aria-live="polite"></div>
+        </form>
+      </div>
+    </div>
+  </div>
+
+  <!-- libs (from CDN) -->
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/stellar-sdk/10.5.1/stellar-sdk.min.js" integrity="sha512-+uYc8WQvG8c+0pT1+QqJp5gR1+N1iFj3F1p7Xw8eNsQqA+8k0vP9a6NqEgbjG7e0oZ2FQg3e3sH4q1P5gFKM0A==" crossorigin="anonymous" referrerpolicy="no-referrer"></script>
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
 
 <script>
 (() => {
@@ -661,12 +662,11 @@
   document.getElementById('link-ops').href      = `${accountUrl}/operations`;
   document.getElementById('link-assets').href   = `${API_BASE}/assets?asset_code=${encodeURIComponent(ASSET_CODE)}&asset_issuer=${encodeURIComponent(ISSUER)}`;
 
-  // QR
+  // QR for the trustline deep link
   const qrData = encodeURIComponent(DEEP_LINK);
   qrimg.src = `https://api.qrserver.com/v1/create-qr-code/?size=240x240&data=${qrData}`;
 
   // spin-to-refresh
-  const coin = document.getElementById('coinImg');
   const wrap = document.getElementById('coinWrap');
   let startX=0, startT=0;
   function start(e){ const p = e.touches ? e.touches[0] : e; startX=p.clientX; startT=performance.now(); }
@@ -676,9 +676,7 @@
     const dt = Math.max(1, performance.now() - startT);
     const speed = Math.abs(dx) / dt;
     if (speed > 0.4) {
-      wrap.classList.remove('spin-anim');
-void wrap.offsetWidth;
-wrap.classList.add('spin-anim');
+      wrap.classList.remove('spin-anim'); void wrap.offsetWidth; wrap.classList.add('spin-anim');
       setTimeout(fetchSummary, 1100);
     }
   }
@@ -731,89 +729,65 @@ wrap.classList.add('spin-anim');
   }
   fetchSummary();
 
-  // Modal wiring
+  // ===== Modals wiring =====
   const roadmapBtn    = document.getElementById('roadmapBtn');
   const badgeOpen     = document.getElementById('badgeOpen');
   const modal         = document.getElementById('roadmapModal');
+  const orderbookBtn  = document.getElementById('orderbookBtn');
+  const orderbookModal= document.getElementById('orderbookModal');
+  const closeOrderbookBtn = document.getElementById('closeOrderbookBtn');
+  const placeOrderModal   = document.getElementById('placeOrderModal');
+  const orderBtn          = document.getElementById('orderBtn');
+  const closePlaceOrderBtn= document.getElementById('closePlaceOrderBtn');
   const backdrop      = document.getElementById('modalBackdrop');
   const closeModalBtn = document.getElementById('closeModalBtn');
   let lastFocus = null;
 
-  function openModal(){
+  function openModal(el, focusEl){
     lastFocus = document.activeElement;
-    modal.hidden = false; backdrop.hidden = false;
-    modal.setAttribute('open',''); backdrop.setAttribute('open','');
+    el.hidden = false; backdrop.hidden = false;
+    el.setAttribute('open',''); backdrop.setAttribute('open','');
     document.body.style.overflow = 'hidden';
-    closeModalBtn.focus();
+    (focusEl || el.querySelector('.close-btn'))?.focus();
   }
-  function closeModal(){
-    modal.removeAttribute('open'); backdrop.removeAttribute('open');
-    modal.hidden = true; backdrop.hidden = true;
+  function closeModal(el){
+    el.removeAttribute('open'); backdrop.removeAttribute('open');
+    el.hidden = true; backdrop.hidden = true;
     document.body.style.overflow = '';
     if (lastFocus && lastFocus.focus) lastFocus.focus();
   }
-  roadmapBtn.addEventListener('click', openModal);
-  badgeOpen.addEventListener('click', openModal);
-  closeModalBtn.addEventListener('click', closeModal);
-  backdrop.addEventListener('click', closeModal);
-  window.addEventListener('keydown', (e)=>{ if(e.key === 'Escape') closeModal(); });
-
-  // focus trap
-  modal.addEventListener('keydown', (e)=>{
-    if(e.key !== 'Tab') return;
-    const f = modal.querySelectorAll('button, [href], input, select, textarea, [tabindex]:not([tabindex="-1"])');
-    if(!f.length) return;
-    const first = f[0], last = f[f.length - 1];
-    if(e.shiftKey && document.activeElement === first){ last.focus(); e.preventDefault(); }
-    else if(!e.shiftKey && document.activeElement === last){ first.focus(); e.preventDefault(); }
+  roadmapBtn.addEventListener('click', ()=>openModal(modal, closeModalBtn));
+  badgeOpen.addEventListener('click', ()=>openModal(modal, closeModalBtn));
+  closeModalBtn.addEventListener('click', ()=>closeModal(modal));
+  orderbookBtn.addEventListener('click', ()=>{ openModal(orderbookModal, closeOrderbookBtn); loadOrderbook(); startObRefresh(); });
+  closeOrderbookBtn.addEventListener('click', ()=>{ stopObRefresh(); closeModal(orderbookModal); });
+  orderBtn.addEventListener('click', ()=>openModal(placeOrderModal, closePlaceOrderBtn));
+  closePlaceOrderBtn.addEventListener('click', ()=>closeModal(placeOrderModal));
+  backdrop.addEventListener('click', ()=>{
+    if (!orderbookModal.hidden){       stopObRefresh(); closeModal(orderbookModal); }
+    if (!modal.hidden)          { closeModal(modal); }
+    if (!placeOrderModal.hidden){ closeModal(placeOrderModal); }
   });
-    // ===== Order Book constants =====
+
+  // ===== Order Book + Trades endpoints =====
   const ORDERBOOK_URL = `${API_BASE}/order_book`
     + `?selling_asset_type=credit_alphanum4`
     + `&selling_asset_code=${encodeURIComponent(ASSET_CODE)}`
     + `&selling_asset_issuer=${encodeURIComponent(ISSUER)}`
     + `&buying_asset_type=native`;
 
-  // SEP-7 Change Trust (testnet)
-  const SEP7_TRUST = `web+stellar:changeTrust?`
-    + `asset_code=${encodeURIComponent(ASSET_CODE)}`
-    + `&asset_issuer=${encodeURIComponent(ISSUER)}`
-    + `&limit=922337203685.4775807`
-    + `&network_passphrase=${encodeURIComponent('Pi Testnet')}`;
+  // Trades (IZZA <-> Pi) for price/volume chart — newest first
+  const TRADES_URL = `${API_BASE}/trades`
+    + `?base_asset_type=credit_alphanum4`
+    + `&base_asset_code=${encodeURIComponent(ASSET_CODE)}`
+    + `&base_asset_issuer=${encodeURIComponent(ISSUER)}`
+    + `&counter_asset_type=native`
+    + `&order=desc&limit=200`;
 
-  // ===== Order Book modal wiring =====
-  const orderbookBtn      = document.getElementById('orderbookBtn');
-  const orderbookModal    = document.getElementById('orderbookModal');
-  const closeOrderbookBtn = document.getElementById('closeOrderbookBtn');
-  const rawOrderbookLink  = document.getElementById('rawOrderbookLink');
-  const addTrustBtn       = document.getElementById('addTrustBtn');
+  // Link the "Raw JSON" to order book endpoint
+  document.getElementById('rawOrderbookLink').href = ORDERBOOK_URL;
 
-  rawOrderbookLink.href = ORDERBOOK_URL;
-  addTrustBtn.href      = SEP7_TRUST;
-
-  function openOrderbook(){
-    orderbookModal.hidden = false; backdrop.hidden = false;
-    orderbookModal.setAttribute('open',''); backdrop.setAttribute('open','');
-    document.body.style.overflow = 'hidden';
-    closeOrderbookBtn.focus();
-    loadOrderbook();
-  }
-  function closeOrderbook(){
-    orderbookModal.removeAttribute('open'); backdrop.removeAttribute('open');
-    orderbookModal.hidden = true; backdrop.hidden = true;
-    document.body.style.overflow = '';
-  }
-
-  orderbookBtn.addEventListener('click', openOrderbook);
-  closeOrderbookBtn.addEventListener('click', closeOrderbook);
-
-  // Make backdrop close whichever modal is open
-  backdrop.addEventListener('click', () => {
-    if (!orderbookModal.hidden) closeOrderbook();
-    if (!modal.hidden)          closeModal();
-  });
-
-  // ===== Order Book loader =====
+  // ===== ORDER BOOK TABLES =====
   const obBestAsk = document.getElementById('obBestAsk');
   const obBestBid = document.getElementById('obBestBid');
   const obSpread  = document.getElementById('obSpread');
@@ -874,12 +848,281 @@ wrap.classList.add('spin-anim');
 
   // Refresh every 10s while open
   let obTimer = null;
-  orderbookBtn.addEventListener('click', ()=>{
+  function startObRefresh(){
     if(obTimer) clearInterval(obTimer);
-    obTimer = setInterval(()=>{ if(!orderbookModal.hidden) loadOrderbook(); }, 10000);
+    obTimer = setInterval(()=>{ if(!orderbookModal.hidden){ loadOrderbook(); loadTradesAndDraw(); } }, 10000);
+  }
+  function stopObRefresh(){ if(obTimer) clearInterval(obTimer); obTimer=null; }
+
+  // ===== PRICE/VOLUME CHART (CoinGecko/CoinMarketCap style) =====
+  // Purple line for price; gold bars for volume; range toggles only affect the chart.
+  const ctx = document.getElementById('izzaChart').getContext('2d');
+  let izzaChart = null;
+  let allPoints = []; // {t: Date, price: Number, vol: Number}
+
+  // Active range
+  let activeRange = '1D';
+  const rangeBtns = Array.from(document.querySelectorAll('.rangeBtn'));
+  rangeBtns.forEach(b=>{
+    b.addEventListener('click', ()=>{
+      rangeBtns.forEach(x=>x.setAttribute('aria-pressed','false'));
+      b.setAttribute('aria-pressed','true');
+      activeRange = b.dataset.range;
+      drawChart();
+    });
   });
-  closeOrderbookBtn.addEventListener('click', ()=>{ if(obTimer) clearInterval(obTimer); });
-})();  // <— keep the IIFE closing 
+
+  // Fetch recent trades -> derive price (Pi per IZZA) & volume (IZZA)
+  async function loadTradesAndDraw(){
+    try{
+      const res = await fetch(TRADES_URL, {cache:'no-store'});
+      const data = await res.json();
+      const recs = (data._embedded && data._embedded.records) ? data._embedded.records : [];
+
+      // Map trades to points: price as Pi/IZZA, volume as IZZA
+      allPoints = recs.map(r=>{
+        // Each trade record has: price.n / price.d referring to counter/base price
+        // Here base = IZZA (credit), counter = Pi (native)
+        // We want Pi per IZZA -> counter_amount / base_amount
+        const izza = Number(r.base_amount);
+        const pi   = Number(r.counter_amount);
+        const price = (izza > 0) ? (pi / izza) : Number(r.price && r.price.n && r.price.d ? (r.price.n/r.price.d) : NaN);
+        return { t: new Date(r.ledger_close_time || r.created_at), price, vol: izza };
+      }).reverse(); // chronological
+
+      drawChart();
+    }catch(e){
+      console.warn('trades load failed', e);
+      // If trades fail once, keep the existing chart (if any)
+    }
+  }
+
+  function msAgo(n){ return Date.now() - n; }
+  function filteredByRange(){
+    if(!allPoints.length) return [];
+    let cutoff = 0;
+    switch(activeRange){
+      case '1D':  cutoff = msAgo(24*3600*1000); break;
+      case '1W':  cutoff = msAgo(7*24*3600*1000); break;
+      case '1M':  cutoff = msAgo(30*24*3600*1000); break;
+      case '1Y':  cutoff = msAgo(365*24*3600*1000); break;
+      case 'ALL': default: return allPoints;
+    }
+    return allPoints.filter(p => p.t.getTime() >= cutoff);
+  }
+
+  function drawChart(){
+    const pts = filteredByRange();
+    const labels = pts.map(p=>p.t);
+    const prices = pts.map(p=>p.price);
+    const vols   = pts.map(p=>p.vol);
+
+    if(izzaChart){ izzaChart.destroy(); }
+
+    izzaChart = new Chart(ctx, {
+      type: 'bar',
+      data: {
+        labels,
+        datasets: [
+          {
+            type: 'line',
+            label: 'Price (Pi/IZZA)',
+            data: prices,
+            yAxisID: 'y',
+            tension: 0.3,
+            borderColor: '#7a44ff',     // violet
+            backgroundColor: 'rgba(122,68,255,0.25)',
+            pointRadius: 0,
+            borderWidth: 2
+          },
+          {
+            type: 'bar',
+            label: 'Volume (IZZA)',
+            data: vols,
+            yAxisID: 'y1',
+            backgroundColor: '#ffcd60', // gold
+            borderWidth: 0
+          }
+        ]
+      },
+      options: {
+        animation: false,
+        maintainAspectRatio: false,
+        scales: {
+          x: {
+            type: 'time',
+            time: { unit: pickTimeUnit() },
+            grid: { color: 'rgba(255,255,255,0.06)' },
+            ticks:{ color:'#cfe0ff' }
+          },
+          y: {
+            position: 'left',
+            grid: { color: 'rgba(255,255,255,0.06)' },
+            ticks:{ color:'#cfe0ff' }
+          },
+          y1: {
+            position: 'right',
+            grid: { display:false },
+            ticks:{ color:'#ffcd60' }
+          }
+        },
+        plugins: {
+          legend: { labels:{ color:'#cfe0ff' } },
+          tooltip:{
+            mode: 'index',
+            intersect: false,
+            callbacks:{
+              // Format price/volume cleanly
+              label: (ctx)=>{
+                const v = ctx.parsed.y;
+                if(ctx.dataset.yAxisID === 'y') return ` Price: ${Number(v).toFixed(6)} Pi`;
+                return ` Volume: ${Number(v).toLocaleString()} IZZA`;
+              }
+            }
+          }
+        }
+      }
+    });
+  }
+
+  function pickTimeUnit(){
+    switch(activeRange){
+      case '1D': return 'hour';
+      case '1W': return 'day';
+      case '1M': return 'day';
+      case '1Y': return 'month';
+      default:   return 'day';
+    }
+  }
+
+  // Load once when opening orderbook
+  loadTradesAndDraw();
+
+  // ===== PLACE ORDER (SEP-7 TX preview) =====
+  const sideBtns  = Array.from(document.querySelectorAll('.sideBtn'));
+  const typeBtns  = Array.from(document.querySelectorAll('.typeBtn'));
+  let side = 'BUY';   // BUY => receive IZZA, spend Pi
+  let otype = 'LIMIT';
+
+  sideBtns.forEach(b=>{
+    b.addEventListener('click', ()=>{
+      sideBtns.forEach(x=>x.setAttribute('aria-pressed','false'));
+      b.setAttribute('aria-pressed','true');
+      side = b.dataset.side;
+    });
+  });
+  typeBtns.forEach(b=>{
+    b.addEventListener('click', ()=>{
+      typeBtns.forEach(x=>x.setAttribute('aria-pressed','false'));
+      b.setAttribute('aria-pressed','true');
+      otype = b.dataset.type;
+    });
+  });
+
+  const orderForm = document.getElementById('orderForm');
+  const acctPub   = document.getElementById('acctPub');
+  const priceEl   = document.getElementById('price');
+  const amtEl     = document.getElementById('amount');
+  const orderMsg  = document.getElementById('orderMsg');
+
+  const SEP7_PREFIX = `web+stellar:tx?`;
+  const NETWORK_PASSPHRASE = 'Pi Testnet';
+
+  orderForm.addEventListener('submit', async (e)=>{
+    e.preventDefault();
+    orderMsg.textContent = 'Building unsigned transaction…';
+
+    try{
+      const pub = acctPub.value.trim();
+      const price = Number(priceEl.value);
+      const amount = Number(amtEl.value);
+      if(!pub || !isFinite(price) || !isFinite(amount) || price<=0 || amount<=0){
+        orderMsg.textContent = 'Please provide a valid account, price and amount.'; return;
+      }
+
+      const server = new StellarSdk.Server(API_BASE);
+      const acct   = await server.loadAccount(pub);
+
+      const izza  = new StellarSdk.Asset(ASSET_CODE, ISSUER);
+      const native= StellarSdk.Asset.native();
+
+      // Manage offer ops
+      let op;
+      if(side === 'SELL'){
+        // SELL IZZA for Pi
+        // price = Pi/IZZA
+        op = StellarSdk.Operation.manageSellOffer({
+          selling: izza,
+          buying : native,
+          amount : amount.toString(),
+          price  : price.toString()  // price = buying/selling
+        });
+      }else{
+        // BUY IZZA with Pi
+        // manageBuyOffer wants buyAmount; offer price is Pi/IZZA
+        op = StellarSdk.Operation.manageBuyOffer({
+          buying : izza,
+          selling: native,
+          buyAmount: amount.toString(),
+          price  : price.toString()
+        });
+      }
+
+      // For a MARKET order demo: we’ll encode as a very wide price (still unsigned preview)
+      // Real wallets/exchanges usually simulate market order via aggressive price.
+      if(otype === 'MARKET'){
+        if(side === 'SELL'){ op.price = (price*10).toString(); }
+        else               { op.price = (price*10).toString(); }
+      }
+
+      const tx = new StellarSdk.TransactionBuilder(
+        acct,
+        { fee: (await server.fetchBaseFee()).toString(), networkPassphrase: NETWORK_PASSPHRASE }
+      )
+      .addOperation(op)
+      .setTimeout(180)
+      .build();
+
+      const xdr = tx.toXDR();
+      const uri = `${SEP7_PREFIX}xdr=${encodeURIComponent(xdr)}&network_passphrase=${encodeURIComponent(NETWORK_PASSPHRASE)}`;
+
+      orderMsg.innerHTML = `Opening your wallet… If nothing happens, copy this URI into a wallet that supports <strong>SEP-7</strong>:<br><code style="word-break:break-all">${uri}</code>`;
+      // Attempt to open in a registered wallet handler
+      window.location.href = uri;
+
+    }catch(err){
+      console.error(err);
+      orderMsg.textContent = 'Could not build the transaction (check account on testnet, CORS, or network). You can still copy the URI above when available.';
+    }
+  });
+
+  // ===== Accessibility: focus trap inside any modal =====
+  function trapFocus(container){
+    container.addEventListener('keydown', (e)=>{
+      if(e.key !== 'Tab') return;
+      const f = container.querySelectorAll('button, [href], input, select, textarea, [tabindex]:not([tabindex="-1"])');
+      if(!f.length) return;
+      const first = f[0], last = f[f.length - 1];
+      if(e.shiftKey && document.activeElement === first){ last.focus(); e.preventDefault(); }
+      else if(!e.shiftKey && document.activeElement === last){ first.focus(); e.preventDefault(); }
+    });
+  }
+  [modal, orderbookModal, placeOrderModal].forEach(trapFocus);
+
+  // ===== Scroll helpers =====
+  // If an "Add Trustline" link in the Order Book is clicked, close the modal and jump to deep link section.
+  const addTrustBtn = document.getElementById('addTrustBtn');
+  addTrustBtn?.addEventListener('click', (ev)=>{
+    ev.preventDefault();
+    stopObRefresh();
+    closeModal(orderbookModal);
+    document.getElementById('deepSection')?.scrollIntoView({behavior:'smooth', block:'start'});
+  });
+
+})(); // IIFE end
 </script>
+
+<!-- time adapter for Chart.js -->
+<script src="https://cdn.jsdelivr.net/npm/chartjs-adapter-date-fns@3"></script>
 </body>
 </html>
