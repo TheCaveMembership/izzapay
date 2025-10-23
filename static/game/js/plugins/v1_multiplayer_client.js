@@ -63,7 +63,14 @@
   const isSolo = ()=> String((me && me.world) || 'solo').toLowerCase()==='solo';
 
   async function loadMe(){ me = await jget('/me'); return me; }
-  async function loadFriends(){ const res=await jget('/friends/list'); friends=res.friends||[]; return friends; }
+  async function loadFriends(){
+  const res = await jget('/friends/list');
+  friends = (res.friends||[]).map(f => ({
+    ...f,
+    active: normalizeActive(f.active ?? f.status ?? f.online, f.lastSeen ?? f.last_seen)
+  }));
+  return friends;
+}
   async function searchPlayers(q){ const res=await jget('/players/search?q='+encodeURIComponent(q||'')); return res.users||[]; }
 
   async function refreshRanks(){ try{ const r=await jget('/ranks'); if(r&&r.ranks) me.ranks=r.ranks; paintRanks(); }catch{} }
@@ -113,6 +120,22 @@
     return row;
   }
 
+  function normalizeActive(v, lastSeen){
+  // handle booleans, numbers, strings, and lastSeen timestamps
+  if (v === true || v === 1) return true;
+  if (v === false || v === 0 || v === null) return false;
+  if (typeof v === 'string') {
+    const s = v.trim().toLowerCase();
+    if (s==='online' || s==='active' || s==='true' || s==='1') return true;
+    if (s==='offline' || s==='inactive' || s==='false' || s==='0') return false;
+  }
+  if (typeof lastSeen === 'number' && isFinite(lastSeen)) {
+    // consider online if seen within last 2 minutes (tweak if needed)
+    return (Date.now() - lastSeen) < 120000;
+  }
+  return false; // default
+}
+
   function paintFriends(list){
     const host=$('#mpFriends',lobby); if(!host) return;
     host.innerHTML='';
@@ -123,7 +146,13 @@
     const filtered = q ? friends.filter(x=> (x.username||'').toLowerCase().includes(q)) : friends;
     paintFriends(filtered);
   }
-  function updatePresence(user, active){ const f=friends.find(x=>x.username===user); if(f){ f.active=!!active; if(lobby && lobby.style.display!=='none') repaintFriends(); } }
+  function updatePresence(user, active, lastSeen){
+  const f = friends.find(x=>x.username===user);
+  if(f){
+    f.active = normalizeActive(active, lastSeen);
+    if(lobby && lobby.style.display!=='none') repaintFriends();
+  }
+}
 
   // ==== MATCH / ROUNDS — state machine + watchdogs ===========================
   let match = null; // { id, mode, players[], myName, oppName, ... }
@@ -332,8 +361,12 @@
       let msg=null; try{ msg=JSON.parse(evt.data);}catch{}
       if(!msg) return;
 
-      if(msg.type==='presence'){
-        updatePresence(msg.user, !!msg.active);
+      } else if (msg.type === 'presence') {
+  updatePresence(
+    msg.user,
+    (msg.active ?? msg.status ?? msg.online),
+    (msg.lastSeen ?? msg.last_seen)
+  );
 
       }else if(msg.type==='queue.update' && ui.queueMsg){
         const nice= msg.mode==='br10'?'Battle Royale (10)': msg.mode==='v1'?'1v1': msg.mode==='v2'?'2v2':'3v3';
@@ -845,7 +878,10 @@
       try{
         const list = await searchPlayers(q);
         if(searchRunId !== thisRun) return;
-        paintFriends((list||[]).map(u=>({username:u.username, active:!!u.active})));
+        paintFriends((list||[]).map(u => ({
+  username: u.username,
+  active: normalizeActive(u.active ?? u.status ?? u.online, u.lastSeen ?? u.last_seen)
+})));
         setStatus((list&&list.length)?`Found ${list.length} result${list.length===1?'':'s'}`:'No players found');
         if(!list || !list.length){
           const host = lobby.querySelector('#mpFriends');
