@@ -42,10 +42,15 @@ FUNDING_STARTING_BAL = getenv("FUNDING_STARTING_BALANCE", "5")
 # Optional manual override via env
 BASE_FEE_OVERRIDE = getenv("BASE_FEE", "")
 
+# Runtime switches (safe defaults)
+RUN_MINT         = getenv("RUN_MINT", "0") == "1"          # default: don't mint again
+RUN_SELL_LADDER  = getenv("RUN_SELL_LADDER", "1") == "1"   # default: DO seed the sale ladder
+
 print("Loaded environment:")
 print("ISSUER_PUB:", ISSUER_PUB)
 print("DISTR_PUB:", DISTR_PUB)
 print("HORIZON_URL:", HORIZON_URL)
+print("RUN_MINT:", RUN_MINT, " RUN_SELL_LADDER:", RUN_SELL_LADDER)
 
 # Validate keys
 problems = []
@@ -109,6 +114,21 @@ def submit_and_print(tx):
     print("✅ Success:", resp["hash"])
     print("  Ledger:", resp.get("ledger"))
     return resp
+
+def get_izza_balance(pubkey: str) -> Decimal:
+    """Return IZZA balance for an account (0 if no trustline)."""
+    try:
+        acc = server.accounts().account_id(pubkey).call()
+    except NotFoundError:
+        return Decimal("0")
+    for b in acc.get("balances", []):
+        if (
+            b.get("asset_type") in ("credit_alphanum4", "credit_alphanum12")
+            and b.get("asset_code") == ASSET_CODE
+            and b.get("asset_issuer") == ISSUER_PUB
+        ):
+            return Decimal(b.get("balance", "0"))
+    return Decimal("0")
 
 # ---- Set issuer options ----
 def set_issuer_options():
@@ -270,25 +290,52 @@ if __name__ == "__main__":
     maybe_create_account(ISSUER_PUB)
     maybe_create_account(DISTR_PUB)
 
-    print("Step 1/3: Set issuer options …")
+    print("Step 1/4: Set issuer options … (idempotent)")
     set_issuer_options()
 
-    print("Step 2/3: Distributor change-trust …")
+    print("Step 2/4: Distributor change-trust … (idempotent)")
     distributor_change_trust()
 
-    print("Step 3/3: Mint payment issuer → distributor …")
-    issuer_mint_payment()
+    # SAFE MINT GUARD:
+    # Only mint if explicitly enabled AND distributor has zero IZZA balance.
+    # This prevents accidental re-minting when re-running the script.
+    print("Step 3/4: Conditional mint check …")
+    current_bal = get_izza_balance(DISTR_PUB)
+    print(f"Distributor IZZA balance: {current_bal}")
+    if RUN_MINT:
+        if current_bal > Decimal("0"):
+            print("⏭️  Skipping mint: distributor already holds IZZA.")
+        else:
+            print("Mint enabled and distributor has 0 IZZA → minting …")
+            issuer_mint_payment()
+    else:
+        print("⏭️  RUN_MINT is 0 (default). Mint step skipped.")
 
     # --- Step 4: Seed public sale ladder (Growth allocation) ---
     # 400,000 IZZA total, 10,000 per rung, start at 0.0005 Pi and +0.001 each step
-    print("Step 4/4: Seed DEX sale ladder …")
-    seed_sale_ladder(
-        total_amount=400_000,
-        chunk_amount=10_000,
-        start_price=Decimal("0.0005"),
-        step=Decimal("0.001")
-    )
+    # Will auto-cap at available distributor balance to avoid failures.
+    if RUN_SELL_LADDER:
+        print("Step 4/4: Seed DEX sale ladder …")
+        # refresh balance in case we minted this run
+        current_bal = get_izza_balance(DISTR_PUB)
+        target_to_sell = Decimal("400000")
+        sellable = min(current_bal, target_to_sell)
+        if sellable <= 0:
+            print("⚠️  No IZZA available to post offers. Skipping ladder.")
+        else:
+            # Round down to integer tokens
+            sellable_int = int(sellable.to_integral_value(rounding="ROUND_FLOOR"))
+            print(f"Posting ladder for {sellable_int} IZZA …")
+            seed_sale_ladder(
+                total_amount=sellable_int,
+                chunk_amount=10_000,
+                start_price=Decimal("0.0005"),
+                step=Decimal("0.001")
+            )
+    else:
+        print("⏭️  RUN_SELL_LADDER is 0. Skipping offer creation.")
 
     print("\nAll done. Verify balances/offers at:")
     print(f"  Issuer:      {HORIZON_URL}/accounts/{ISSUER_PUB}")
     print(f"  Distributor: {HORIZON_URL}/accounts/{DISTR_PUB}")
+    print(f"  Offers API:  {HORIZON_URL}/offers?seller={DISTR_PUB}")
