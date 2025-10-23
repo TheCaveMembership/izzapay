@@ -67,11 +67,25 @@
   const res = await jget('/friends/list');
   friends = (res.friends||[]).map(f => ({
     ...f,
-    active: normalizeActive(f.active ?? f.status ?? f.online, f.lastSeen ?? f.last_seen)
+    active: normalizeActive(
+      f.active ?? f.status ?? f.online,
+      f.lastSeen ?? f.last_seen,
+      f.world ?? f.w
+    )
   }));
   return friends;
 }
-  async function searchPlayers(q){ const res=await jget('/players/search?q='+encodeURIComponent(q||'')); return res.users||[]; }
+  async function searchPlayers(q){
+  const res = await jget('/players/search?q='+encodeURIComponent(q||''));
+  return (res.users||[]).map(u => ({
+    username: u.username,
+    active: normalizeActive(
+      u.active ?? u.status ?? u.online,
+      u.lastSeen ?? u.last_seen,
+      u.world ?? u.w
+    )
+  }));
+}
 
   async function refreshRanks(){ try{ const r=await jget('/ranks'); if(r&&r.ranks) me.ranks=r.ranks; paintRanks(); }catch{} }
   function paintRanks(){
@@ -120,20 +134,28 @@
     return row;
   }
 
-  function normalizeActive(v, lastSeen){
-  // handle booleans, numbers, strings, and lastSeen timestamps
-  if (v === true || v === 1) return true;
-  if (v === false || v === 0 || v === null) return false;
-  if (typeof v === 'string') {
-    const s = v.trim().toLowerCase();
-    if (s==='online' || s==='active' || s==='true' || s==='1') return true;
-    if (s==='offline' || s==='inactive' || s==='false' || s==='0') return false;
+  // --- ACTIVE RULES (strict) ---
+const ACTIVE_WINDOW_MS = 30_000;             // seen in last 30s
+const ACTIVE_WORLDS    = new Set(['1','2','3','4']); // city worlds only
+
+function normalizeActive(v, lastSeen, world){
+  // must be in a multiplayer world
+  if (world != null && !ACTIVE_WORLDS.has(String(world))) return false;
+
+  // accept only boolean/number; ignore strings like "active"/"online"
+  if (v === true || v === 1) {
+    // if we have lastSeen, also require it's fresh
+    if (typeof lastSeen === 'number' && isFinite(lastSeen)) {
+      return (Date.now() - lastSeen) <= ACTIVE_WINDOW_MS;
+    }
+    return true;
   }
+
   if (typeof lastSeen === 'number' && isFinite(lastSeen)) {
-    // consider online if seen within last 2 minutes (tweak if needed)
-    return (Date.now() - lastSeen) < 120000;
+    return (Date.now() - lastSeen) <= ACTIVE_WINDOW_MS;
   }
-  return false; // default
+
+  return false;
 }
 
   function paintFriends(list){
@@ -146,11 +168,11 @@
     const filtered = q ? friends.filter(x=> (x.username||'').toLowerCase().includes(q)) : friends;
     paintFriends(filtered);
   }
-  function updatePresence(user, active, lastSeen){
+  function updatePresence(user, active, lastSeen, world){
   const f = friends.find(x=>x.username===user);
-  if(f){
-    f.active = normalizeActive(active, lastSeen);
-    if(lobby && lobby.style.display!=='none') repaintFriends();
+  if (f) {
+    f.active = normalizeActive(active, lastSeen, world);
+    if (lobby && lobby.style.display!=='none') repaintFriends();
   }
 }
 
@@ -364,10 +386,11 @@
   // FIRST branch: presence
   if (msg.type === 'presence') {
     updatePresence(
-      (msg.user || msg.username),
-      (msg.active ?? msg.status ?? msg.online),
-      (msg.lastSeen ?? msg.last_seen)
-    );
+  (msg.user || msg.username),
+  (msg.active ?? msg.status ?? msg.online),
+  (msg.lastSeen ?? msg.last_seen),
+  (msg.world ?? msg.w)
+);
 
   } else if (msg.type === 'queue.update' && ui.queueMsg) {
     const nice = msg.mode==='br10'?'Battle Royale (10)': msg.mode==='v1'?'1v1': msg.mode==='v2'?'2v2':'3v3';
@@ -880,11 +903,8 @@
       disableBtn(); setStatus('Searching…');
       try{
         const list = await searchPlayers(q);
-        if(searchRunId !== thisRun) return;
-        paintFriends((list||[]).map(u => ({
-  username: u.username,
-  active: normalizeActive(u.active ?? u.status ?? u.online, u.lastSeen ?? u.last_seen)
-})));
+if (searchRunId !== thisRun) return;
+paintFriends(list); // list already has active normalized with world gating
         setStatus((list&&list.length)?`Found ${list.length} result${list.length===1?'':'s'}`:'No players found');
         if(!list || !list.length){
           const host = lobby.querySelector('#mpFriends');
