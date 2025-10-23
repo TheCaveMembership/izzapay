@@ -12,7 +12,7 @@
 #   equipped-weapon mirroring, /duel/selfdown
 #
 # Notes:
-# - Presence TTL ~10s; roster returns others (not you) currently in same world.
+# - Presence TTL ~30s; roster returns others (not you) currently in same world.
 # - Inventory/appearance is mirrored so remote renderer can tint/skin correctly.
 # - Worlds: 'solo' is ignored by presence (counts exclude 'solo').
 
@@ -85,7 +85,7 @@ def _counts_by_world() -> Dict[str,int]:
 
 # In-memory presence: world -> uid -> state
 # state: {x,y,facing,appearance,inv,last}
-_PRES_TTL = 10.0
+_PRES_TTL = 30.0  # players are considered "active" if they've pinged within the last 30s
 _WORLD_STATE: Dict[str, Dict[int, Dict[str,Any]]] = {w:{} for w in _WORLDS}
 
 def _sweep_presence():
@@ -93,6 +93,16 @@ def _sweep_presence():
     for w, umap in _WORLD_STATE.items():
         dead = [uid for uid, st in umap.items() if (now - float(st.get("last",0))) > _PRES_TTL]
         for uid in dead: umap.pop(uid, None)
+
+# ---- Presence projection -----------------------------------------------------
+
+def _presence_for(uid: int) -> Dict[str, Any]:
+    """Return {active, lastSeen(ms), world} for a user based on _WORLD_STATE + TTL."""
+    w = _user_world(uid)
+    st = _WORLD_STATE.get(w, {}).get(int(uid))
+    last = float(st.get("last", 0.0)) if st else 0.0
+    active = bool(st) and (time.time() - last) <= _PRES_TTL
+    return {"active": bool(active), "lastSeen": int(last * 1000) if last else 0, "world": w}
 
 # ---- minimal schema (friends/invites/rank) ----------------------------------
 
@@ -261,7 +271,8 @@ def mp_me():
     if not who: return jsonify({"error":"not_authenticated"}), 401
     uid,_,name=who
     if uid not in _WORLD_OF: _set_world(uid, "1")
-    return jsonify({"username":name,"active":True,"world":_user_world(uid),"inviteLink":"/izza-game/auth"})
+    p = _presence_for(uid)
+    return jsonify({"username": name, **p, "inviteLink": "/izza-game/auth"})
 
 @mp_bp.get("/friends/list")
 def mp_friends_list():
@@ -279,7 +290,11 @@ def mp_friends_list():
             WHERE fr.status='accepted' AND (fr.from_user=? OR fr.to_user=?)
             ORDER BY u.pi_username COLLATE NOCASE
         """,(uid,uid,uid,uid)).fetchall()
-    friends=[{"username":r["username"],"active": True} for r in rows]
+    friends=[]
+    for r in rows:
+        fid = int(r["fid"])
+        p = _presence_for(fid)
+        friends.append({"username": r["username"], **p})
     return jsonify({"friends":friends})
 
 @mp_bp.get("/players/search")
@@ -301,7 +316,11 @@ def mp_players_search():
             ORDER BY u.pi_username COLLATE NOCASE
             LIMIT 15
         """,(like,)).fetchall()
-    users=[{"username":r["username"],"active": True} for r in rows]
+    users=[]
+    for r in rows:
+        uid = int(r["uid"])
+        p = _presence_for(uid)
+        users.append({"username": r["username"], **p})
     return jsonify({"users":users})
 
 @mp_bp.post("/friends/request")
