@@ -166,8 +166,18 @@
               {% endif %} Allowed characters: a–z, 0–9, hyphen. No spaces.
             </small>
           </div>
+
+          <!-- NEW: Edit Logo picker (upload + preview) -->
+          <div class="field">
+            <label class="ip-label">Logo</label>
+            <div class="picker card">
+              <div class="thumb" id="editLogoThumb"><span class="muted">Preview</span></div>
+              <div class="row"><input type="file" id="editLogoFile" accept="image/*" style="flex:1"/><button class="ip-btn" type="button" id="editLogoUploadBtn">Upload</button></div>
+              <div class="field" style="margin-top:6px"><input class="ip-input" id="editLogoUrl" name="logo_url" value="{{ m.logo_url or '' }}" placeholder="https://… (or paste a logo URL)"></div>
+            </div>
+          </div>
+
           <div class="field-inline">
-            <div class="field"><label class="ip-label">Logo URL</label><input class="ip-input" name="logo_url" value="{{ m.logo_url or '' }}"></div>
             <div class="field">
               <label class="ip-label">Theme mode</label>
               <select class="ip-select" name="theme_mode">
@@ -388,7 +398,7 @@
       </div>
 
       <div class="card" id="danger-zone" style="margin:12px 0 0 0">
-        <div class="h2" style="color:#ffb86b">Danger Zone</div>
+        <div class="h2">Danger Zone</div>
         <p class="muted" style="margin-top:-2px">Deleting your store will permanently remove <strong>all store information and items</strong>. This cannot be undone.</p>
         <ul class="muted" style="margin:6px 0 12px;padding-left:18px">
           <li>Make sure you’ve <strong>processed delivery for any purchased physical items</strong>.</li>
@@ -550,27 +560,58 @@
     }
   });
 
-  // ---------- logo upload ----------
+  // ---------- logo upload (setup + edit) with auto-upload on select ----------
   (function(){
-    const file=$('#logoFile'), btn=$('#logoUploadBtn'), inp=$('#logoUrl');
-    if(!file||!btn||!inp) return;
-    file.addEventListener('change',()=>{ const f=file.files?.[0]; if(f) setThumb('logoThumb', URL.createObjectURL(f)); });
-    btn.addEventListener('click', async ()=>{
-      if(!file.files?.[0]){ inp.focus(); return; }
-      btn.disabled=true; btn.textContent='Uploading…';
-      try{ const url=await uploadTo('/upload', file.files[0]); inp.value=ABS(url); setThumb('logoThumb', proxy(url)); }
-      catch{ alert('Upload failed. You can paste a URL instead.'); }
-      finally{ btn.disabled=false; btn.textContent='Upload'; }
-    });
-    inp.addEventListener('input',()=>{ const v=proxy(inp.value); if(v) setThumb('logoThumb', v); });
-    if(inp.value){ const v=proxy(inp.value); if(v) setThumb('logoThumb', v); }
+    async function handleFileChange(fileEl, btnEl, inpEl, thumbId){
+      const f = fileEl?.files?.[0];
+      if(!f) return;
+      setThumb(thumbId, URL.createObjectURL(f));            // local preview
+      if(btnEl) { btnEl.disabled=true; btnEl.textContent='Uploading…'; }
+      try{
+        const url = await uploadTo('/upload', f);           // upload immediately
+        if(inpEl){ inpEl.value = ABS(url); }
+        setThumb(thumbId, proxy(url));                      // show server URL
+      }catch{
+        alert('Upload failed. You can paste a URL instead.');
+      }finally{
+        if(btnEl){ btnEl.disabled=false; btnEl.textContent='Upload'; }
+      }
+    }
+    function bind(fileSel, btnSel, inputSel, thumbId){
+      const file=$(fileSel), btn=$(btnSel), inp=$(inputSel);
+      if(!file||!inp) return;
+      // auto-upload when a file is chosen
+      file.addEventListener('change',()=>handleFileChange(file, btn, inp, thumbId));
+      // manual upload button still works
+      if(btn){ btn.addEventListener('click', async ()=>{ if(!file.files?.[0]){ inp.focus(); return; } await handleFileChange(file, btn, inp, thumbId); }); }
+      // typing/pasting a URL shows preview
+      inp.addEventListener('input',()=>{ const v=proxy(inp.value); if(v) setThumb(thumbId, v); });
+      // show existing value on load
+      if(inp.value){ const v=proxy(inp.value); if(v) setThumb(thumbId, v); }
+    }
+    // setup page picker
+    bind('#logoFile', '#logoUploadBtn', '#logoUrl', 'logoThumb');
+    // edit page picker
+    bind('#editLogoFile', '#editLogoUploadBtn', '#editLogoUrl', 'editLogoThumb');
   })();
 
   // ---------- item image upload ----------
   (function(){
     const file=$('#itFile'), btn=$('#itUploadBtn'), inp=$('#itUrl'), thumbId='itThumb';
     if(!file||!btn||!inp) return;
-    file.addEventListener('change',()=>{ const f=file.files?.[0]; if(f) setThumb(thumbId, URL.createObjectURL(f)); });
+    file.addEventListener('change',async ()=>{
+      const f=file.files?.[0];
+      if(f){
+        // auto-upload for item image as well
+        btn.disabled=true; btn.textContent='Uploading…';
+        try{
+          const url=await uploadTo('/upload', f);
+          inp.value=ABS(url);
+          setThumb(thumbId, proxy(url));
+        }catch{ alert('Upload failed. You can paste an image URL instead.'); }
+        finally{ btn.disabled=false; btn.textContent='Upload'; }
+      }
+    });
     btn.addEventListener('click', async ()=>{
       if(!file.files?.[0]){ inp.focus(); return; }
       btn.disabled=true; btn.textContent='Uploading…';
@@ -743,7 +784,7 @@
     }
 
     // --- Create form wiring
-    (function wireCreate(){
+    (function(){
       const sel=$('#craftedSelect'); if(!sel) return;
       const hid='crafted_item_id';
       const fk='fulfillment_kind';
