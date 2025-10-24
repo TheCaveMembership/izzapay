@@ -1138,13 +1138,19 @@ backdrop.addEventListener('click', ()=>{
 });
 
 // Add the missing Wallet button handler
+// Wallet button — ensure user auth first so mwUser is filled
 walletBtn.addEventListener('click', async ()=>{
-  // try server; if nothing, use the just-created local wallet
+  if (!USER) {                    // <- get username from Pi auth
+    try { await piSignIn(); } catch(_) { /* ignore if user cancels */ }
+  }
+
+  // get an active pub (server or the fresh local one)
   if (!ACTIVE_PUB){
     await fetchActiveWallet();
     if (!ACTIVE_PUB && NEW_WALLET) ACTIVE_PUB = NEW_WALLET.pub;
   }
-  await refreshMyWalletModal();
+
+  await refreshMyWalletModal();   // this now sees USER.username
   openModal(myWalletModal, closeMyWalletBtn);
 });
 
