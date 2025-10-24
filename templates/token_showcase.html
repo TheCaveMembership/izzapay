@@ -597,8 +597,9 @@
           <button id="revealOnceBtn" class="cta" type="button" style="margin-right:8px">Reveal Secret (once)</button>
           <button id="exportBackupBtn" class="cta" type="button">Export Encrypted</button>
           <div class="help" style="margin-top:8px">
-            We never send your secret to the server. Keep it safe.
-          </div>
+  This is a <strong>non-custodial</strong> wallet. We never send your secret to the server.
+  <br><em>Fine print:</em> You can reveal your secret <strong>one more time</strong> on this device during this session only.
+</div>
           <pre id="secretOnce" style="display:none;margin-top:10px;padding:10px;border:1px dashed rgba(255,255,255,.12);border-radius:10px"></pre>
                 <!-- ADD: Import Secret box (existing wallet) -->
       <div class="blox" style="margin-top:10px">
@@ -782,6 +783,15 @@
             <label>Public Key (your account)</label>
             <input id="acctPub" type="text" placeholder="G... (testnet account)" required>
           </div>
+
+          <div class="field" id="secRow" style="display:none">
+  <label>Secret Key (S…) <span class="small-muted">(used only to sign this order; never sent to server)</span></label>
+  <input id="acctSec" type="password" placeholder="S..." inputmode="latin" autocomplete="off">
+  <label style="margin-top:6px;display:flex;gap:8px;align-items:center">
+    <input id="rememberSec" type="checkbox">
+    <span>Save locally for next time (on this device)</span>
+  </label>
+</div>
 
           <div class="row2">
             <div class="field">
@@ -1730,11 +1740,23 @@ function startFundingWatcher(pub){
   }
 
   // ==== UI gate & trustline flow ====
-  const statusEl        = document.getElementById('walletStatus');
-  const checkFundingBtn = document.getElementById('checkFundingBtn');
-  const addTrustlineBtn = document.getElementById('addTrustlineBtn');
-  const acctPubInput    = document.getElementById('acctPub');
-  const autoFundHelp    = document.getElementById('autoFundHelp') || document.querySelector('#newWalletBox .help');
+const statusEl        = document.getElementById('walletStatus');
+const checkFundingBtn = document.getElementById('checkFundingBtn');
+const addTrustlineBtn = document.getElementById('addTrustlineBtn');
+
+// 👇 ADD THESE HERE
+const acctPubInput    = document.getElementById('acctPub');
+const autoFundHelp    = document.getElementById('autoFundHelp') || document.querySelector('#newWalletBox .help');
+
+/* 👇 ADD: Secret-row visibility wiring */
+const secRow = document.getElementById('secRow');
+const acctSec = document.getElementById('acctSec');
+const rememberSec = document.getElementById('rememberSec');
+
+function updateSecretRowVisibility(pub){
+  const hasLocal = pub && !!getLocalSecret(pub, USER?.username);
+  if (secRow) secRow.style.display = (pub && !hasLocal) ? '' : 'none';
+}
 
   let NEW_WALLET = null; // { pub, sec } only when generated here
   function isLocalWallet(pub){ return NEW_WALLET && NEW_WALLET.pub === pub; }
@@ -1892,11 +1914,7 @@ function startFundingWatcher(pub){
 
   createBtn.addEventListener('click', async ()=>{
   // 🛑 Stop if the user already has a wallet (server or local)
-  if (ACTIVE_PUB || (JSON.parse(localStorage.getItem('izza_test_wallet') || 'null')?.pub)) {
-    statusEl.innerHTML = '<span style="color:#ff7b7b">You already have an IZZA Wallet.</span>';
-    try { statusEl.scrollIntoView({behavior:'smooth', block:'nearest'}); } catch(_){}
-    return;
-  }
+  
 
   // ✅ continue with your existing code below
   const ok = await ensureStellar();
@@ -1912,6 +1930,22 @@ function startFundingWatcher(pub){
   try{
     const kp = StellarSdk.Keypair.random();
     NEW_WALLET = { pub: kp.publicKey(), sec: kp.secret() };
+    // After: NEW_WALLET = { pub: kp.publicKey(), sec: kp.secret() };
+try {
+  // Save locally so future submits work on this device
+  saveLocalSecret(NEW_WALLET.pub, NEW_WALLET.sec, USER?.username);
+} catch(_) {}
+
+const secretBox = document.getElementById('secretOnce');
+if (secretBox) {
+  secretBox.style.display = 'block';
+  secretBox.textContent =
+    `YOUR SECRET (copy & store safely):\n${NEW_WALLET.sec}\n\n` +
+    `This is a non-custodial wallet. We never send your secret to our server. ` +
+    `You will need this secret on new devices or if your browser storage is cleared.`;
+}
+// reset the one-time flag so Reveal works once in this session
+try { markSecretViewedOnce(NEW_WALLET.pub, USER?.username); } catch(_){}
 
     // --- immediately make this the active wallet everywhere ---
     try { await linkActiveWallet(NEW_WALLET.pub); } catch(_) {}
