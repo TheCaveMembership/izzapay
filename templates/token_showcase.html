@@ -1197,45 +1197,76 @@ const distBalanceEl = document.getElementById('dist-balance');
 const trustCountEl  = document.getElementById('trust-count');
 const recentOpsEl   = document.getElementById('recentOps');
   // =================== Summary fetch ===================
-  async function fetchSummary(){
-    try{
-      const [acctRes, holdersRes, opsRes] = await Promise.all([
-        fetch(`${API_BASE}/accounts/${DISTRIBUTOR}`),
-        fetch(`${API_BASE}/accounts?asset=${encodeURIComponent(ASSET_CODE)}:${encodeURIComponent(ISSUER)}`),
-        fetch(`${API_BASE}/accounts/${DISTRIBUTOR}/operations?limit=6&order=desc`)
-      ]);
-      const acctJson = acctRes.ok ? await acctRes.json() : null;
-      const holders  = holdersRes.ok ? await holdersRes.json() : null;
-      const opsJson  = opsRes.ok ? await opsRes.json() : null;
+async function fetchSummary(){
+  try{
+    // Build the /assets lookup URL (1 record only)
+    const assetUrl =
+      `${API_BASE}/assets` +
+      `?asset_code=${encodeURIComponent(ASSET_CODE)}` +
+      `&asset_issuer=${encodeURIComponent(ISSUER)}` +
+      `&limit=1`;
 
-      let izzaBal = '0';
-      if (acctJson && Array.isArray(acctJson.balances)) {
-        const line = acctJson.balances.find(b => b.asset_type !== 'native' && b.asset_code === ASSET_CODE && b.asset_issuer === ISSUER);
-        izzaBal = line ? String(line.balance) : '0';
-      }
-      distBalanceEl.textContent = izzaBal;
+    // Distributor account, asset summary, recent ops
+    const [acctRes, assetsRes, opsRes] = await Promise.all([
+      fetch(`${API_BASE}/accounts/${DISTRIBUTOR}`, { cache:'no-store' }),
+      fetch(assetUrl,                             { cache:'no-store' }),
+      fetch(`${API_BASE}/accounts/${DISTRIBUTOR}/operations?limit=6&order=desc`, { cache:'no-store' })
+    ]);
 
-      const count = (holders && holders._embedded && holders._embedded.records) ? holders._embedded.records.length : 0;
-      trustCountEl.textContent = count;
+    const acctJson   = acctRes.ok   ? await acctRes.json()   : null;
+    const assetsJson = assetsRes.ok ? await assetsRes.json() : null;
+    const opsJson    = opsRes.ok    ? await opsRes.json()    : null;
 
-      let opsHtml = '';
-      const recs = opsJson && opsJson._embedded ? opsJson._embedded.records : [];
-      if (recs && recs.length){
-        recs.forEach(op=>{
-          const t = op.type || 'operation';
-          const when = op.created_at ? new Date(op.created_at).toLocaleString() : '';
-          const msg = (op.asset_code ? op.asset_code : (op.asset || 'native')) + (op.to ? ` → ${op.to.slice(0,8)}…` : '');
-          opsHtml += `<div class="op"><span class="t">${t}</span><div class="m">${msg}</div><div class="m">${when}</div></div>`;
-        });
-      } else { opsHtml = '<div class="m">No recent activity.</div>'; }
-      recentOpsEl.innerHTML = opsHtml;
-    } catch(e){
-      distBalanceEl.textContent = '—';
-      trustCountEl.textContent  = '—';
-      recentOpsEl.textContent   = 'Error loading recent activity';
-      log('summary.fail',{err:String(e)});
+    // Distributor IZZA balance
+    let izzaBal = '0';
+    if (acctJson && Array.isArray(acctJson.balances)) {
+      const line = acctJson.balances.find(
+        b => b.asset_type !== 'native' && b.asset_code === ASSET_CODE && b.asset_issuer === ISSUER
+      );
+      izzaBal = line ? String(line.balance) : '0';
     }
+    distBalanceEl.textContent = izzaBal;
+
+    // Holders / trustlines (from /assets)
+    const rec = assetsJson?._embedded?.records?.[0];
+    const count =
+      rec?.num_accounts ??
+      ((rec?.accounts?.authorized ?? 0) +
+       (rec?.accounts?.authorized_to_maintain_liabilities ?? 0) +
+       (rec?.accounts?.unauthorized ?? 0));
+
+    trustCountEl.textContent = (count ?? 0).toLocaleString();
+
+    // Recent ops
+    let opsHtml = '';
+    const recs = opsJson && opsJson._embedded ? opsJson._embedded.records : [];
+    if (recs && recs.length){
+      recs.forEach(op=>{
+        const t = op.type || 'operation';
+        const when = op.created_at ? new Date(op.created_at).toLocaleString() : '';
+        const msg = (op.asset_code ? op.asset_code : (op.asset || 'native')) + (op.to ? ` → ${op.to.slice(0,8)}…` : '');
+        opsHtml += `<div class="op"><span class="t">${t}</span><div class="m">${msg}</div><div class="m">${when}</div></div>`;
+      });
+    } else {
+      opsHtml = '<div class="m">No recent activity.</div>';
+    }
+    recentOpsEl.innerHTML = opsHtml;
+
+    // (Nice to have) wire the “Raw data & quick links” anchors
+    try{
+      document.getElementById('link-account').href   = `${API_BASE}/accounts/${DISTRIBUTOR}`;
+      document.getElementById('link-payments').href  = `${API_BASE}/accounts/${DISTRIBUTOR}/payments?limit=20&order=desc`;
+      document.getElementById('link-ops').href       = `${API_BASE}/accounts/${DISTRIBUTOR}/operations?limit=20&order=desc`;
+      document.getElementById('link-assets').href    = assetUrl;
+    }catch(_){ /* non-fatal */ }
+
+  } catch(e){
+    distBalanceEl.textContent = '—';
+    trustCountEl.textContent  = '—';
+    recentOpsEl.textContent   = 'Error loading recent activity';
+    log('summary.fail',{err:String(e)});
   }
+}
   fetchSummary();
   bootstrapAuthUI();
 
