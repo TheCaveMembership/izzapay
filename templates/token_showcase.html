@@ -1201,6 +1201,36 @@ function getServer(){
   return new ServerCtor(String(API_BASE).replace(/\/+$/,''));
 }
 
+  // --- Horizon error -> friendly text (put this above the submit handler) ---
+function explainHorizonError(e){
+  try{
+    const d   = e?.response?.data || e?.data || null;
+    const ex  = d?.extras || null;
+    const txc = ex?.result_codes?.transaction || null;
+    const opc = Array.isArray(ex?.result_codes?.operations)
+      ? ex.result_codes.operations[0]
+      : null;
+
+    const friendly = {
+      op_underfunded:       'Not enough Pi to cover price×amount plus fees/reserves.',
+      op_low_reserve:       'Account would drop below the minimum reserve.',
+      op_no_trust:          'Missing trustline for the asset on this side.',
+      op_buy_no_trust:      'Missing trustline for the asset you are buying.',
+      op_sell_no_trust:     'Missing trustline for the asset you are selling.',
+      op_line_full:         'Trustline limit/balance can’t accept this much.',
+      tx_bad_auth:          'Bad signature or wrong network passphrase.',
+      tx_insufficient_balance: 'Insufficient balance to pay the fee.'
+    };
+
+    const title = d?.title || 'Bad request';
+    const detail = d?.detail || title;
+    const msg = friendly[opc] || friendly[txc] || detail;
+    return { msg, txc, opc, raw: d };
+  }catch{
+    return { msg: String(e) };
+  }
+}
+
 // Best price helper (for MARKET)
 async function getAutoPrice(side, slippage = 0.03){
   try{
@@ -1362,10 +1392,14 @@ orderForm.addEventListener('submit', async (e)=>{
       window.location.href = uri;
       orderMsg.innerHTML = `Opening your wallet… If nothing happens, copy this URI into a SEP-7 wallet:<br><code style="word-break:break-all">${uri}</code>`;
     }
-  }catch(err){
-    log('order.tx.fail',{err:String(err)});
-    orderMsg.innerHTML = `<span style="color:#ffb3b3">Order failed: ${String(err)}</span>`;
-  }
+  } catch(err){
+  const info = explainHorizonError(err);
+  log('order.tx.fail', { err:String(err), txc:info.txc, opc:info.opc });
+  const codeLine = [info.opc, info.txc].filter(Boolean).join(' • ');
+  orderMsg.innerHTML =
+    `❌ ${info.msg}` +
+    (codeLine ? `<br><span class="small-muted">${codeLine}</span>` : '');
+}
 });
 
 // =================== Create Test Wallet (await Stellar) ===================
