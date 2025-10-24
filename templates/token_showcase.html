@@ -1015,9 +1015,12 @@ let __hydrated = false;
   // =================== Fetch/link active wallet ===================
 async function fetchActiveWallet(){
   try{
-    const r = await fetch('/api/wallet/active', {
+    // Prefer authenticated username; fall back to URL ?u
+    const u = (USER && USER.username) || (new URLSearchParams(location.search).get('u')) || '';
+    const url = '/api/wallet/active' + (u ? `?u=${encodeURIComponent(u)}` : '');
+    const r = await fetch(url, {
       cache: 'no-store',
-      credentials: 'include'        // << send session cookie
+      credentials: 'include'
     });
     if (!r.ok) return null;
     const j = await r.json();
@@ -1025,7 +1028,6 @@ async function fetchActiveWallet(){
     return ACTIVE_PUB;
   }catch{ return null; }
 }
-
 async function ensureUserAndWalletGate(){
   // if hydration hasn't finished yet, wait once
   if (!__hydrated) {
