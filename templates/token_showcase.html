@@ -738,7 +738,9 @@
   const ASSET_CODE  = "{{ ASSET_CODE }}";
   const ISSUER      = "{{ ISSUER }}";
   const DISTRIBUTOR = "{{ DISTRIBUTOR }}";
-  const API_BASE    = "{{ API_BASE }}";
+  const API_BASE = ("{{ API_BASE }}".startsWith("http")
+  ? "{{ API_BASE }}"
+  : "https://api.testnet.minepi.com");
   const DEEP_LINK   = "{{ DEEP_LINK }}";
 
   // =================== Tiny logger (+ global error taps) ===================
@@ -1249,8 +1251,10 @@ if (chartCanvas && chartCanvas.parentElement) ro.observe(chartCanvas.parentEleme
 
       orderMsg.textContent = 'Building unsigned transaction…';
 
-      const server = new StellarSdk.Server(API_BASE);
-      const acct   = await server.loadAccount(pub);
+      const SDK = window.StellarSdk;
+if (!SDK) { orderMsg.textContent = 'Stellar SDK missing.'; return; }
+const server = new SDK.Server(API_BASE);
+const acct   = await server.loadAccount(pub);
 
       const izza  = new StellarSdk.Asset(ASSET_CODE, ISSUER);
       const native= StellarSdk.Asset.native();
@@ -1371,24 +1375,29 @@ addTrustlineBtn.addEventListener('click', async ()=>{
   addTrustlineBtn.disabled = true;
   statusEl.textContent = 'Adding IZZA trustline…';
   try{
-    const server = new StellarSdk.Server(API_BASE);
-    const user   = StellarSdk.Keypair.fromSecret(NEW_WALLET.sec);
-    const acct   = await server.loadAccount(user.publicKey());
-    const izza   = new StellarSdk.Asset(ASSET_CODE, ISSUER);
-    const tx = new StellarSdk.TransactionBuilder(acct, {
-      fee: (await server.fetchBaseFee()).toString(),
-      networkPassphrase: 'Pi Testnet'
-    }).addOperation(StellarSdk.Operation.changeTrust({ asset: izza }))
-      .setTimeout(180).build();
-    tx.sign(user);
-    const res = await server.submitTransaction(tx);
+    const SDK = window.StellarSdk;
+if (!SDK) { statusEl.textContent = 'Stellar SDK missing.'; return; }
+
+const server = new SDK.Server(API_BASE);
+const user   = SDK.Keypair.fromSecret(NEW_WALLET.sec);
+const acct   = await server.loadAccount(user.publicKey());
+const izza   = new SDK.Asset(ASSET_CODE, ISSUER);
+
+const tx = new SDK.TransactionBuilder(acct, {
+  fee: (await server.fetchBaseFee()).toString(),
+  networkPassphrase: 'Pi Testnet'
+})
+  .addOperation(SDK.Operation.changeTrust({ asset: izza }))
+  .setTimeout(180)
+  .build();
+
+tx.sign(user);
+const res = await server.submitTransaction(tx);
     const okRes = !!res && (res.successful || res.result_xdr);
     statusEl.textContent = okRes ? 'Trustline added. You can place orders now.' : 'Trustline failed.';
     addTrustlineBtn.disabled = !okRes;
     if (okRes) setOrderReady(true);
-    if (funded) {
-  checkFundingBtn.style.display = 'none';
-}
+    checkFundingBtn.style.display = 'none'; // hide after a successful trustline
   }catch(e){
     statusEl.innerHTML = `<span style="color:#ffb3b3">Trustline failed: ${String(e)}</span>`;
     addTrustlineBtn.disabled = false;
