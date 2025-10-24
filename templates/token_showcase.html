@@ -1126,6 +1126,7 @@ if (chartCanvas && chartCanvas.parentElement) ro.observe(chartCanvas.parentEleme
   requestAnimationFrame(()=>{ try{ izzaChart && izzaChart.resize(); }catch(_){} });
 });
   closeOrderbookBtn.addEventListener('click', ()=>{ stopObRefresh(); closeModal(orderbookModal); });
+  closePlaceOrderBtn.addEventListener('click', ()=>{ closeModal(placeOrderModal); });
 
   // =================== Orders / Wallet (with Stellar ensure) ===================
   const sideBtns  = Array.from(document.querySelectorAll('.sideBtn'));
@@ -1312,13 +1313,29 @@ if (chartCanvas && chartCanvas.parentElement) ro.observe(chartCanvas.parentEleme
   }
 
   createBtn.addEventListener('click', async ()=>{
-    // Ensure Stellar SDK before using Keypair.random()
-    const ok = await ensureStellar();
-    if (!ok || !window.StellarSdk){
-      statusEl.innerHTML = `<span style="color:#ffb3b3">Couldn’t create wallet: Stellar SDK failed to load in this WebView.</span>`;
-      log('wallet.create.noSDK');
-      return;
-    }
+  const ok = await ensureStellar();
+  if (!ok || !window.StellarSdk){
+    statusEl.innerHTML = `<span style="color:#ffb3b3">Couldn’t load Stellar SDK (blocked by CSP/CDN/SRI). Try a modern browser, or host /static/stellar-sdk.min.js.</span>`;
+    return;
+  }
+  if (!window.crypto || !window.crypto.getRandomValues){
+    statusEl.innerHTML = `<span style="color:#ffb3b3">This browser/WebView lacks secure randomness (WebCrypto). Can’t generate keys here.</span>`;
+    return;
+  }
+
+  try{
+    const kp = StellarSdk.Keypair.random();
+    NEW_WALLET = { pub: kp.publicKey(), sec: kp.secret() };
+    acctPubInput.value = NEW_WALLET.pub;
+    newPubEl.textContent = NEW_WALLET.pub;
+    drawQR(newQRCanvas, NEW_WALLET.pub);
+    box.style.display = 'block';
+    statusEl.textContent = 'Wallet created locally. Fund ~2.0 test Pi, then “Check Funding”.';
+    try{ localStorage.setItem('izza_test_wallet', JSON.stringify(NEW_WALLET)); }catch(_){}
+  }catch(e){
+    statusEl.innerHTML = `<span style="color:#ffb3b3">Couldn’t create wallet: ${String(e)}</span>`;
+  }
+});
 
     try{
       const kp = StellarSdk.Keypair.random();
