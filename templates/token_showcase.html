@@ -930,34 +930,38 @@
 
   // =================== Sign-in using Pi SDK (after ensurePiReady) ===================
   async function piSignIn(){
-    const ok = await ensurePiReady({ sandbox: false });
-    if (!ok) {
-      const isPiBrowser = /PiBrowser/i.test(navigator.userAgent || '');
-      if (!isPiBrowser) location.href = '/authenticate?dest=wallet';
-      throw new Error('pi-sdk-unavailable');
-    }
-    try{
-      const scopes = ['username'];
-      const onIncompletePaymentFound = function(_){};
-      const auth = await window.Pi.authenticate(scopes, onIncompletePaymentFound);
-
-      await fetch('/api/auth/pi/verify', {
-        method:'POST', headers:{'Content-Type':'application/json'},
-        body: JSON.stringify({
-          uid: auth.user.uid,
-          username: auth.user.username,
-          accessToken: auth.accessToken
-        })
-      });
-
-      USER = { uid: auth.user.uid, username: auth.user.username };
-      return USER;
-    }catch(e){
-      log('pi.auth.fail', { err:String(e) });
-      throw e;
-    }
+  const ok = await ensurePiReady({ sandbox: false });
+  if (!ok) {
+    const isPiBrowser = /PiBrowser/i.test(navigator.userAgent || '');
+    if (!isPiBrowser) location.href = '/authenticate?dest=wallet';
+    throw new Error('pi-sdk-unavailable');
   }
+  try{
+    const scopes = ['username'];
+    const onIncompletePaymentFound = function(_){};
+    const auth = await window.Pi.authenticate(scopes, onIncompletePaymentFound);
 
+    // FIXED verify payload (drop-in)
+    const resp = await fetch('/api/auth/pi/verify', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        accessToken: auth.accessToken,
+        user: { id: auth.user.uid, uid: auth.user.uid, username: auth.user.username }
+      })
+    });
+    if (!resp.ok) {
+      const errText = await resp.text().catch(() => '');
+      throw new Error(`verify_failed:${resp.status}${errText ? ' ' + errText : ''}`);
+    }
+
+    USER = { uid: auth.user.uid, username: auth.user.username };
+    return USER;
+  }catch(e){
+    log('pi.auth.fail', { err:String(e) });
+    throw e;
+  }
+}
   // =================== Fetch/link active wallet ===================
   async function fetchActiveWallet(){
     try{
