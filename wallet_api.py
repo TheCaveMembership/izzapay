@@ -9,8 +9,22 @@ def now_i():
     return int(time())
 
 def current_username():
-    # Same key you already use for merchant pages (session is already set in your Pi verify route)
-    return session.get("pi_username")
+    # Fast path: already cached
+    u = session.get("pi_username")
+    if u:
+        return u
+
+    # Your auth flow sets only user_id; resolve username and cache it
+    uid = session.get("user_id")
+    if not uid:
+        return None
+
+    with conn() as cx:
+        row = cx.execute("SELECT pi_username FROM users WHERE id = ?", (int(uid),)).fetchone()
+    if row and row["pi_username"]:
+        session["pi_username"] = row["pi_username"]
+        return row["pi_username"]
+    return None
 
 @bp.get("/api/wallet/active")
 def wallet_active():
