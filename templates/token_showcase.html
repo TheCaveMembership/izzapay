@@ -1145,9 +1145,6 @@ walletBtn.addEventListener('click', async ()=>{
 
 // ✅ Call the gate AFTER everything above exists
 ensureUserAndWalletGate();
-    if (!orderbookModal.hidden){ stopObRefresh(); }
-    [modal, orderbookModal, placeOrderModal, myWalletModal].forEach(m=>{ if(!m.hidden) closeModal(m); });
-  });
 
   // =================== Order book endpoints ===================
   const ORDERBOOK_URL = `${API_BASE}/order_book`
