@@ -1694,6 +1694,102 @@ def pi_clear_pending():
         return {"ok": True, "cleared": True, "payment_id": (pay_id or None), "session_id": (session_id or None)}
     except Exception:
         return {"ok": False, "error": "server_error"}, 500
+
+    # ---------- Compatibility shims for front-end calls ----------
+# These satisfy the UI calls to /api/auth/pi/verify and /api/wallet/*
+
+@app.post("/api/auth/pi/verify")
+def api_auth_pi_verify():
+    """
+    Accepts JSON: { accessToken, user: { uid, username } }
+    Verifies with Pi /v2/me, upserts user, and starts a session.
+    Returns: { ok:true }
+    """
+    try:
+        data = request.get_json(silent=True) or {}
+        token = (data.get("accessToken") or "").strip()
+        user  = data.get("user") or {}
+        uid   = user.get("uid") or user.get("id")
+        uname = (user.get("username") or "").strip()
+
+        if not token or not uid or not uname:
+            return jsonify(ok=False, error="invalid_payload"), 400
+
+        # Verify token with Pi
+        r = requests.get(f"{PI_API_BASE}/v2/me",
+                         headers={"Authorization": f"Bearer {token}"}, timeout=10)
+        if r.status_code != 200:
+            return jsonify(ok=False, error="token_invalid"), 401
+
+        # Ensure minimal columns exist (mirrors auth_exchange safety)
+        with conn() as cx:
+            cols = [row["name"] for row in cx.execute("PRAGMA table_info(users)").fetchall()]
+            if "pi_uid" not in cols:
+                cx.execute("ALTER TABLE users ADD COLUMN pi_uid TEXT")
+            if "pi_username" not in cols:
+                cx.execute("ALTER TABLE users ADD COLUMN pi_username TEXT")
+            if "role" not in cols:
+                cx.execute("ALTER TABLE users ADD COLUMN role TEXT")
+            if "created_at" not in cols:
+                cx.execute("ALTER TABLE users ADD COLUMN created_at INTEGER")
+            if "ic_credits" not in cols:
+                cx.execute("ALTER TABLE users ADD COLUMN ic_credits INTEGER DEFAULT 0")
+
+        # Upsert by uid (fallback by username if needed)
+        with conn() as cx:
+            row = cx.execute("SELECT * FROM users WHERE pi_uid=?", (uid,)).fetchone()
+            if not row:
+                alt = cx.execute("SELECT * FROM users WHERE pi_username=?", (uname,)).fetchone()
+                if alt:
+                    cx.execute("UPDATE users SET pi_uid=? WHERE id=?", (uid, alt["id"]))
+                    row = cx.execute("SELECT * FROM users WHERE id=?", (alt["id"],)).fetchone()
+            if not row:
+                cx.execute("""INSERT INTO users(pi_uid, pi_username, role, created_at)
+                              VALUES(?, ?, 'buyer', ?)""",
+                           (uid, uname, int(time.time())))
+                row = cx.execute("SELECT * FROM users WHERE pi_uid=?", (uid,)).fetchone()
+
+        # Start a Flask session and return ok
+        try:
+            session["user_id"] = row["id"]
+            session.permanent = True
+        except Exception:
+            pass
+
+        return jsonify(ok=True)
+    except Exception:
+        return jsonify(ok=False, error="server_error"), 500
+
+
+@app.get("/api/wallet/active")
+def api_wallet_active():
+    """
+    Returns the user's currently linked public key from session storage.
+    404 with small JSON body if none set (matches frontend expectation).
+    """
+    pub = session.get("active_pub")
+    if not pub:
+        return jsonify(error="no_active_wallet"), 404
+    return jsonify(pub=pub)
+
+
+@app.post("/api/wallet/link")
+def api_wallet_link():
+    """
+    Accepts JSON: { pub: "G...." }
+    Stores the public key in the session after light validation.
+    """
+    try:
+        data = request.get_json(silent=True) or {}
+        pub = (data.get("pub") or "").strip()
+        if not (pub and len(pub) == 56 and pub.startswith("G")):
+            return jsonify(ok=False, error="bad_pub"), 400
+        session["active_pub"] = pub
+        session.permanent = True
+        return jsonify(ok=True)
+    except Exception:
+        return jsonify(ok=False, error="server_error"), 500
+# ---------- /compatibility shims ----------
         
 # NEW: Same-origin proxy to your LibreTranslate service
 @app.post("/api/translate")
