@@ -46,60 +46,59 @@
   </div>
 
   <script>
-  (function(){
-    const sandbox = {{ 'true' if sandbox else 'false' }};
-    const btn = document.getElementById('piTokenAuthBtn');
-    const msg = document.getElementById('msg');
-    const err = document.getElementById('err');
+(function(){
+  const sandbox = {{ 'true' if sandbox else 'false' }};
+  const btn = document.getElementById('piTokenAuthBtn');
+  const msg = document.getElementById('msg');
+  const err = document.getElementById('err');
 
-    function setMsg(t){ msg.textContent = t || ''; }
-    function setErr(t){ err.textContent = t || ''; }
+  function setMsg(t){ if(msg) msg.textContent = t || ''; }
+  function setErr(t){ if(err) err.textContent = t || ''; }
 
-    function initPi(){
-      if (!window.Pi || !Pi.init) return false;
-      try { Pi.init({ version: "2.0", sandbox }); return true; }
-      catch(e){ console.error("Pi.init failed", e); setErr("Pi.init failed: " + (e?.message || e)); return false; }
+  function initPi(){
+    if (!window.Pi || !Pi.init) return false;
+    try { Pi.init({ version: "2.0", sandbox: sandbox }); return true; }
+    catch(e){ console.error("Pi.init failed", e); setErr("Pi.init failed: " + (e?.message || e)); return false; }
+  }
+  if (!initPi()) setMsg("Open in Pi Browser or refresh. Pi SDK is initializing.");
+
+  btn?.addEventListener('click', async function(){
+    setErr('');
+    if (!window.Pi || !Pi.authenticate) {
+      setMsg("Open this page inside Pi Browser so the Pi SDK can run.");  // <- no redirect
+      return;
     }
-    if (!initPi()) setMsg("Open in Pi Browser or refresh. Pi SDK is initializing.");
+    setMsg("Requesting authorization…");
 
-    btn?.addEventListener('click', async function(){
-      setErr('');
-      if (!window.Pi || !Pi.authenticate) {
-        // Fallback to a generic signin route if not in Pi Browser
-        location.href = "/authenticate?dest=" + encodeURIComponent("/token/izza");
-        return;
-      }
-      setMsg("Requesting authorization…");
+    try{
+      const auth = await Pi.authenticate(['username'], function onIncompletePaymentFound(){});
+      try{ localStorage.setItem('piAuthUser', JSON.stringify(auth.user||null)); }catch{}
+      try{ localStorage.setItem('piAccessToken', auth.accessToken || ''); }catch{}
 
-      try{
-        const auth = await Pi.authenticate(['username'], function onIncompletePaymentFound(){});
-        try{ localStorage.setItem('piAuthUser', JSON.stringify(auth.user||null)); }catch{}
-        try{ localStorage.setItem('piAccessToken', auth.accessToken || ''); }catch{}
+      // SAME FLOW: post to /auth/exchange with payload + next
+      const form = document.createElement('form');
+      form.method = 'POST';
+      form.action = '/auth/exchange';
 
-        const form = document.createElement('form');
-        form.method = 'POST';
-        form.action = '/auth/exchange';
+      const payload = document.createElement('input');
+      payload.type='hidden'; payload.name='payload';
+      payload.value = JSON.stringify({ accessToken: auth.accessToken, user: auth.user });
+      form.appendChild(payload);
 
-        const payload = document.createElement('input');
-        payload.type='hidden'; payload.name='payload';
-        payload.value = JSON.stringify({ accessToken: auth.accessToken, user: auth.user });
-        form.appendChild(payload);
+      const next = document.createElement('input');
+      next.type='hidden'; next.name='next';
+      next.value = '/token/izza';
+      form.appendChild(next);
 
-        // IMPORTANT: use the same field your server already supports (your game flow uses "next")
-        const next = document.createElement('input');
-        next.type='hidden'; next.name='next';
-        next.value = '/token/izza';
-        form.appendChild(next);
-
-        document.body.appendChild(form);
-        form.submit();
-      }catch(e){
-        console.error(e);
-        setMsg("Authorization failed. Please try again.");
-        setErr(e?.message || String(e));
-      }
-    });
-  })();
-  </script>
+      document.body.appendChild(form);
+      form.submit();
+    }catch(e){
+      console.error(e);
+      setMsg("Authorization failed. Please try again.");
+      setErr(e?.message || String(e));
+    }
+  });
+})();
+</script>
 </body>
 </html>
