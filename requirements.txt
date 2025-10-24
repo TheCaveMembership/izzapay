@@ -7,4 +7,4 @@ gunicorn==22.0.0
 flask-sock==0.7.0
 simple-websocket==1.0.0
 eventlet==0.36.1
-stellar-sdk==10.5.1
+stellar-sdk==11.1.0
