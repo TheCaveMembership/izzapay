@@ -1133,6 +1133,34 @@ const recentOpsEl   = document.getElementById('recentOps');
   fetchSummary();
   bootstrapAuthUI();
 
+  // --- Deep link + QR render ---
+(function renderDeepAndQR(){
+  const deepPre = document.getElementById('deepPre');
+  if (deepPre && DEEP_LINK) deepPre.textContent = DEEP_LINK;
+
+  const qr = document.getElementById('qrimg');
+  if (!qr) return;
+
+  // Prefer deep link; fall back to "<ASSET_CODE>:<ISSUER>"
+  const payload = encodeURIComponent(DEEP_LINK || `${ASSET_CODE}:${ISSUER}`);
+
+  // Simple hosted QR (tiny, works anywhere); graceful fallback to a canvas scribble
+  qr.src = `https://api.qrserver.com/v1/create-qr-code/?size=120x120&data=${payload}`;
+  qr.alt = 'QR';
+  qr.onerror = () => {
+    try {
+      const c = document.createElement('canvas');
+      c.width = 120; c.height = 120;
+      const ctx = c.getContext('2d');
+      ctx.fillStyle = '#fff'; ctx.fillRect(0,0,120,120);
+      ctx.fillStyle = '#000'; ctx.font = '10px monospace';
+      (decodeURIComponent(payload).match(/.{1,16}/g)||[]).slice(0,7)
+        .forEach((ln,i)=>ctx.fillText(ln,6,16+i*16));
+      qr.src = c.toDataURL();
+    } catch(_) {}
+  };
+})();
+
   // =================== Modal wiring (only one open at a time) ===================
 const roadmapBtn    = document.getElementById('roadmapBtn');
 const badgeOpen     = document.getElementById('badgeOpen');
@@ -1639,7 +1667,13 @@ function startFundingWatcher(pub){
   }
 
   checkFundingBtn?.addEventListener('click', ()=> refreshAccountGate());
-  acctPubInput?.addEventListener('change', ()=> refreshAccountGate(acctPubInput.value));
+  acctPubInput?.addEventListener('input', () => {
+  const pub = (acctPubInput.value || '').trim();
+  const direct = !!pub && ((pub === ACTIVE_PUB && !!getLocalSecret(pub)) || isLocalWallet(pub));
+  // We don’t know trustline status here, so just enable the label state;
+  // refreshAccountGate() will still manage the real enabled/disabled bit.
+  buildBtn.textContent = direct ? 'Submit Order' : 'Open in Wallet (SEP-7)';
+});
 
   // ==== Order submit handler ====
   orderForm.addEventListener('submit', async (e)=>{
@@ -1740,6 +1774,14 @@ function startFundingWatcher(pub){
   }
 
   createBtn.addEventListener('click', async ()=>{
+  // 🛑 Stop if the user already has a wallet (server or local)
+  if (ACTIVE_PUB || (JSON.parse(localStorage.getItem('izza_test_wallet') || 'null')?.pub)) {
+    statusEl.innerHTML = '<span style="color:#ff7b7b">You already have an IZZA Wallet.</span>';
+    try { statusEl.scrollIntoView({behavior:'smooth', block:'nearest'}); } catch(_){}
+    return;
+  }
+
+  // ✅ continue with your existing code below
   const ok = await ensureStellar();
   if (!ok || !window.StellarSdk){
     statusEl.innerHTML = `<span style="color:#ffb3b3">Couldn’t load Stellar SDK (blocked by CSP/CDN/SRI). Try a modern browser, or host /static/stellar-sdk.min.js.</span>`;
