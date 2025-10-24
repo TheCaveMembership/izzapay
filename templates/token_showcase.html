@@ -1256,24 +1256,24 @@ if (!SDK) { orderMsg.textContent = 'Stellar SDK missing.'; return; }
 const server = new SDK.Server(API_BASE);
 const acct   = await server.loadAccount(pub);
 
-      const izza  = new StellarSdk.Asset(ASSET_CODE, ISSUER);
-      const native= StellarSdk.Asset.native();
+      const izza   = new SDK.Asset(ASSET_CODE, ISSUER);
+const native = SDK.Asset.native();
 
-      let op;
-      if(side === 'SELL'){
-        op = StellarSdk.Operation.manageSellOffer({
-          selling: izza, buying: native, amount: amount.toString(), price: price.toString()
-        });
-      }else{
-        op = StellarSdk.Operation.manageBuyOffer({
-          buying: izza, selling: native, buyAmount: amount.toString(), price: price.toString()
-        });
-      }
+let op;
+if (side === 'SELL') {
+  op = SDK.Operation.manageSellOffer({
+    selling: izza, buying: native, amount: amount.toString(), price: price.toString()
+  });
+} else {
+  op = SDK.Operation.manageBuyOffer({
+    buying: izza, selling: native, buyAmount: amount.toString(), price: price.toString()
+  });
+}
 
-      const tx = new StellarSdk.TransactionBuilder(
-        acct,
-        { fee: (await server.fetchBaseFee()).toString(), networkPassphrase: NETWORK_PASSPHRASE }
-      ).addOperation(op).setTimeout(180).build();
+const tx = new SDK.TransactionBuilder(
+  acct,
+  { fee: (await server.fetchBaseFee()).toString(), networkPassphrase: NETWORK_PASSPHRASE }
+).addOperation(op).setTimeout(180).build();
 
       const xdr = tx.toXDR();
       const uri = `${SEP7_PREFIX}xdr=${encodeURIComponent(xdr)}&network_passphrase=${encodeURIComponent(NETWORK_PASSPHRASE)}`;
