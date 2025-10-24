@@ -26,6 +26,7 @@ try:
 except ImportError:
     from db import init_db, conn
     def ensure_schema():
+        from wallet_api import bp as wallet_api_bp
         with conn() as cx:
             # merchants patches
             cols = {r["name"] for r in cx.execute("PRAGMA table_info(merchants)")}
@@ -143,6 +144,7 @@ except Exception:
 # ----------------- APP -----------------
 app = Flask(__name__)
 app.register_blueprint(bp_faucet)
+app.register_blueprint(wallet_api_bp)
 
 # ======================================================
 # PUBLIC FILE SERVING ROUTES (.well-known and /assets/)
