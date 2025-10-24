@@ -1791,27 +1791,7 @@ def api_auth_pi_verify():
     except Exception:
         return jsonify(ok=False, error="server_error"), 500
 
-@app.get("/api/wallet/active")
-def api_wallet_active():
-    pub = session.get("active_pub")
-    return jsonify(pub=(pub or None))
 
-@app.post("/api/wallet/link")
-def api_wallet_link():
-    """
-    Accepts JSON: { pub: "G...." }
-    Stores the public key in the session after light validation.
-    """
-    try:
-        data = request.get_json(silent=True) or {}
-        pub = (data.get("pub") or "").strip()
-        if not (pub and len(pub) == 56 and pub.startswith("G")):
-            return jsonify(ok=False, error="bad_pub"), 400
-        session["active_pub"] = pub
-        session.permanent = True
-        return jsonify(ok=True)
-    except Exception:
-        return jsonify(ok=False, error="server_error"), 500
 # ---------- /compatibility shims ----------
         
 # NEW: Same-origin proxy to your LibreTranslate service
