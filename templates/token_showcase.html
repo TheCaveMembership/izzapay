@@ -600,6 +600,29 @@
             We never send your secret to the server. Keep it safe.
           </div>
           <pre id="secretOnce" style="display:none;margin-top:10px;padding:10px;border:1px dashed rgba(255,255,255,.12);border-radius:10px"></pre>
+                <!-- ADD: Import Secret box (existing wallet) -->
+      <div class="blox" style="margin-top:10px">
+        <h4 style="margin:0 0 8px 0">Import Secret (existing wallet)</h4>
+        <div class="field">
+          <label>Public Key (G…)</label>
+          <input id="impPub" type="text" placeholder="G..." inputmode="latin" autocomplete="off">
+        </div>
+        <div class="field">
+          <label>Secret Key (S…)</label>
+          <input id="impSec" type="password" placeholder="S..." inputmode="latin" autocomplete="off">
+        </div>
+        <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center">
+          <button id="importSecretBtn" class="cta" type="button">Save Secret Locally</button>
+          <label style="display:flex;gap:8px;align-items:center">
+            <input id="impUseForOrders" type="checkbox" checked>
+            <span>Set as Active for Orders</span>
+          </label>
+          <!-- Optional (server escrow, see section C): -->
+          <button id="saveSecretServerBtn" class="cta" type="button" style="display:none">Save Encrypted to Server</button>
+          <button id="restoreSecretServerBtn" class="cta" type="button" style="display:none">Restore from Server</button>
+        </div>
+        <div id="impMsg" class="help" style="margin-top:6px"></div>
+      </div>
         </div>
       </div>
     </div>
@@ -801,18 +824,91 @@
     // =================== Pi Auth + Active Wallet (one per user) ===================
   let USER = null;                // { uid, username }
   let ACTIVE_PUB = null;          // active wallet public key from server
-  const VAULT_KEY = 'izza_wallets'; // local encrypted secrets by pub
+    const VAULT_KEY = 'izza_wallets'; // same key
 
-  // Simple local vault helpers (encrypted blob storage). For now we store a raw secret
-  // ONLY for testnet demo if user opts-in; production: replace with AES-GCM (PBKDF2).
-  function saveLocalSecret(pub, secret){
-    const all = JSON.parse(localStorage.getItem(VAULT_KEY) || '{}');
-    all[pub] = { blob: btoa(secret) };     // demo only
+  function __readVault(){
+    try { return JSON.parse(localStorage.getItem(VAULT_KEY) || '{}'); }
+    catch { return {}; }
+  }
+
+  // Store secret per user + pub; keep one-time-reveal flag
+  function saveLocalSecret(pub, secret, username){
+    const u = username || (USER && USER.username) || '_anon';
+    const all = __readVault();
+
+    // Migrate legacy { [pub]:{blob} } → { __namespaced:true, [u]:{[pub]:{...}} }
+    if (!all.__namespaced && all && Object.keys(all).some(k => k.startsWith('G') && all[k]?.blob)) {
+      const migrated = { [u]: {}, __namespaced: true };
+      for (const k of Object.keys(all)) {
+        if (k.startsWith('G') && all[k]?.blob) {
+          migrated[u][k] = { ...all[k], viewedOnce:false, createdAt: Date.now() };
+        }
+      }
+      localStorage.setItem(VAULT_KEY, JSON.stringify(migrated));
+      return saveLocalSecret(pub, secret, username);
+    }
+
+    all.__namespaced = true;
+    all[u] = all[u] || {};
+    all[u][pub] = { blob: btoa(secret), viewedOnce:false, createdAt: Date.now() };
     localStorage.setItem(VAULT_KEY, JSON.stringify(all));
   }
-  function getLocalSecret(pub){
-    const all = JSON.parse(localStorage.getItem(VAULT_KEY) || '{}');
-    return all[pub] ? atob(all[pub].blob) : null;
+
+  function getLocalSecret(pub, username){
+    const u = username || (USER && USER.username) || '_anon';
+    const all = __readVault();
+    if (all?.__namespaced) return all?.[u]?.[pub]?.blob ? atob(all[u][pub].blob) : null;
+    return all?.[pub]?.blob ? atob(all[pub].blob) : null; // legacy
+  }
+// === Import Secret flow (for existing wallets) ===
+const impPub  = document.getElementById('impPub');
+const impSec  = document.getElementById('impSec');
+const impMsg  = document.getElementById('impMsg');
+const importBtn = document.getElementById('importSecretBtn');
+const impUseForOrders = document.getElementById('impUseForOrders');
+
+if (importBtn) {
+  importBtn.addEventListener('click', async () => {
+    const pub = (impPub.value || '').trim();
+    const sec = (impSec.value || '').trim();
+    if (!pub.startsWith('G') || !sec.startsWith('S')) {
+      impMsg.textContent = '❌ Invalid keys. Public key must start with G and secret with S.';
+      return;
+    }
+
+    try {
+      saveLocalSecret(pub, sec, USER?.username);
+      impMsg.textContent = '✅ Secret stored locally. You can now sign transactions.';
+
+      // Optional: set as active wallet
+      if (impUseForOrders.checked) {
+        ACTIVE_PUB = pub;
+        try { await linkActiveWallet(pub); } catch (_) {}
+        const acct = document.getElementById('acctPub');
+        if (acct) acct.value = pub;
+        setOrderReady(true, true);
+      }
+
+      impPub.value = '';
+      impSec.value = '';
+    } catch (err) {
+      impMsg.textContent = '❌ Could not save secret: ' + String(err);
+    }
+  });
+}
+  function markSecretViewedOnce(pub, username){
+    const u = username || (USER && USER.username) || '_anon';
+    const all = __readVault();
+    if (all?.__namespaced && all?.[u]?.[pub]) {
+      all[u][pub].viewedOnce = true;
+      localStorage.setItem(VAULT_KEY, JSON.stringify(all));
+    }
+  }
+
+  function hasViewedOnce(pub, username){
+    const u = username || (USER && USER.username) || '_anon';
+    const all = __readVault();
+    return !!(all?.__namespaced && all?.[u]?.[pub]?.viewedOnce);
   }
   
   // =================== Tiny logger (+ global error taps) ===================
@@ -921,7 +1017,7 @@ async function hydrateUserAndWallet() {
     const acct = document.getElementById('acctPub');
     if (ACTIVE_PUB && acct && !acct.value) acct.value = ACTIVE_PUB;
     const hasLocal = ACTIVE_PUB && !!getLocalSecret(ACTIVE_PUB);
-    setOrderReady(!!ACTIVE_PUB, hasLocal);
+setOrderReady(!!ACTIVE_PUB, hasLocal || (ACTIVE_PUB && getLocalSecret(ACTIVE_PUB)));
   } catch (_) {}
 }
 let __hydrated = false;
@@ -1176,6 +1272,9 @@ const closePlaceOrderBtn= document.getElementById('closePlaceOrderBtn');
 const backdrop      = document.getElementById('modalBackdrop');
 const closeModalBtn = document.getElementById('closeModalBtn');
 let lastFocus = null;
+  // My Wallet modal (Actions)
+const revealOnceBtn = document.getElementById('revealOnceBtn');
+const secretOnce    = document.getElementById('secretOnce');
 
 function openModal(el, focusEl){
   lastFocus = document.activeElement;
@@ -1216,6 +1315,19 @@ backdrop.addEventListener('click', ()=>{
   [modal, orderbookModal, placeOrderModal, myWalletModal].forEach(m=>{
     if (!m.hidden) closeModal(m);
   });
+});
+  // Reveal Secret (one-time local reveal)
+revealOnceBtn?.addEventListener('click', ()=>{
+  if (!ACTIVE_PUB) return;
+  if (hasViewedOnce(ACTIVE_PUB, USER?.username)) {
+    secretOnce.style.display = 'block';
+    secretOnce.textContent = 'Secret was already revealed once on this device.';
+    return;
+  }
+  const sec = getLocalSecret(ACTIVE_PUB, USER?.username);
+  secretOnce.style.display = 'block';
+  secretOnce.textContent = sec ? sec : 'No secret stored locally for this wallet.';
+  if (sec) markSecretViewedOnce(ACTIVE_PUB, USER?.username);
 });
 
 // Add the missing Wallet button handler
@@ -1492,10 +1604,15 @@ walletBtn.addEventListener('click', async ()=>{
 
   const buildBtn = document.getElementById('buildSep7');
   function setOrderReady(ready, direct=false){
-    buildBtn.disabled = !ready;
-    if (!ready) buildBtn.textContent = 'Waiting for funding & trustline…';
-    else buildBtn.textContent = direct ? 'Submit Order' : 'Open in Wallet (SEP-7)';
-  }
+  const pub = document.getElementById('acctPub')?.value || ACTIVE_PUB;
+  const localSec = pub && getLocalSecret(pub);
+  const isIzzaWallet = pub && pub.startsWith('G') && localSec;
+
+  buildBtn.disabled = !ready;
+  if (!ready) buildBtn.textContent = 'Waiting for funding & trustline…';
+  else if (isIzzaWallet) buildBtn.textContent = 'Submit Order';
+  else buildBtn.textContent = direct ? 'Submit Order' : 'Open in Wallet (SEP-7)';
+}
   setOrderReady(false);
 
   // Horizon + network
