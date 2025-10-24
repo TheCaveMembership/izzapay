@@ -1023,6 +1023,7 @@ async function ensureChart(){
     }
   }
   fetchSummary();
+  bootstrapAuthUI();
 
   // =================== Modal wiring (only one open at a time) ===================
   const roadmapBtn    = document.getElementById('roadmapBtn');
@@ -1454,7 +1455,8 @@ async function refreshAccountGate(pubMaybe){
   if (hasTrust){
     statusEl.textContent = 'Trustline present. You can place orders.';
     addTrustlineBtn.disabled = true;
-    setOrderReady(true, isLocalWallet(pub));
+    const isDirect = (ACTIVE_PUB && pub === ACTIVE_PUB && !!getLocalSecret(pub)) || isLocalWallet(pub);
+setOrderReady(true, isDirect);
   } else {
     statusEl.textContent = 'Account funded. Add the IZZA trustline.';
     addTrustlineBtn.disabled = false;
@@ -1519,7 +1521,8 @@ orderForm.addEventListener('submit', async (e)=>{
     autoPreview.textContent = (auto && isFinite(auto)) ? Number(auto).toFixed(7) : '—';
   }
 
-  orderMsg.textContent = isLocalWallet(pub) ? 'Submitting order…' : 'Preparing wallet request…';
+  const localSec = (ACTIVE_PUB && pub === ACTIVE_PUB) ? getLocalSecret(pub) : null;
+orderMsg.textContent = (localSec || isLocalWallet(pub)) ? 'Submitting order…' : 'Preparing wallet request…';
 
   try{
     const SDK    = window.StellarSdk;
@@ -1537,18 +1540,22 @@ orderForm.addEventListener('submit', async (e)=>{
       { fee: (await server.fetchBaseFee()).toString(), networkPassphrase: NETWORK_PASSPHRASE }
     ).addOperation(op).setTimeout(180).build();
 
-    if (isLocalWallet(pub)) {
-      const key = SDK.Keypair.fromSecret(NEW_WALLET.sec);
-      tx.sign(key);
-      const res = await server.submitTransaction(tx);
-      if (res && res.hash) orderMsg.innerHTML = `✅ Order submitted. Tx hash: <code>${res.hash}</code>`;
-      else orderMsg.textContent = 'Order submitted, awaiting confirmation.';
-    } else {
-      const xdr = tx.toXDR();
-      const uri = `${SEP7_PREFIX}xdr=${encodeURIComponent(xdr)}&network_passphrase=${encodeURIComponent(NETWORK_PASSPHRASE)}`;
-      window.location.href = uri;
-      orderMsg.innerHTML = `Opening your wallet… If nothing happens, copy this URI into a SEP-7 wallet:<br><code style="word-break:break-all">${uri}</code>`;
-    }
+    if (localSec || isLocalWallet(pub)) {
+  const sec = localSec || NEW_WALLET.sec;
+  const key = SDK.Keypair.fromSecret(sec);
+  tx.sign(key);
+  const res = await server.submitTransaction(tx);
+  if (res && res.hash) {
+    orderMsg.innerHTML = `✅ Order submitted. Tx hash: <code>${res.hash}</code>`;
+  } else {
+    orderMsg.textContent = 'Order submitted, awaiting confirmation.';
+  }
+} else {
+  const xdr = tx.toXDR();
+  const uri = `${SEP7_PREFIX}xdr=${encodeURIComponent(xdr)}&network_passphrase=${encodeURIComponent(NETWORK_PASSPHRASE)}`;
+  window.location.href = uri;
+  orderMsg.innerHTML = `Opening your wallet… If nothing happens, copy this URI into a SEP-7 wallet:<br><code style="word-break:break-all">${uri}</code>`;
+}
   } catch(err){
   const info = explainHorizonError(err);
   log('order.tx.fail', { err:String(err), txc:info.txc, opc:info.opc });
@@ -1692,7 +1699,14 @@ async function buildChangeTrustSEP7(pub){
 setTimeout(()=>refreshAccountGate(), 0);
 
 // =================== Open the Place Order modal ===================
-orderBtn.addEventListener('click', ()=>openModal(placeOrderModal, closePlaceOrderBtn));
+orderBtn.addEventListener('click', async ()=>{
+  if (!USER){
+    try { await piSignIn(); } catch(_) { /* user canceled; continue read-only */ }
+  }
+  await bootstrapAuthUI();
+  openModal(placeOrderModal, closePlaceOrderBtn);
+  refreshAccountGate(acctPub.value);
+});
 
 // =================== Coin spin to refresh ===================
 const wrap = document.getElementById('coinWrap');
