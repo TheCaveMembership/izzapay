@@ -173,6 +173,11 @@ def _client_log():
         print("TRUST_EVT_ERR", repr(e))
     return {"ok": True}
 
+# Alias for older clients posting to /_client-log
+@app.post("/_client-log")
+def _client_log_alias():
+    return _client_log()
+
 @app.get("/trust/open")
 def trust_https_redirect():
     # Deep link
