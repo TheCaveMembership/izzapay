@@ -653,11 +653,9 @@
       <canvas id="newWalletQR" width="120" height="120" style="border-radius:12px;background:#fff"></canvas>
     </div>
     <div class="help" style="align-self:center">
-      <strong>Next step:</strong> Open your <em>Pi Testnet</em> wallet and send
-      <strong>~2.0 test&nbsp;Pi</strong> to the public key above.
-      This activates the wallet (CreateAccount) and gives room to add the IZZA trustline.
-      We never fund or custody your wallet.
-    </div>
+  <strong>We’ll auto-fund your new wallet with 2.0 Test-Pi.</strong><br>
+  Watch the status above. If funding fails (rate-limit or network), use “Check Funding” to retry later.
+</div>
   </div>
 
   <div style="display:flex;gap:8px;margin-top:10px;flex-wrap:wrap">
@@ -1388,6 +1386,9 @@ addTrustlineBtn.addEventListener('click', async ()=>{
     statusEl.textContent = okRes ? 'Trustline added. You can place orders now.' : 'Trustline failed.';
     addTrustlineBtn.disabled = !okRes;
     if (okRes) setOrderReady(true);
+    if (funded) {
+  checkFundingBtn.style.display = 'none';
+}
   }catch(e){
     statusEl.innerHTML = `<span style="color:#ffb3b3">Trustline failed: ${String(e)}</span>`;
     addTrustlineBtn.disabled = false;
