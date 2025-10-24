@@ -729,8 +729,9 @@
   </div>
 
   <!-- libs (from CDN) -->
-  <script src="https://cdn.jsdelivr.net/npm/chartjs-adapter-date-fns@3"></script>
-  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
+  <!-- better: Chart first, then adapter -->
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/chartjs-adapter-date-fns@3"></script>
   <script src="https://cdnjs.cloudflare.com/ajax/libs/stellar-sdk/10.5.1/stellar-sdk.min.js" integrity="sha512-+uYc8WQvG8c+0pT1+QqJp5gR1+N1iFj3F1p7Xw8eNsQqA+8k0vP9a6NqEgbjG7e0oZ2FQg3e3sH4q1P5gFKM0A==" crossorigin="anonymous" referrerpolicy="no-referrer"></script>
 
 <script>
