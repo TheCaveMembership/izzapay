@@ -1055,17 +1055,17 @@ async function ensureUserAndWalletGate(){
 }
 
 async function linkActiveWallet(pub){
-  const r = await fetch('/api/wallet/link', {
+  const u = (USER && USER.username) || (new URLSearchParams(location.search).get('u')) || '';
+  const r = await fetch('/api/wallet/link' + (u ? `?u=${encodeURIComponent(u)}` : ''), {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    credentials: 'include',          // << send session cookie
+    credentials: 'include',
     body: JSON.stringify({ pub })
   });
-  if (!r.ok) {
-    const t = await r.text().catch(()=>r.statusText);
-    throw new Error('link-failed:'+t);
-  }
+  const j = await r.json().catch(()=>null);
+  if (!r.ok) throw new Error('link-failed:' + (j?.error || r.status));
   ACTIVE_PUB = pub;
+  return j;
 }
 
 // =================== Static DOM wiring ===================
