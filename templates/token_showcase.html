@@ -1049,7 +1049,6 @@ document.addEventListener('DOMContentLoaded', hydrateUserAndWallet);
 
   try { await refreshAccountGate(acct?.value); } catch(_){}
 }
-}
   async function linkActiveWallet(pub){
     const r = await fetch('/api/wallet/link', {
       method:'POST', headers:{'Content-Type':'application/json'},
