@@ -930,11 +930,6 @@ def token_auth():
     # pass sandbox=True/False to the template context
     return render_template("token-auth.html", sandbox=current_app.config.get("PI_SANDBOX", False))
 
-@app.get("/token/izza")
-def token_izza():
-    # read username from session (set by /auth/exchange)
-    return render_template("token.html")
-
 @app.get("/izza-game/voucher")
 def voucher_page():
     # optional: require sign-in to see it
