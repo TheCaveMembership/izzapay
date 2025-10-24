@@ -928,7 +928,6 @@ let __hydrated = false;
 (async () => {
   await hydrateUserAndWallet();     // get USER + ACTIVE_PUB (server/local)
   __hydrated = true;
-  ensureUserAndWalletGate();        // only run the create-wallet gate AFTER hydration
 })();
 // run hydration before gates that might show "create wallet"
 
@@ -993,13 +992,14 @@ let __hydrated = false;
 
     // FIXED verify payload (drop-in)
     const resp = await fetch('/api/auth/pi/verify', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        accessToken: auth.accessToken,
-        user: { id: auth.user.uid, uid: auth.user.uid, username: auth.user.username }
-      })
-    });
+  method: 'POST',
+  headers: { 'Content-Type': 'application/json' },
+  credentials: 'include',     // << add this
+  body: JSON.stringify({
+    accessToken: auth.accessToken,
+    user: { id: auth.user.uid, uid: auth.user.uid, username: auth.user.username }
+  })
+});
     if (!resp.ok) {
       const errText = await resp.text().catch(() => '');
       throw new Error(`verify_failed:${resp.status}${errText ? ' ' + errText : ''}`);
@@ -1013,16 +1013,20 @@ let __hydrated = false;
   }
 }
   // =================== Fetch/link active wallet ===================
-  async function fetchActiveWallet(){
-    try{
-      const r = await fetch('/api/wallet/active', { cache:'no-store' });
-      if (!r.ok) return null;
-      const j = await r.json();
-      ACTIVE_PUB = j && j.pub ? j.pub : null;
-      return ACTIVE_PUB;
-    }catch{ return null; }
-  }
-  async function ensureUserAndWalletGate(){
+async function fetchActiveWallet(){
+  try{
+    const r = await fetch('/api/wallet/active', {
+      cache: 'no-store',
+      credentials: 'include'        // << send session cookie
+    });
+    if (!r.ok) return null;
+    const j = await r.json();
+    ACTIVE_PUB = j && j.pub ? j.pub : null;
+    return ACTIVE_PUB;
+  }catch{ return null; }
+}
+
+async function ensureUserAndWalletGate(){
   // if hydration hasn't finished yet, wait once
   if (!__hydrated) {
     try { await hydrateUserAndWallet(); } catch(_) {}
@@ -1049,24 +1053,27 @@ let __hydrated = false;
 
   try { await refreshAccountGate(acct?.value); } catch(_){}
 }
-  async function linkActiveWallet(pub){
-    const r = await fetch('/api/wallet/link', {
-      method:'POST', headers:{'Content-Type':'application/json'},
-      body: JSON.stringify({ pub })
-    });
-    if (!r.ok) {
-      const t = await r.text().catch(()=>r.statusText);
-      throw new Error('link-failed:'+t);
-    }
-    ACTIVE_PUB = pub;
+
+async function linkActiveWallet(pub){
+  const r = await fetch('/api/wallet/link', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    credentials: 'include',          // << send session cookie
+    body: JSON.stringify({ pub })
+  });
+  if (!r.ok) {
+    const t = await r.text().catch(()=>r.statusText);
+    throw new Error('link-failed:'+t);
   }
+  ACTIVE_PUB = pub;
+}
 
-  // =================== Static DOM wiring ===================
-  const walletBtn = document.getElementById('walletBtn');
+// =================== Static DOM wiring ===================
+const walletBtn = document.getElementById('walletBtn');
 
-  async function bootstrapAuthUI(){
+async function bootstrapAuthUI(){
   try{
-    const pub = await fetchActiveWallet();
+    const pub = await fetchActiveWallet(); // already includes credentials
     if (pub){
       ACTIVE_PUB = pub;
       const acct = document.getElementById('acctPub');
@@ -1076,6 +1083,7 @@ let __hydrated = false;
     }
   }catch(_){}
 }
+
 // DOM refs used by fetchSummary()
 const distBalanceEl = document.getElementById('dist-balance');
 const trustCountEl  = document.getElementById('trust-count');
