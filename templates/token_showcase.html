@@ -1128,176 +1128,251 @@ if (chartCanvas && chartCanvas.parentElement) ro.observe(chartCanvas.parentEleme
   closeOrderbookBtn.addEventListener('click', ()=>{ stopObRefresh(); closeModal(orderbookModal); });
   closePlaceOrderBtn.addEventListener('click', ()=>{ closeModal(placeOrderModal); });
 
-  // =================== Orders / Wallet (with Stellar ensure) ===================
-  const sideBtns  = Array.from(document.querySelectorAll('.sideBtn'));
-  const typeBtns  = Array.from(document.querySelectorAll('.typeBtn'));
-  let side = 'BUY';  // BUY => receive IZZA, spend Pi
-  let otype = 'LIMIT';
+// =================== Orders / Wallet (with Stellar ensure) ===================
+const sideBtns  = Array.from(document.querySelectorAll('.sideBtn'));
+const typeBtns  = Array.from(document.querySelectorAll('.typeBtn'));
+let side  = 'BUY';   // BUY => receive IZZA, spend Pi
+let otype = 'LIMIT';
 
-  sideBtns.forEach(b=>{
-    b.addEventListener('click', ()=>{
-      sideBtns.forEach(x=>x.setAttribute('aria-pressed','false'));
-      b.setAttribute('aria-pressed','true');
-      side = b.dataset.side;
-    });
+// Buttons: BUY/SELL
+sideBtns.forEach(b=>{
+  b.addEventListener('click', ()=>{
+    sideBtns.forEach(x=>x.setAttribute('aria-pressed','false'));
+    b.setAttribute('aria-pressed','true');
+    side = b.dataset.side;
   });
+});
 
-  const orderHelp   = document.getElementById('orderHelp');
-  const slipRow     = document.getElementById('slipRow');
-  const slippagePct = document.getElementById('slippagePct');
-  const agreeSlip   = document.getElementById('agreeSlippage');
-  const slipEcho    = document.getElementById('slipEcho');
-  const autoNote    = document.getElementById('autoPriceNote');
-  const autoPreview = document.getElementById('autoPricePreview');
-  slippagePct.addEventListener('input', ()=>{ slipEcho.textContent = slippagePct.value || '0'; });
+// Market/Limit toggles
+const orderHelp   = document.getElementById('orderHelp');
+const slipRow     = document.getElementById('slipRow');
+const slippagePct = document.getElementById('slippagePct');
+const agreeSlip   = document.getElementById('agreeSlippage');
+const slipEcho    = document.getElementById('slipEcho');
+const autoNote    = document.getElementById('autoPriceNote');
+const autoPreview = document.getElementById('autoPricePreview');
+slippagePct?.addEventListener('input', ()=>{ slipEcho.textContent = slippagePct.value || '0'; });
 
-  const orderForm = document.getElementById('orderForm');
-  const acctPub   = document.getElementById('acctPub');
-  const priceEl   = document.getElementById('price');
-  const amtEl     = document.getElementById('amount');
-  const orderMsg  = document.getElementById('orderMsg');
+const orderForm = document.getElementById('orderForm');
+const acctPub   = document.getElementById('acctPub');
+const priceEl   = document.getElementById('price');
+const amtEl     = document.getElementById('amount');
+const orderMsg  = document.getElementById('orderMsg');
 
-  typeBtns.forEach(b=>{
-    b.addEventListener('click', ()=>{
-      typeBtns.forEach(x=>x.setAttribute('aria-pressed','false'));
-      b.setAttribute('aria-pressed','true');
-      otype = b.dataset.type;
+typeBtns.forEach(b=>{
+  b.addEventListener('click', ()=>{
+    typeBtns.forEach(x=>x.setAttribute('aria-pressed','false'));
+    b.setAttribute('aria-pressed','true');
+    otype = b.dataset.type;
 
-      const isMarket = (otype === 'MARKET');
-      priceEl.disabled    = isMarket;
-      priceEl.required    = !isMarket;
-      priceEl.placeholder = isMarket ? 'auto (best price ± slippage)' : 'e.g. 0.005';
+    const isMarket = (otype === 'MARKET');
+    priceEl.disabled    = isMarket;
+    priceEl.required    = !isMarket;
+    priceEl.placeholder = isMarket ? 'auto (best price ± slippage)' : 'e.g. 0.005';
 
-      slipRow.style.display = isMarket ? '' : 'none';
-      autoNote.style.display= isMarket ? '' : 'none';
-      if (!isMarket) { agreeSlip.checked = false; }
+    slipRow.style.display  = isMarket ? '' : 'none';
+    autoNote.style.display = isMarket ? '' : 'none';
+    if (!isMarket) agreeSlip.checked = false;
 
-      orderHelp.textContent = isMarket
-        ? 'Market: we auto-use the best available price with your slippage cap. Any remainder may rest as an offer.'
-        : 'Limit: you set the price; it fills if it crosses the book, otherwise rests until matched.';
-    });
+    orderHelp.textContent = isMarket
+      ? 'Market: we auto-use the best available price with your slippage cap. Any remainder may rest as an offer.'
+      : 'Limit: you set the price; it fills if it crosses the book, otherwise rests until matched.';
   });
+});
 
-  const buildBtn = document.getElementById('buildSep7');
-  function setOrderReady(ready){
-    buildBtn.disabled = !ready;
-    buildBtn.textContent = ready
-      ? 'Open in SEP-7 Wallet'
-      : 'Waiting for funding & trustline…';
-  }
-  setOrderReady(false);
+// Primary submit button
+const buildBtn = document.getElementById('buildSep7');
+function setOrderReady(ready, direct=false){
+  buildBtn.disabled = !ready;
+  if (!ready) buildBtn.textContent = 'Waiting for funding & trustline…';
+  else buildBtn.textContent = direct ? 'Submit Order' : 'Open in Wallet (SEP-7)';
+}
+setOrderReady(false);
 
-  const SEP7_PREFIX = `web+stellar:tx?`;
-  const NETWORK_PASSPHRASE = 'Pi Testnet';
+// Horizon + network
+const NETWORK_PASSPHRASE = 'Pi Testnet';
+const SEP7_PREFIX = `web+stellar:tx?`;
 
-  async function getAutoPrice(side, slippage = 0.03){
-    try{
-      const res = await fetch(
-        `${API_BASE}/order_book?selling_asset_type=credit_alphanum4`+
-        `&selling_asset_code=${encodeURIComponent(ASSET_CODE)}`+
-        `&selling_asset_issuer=${encodeURIComponent(ISSUER)}`+
-        `&buying_asset_type=native`,
-        { cache:'no-store' }
-      );
-      const ob = await res.json();
-      const asks = (ob.asks||[]).map(r=>Number(r.price));
-      const bids = (ob.bids||[]).map(r=>Number(r.price));
-      const bestAsk = asks.length ? Math.min(...asks) : null;
-      const bestBid = bids.length ? Math.max(...bids) : null;
-
-      if(side === 'BUY' && bestAsk!=null)  return bestAsk * (1 + slippage);
-      if(side === 'SELL' && bestBid!=null) return bestBid * (1 - slippage);
-      return null;
-    }catch(_){ return null; }
-  }
-
-  orderForm.addEventListener('submit', async (e)=>{
-    e.preventDefault();
-
-    if (buildBtn.disabled) {
-      orderMsg.textContent = 'Fund wallet & add the IZZA trustline first.';
-      return;
-    }
-
-    // Ensure Stellar SDK before building any tx
-    const stellarOK = await ensureStellar();
-    if (!stellarOK || !window.StellarSdk){
-      orderMsg.innerHTML = `<span style="color:#ffb3b3">Couldn’t load Stellar SDK in this WebView. Try opening in Safari/Chrome.</span>`;
-      return;
-    }
-
-    try{
-      const pub = acctPub.value.trim();
-      const amount = Number(amtEl.value);
-      if(!pub || !isFinite(amount) || amount<=0){
-        orderMsg.textContent = 'Please provide a valid account and amount.'; return;
-      }
-
-      let price = Number(priceEl.value);
-      if(otype === 'LIMIT'){
-        if(!isFinite(price) || price<=0){
-          orderMsg.textContent = 'Please provide a valid limit price.'; return;
-        }
-      } else {
-        const slip = Math.max(0, Math.min(50, Number(slippagePct.value||0))) / 100;
-        if (!agreeSlip.checked){
-          orderMsg.textContent = 'Please accept the slippage consent to place a market order.'; return;
-        }
-        orderMsg.textContent = 'Finding best price…';
-        const auto = await getAutoPrice(side, slip);
-        price = (auto && isFinite(auto)) ? auto :  (side === 'BUY' ?  1e9 : 1e-9);
-        autoPreview.textContent = (auto && isFinite(auto)) ? Number(auto).toFixed(7) : '—';
-      }
-
-      orderMsg.textContent = 'Building unsigned transaction…';
-
-      const SDK = window.StellarSdk;
-if (!SDK) { orderMsg.textContent = 'Stellar SDK missing.'; return; }
-const server = new SDK.Server(API_BASE);
-const acct   = await server.loadAccount(pub);
-
-      const izza   = new SDK.Asset(ASSET_CODE, ISSUER);
-const native = SDK.Asset.native();
-
-let op;
-if (side === 'SELL') {
-  op = SDK.Operation.manageSellOffer({
-    selling: izza, buying: native, amount: amount.toString(), price: price.toString()
-  });
-} else {
-  op = SDK.Operation.manageBuyOffer({
-    buying: izza, selling: native, buyAmount: amount.toString(), price: price.toString()
-  });
+// Safe Server ctor (fix for "undefined is not a constructor")
+function getServer(){
+  const SDK = window.StellarSdk;
+  const ServerCtor = SDK?.Server || SDK?.Horizon?.Server;
+  if (!ServerCtor) throw new Error('Stellar SDK loaded, but Server class is unavailable');
+  return new ServerCtor(String(API_BASE).replace(/\/+$/,''));
 }
 
-const tx = new SDK.TransactionBuilder(
-  acct,
-  { fee: (await server.fetchBaseFee()).toString(), networkPassphrase: NETWORK_PASSPHRASE }
-).addOperation(op).setTimeout(180).build();
+// Best price helper (for MARKET)
+async function getAutoPrice(side, slippage = 0.03){
+  try{
+    const res = await fetch(
+      `${API_BASE}/order_book?selling_asset_type=credit_alphanum4`+
+      `&selling_asset_code=${encodeURIComponent(ASSET_CODE)}`+
+      `&selling_asset_issuer=${encodeURIComponent(ISSUER)}`+
+      `&buying_asset_type=native`,
+      { cache:'no-store' }
+    );
+    const ob = await res.json();
+    const asks = (ob.asks||[]).map(r=>Number(r.price));
+    const bids = (ob.bids||[]).map(r=>Number(r.price));
+    const bestAsk = asks.length ? Math.min(...asks) : null;
+    const bestBid = bids.length ? Math.max(...bids) : null;
+    if(side === 'BUY'  && bestAsk!=null) return bestAsk * (1 + slippage);
+    if(side === 'SELL' && bestBid!=null) return bestBid * (1 - slippage);
+    return null;
+  }catch(_){ return null; }
+}
 
-      const xdr = tx.toXDR();
-      const uri = `${SEP7_PREFIX}xdr=${encodeURIComponent(xdr)}&network_passphrase=${encodeURIComponent(NETWORK_PASSPHRASE)}`;
+// ==== Account state helpers: funded? has trustline? ====
+async function loadAccount(pub){
+  try{ const r = await fetch(`${API_BASE}/accounts/${pub}`, {cache:'no-store'}); return r.ok ? r.json() : null; }
+  catch(_){ return null; }
+}
+function hasIzzaTrust(balances){
+  if (!Array.isArray(balances)) return false;
+  return balances.some(b => b.asset_code === ASSET_CODE && b.asset_issuer === ISSUER);
+}
+async function getAccountState(pub){
+  const json = await loadAccount(pub);
+  if (!json) return { funded:false, hasTrust:false };
+  return { funded:true, hasTrust: hasIzzaTrust(json.balances||[]) };
+}
 
-      orderMsg.innerHTML = `Opening your wallet… If nothing happens, copy this URI into a wallet that supports <strong>SEP-7</strong>:<br><code style="word-break:break-all">${uri}</code>`;
-      window.location.href = uri;
-
-    }catch(err){
-      log('order.tx.fail',{err:String(err)});
-      orderMsg.textContent = 'Could not build the transaction (check account on testnet, CORS, or network). You can still copy the URI above when available.';
-    }
-  });
-
-  // =================== Create Test Wallet (await Stellar) ===================
-const createBtn       = document.getElementById('createWalletBtn');
+// ==== UI: enable trustline button & order readiness based on account ====
 const statusEl        = document.getElementById('walletStatus');
-const box             = document.getElementById('newWalletBox');
-const newPubEl        = document.getElementById('newPub');
-const newQRCanvas     = document.getElementById('newWalletQR');
 const checkFundingBtn = document.getElementById('checkFundingBtn');
 const addTrustlineBtn = document.getElementById('addTrustlineBtn');
 const acctPubInput    = document.getElementById('acctPub');
+const autoFundHelp    = document.getElementById('autoFundHelp') || document.querySelector('#newWalletBox .help');
 
-let NEW_WALLET = null;
+let NEW_WALLET = null; // { pub, sec } only when generated here
+function isLocalWallet(pub){ return NEW_WALLET && NEW_WALLET.pub === pub; }
+
+async function refreshAccountGate(pubMaybe){
+  const pub = (pubMaybe || acctPubInput.value || '').trim();
+  if (!pub){ addTrustlineBtn.disabled = true; setOrderReady(false); return; }
+
+  statusEl.textContent = 'Checking account on Pi Testnet…';
+  const { funded, hasTrust } = await getAccountState(pub);
+
+  // Hide the auto-fund helper if we detect funding success
+  if (funded && autoFundHelp) autoFundHelp.style.display = 'none';
+
+  if (!funded){
+    statusEl.textContent = 'Account is not funded yet. Fund with Test-Pi first.';
+    addTrustlineBtn.disabled = true;
+    setOrderReady(false);
+    return;
+  }
+
+  if (hasTrust){
+    statusEl.textContent = 'Trustline present. You can place orders.';
+    addTrustlineBtn.disabled = true;
+    setOrderReady(true, isLocalWallet(pub));
+  } else {
+    statusEl.textContent = 'Account funded. Add the IZZA trustline.';
+    addTrustlineBtn.disabled = false;
+    setOrderReady(false);
+  }
+
+  // Trustline button behavior: direct (local) vs SEP-7 (external)
+  addTrustlineBtn.onclick = async ()=>{
+    const target = (acctPubInput.value||'').trim();
+    if (!target) return;
+    if (isLocalWallet(target)) {
+      await addTrustlineDirect();              // sign+submit here
+    } else {
+      const uri = await buildChangeTrustSEP7(target); // request to external wallet
+      if (uri){
+        window.location.href = uri;
+        orderMsg.innerHTML = `We opened your wallet to add the trustline. If nothing happens, copy this URI into a SEP-7 wallet:<br><code style="word-break:break-all">${uri}</code>`;
+      } else {
+        orderMsg.innerHTML = `<span style="color:#ffb3b3">Couldn’t prepare trustline request for this account.</span>`;
+      }
+    }
+  };
+}
+
+checkFundingBtn?.addEventListener('click', ()=> refreshAccountGate());
+acctPubInput?.addEventListener('change', ()=> refreshAccountGate(acctPubInput.value));
+// (keep input handler light; change is enough)
+
+// ==== Order submit handler (direct if local, SEP-7 otherwise) ====
+orderForm.addEventListener('submit', async (e)=>{
+  e.preventDefault();
+
+  const pub = (acctPub.value||'').trim();
+  const amount = Number(amtEl.value);
+  if(!pub || !isFinite(amount) || amount<=0){
+    orderMsg.textContent = 'Please provide a valid account and amount.'; return;
+  }
+
+  const { funded, hasTrust } = await getAccountState(pub);
+  if (!funded){ orderMsg.textContent = 'Account not funded yet.'; return; }
+  if (!hasTrust){ orderMsg.textContent = 'Add the IZZA trustline first.'; return; }
+
+  const stellarOK = await ensureStellar();
+  if (!stellarOK || !window.StellarSdk){
+    orderMsg.innerHTML = `<span style="color:#ffb3b3">Couldn’t load Stellar SDK in this WebView.</span>`;
+    return;
+  }
+
+  let price = Number(priceEl.value);
+  if(otype === 'LIMIT'){
+    if(!isFinite(price) || price<=0){
+      orderMsg.textContent = 'Please provide a valid limit price.'; return;
+    }
+  } else {
+    const slip = Math.max(0, Math.min(50, Number(slippagePct.value||0))) / 100;
+    if (!agreeSlip.checked){
+      orderMsg.textContent = 'Please accept the slippage consent to place a market order.'; return;
+    }
+    orderMsg.textContent = 'Finding best price…';
+    const auto = await getAutoPrice(side, slip);
+    price = (auto && isFinite(auto)) ? auto :  (side === 'BUY' ?  1e9 : 1e-9);
+    autoPreview.textContent = (auto && isFinite(auto)) ? Number(auto).toFixed(7) : '—';
+  }
+
+  orderMsg.textContent = isLocalWallet(pub) ? 'Submitting order…' : 'Preparing wallet request…';
+
+  try{
+    const SDK    = window.StellarSdk;
+    const server = getServer();
+    const acct   = await server.loadAccount(pub);
+    const izza   = new SDK.Asset(ASSET_CODE, ISSUER);
+    const native = SDK.Asset.native();
+
+    const op = (side === 'SELL')
+      ? SDK.Operation.manageSellOffer({ selling: izza, buying: native, amount: amount.toString(), price: price.toString() })
+      : SDK.Operation.manageBuyOffer({  buying: izza, selling: native, buyAmount: amount.toString(), price: price.toString() });
+
+    const tx = new SDK.TransactionBuilder(
+      acct,
+      { fee: (await server.fetchBaseFee()).toString(), networkPassphrase: NETWORK_PASSPHRASE }
+    ).addOperation(op).setTimeout(180).build();
+
+    if (isLocalWallet(pub)) {
+      const key = SDK.Keypair.fromSecret(NEW_WALLET.sec);
+      tx.sign(key);
+      const res = await server.submitTransaction(tx);
+      if (res && res.hash) orderMsg.innerHTML = `✅ Order submitted. Tx hash: <code>${res.hash}</code>`;
+      else orderMsg.textContent = 'Order submitted, awaiting confirmation.';
+    } else {
+      const xdr = tx.toXDR();
+      const uri = `${SEP7_PREFIX}xdr=${encodeURIComponent(xdr)}&network_passphrase=${encodeURIComponent(NETWORK_PASSPHRASE)}`;
+      window.location.href = uri;
+      orderMsg.innerHTML = `Opening your wallet… If nothing happens, copy this URI into a SEP-7 wallet:<br><code style="word-break:break-all">${uri}</code>`;
+    }
+  }catch(err){
+    log('order.tx.fail',{err:String(err)});
+    orderMsg.innerHTML = `<span style="color:#ffb3b3">Order failed: ${String(err)}</span>`;
+  }
+});
+
+// =================== Create Test Wallet (await Stellar) ===================
+const createBtn    = document.getElementById('createWalletBtn');
+const box          = document.getElementById('newWalletBox');
+const newPubEl     = document.getElementById('newPub');
+const newQRCanvas  = document.getElementById('newWalletQR');
 
 function drawQR(canvas, text){
   try{
@@ -1308,10 +1383,6 @@ function drawQR(canvas, text){
     const lines = text.match(/.{1,16}/g) || [text];
     lines.slice(0,7).forEach((ln,i)=>ctx.fillText(ln, 6, 16 + i*16));
   }catch(e){ log('wallet.qr.fail',{err:String(e)}); }
-}
-async function isFunded(pub){
-  try{ const res = await fetch(`${API_BASE}/accounts/${pub}`, {cache:'no-store'}); return res.ok; }
-  catch(_){ return false; }
 }
 
 createBtn.addEventListener('click', async ()=>{
@@ -1326,39 +1397,32 @@ createBtn.addEventListener('click', async ()=>{
   }
 
   try{
-    // 1) Generate locally
     const kp = StellarSdk.Keypair.random();
     NEW_WALLET = { pub: kp.publicKey(), sec: kp.secret() };
 
-    if (acctPubInput) acctPubInput.value = NEW_WALLET.pub;
+    if (acctPub) acctPub.value = NEW_WALLET.pub;
     newPubEl.textContent = NEW_WALLET.pub;
     drawQR(newQRCanvas, NEW_WALLET.pub);
     box.style.display = 'block';
     statusEl.textContent = 'Wallet created. Funding 2.0 Test-Pi…';
     try{ localStorage.setItem('izza_test_wallet', JSON.stringify(NEW_WALLET)); }catch(_){}
 
-    // 2) Ask server faucet to create+fund with 2 Test-Pi
+    // Ask your server faucet to create+fund with 2 Test-Pi
     let funded = false;
     try{
-      const res = await fetch('/faucet', {
-        method:'POST',
-        headers:{'Content-Type':'application/json'},
-        body: JSON.stringify({ dest: NEW_WALLET.pub })
-      });
+      const res  = await fetch('/faucet', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ dest: NEW_WALLET.pub }) });
       const json = await res.json();
       funded = !!(res.ok && json && (json.ok || json.already));
-      if (!funded) {
-        statusEl.innerHTML = `<span style="color:#ffb3b3">Faucet failed: ${json && json.err ? json.err : 'unknown'}</span>`;
-      }
+      if (!funded) statusEl.innerHTML = `<span style="color:#ffb3b3">Faucet failed: ${json && json.err ? json.err : 'unknown'}</span>`;
     }catch(e){
       statusEl.innerHTML = `<span style="color:#ffb3b3">Faucet error: ${String(e)}</span>`;
     }
 
-    // 3) Ready state
     if (funded){
       statusEl.textContent = 'Funded with 2.0 Test-Pi! You can now add the IZZA trustline.';
-      addTrustlineBtn.disabled = false;
-      setOrderReady(true);
+      if (autoFundHelp) autoFundHelp.style.display = 'none'; // hide auto-fund blurb
+      addTrustlineBtn.disabled = false;                      // enable trustline
+      setOrderReady(false);                                  // wait for trustline before allowing orders
     }else{
       statusEl.textContent = 'Created but not funded. You can retry later with “Check Funding”.';
     }
@@ -1368,42 +1432,73 @@ createBtn.addEventListener('click', async ()=>{
   }
 });
 
-addTrustlineBtn.addEventListener('click', async ()=>{
+// ==== Add trustline (direct for local wallet) ====
+async function addTrustlineDirect(){
   const ok = await ensureStellar();
   if (!ok || !window.StellarSdk){ statusEl.textContent = 'Stellar SDK missing.'; return; }
   if(!NEW_WALLET){ statusEl.textContent = 'No wallet in memory.'; return; }
+
   addTrustlineBtn.disabled = true;
   statusEl.textContent = 'Adding IZZA trustline…';
   try{
-    const SDK = window.StellarSdk;
-if (!SDK) { statusEl.textContent = 'Stellar SDK missing.'; return; }
+    const SDK    = window.StellarSdk;
+    const server = getServer();
+    const user   = SDK.Keypair.fromSecret(NEW_WALLET.sec);
+    const acct   = await server.loadAccount(user.publicKey());
+    const izza   = new SDK.Asset(ASSET_CODE, ISSUER);
 
-const server = new SDK.Server(API_BASE);
-const user   = SDK.Keypair.fromSecret(NEW_WALLET.sec);
-const acct   = await server.loadAccount(user.publicKey());
-const izza   = new SDK.Asset(ASSET_CODE, ISSUER);
+    const tx = new SDK.TransactionBuilder(acct, {
+      fee: (await server.fetchBaseFee()).toString(),
+      networkPassphrase: NETWORK_PASSPHRASE
+    })
+    .addOperation(SDK.Operation.changeTrust({ asset: izza }))
+    .setTimeout(180)
+    .build();
 
-const tx = new SDK.TransactionBuilder(acct, {
-  fee: (await server.fetchBaseFee()).toString(),
-  networkPassphrase: 'Pi Testnet'
-})
-  .addOperation(SDK.Operation.changeTrust({ asset: izza }))
-  .setTimeout(180)
-  .build();
-
-tx.sign(user);
-const res = await server.submitTransaction(tx);
+    tx.sign(user);
+    const res = await server.submitTransaction(tx);
     const okRes = !!res && (res.successful || res.result_xdr);
     statusEl.textContent = okRes ? 'Trustline added. You can place orders now.' : 'Trustline failed.';
-    addTrustlineBtn.disabled = !okRes;
-    if (okRes) setOrderReady(true);
-    checkFundingBtn.style.display = 'none'; // hide after a successful trustline
+    addTrustlineBtn.disabled = okRes ? true : false;
+    if (okRes){
+      setOrderReady(true, true);      // enable direct Submit Order
+      checkFundingBtn && (checkFundingBtn.style.display = 'none');
+    }
   }catch(e){
     statusEl.innerHTML = `<span style="color:#ffb3b3">Trustline failed: ${String(e)}</span>`;
     addTrustlineBtn.disabled = false;
     log('wallet.trustline.fail',{err:String(e)});
   }
-});
+}
+
+// ==== Build changeTrust SEP-7 for external wallets ====
+async function buildChangeTrustSEP7(pub){
+  const ok = await ensureStellar();
+  if (!ok || !window.StellarSdk) { statusEl.textContent = 'Stellar SDK missing.'; return null; }
+  try{
+    const SDK    = window.StellarSdk;
+    const server = getServer();
+    const acct   = await server.loadAccount(pub);
+    const izza   = new SDK.Asset(ASSET_CODE, ISSUER);
+
+    const tx = new SDK.TransactionBuilder(acct, {
+      fee: (await server.fetchBaseFee()).toString(),
+      networkPassphrase: NETWORK_PASSPHRASE
+    })
+    .addOperation(SDK.Operation.changeTrust({ asset: izza }))
+    .setTimeout(180)
+    .build();
+
+    const xdr = tx.toXDR();
+    return `${SEP7_PREFIX}xdr=${encodeURIComponent(xdr)}&network_passphrase=${encodeURIComponent(NETWORK_PASSPHRASE)}`;
+  }catch(e){
+    log('trust.sep7.fail',{err:String(e)});
+    return null;
+  }
+}
+
+// Run an initial gate check (handles autofill case & enables trustline if funded)
+setTimeout(()=>refreshAccountGate(), 0);
 
 // =================== Open the Place Order modal ===================
 orderBtn.addEventListener('click', ()=>openModal(placeOrderModal, closePlaceOrderBtn));
