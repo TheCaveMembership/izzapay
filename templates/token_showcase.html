@@ -312,7 +312,7 @@
             <img id="coinImg" src="{{ url_for('serve_assets', filename='izza.png') }}" alt="IZZA token">
           </div>
 
-          <!-- Pulsing mark opens the roadmap modal -->
+        <!-- Pulsing mark opens the roadmap modal -->
           <div class="side-badge">
             <button id="badgeOpen" class="mark-wrap" type="button" title="Open Mainnet Roadmap">
               <img src="/static/izzapay-mark.svg" alt="IZZA mark">
@@ -670,6 +670,27 @@
           <button class="typeBtn" data-type="MARKET">Market</button>
         </div>
 
+        <!-- Inline explainers + slippage UI (Market only) -->
+        <div id="orderHelp" class="help" style="margin:8px 0 10px" aria-live="polite">
+          Limit: you set the price. Market: we auto-use the best available price ± slippage.
+        </div>
+        <div id="slipRow" class="row2" style="display:none">
+          <div class="field">
+            <label>Slippage (%)</label>
+            <input id="slippagePct" type="number" step="0.1" min="0" max="50" value="3" inputmode="decimal">
+          </div>
+          <div class="field" style="align-self:end">
+            <label class="small-muted" style="display:block;margin-bottom:6px">Consent</label>
+            <label style="display:flex;gap:8px;align-items:flex-start">
+              <input id="agreeSlippage" type="checkbox">
+              <span>I accept execution up to <span id="slipEcho">3</span>% away from the best price.</span>
+            </label>
+          </div>
+        </div>
+        <div id="autoPriceNote" class="help" style="display:none;margin:-4px 0 8px">
+          Estimated execution price: <strong id="autoPricePreview">—</strong> Pi / IZZA (will update on submit).
+        </div>
+
         <form id="orderForm">
           <div class="field">
             <label>Public Key (your account)</label>
@@ -698,8 +719,9 @@
   </div>
 
   <!-- libs (from CDN) -->
-  <script src="https://cdnjs.cloudflare.com/ajax/libs/stellar-sdk/10.5.1/stellar-sdk.min.js" integrity="sha512-+uYc8WQvG8c+0pT1+QqJp5gR1+N1iFj3F1p7Xw8eNsQqA+8k0vP9a6NqEgbjG7e0oZ2FQg3e3sH4q1P5gFKM0A==" crossorigin="anonymous" referrerpolicy="no-referrer"></script>
+  <script src="https://cdn.jsdelivr.net/npm/chartjs-adapter-date-fns@3"></script>
   <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/stellar-sdk/10.5.1/stellar-sdk.min.js" integrity="sha512-+uYc8WQvG8c+0pT1+QqJp5gR1+N1iFj3F1p7Xw8eNsQqA+8k0vP9a6NqEgbjG7e0oZ2FQg3e3sH4q1P5gFKM0A==" crossorigin="anonymous" referrerpolicy="no-referrer"></script>
 
 <script>
 (() => {
@@ -830,7 +852,8 @@
   roadmapBtn.addEventListener('click', ()=>openModal(modal, closeModalBtn));
   badgeOpen.addEventListener('click', ()=>openModal(modal, closeModalBtn));
   closeModalBtn.addEventListener('click', ()=>closeModal(modal));
-  orderbookBtn.addEventListener('click', ()=>{ openModal(orderbookModal, closeOrderbookBtn); loadOrderbook(); startObRefresh(); });
+  // add loadTradesAndDraw() on open to lazily build chart after adapter is loaded
+  orderbookBtn.addEventListener('click', ()=>{ openModal(orderbookModal, closeOrderbookBtn); loadOrderbook(); loadTradesAndDraw(); startObRefresh(); });
   closeOrderbookBtn.addEventListener('click', ()=>{ stopObRefresh(); closeModal(orderbookModal); });
   orderBtn.addEventListener('click', ()=>openModal(placeOrderModal, closePlaceOrderBtn));
   closePlaceOrderBtn.addEventListener('click', ()=>closeModal(placeOrderModal));
@@ -1059,9 +1082,6 @@
     }
   }
 
-  // Load once when opening orderbook
-  loadTradesAndDraw();
-
   //===== PLACE ORDER (SEP-7 TX preview) =====//
   // Side + Type toggles
   const sideBtns  = Array.from(document.querySelectorAll('.sideBtn'));
@@ -1076,23 +1096,43 @@
       side = b.dataset.side;
     });
   });
-  typeBtns.forEach(b=>{
-    b.addEventListener('click', ()=>{
-      typeBtns.forEach(x=>x.setAttribute('aria-pressed','false'));
-      b.setAttribute('aria-pressed','true');
-      otype = b.dataset.type;
-      // Disable price field for MARKET; enable for LIMIT
-      priceEl.disabled = (otype === 'MARKET');
-      priceEl.placeholder = (otype === 'MARKET') ? 'auto (best price ± slippage)' : 'e.g. 0.005';
-    });
-  });
+  // Slippage/explainer refs
+  const orderHelp   = document.getElementById('orderHelp');
+  const slipRow     = document.getElementById('slipRow');
+  const slippagePct = document.getElementById('slippagePct');
+  const agreeSlip   = document.getElementById('agreeSlippage');
+  const slipEcho    = document.getElementById('slipEcho');
+  const autoNote    = document.getElementById('autoPriceNote');
+  const autoPreview = document.getElementById('autoPricePreview');
+  slippagePct.addEventListener('input', ()=>{ slipEcho.textContent = slippagePct.value || '0'; });
 
-  // Form refs
   const orderForm = document.getElementById('orderForm');
   const acctPub   = document.getElementById('acctPub');
   const priceEl   = document.getElementById('price');
   const amtEl     = document.getElementById('amount');
   const orderMsg  = document.getElementById('orderMsg');
+
+  // Toggle type + slippage UI
+  typeBtns.forEach(b=>{
+    b.addEventListener('click', ()=>{
+      typeBtns.forEach(x=>x.setAttribute('aria-pressed','false'));
+      b.setAttribute('aria-pressed','true');
+      otype = b.dataset.type;
+
+      const isMarket = (otype === 'MARKET');
+      priceEl.disabled    = isMarket;
+      priceEl.required    = !isMarket;
+      priceEl.placeholder = isMarket ? 'auto (best price ± slippage)' : 'e.g. 0.005';
+
+      slipRow.style.display = isMarket ? '' : 'none';
+      autoNote.style.display= isMarket ? '' : 'none';
+      if (!isMarket) { agreeSlip.checked = false; }
+
+      orderHelp.textContent = isMarket
+        ? 'Market: we auto-use the best available price with your slippage cap. Any remainder may rest as an offer.'
+        : 'Limit: you set the price; it fills if it crosses the book, otherwise rests until matched.';
+    });
+  });
 
   // --- gate submit until wallet is funded + trustline exists
   const buildBtn = document.getElementById('buildSep7');
@@ -1132,13 +1172,10 @@
   orderForm.addEventListener('submit', async (e)=>{
     e.preventDefault();
 
-    // Hard gate while unfunded/no trustline
     if (buildBtn.disabled) {
       orderMsg.textContent = 'Fund wallet & add the IZZA trustline first.';
       return;
     }
-
-    orderMsg.textContent = 'Building unsigned transaction…';
 
     try{
       const pub = acctPub.value.trim();
@@ -1147,17 +1184,23 @@
         orderMsg.textContent = 'Please provide a valid account and amount.'; return;
       }
 
-      // Price handling:
       let price = Number(priceEl.value);
       if(otype === 'LIMIT'){
         if(!isFinite(price) || price<=0){
           orderMsg.textContent = 'Please provide a valid limit price.'; return;
         }
       } else {
-        // MARKET: auto-compute from orderbook; fallback to wide price if needed
-        const auto = await getAutoPrice(side, 0.03);
+        const slip = Math.max(0, Math.min(50, Number(slippagePct.value||0))) / 100;
+        if (!agreeSlip.checked){
+          orderMsg.textContent = 'Please accept the slippage consent to place a market order.'; return;
+        }
+        orderMsg.textContent = 'Finding best price…';
+        const auto = await getAutoPrice(side, slip);
         price = (auto && isFinite(auto)) ? auto :  (side === 'BUY' ?  1e9 : 1e-9);
+        autoPreview.textContent = (auto && isFinite(auto)) ? Number(auto).toFixed(7) : '—';
       }
+
+      orderMsg.textContent = 'Building unsigned transaction…';
 
       const server = new StellarSdk.Server(API_BASE);
       const acct   = await server.loadAccount(pub);
@@ -1174,7 +1217,6 @@
           price  : price.toString()
         });
       }else{
-        // ManageBuyOffer uses buyAmount (what IZZA you want to receive)
         op = StellarSdk.Operation.manageBuyOffer({
           buying   : izza,
           selling  : native,
@@ -1325,8 +1367,5 @@
   });
 })(); // IIFE end
 </script>
-
-<!-- time adapter for Chart.js -->
-<script src="https://cdn.jsdelivr.net/npm/chartjs-adapter-date-fns@3"></script>
 </body>
 </html>
