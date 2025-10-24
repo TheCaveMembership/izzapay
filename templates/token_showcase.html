@@ -887,7 +887,51 @@
     }
     return true;
   }
+// ---- Boot hydration: get USER + ACTIVE_PUB before any UI gates ----
+async function hydrateUserAndWallet() {
+  // 1) Try server session
+  try {
+    const me = await fetch('/api/auth/me', { credentials:'include', cache:'no-store' })
+      .then(r => r.ok ? r.json() : null).catch(()=>null);
+    if (me?.uid) USER = { uid: me.uid, username: me.username };
+  } catch (_) {}
 
+  // 2) If no USER, silently Pi-auth (Pi Browser usually returns instantly)
+  if (!USER) {
+    try { await piSignIn(); } catch (_) { /* user canceled: fine, read-only */ }
+  }
+
+  // 3) Ask server for the mapped active wallet
+  await fetchActiveWallet();
+
+  // 4) If server has nothing (lost session or new browser), fall back to local
+  if (!ACTIVE_PUB) {
+    try {
+      const local = JSON.parse(localStorage.getItem('izza_test_wallet') || 'null');
+      if (local?.pub) {
+        ACTIVE_PUB = local.pub;
+        // re-link to server so future visits work without local fallback
+        try { await linkActiveWallet(ACTIVE_PUB); } catch (_) {}
+      }
+    } catch (_) {}
+  }
+
+  // 5) Pre-fill UI bits and enable actions if we can sign locally
+  try {
+    const acct = document.getElementById('acctPub');
+    if (ACTIVE_PUB && acct && !acct.value) acct.value = ACTIVE_PUB;
+    const hasLocal = ACTIVE_PUB && !!getLocalSecret(ACTIVE_PUB);
+    setOrderReady(!!ACTIVE_PUB, hasLocal);
+  } catch (_) {}
+}
+let __hydrated = false;
+(async () => {
+  await hydrateUserAndWallet();     // get USER + ACTIVE_PUB (server/local)
+  __hydrated = true;
+  ensureUserAndWalletGate();        // only run the create-wallet gate AFTER hydration
+})();
+// run hydration before gates that might show "create wallet"
+document.addEventListener('DOMContentLoaded', hydrateUserAndWallet);
   // =================== Pi v2 loader + init (robust, iOS-safe) ===================
   let __PI_INIT_DONE = false;
 
@@ -979,32 +1023,32 @@
     }catch{ return null; }
   }
   async function ensureUserAndWalletGate(){
-  try{
-    // User should already be signed in (you arrive here via /token/auth),
-    // but we’ll soft-verify server-side session by asking for active wallet.
-    const pub = await fetchActiveWallet(); // sets ACTIVE_PUB internally
-    if (pub) return; // wallet exists => nothing to do
+  // if hydration hasn't finished yet, wait once
+  if (!__hydrated) {
+    try { await hydrateUserAndWallet(); } catch(_) {}
+  }
 
-    // No active wallet for this user:
-    // open the Place Testnet Order UI and flash the create button.
-    openModal(placeOrderModal, closePlaceOrderBtn);
-    // Make sure field reflects active pub (may be blank)
-    const acct = document.getElementById('acctPub');
-    if (acct && !acct.value) acct.value = '';
+  // may already be set by hydrate; asking server again is fine (cheap)
+  const pub = await fetchActiveWallet();
+  if (pub) return; // we have a wallet — do NOT open the create flow
 
-    // Flash create button for 1 second
-    const createBtn = document.getElementById('createWalletBtn');
-    if (createBtn){
-      createBtn.classList.remove('flash-once'); // reset if present
-      void createBtn.offsetWidth;               // reflow to restart animation
-      createBtn.classList.add('flash-once');
-      // optional: focus it for extra affordance
-      setTimeout(()=>{ try{ createBtn.focus(); }catch(_){ } }, 150);
-    }
+  // still nothing: only then nudge user to create
+  openModal(placeOrderModal, closePlaceOrderBtn);
 
-    // Also ensure the account gate reflects "not funded / needs wallet"
-    try { await refreshAccountGate(acct?.value); } catch(_){}
-  }catch(_){}
+  const acct = document.getElementById('acctPub');
+  if (acct && !acct.value) acct.value = '';
+
+  // flash create button
+  const createBtn = document.getElementById('createWalletBtn');
+  if (createBtn){
+    createBtn.classList.remove('flash-once');
+    void createBtn.offsetWidth;
+    createBtn.classList.add('flash-once');
+    setTimeout(()=>{ try{ createBtn.focus(); }catch(_){ } }, 150);
+  }
+
+  try { await refreshAccountGate(acct?.value); } catch(_){}
+}
 }
   async function linkActiveWallet(pub){
     const r = await fetch('/api/wallet/link', {
@@ -1155,7 +1199,7 @@ walletBtn.addEventListener('click', async ()=>{
 });
 
 // ✅ Call the gate AFTER everything above exists
-ensureUserAndWalletGate();
+
 
   // =================== Order book endpoints ===================
   const ORDERBOOK_URL = `${API_BASE}/order_book`
@@ -1816,7 +1860,7 @@ function startFundingWatcher(pub){
   }
 
   // Initial gate & UI
-  setTimeout(()=>refreshAccountGate(), 0);
+  setTimeout(()=>{ if (ACTIVE_PUB) refreshAccountGate(ACTIVE_PUB); }, 0);
 
   // =================== Open the Place Order modal ===================
   orderBtn.addEventListener('click', async ()=>{
