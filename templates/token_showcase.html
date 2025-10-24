@@ -197,6 +197,15 @@
       box-shadow:0 40px 120px rgba(0,0,0,.55), 0 0 80px rgba(122,68,255,.35) inset;
       animation:pop .18s ease-out;
     }
+    /* quick one-shot flash for the create-wallet button */
+@keyframes izza-flash {
+  0% { box-shadow: 0 0 0 rgba(183,132,255,0); transform: translateY(0); }
+  30% { box-shadow: 0 0 22px rgba(183,132,255,.55), 0 0 60px rgba(122,68,255,.35); transform: translateY(-1px); }
+  100% { box-shadow: 0 0 0 rgba(183,132,255,0); transform: translateY(0); }
+}
+.flash-once {
+  animation: izza-flash 1s ease-out 1;
+}
     @keyframes pop{from{transform:translateY(10px) scale(.98);opacity:.6}to{transform:none;opacity:1}}
     .modal-header{
       position:sticky;top:0;z-index:2;display:flex;align-items:center;gap:12px;justify-content:space-between;
@@ -292,32 +301,29 @@
 <body>
   <div class="wrap">
     <header>
-      <a class="logo" href="{{ APP_BASE_URL or '/' }}" title="Back"
-         onclick="try{history.back();}catch(_){/*fallback*/}">
-        <img src="/static/izzapay-word.svg" alt="IZZA PAY">
-      </a>
+  <a class="logo" href="{{ APP_BASE_URL or '/' }}" title="Back"
+     onclick="try{history.back();}catch(_){/*fallback*/}">
+    <img src="/static/izzapay-word.svg" alt="IZZA PAY">
+  </a>
 
-      <div class="top-cta" style="grid-column:1 / -1; width:100%">
-        <button id="roadmapBtn" class="cta" type="button" aria-haspopup="dialog" aria-controls="roadmapModal">
-          <img src="/static/izzapay-mark.svg" alt="" aria-hidden="true">
-          View Mainnet Roadmap
-        </button>
-      </div>
+  <div class="top-cta" style="grid-column:1 / -1; width:100%; display:flex; gap:8px; justify-content:center; flex-wrap:wrap">
+    <button id="roadmapBtn" class="cta" type="button" aria-haspopup="dialog" aria-controls="roadmapModal">
+      <img src="/static/izzapay-mark.svg" alt="" aria-hidden="true">
+      View Mainnet Roadmap
+    </button>
 
-      <div>
-        <h1>IZZA — Test Token Showcase</h1>
-        <p class="lead">Issuer, distributor, balances and activity on Pi Testnet.</p>
-      </div>
-      <div class="spacer"></div>
-      <!-- Pi auth + wallet entry -->
-<div id="authRow" style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
-  <button id="piAuthBtn" class="cta" type="button">🔐 Sign in with Pi</button>
-  <button id="walletBtn" class="cta" type="button" aria-haspopup="dialog" aria-controls="myWalletModal" style="display:none">
-    💼 My IZZA Wallet
-  </button>
-  <span id="whoami" class="small" style="display:none"></span>
-</div>
-    </header>
+    <!-- NEW centered wallet button -->
+    <button id="walletBtn" class="cta" type="button" aria-haspopup="dialog" aria-controls="myWalletModal">
+      💼 IZZA Wallet
+    </button>
+  </div>
+
+  <div>
+    <h1>IZZA — Test Token Showcase</h1>
+    <p class="lead">Issuer, distributor, balances and activity on Pi Testnet.</p>
+  </div>
+  <div class="spacer"></div>
+</header>
 
     <section class="hero">
       <!-- LEFT: main token summary -->
@@ -972,6 +978,34 @@
       return ACTIVE_PUB;
     }catch{ return null; }
   }
+  async function ensureUserAndWalletGate(){
+  try{
+    // User should already be signed in (you arrive here via /token/auth),
+    // but we’ll soft-verify server-side session by asking for active wallet.
+    const pub = await fetchActiveWallet(); // sets ACTIVE_PUB internally
+    if (pub) return; // wallet exists => nothing to do
+
+    // No active wallet for this user:
+    // open the Place Testnet Order UI and flash the create button.
+    openModal(placeOrderModal, closePlaceOrderBtn);
+    // Make sure field reflects active pub (may be blank)
+    const acct = document.getElementById('acctPub');
+    if (acct && !acct.value) acct.value = '';
+
+    // Flash create button for 1 second
+    const createBtn = document.getElementById('createWalletBtn');
+    if (createBtn){
+      createBtn.classList.remove('flash-once'); // reset if present
+      void createBtn.offsetWidth;               // reflow to restart animation
+      createBtn.classList.add('flash-once');
+      // optional: focus it for extra affordance
+      setTimeout(()=>{ try{ createBtn.focus(); }catch(_){ } }, 150);
+    }
+
+    // Also ensure the account gate reflects "not funded / needs wallet"
+    try { await refreshAccountGate(acct?.value); } catch(_){}
+  }catch(_){}
+}
   async function linkActiveWallet(pub){
     const r = await fetch('/api/wallet/link', {
       method:'POST', headers:{'Content-Type':'application/json'},
@@ -985,61 +1019,24 @@
   }
 
   // =================== Static DOM wiring ===================
-  const piAuthBtn = document.getElementById('piAuthBtn');
   const walletBtn = document.getElementById('walletBtn');
-  const whoami    = document.getElementById('whoami');
 
   async function bootstrapAuthUI(){
   try{
     const pub = await fetchActiveWallet();
     if (pub){
       ACTIVE_PUB = pub;
-      const acct = document.getElementById('acctPub');  // ← new
-      if (acct) acct.value = pub;                       // ← guard
-      whoami.style.display = 'inline';
-      walletBtn.style.display = '';
-      piAuthBtn.style.display = 'none';
-      whoami.textContent = `Active: ${pub.slice(0,6)}…${pub.slice(-6)}`;
+      const acct = document.getElementById('acctPub');
+      if (acct) acct.value = pub;
       const hasLocal = !!getLocalSecret(pub);
       setOrderReady(true, hasLocal);
     }
   }catch(_){}
 }
-
-  piAuthBtn?.addEventListener('click', async ()=>{
-    await piSignIn();
-    await bootstrapAuthUI();
-  });
-  walletBtn?.addEventListener('click', async ()=>{
-    await refreshMyWalletModal();
-    openModal(myWalletModal, closeMyWalletBtn);
-  });
-
-  const issuerEl       = document.getElementById('issuer');
-  const distributorEl  = document.getElementById('distributor');
-  const distBalanceEl  = document.getElementById('dist-balance');
-  const trustCountEl   = document.getElementById('trust-count');
-  const issuerCompact  = document.getElementById('issuer-compact');
-  const dshort         = document.getElementById('d-short');
-  const qrimg          = document.getElementById('qrimg');
-  const deepPre        = document.getElementById('deepPre');
-  const recentOpsEl    = document.getElementById('recentOps');
-
-  issuerEl.textContent = ISSUER;
-  distributorEl.textContent = DISTRIBUTOR;
-  issuerCompact.textContent = ISSUER.slice(0,6) + '…' + ISSUER.slice(-6);
-  dshort.textContent = DISTRIBUTOR.slice(0,8) + '…' + DISTRIBUTOR.slice(-6);
-  deepPre.textContent = DEEP_LINK;
-
-  const accountUrl = `${API_BASE}/accounts/${DISTRIBUTOR}`;
-  document.getElementById('link-account').href  = accountUrl;
-  document.getElementById('link-payments').href = `${accountUrl}/payments`;
-  document.getElementById('link-ops').href      = `${accountUrl}/operations`;
-  document.getElementById('link-assets').href   = `${API_BASE}/assets?asset_code=${encodeURIComponent(ASSET_CODE)}&asset_issuer=${encodeURIComponent(ISSUER)}`;
-
-  const qrData = encodeURIComponent(DEEP_LINK);
-  qrimg.src = `https://api.qrserver.com/v1/create-qr-code/?size=240x240&data=${qrData}`;
-
+// DOM refs used by fetchSummary()
+const distBalanceEl = document.getElementById('dist-balance');
+const trustCountEl  = document.getElementById('trust-count');
+const recentOpsEl   = document.getElementById('recentOps');
   // =================== Summary fetch ===================
   async function fetchSummary(){
     try{
@@ -1084,40 +1081,70 @@
   bootstrapAuthUI();
 
   // =================== Modal wiring (only one open at a time) ===================
-  const roadmapBtn    = document.getElementById('roadmapBtn');
-  const badgeOpen     = document.getElementById('badgeOpen');
-  const modal         = document.getElementById('roadmapModal');
-  const orderbookBtn  = document.getElementById('orderbookBtn');
-  const orderbookModal= document.getElementById('orderbookModal');
-  const closeOrderbookBtn = document.getElementById('closeOrderbookBtn');
-  const placeOrderModal   = document.getElementById('placeOrderModal');
-  const myWalletModal     = document.getElementById('myWalletModal');
-  const closeMyWalletBtn  = document.getElementById('closeMyWalletBtn');
-  const orderBtn          = document.getElementById('orderBtn');
-  const closePlaceOrderBtn= document.getElementById('closePlaceOrderBtn');
-  const backdrop      = document.getElementById('modalBackdrop');
-  const closeModalBtn = document.getElementById('closeModalBtn');
-  let lastFocus = null;
+const roadmapBtn    = document.getElementById('roadmapBtn');
+const badgeOpen     = document.getElementById('badgeOpen');
+const modal         = document.getElementById('roadmapModal');
+const orderbookBtn  = document.getElementById('orderbookBtn');
+const orderbookModal= document.getElementById('orderbookModal');
+const closeOrderbookBtn = document.getElementById('closeOrderbookBtn');
+const placeOrderModal   = document.getElementById('placeOrderModal');
+const myWalletModal     = document.getElementById('myWalletModal');
+const closeMyWalletBtn  = document.getElementById('closeMyWalletBtn');
+const orderBtn          = document.getElementById('orderBtn');
+const closePlaceOrderBtn= document.getElementById('closePlaceOrderBtn');
+const backdrop      = document.getElementById('modalBackdrop');
+const closeModalBtn = document.getElementById('closeModalBtn');
+let lastFocus = null;
 
-  function openModal(el, focusEl){
-    lastFocus = document.activeElement;
-    [modal, orderbookModal, placeOrderModal, myWalletModal].forEach(m=>{ m.hidden = true; m.removeAttribute('open'); });
-    el.hidden = false; backdrop.hidden = false;
-    el.setAttribute('open',''); backdrop.setAttribute('open','');
-    document.body.style.overflow = 'hidden';
-    (focusEl || el.querySelector('.close-btn'))?.focus?.();
-  }
-  function closeModal(el){
-    el.removeAttribute('open'); backdrop.removeAttribute('open');
-    el.hidden = true; backdrop.hidden = true;
-    document.body.style.overflow = '';
-    lastFocus?.focus?.();
-  }
-  roadmapBtn.addEventListener('click', ()=>openModal(modal, closeModalBtn));
-  badgeOpen.addEventListener('click', ()=>openModal(modal, closeModalBtn));
-  closeModalBtn.addEventListener('click', ()=>closeModal(modal));
-  closeMyWalletBtn.addEventListener('click', ()=> closeModal(myWalletModal));
-  backdrop.addEventListener('click', ()=>{
+function openModal(el, focusEl){
+  lastFocus = document.activeElement;
+  [modal, orderbookModal, placeOrderModal, myWalletModal].forEach(m=>{
+    m.hidden = true;
+    m.removeAttribute('open');
+  });
+  el.hidden = false;
+  backdrop.hidden = false;
+  el.setAttribute('open','');
+  backdrop.setAttribute('open','');
+  document.body.style.overflow = 'hidden';
+  (focusEl || el.querySelector('.close-btn'))?.focus?.();
+}
+
+function closeModal(el){
+  el.removeAttribute('open');
+  backdrop.removeAttribute('open');
+  el.hidden = true;
+  backdrop.hidden = true;
+  document.body.style.overflow = '';
+  lastFocus?.focus?.();
+}
+
+// Open roadmap (button + badge)
+roadmapBtn.addEventListener('click', ()=>openModal(modal, closeModalBtn));
+badgeOpen.addEventListener('click',  ()=>openModal(modal, closeModalBtn));
+
+// Close buttons
+closeModalBtn.addEventListener('click',     ()=>closeModal(modal));
+closeMyWalletBtn.addEventListener('click',  ()=>closeModal(myWalletModal));
+closeOrderbookBtn.addEventListener('click', ()=>{ stopObRefresh(); closeModal(orderbookModal); });
+closePlaceOrderBtn.addEventListener('click',()=> closeModal(placeOrderModal));
+
+// Backdrop click closes whichever is open (and stops OB refresh if needed)
+backdrop.addEventListener('click', ()=>{
+  if (!orderbookModal.hidden){ stopObRefresh(); }
+  [modal, orderbookModal, placeOrderModal, myWalletModal].forEach(m=>{
+    if (!m.hidden) closeModal(m);
+  });
+});
+
+// Add the missing Wallet button handler
+walletBtn.addEventListener('click', async ()=>{
+  await refreshMyWalletModal();
+  openModal(myWalletModal, closeMyWalletBtn);
+});
+
+// ✅ Call the gate AFTER everything above exists
+ensureUserAndWalletGate();
     if (!orderbookModal.hidden){ stopObRefresh(); }
     [modal, orderbookModal, placeOrderModal, myWalletModal].forEach(m=>{ if(!m.hidden) closeModal(m); });
   });
