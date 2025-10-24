@@ -20,13 +20,15 @@ from dotenv import load_dotenv
 from emailer import send_email
 from payments import split_amounts
 
+# 🟢 Wallet API blueprint import (needs to be at top-level)
+from wallet_api import bp as wallet_api_bp
+
 # ---- DB bootstrap ------------------------------------------------------------
 try:
     from db import init_db, conn, ensure_schema
 except ImportError:
     from db import init_db, conn
     def ensure_schema():
-        from wallet_api import bp as wallet_api_bp
         with conn() as cx:
             # merchants patches
             cols = {r["name"] for r in cx.execute("PRAGMA table_info(merchants)")}
