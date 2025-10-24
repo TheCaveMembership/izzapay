@@ -1139,6 +1139,11 @@ backdrop.addEventListener('click', ()=>{
 
 // Add the missing Wallet button handler
 walletBtn.addEventListener('click', async ()=>{
+  // try server; if nothing, use the just-created local wallet
+  if (!ACTIVE_PUB){
+    await fetchActiveWallet();
+    if (!ACTIVE_PUB && NEW_WALLET) ACTIVE_PUB = NEW_WALLET.pub;
+  }
   await refreshMyWalletModal();
   openModal(myWalletModal, closeMyWalletBtn);
 });
@@ -1480,6 +1485,29 @@ ensureUserAndWalletGate();
     if (!json) return { funded:false, hasTrust:false };
     return { funded:true, hasTrust: hasIzzaTrust(json.balances||[]) };
   }
+  // --- short, self-contained funding watcher (beats Horizon lag) ---
+let __izzaFundingPoll = null;
+function startFundingWatcher(pub){
+  if (__izzaFundingPoll) clearInterval(__izzaFundingPoll);
+  const stopAt = Date.now() + 20000; // ~20s max
+  __izzaFundingPoll = setInterval(async ()=>{
+    try{
+      const { funded, hasTrust } = await getAccountState(pub);
+      if (funded){
+        statusEl.textContent = hasTrust
+          ? 'Trustline present. You can place orders.'
+          : 'Account funded. Add the IZZA trustline.';
+        addTrustlineBtn.disabled = !!hasTrust;
+        const direct = (ACTIVE_PUB === pub && !!getLocalSecret(pub)) || isLocalWallet(pub);
+        setOrderReady(!!hasTrust, direct);
+        if (hasTrust){ clearInterval(__izzaFundingPoll); __izzaFundingPoll = null; }
+      }
+      if (Date.now() > stopAt){ clearInterval(__izzaFundingPoll); __izzaFundingPoll = null; }
+    }catch(_){
+      if (Date.now() > stopAt){ clearInterval(__izzaFundingPoll); __izzaFundingPoll = null; }
+    }
+  }, 2500);
+}
 
   // --- Fill "My Wallet" modal ---
   async function refreshMyWalletModal(){
@@ -1653,51 +1681,68 @@ ensureUserAndWalletGate();
   }
 
   createBtn.addEventListener('click', async ()=>{
-    const ok = await ensureStellar();
-    if (!ok || !window.StellarSdk){
-      statusEl.innerHTML = `<span style="color:#ffb3b3">Couldn’t load Stellar SDK (blocked by CSP/CDN/SRI). Try a modern browser, or host /static/stellar-sdk.min.js.</span>`;
-      return;
-    }
-    if (!window.crypto || !window.crypto.getRandomValues){
-      statusEl.innerHTML = `<span style="color:#ffb3b3">This browser/WebView lacks secure randomness (WebCrypto). Can’t generate keys here.</span>`;
-      return;
-    }
+  const ok = await ensureStellar();
+  if (!ok || !window.StellarSdk){
+    statusEl.innerHTML = `<span style="color:#ffb3b3">Couldn’t load Stellar SDK (blocked by CSP/CDN/SRI). Try a modern browser, or host /static/stellar-sdk.min.js.</span>`;
+    return;
+  }
+  if (!window.crypto || !window.crypto.getRandomValues){
+    statusEl.innerHTML = `<span style="color:#ffb3b3">This browser/WebView lacks secure randomness (WebCrypto). Can’t generate keys here.</span>`;
+    return;
+  }
 
+  try{
+    const kp = StellarSdk.Keypair.random();
+    NEW_WALLET = { pub: kp.publicKey(), sec: kp.secret() };
+
+    // --- immediately make this the active wallet everywhere ---
+    try { await linkActiveWallet(NEW_WALLET.pub); } catch(_) {}
+    ACTIVE_PUB = NEW_WALLET.pub;
+    try { saveLocalSecret(NEW_WALLET.pub, NEW_WALLET.sec); } catch(_){}
+    await refreshMyWalletModal();
+
+    if (acctPub) acctPub.value = NEW_WALLET.pub;
+    newPubEl.textContent = NEW_WALLET.pub;
+    drawQR(newQRCanvas, NEW_WALLET.pub);
+    box.style.display = 'block';
+    statusEl.textContent = 'Wallet created. Funding 2.0 Test-Pi…';
+    try{ localStorage.setItem('izza_test_wallet', JSON.stringify(NEW_WALLET)); }catch(_){}
+
+    // Ask your server faucet to create+fund with 2 Test-Pi
+    let funded = false;
     try{
-      const kp = StellarSdk.Keypair.random();
-      NEW_WALLET = { pub: kp.publicKey(), sec: kp.secret() };
-
-      if (acctPub) acctPub.value = NEW_WALLET.pub;
-      newPubEl.textContent = NEW_WALLET.pub;
-      drawQR(newQRCanvas, NEW_WALLET.pub);
-      box.style.display = 'block';
-      statusEl.textContent = 'Wallet created. Funding 2.0 Test-Pi…';
-      try{ localStorage.setItem('izza_test_wallet', JSON.stringify(NEW_WALLET)); }catch(_){}
-
-      // Ask your server faucet to create+fund with 2 Test-Pi
-      let funded = false;
-      try{
-        const res  = await fetch('/faucet', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ dest: NEW_WALLET.pub }) });
-        const json = await res.json();
-        funded = !!(res.ok && json && (json.ok || json.already));
-        if (!funded) statusEl.innerHTML = `<span style="color:#ffb3b3">Faucet failed: ${json && json.err ? json.err : 'unknown'}</span>`;
-      }catch(e){
-        statusEl.innerHTML = `<span style="color:#ffb3b3">Faucet error: ${String(e)}</span>`;
-      }
-
-      if (funded){
-        statusEl.textContent = 'Funded with 2.0 Test-Pi! You can now add the IZZA trustline.';
-        if (autoFundHelp) autoFundHelp.style.display = 'none';
-        addTrustlineBtn.disabled = false;
-        setOrderReady(false);
-      }else{
-        statusEl.textContent = 'Created but not funded. You can retry later with “Check Funding”.';
-      }
+      const res  = await fetch('/faucet', {
+        method:'POST',
+        headers:{'Content-Type':'application/json'},
+        body: JSON.stringify({ dest: NEW_WALLET.pub })
+      });
+      const json = await res.json();
+      funded = !!(res.ok && json && (json.ok || json.already));
+      if (!funded) statusEl.innerHTML = `<span style="color:#ffb3b3">Faucet failed: ${json && json.err ? json.err : 'unknown'}</span>`;
     }catch(e){
-      statusEl.innerHTML = `<span style="color:#ffb3b3">Couldn’t create wallet: ${String(e)}</span>`;
-      log('wallet.create.fail',{err:String(e)});
+      statusEl.innerHTML = `<span style="color:#ffb3b3">Faucet error: ${String(e)}</span>`;
     }
-  });
+
+    if (funded){
+      statusEl.textContent = 'Funded with 2.0 Test-Pi! You can now add the IZZA trustline.';
+      if (autoFundHelp) autoFundHelp.style.display = 'none';
+
+      // make the button usable immediately (handler lives in refreshAccountGate)
+      addTrustlineBtn.disabled = false;
+      setOrderReady(false);
+
+      // re-run the gate so the onclick is attached,
+      // and briefly poll Horizon to smooth out ledger lag
+      await refreshAccountGate(NEW_WALLET.pub);
+      startFundingWatcher(NEW_WALLET.pub);
+    }else{
+      statusEl.textContent = 'Created but not funded. You can retry later with “Check Funding”.';
+    }
+  }catch(e){
+    statusEl.innerHTML = `<span style="color:#ffb3b3">Couldn’t create wallet: ${String(e)}</span>`;
+    log('wallet.create.fail',{err:String(e)});
+  }
+});
 
   // ==== Add trustline (direct for local wallet) ====
   async function addTrustlineDirect(){
