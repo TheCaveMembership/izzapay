@@ -775,7 +775,7 @@
     </div>
   </div>
 <!-- Pi Platform SDK -->
-<script src="https://sdk.minepi.com/pi.js"></script>
+<script src="https://sdk.minepi.com/pi-sdk.js" defer></script>
   <!-- libs (from CDN) -->
   <!-- better: Chart first, then adapter -->
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
@@ -809,22 +809,73 @@
     return all[pub] ? atob(all[pub].blob) : null;
   }
 
-  async function piSignIn(){
-    try{
-      const scopes = ['username'];
-      const auth = await window.Pi.authenticate(scopes);
-      // verify on backend to create a session
-      await fetch('/api/auth/pi/verify', {
-        method:'POST', headers:{'Content-Type':'application/json'},
-        body: JSON.stringify({ uid: auth.user.uid, username: auth.user.username, accessToken: auth.accessToken })
-      });
-      USER = { uid: auth.user.uid, username: auth.user.username };
-      return USER;
-    }catch(e){
-      log('pi.auth.fail', { err:String(e) });
-      throw e;
-    }
+  // Pi v2 loader + init (robust, works on iOS Safari)
+async function ensurePiReady({ sandbox=false } = {}){
+  // Already good?
+  if (window.Pi && typeof Pi.init === 'function' && typeof Pi.authenticate === 'function') {
+    return true;
   }
+  // Try to load the v2 SDK if not present (idempotent)
+  const add = (id, src) => new Promise((res, rej)=>{
+    if (document.getElementById(id)) return res(true);
+    const s = document.createElement('script');
+    s.id=id; s.src=src; s.defer=true;
+    s.onload=()=>res(true); s.onerror=()=>rej(new Error('load-failed:'+src));
+    document.head.appendChild(s);
+  });
+
+  const candidates = [
+    'https://sdk.minepi.com/pi-sdk.js',
+    '/static/pi-sdk.js' // optional self-hosted fallback
+  ];
+  for (let i=0;i<candidates.length && !(window.Pi && Pi.init); i++){
+    try { await add('pi-sdk-'+i, candidates[i]); } catch(_) {}
+  }
+
+  if (!(window.Pi && Pi.init)) return false;
+
+  // Initialize v2
+  try {
+    Pi.init({ version: '2.0', sandbox: !!sandbox });
+  } catch(_) { /* ignore; Pi may already be inited */ }
+
+  // Wait briefly for methods to attach
+  const t0 = Date.now();
+  while (Date.now() - t0 < 1500) {
+    if (typeof Pi.authenticate === 'function') return true;
+    await new Promise(r=>setTimeout(r, 50));
+  }
+  return typeof Pi.authenticate === 'function';
+}
+
+  async function piSignIn(){
+  // Make sure Pi SDK is ready
+  const ok = await ensurePiReady({ sandbox: false /* or {{ sandbox|tojson }} */ });
+  if (!ok) {
+    // fall back to the same flow as your game auth page
+    // keeps routing consistent and sets the session before returning
+    location.href = '/authenticate?dest=wallet'; // or your actual route
+    throw new Error('pi-sdk-unavailable');
+  }
+
+  try{
+    const scopes = ['username'];
+    const onIncompletePaymentFound = function(_){};
+    const auth = await window.Pi.authenticate(scopes, onIncompletePaymentFound);
+
+    // verify on backend to create a session
+    await fetch('/api/auth/pi/verify', {
+      method:'POST', headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({ uid: auth.user.uid, username: auth.user.username, accessToken: auth.accessToken })
+    });
+
+    USER = { uid: auth.user.uid, username: auth.user.username };
+    return USER;
+  }catch(e){
+    log('pi.auth.fail', { err:String(e) });
+    throw e;
+  }
+}
 
   async function fetchActiveWallet(){
     try{
