@@ -118,6 +118,16 @@ def init_db():
           claimed_at INTEGER NOT NULL,
           FOREIGN KEY(order_id) REFERENCES orders(id)
         );
+
+        -- Wallet map (one active wallet per user)
+CREATE TABLE IF NOT EXISTS user_wallets (
+  id INTEGER PRIMARY KEY,
+  username TEXT NOT NULL UNIQUE,
+  pub TEXT NOT NULL,
+  created_at INTEGER,
+  updated_at INTEGER
+);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_user_wallets_username ON user_wallets(username);
         """)
 
 def ensure_schema():
