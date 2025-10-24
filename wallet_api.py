@@ -15,15 +15,37 @@ def _norm_username(u: str | None) -> str | None:
     return u or None
 
 def _ensure_table():
+    """
+    Ensure the user_wallets table exists and is upgraded to the latest schema.
+    - username TEXT PRIMARY KEY (normalized)
+    - pub      TEXT (G...)
+    - secret   TEXT (S...) optional
+    - revealed INTEGER (optional 'shown once' flag; default 0)
+    - created_at / updated_at INTEGER (unix seconds)
+    """
     with conn() as cx:
+        # Create if missing (base shape)
         cx.execute("""
           CREATE TABLE IF NOT EXISTS user_wallets(
-            username   TEXT PRIMARY KEY,   -- normalized (lowercase, no @)
-            pub        TEXT,               -- 56-char G...
+            username   TEXT PRIMARY KEY,
+            pub        TEXT,
+            secret     TEXT,
+            revealed   INTEGER DEFAULT 0,
             created_at INTEGER NOT NULL,
             updated_at INTEGER NOT NULL
           )
         """)
+
+        # If table existed previously without these columns, upgrade in place.
+        # SQLite lacks "ADD COLUMN IF NOT EXISTS", so we try/except each.
+        try:
+            cx.execute("ALTER TABLE user_wallets ADD COLUMN secret TEXT")
+        except Exception:
+            pass
+        try:
+            cx.execute("ALTER TABLE user_wallets ADD COLUMN revealed INTEGER DEFAULT 0")
+        except Exception:
+            pass
 
 def _resolve_username():
     """
@@ -72,18 +94,26 @@ def wallet_active():
         return jsonify({"pub": None, "why": _why_no_user()}), 200
 
     with conn() as cx:
-        row = cx.execute("SELECT pub FROM user_wallets WHERE username=?", (u,)).fetchone()
+        row = cx.execute(
+            "SELECT pub, secret FROM user_wallets WHERE username=?",
+            (u,)
+        ).fetchone()
 
-    return jsonify({"pub": (row["pub"] if row else None), "username": u}), 200
+    return jsonify({
+        "pub": (row["pub"] if row else None),
+        "secret": (row["secret"] if row else None),
+        "username": u
+    }), 200
 
 @bp.post("/api/wallet/link")
 def wallet_link():
     """
-    Persist (or update) the user's active wallet pubkey.
+    Persist (or update) the user's active wallet keys.
     Accepts ?u=<username> or derives from session like the rest of your app.
-    Body: { "pub": "G..." }
+    Body: { "pub": "G...", "secret": "S..."? }
     """
     _ensure_table()
+
     u = _resolve_username()
     if not u:
         return jsonify({"ok": False, "error": "unauthorized", "why": _why_no_user()}), 401
@@ -95,14 +125,19 @@ def wallet_link():
     if not (pub.startswith("G") and len(pub) == 56):
         return jsonify({"ok": False, "error": "bad_pub"}), 400
 
+    secret = (data.get("secret") or "").strip()
+    if secret and not (secret.startswith("S") and len(secret) == 56):
+        return jsonify({"ok": False, "error": "bad_secret"}), 400
+
     ts = now_i()
     with conn() as cx:
         cx.execute("""
-          INSERT INTO user_wallets(username, pub, created_at, updated_at)
-          VALUES(?,?,?,?)
+          INSERT INTO user_wallets(username, pub, secret, created_at, updated_at)
+          VALUES(?,?,?,?,?)
           ON CONFLICT(username) DO UPDATE SET
             pub=excluded.pub,
+            secret=COALESCE(excluded.secret, user_wallets.secret),
             updated_at=excluded.updated_at
-        """, (u, pub, ts, ts))
+        """, (u, pub, (secret or None), ts, ts))
 
     return jsonify({"ok": True, "username": u, "pub": pub}), 200
