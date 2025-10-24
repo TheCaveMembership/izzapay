@@ -1,4 +1,6 @@
 import os, json, uuid, time, hmac, base64, hashlib
+from faucet import bp_faucet
+app.register_blueprint(bp_faucet)
 from decimal import Decimal, ROUND_HALF_UP
 from datetime import timedelta, datetime
 from urllib.parse import urlparse, urlencode
