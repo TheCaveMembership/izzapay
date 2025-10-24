@@ -261,7 +261,17 @@
     .seg{display:inline-flex;border:1px solid rgba(255,255,255,.1);border-radius:12px;overflow:hidden}
     .seg button{background:transparent;border:0;color:#cfe0ff;font-weight:700;padding:6px 10px;cursor:pointer}
     .seg button[aria-pressed="true"]{background:rgba(122,68,255,.33)}
-    .chart-wrap{background:rgba(255,255,255,.03);border:1px solid rgba(255,255,255,.08);border-radius:12px;padding:10px}
+    .chart-wrap{
+  background:rgba(255,255,255,.03);
+  border:1px solid rgba(255,255,255,.08);
+  border-radius:12px;
+  padding:10px;
+
+  /* NEW: fixed height so Chart.js can lay out correctly in the modal */
+  height:220px;
+}
+/* NEW: let canvas fill the box */
+#izzaChart{ display:block; width:100%; height:100% }
 
     /* mini help */
     .help{color:#cfe0ff;font-size:12px;opacity:.9}
@@ -567,7 +577,7 @@
         </div>
 
         <div class="chart-wrap">
-          <canvas id="izzaChart" height="110"></canvas>
+          <canvas id="izzaChart"></canvas>
         </div>
 
         <div class="row" style="margin:12px 0">
@@ -760,48 +770,53 @@
     });
   }
   async function ensureStellar(){
-    if (window.StellarSdk) return true;
-    log('stellar.ensure.start');
-    const sources = [
-      // alt sources (no SRI so WebViews don’t reject)
-      'https://cdn.jsdelivr.net/npm/stellar-sdk@10.5.1/dist/stellar-sdk.min.js',
-      'https://unpkg.com/stellar-sdk@10.5.1/dist/stellar-sdk.min.js'
+  if (window.StellarSdk) return true;
+  log('stellar.ensure.start');
+  const sources = [
+    '/static/stellar-sdk.min.js', // NEW: self-hosted first
+    'https://cdn.jsdelivr.net/npm/stellar-sdk@10.5.1/dist/stellar-sdk.min.js',
+    'https://unpkg.com/stellar-sdk@10.5.1/dist/stellar-sdk.min.js'
+  ];
+  for (let i=0;i<sources.length;i++){
+    try{
+      await loadScriptOnce('stellar-sdk-'+i, sources[i]);
+      if (window.StellarSdk){ log('stellar.ensure.ok',{i,src:sources[i]}); return true; }
+    }catch(e){ log('stellar.ensure.fail.try',{i,err:String(e)}); }
+  }
+  log('stellar.ensure.fail.all'); return false;
+}
+
+async function ensureChart(){
+  // Chart.js
+  if (!window.Chart){
+    log('chart.ensure.chart.start');
+    const urls = [
+      '/static/chart.umd.min.js', // NEW: self-hosted first
+      'https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js',
+      'https://unpkg.com/chart.js@4.4.1/dist/chart.umd.min.js'
     ];
-    for (let i=0;i<sources.length;i++){
-      try{ await loadScriptOnce('stellar-sdk-'+i, sources[i]); if (window.StellarSdk){ log('stellar.ensure.ok',{i}); return true; } }catch(e){ log('stellar.ensure.fail.try',{i,err:String(e)}); }
+    for (let i=0;i<urls.length && !window.Chart;i++){
+      try{ await loadScriptOnce('chartjs-'+i, urls[i]); }catch(e){ log('chart.ensure.chart.fail.try',{i,err:String(e)}); }
     }
-    log('stellar.ensure.fail.all');
-    return false;
+    if (!window.Chart){ log('chart.ensure.chart.fail.all'); return false; }
+    log('chart.ensure.chart.ok');
   }
-  async function ensureChart(){
-    // Chart.js
-    if (!window.Chart){
-      log('chart.ensure.chart.start');
-      const urls = [
-        'https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js',
-        'https://unpkg.com/chart.js@4.4.1/dist/chart.umd.min.js'
-      ];
-      for (let i=0;i<urls.length && !window.Chart;i++){
-        try{ await loadScriptOnce('chartjs-'+i, urls[i]); }catch(e){ log('chart.ensure.chart.fail.try',{i,err:String(e)}); }
-      }
-      if (!window.Chart){ log('chart.ensure.chart.fail.all'); return false; }
-      log('chart.ensure.chart.ok');
+  // time adapter
+  if (!Chart._adapters || !Chart._adapters._date){
+    log('chart.ensure.adapter.start');
+    const urls = [
+      '/static/chartjs-adapter-date-fns.min.js', // NEW: self-hosted first
+      'https://cdn.jsdelivr.net/npm/chartjs-adapter-date-fns@3',
+      'https://unpkg.com/chartjs-adapter-date-fns@3'
+    ];
+    for (let i=0;i<urls.length && (!Chart._adapters || !Chart._adapters._date); i++){
+      try{ await loadScriptOnce('chartjs-adapter-'+i, urls[i]); }catch(e){ log('chart.ensure.adapter.fail.try',{i,err:String(e)}); }
     }
-    // time adapter
-    if (!Chart._adapters || !Chart._adapters._date){
-      log('chart.ensure.adapter.start');
-      const urls = [
-        'https://cdn.jsdelivr.net/npm/chartjs-adapter-date-fns@3',
-        'https://unpkg.com/chartjs-adapter-date-fns@3'
-      ];
-      for (let i=0;i<urls.length && (!Chart._adapters || !Chart._adapters._date); i++){
-        try{ await loadScriptOnce('chartjs-adapter-'+i, urls[i]); }catch(e){ log('chart.ensure.adapter.fail.try',{i,err:String(e)}); }
-      }
-      if (!Chart._adapters || !Chart._adapters._date){ log('chart.ensure.adapter.fail.all'); return false; }
-      log('chart.ensure.adapter.ok');
-    }
-    return true;
+    if (!Chart._adapters || !Chart._adapters._date){ log('chart.ensure.adapter.fail.all'); return false; }
+    log('chart.ensure.adapter.ok');
   }
+  return true;
+}
 
   // =================== Static DOM wiring ===================
   const issuerEl       = document.getElementById('issuer');
@@ -984,6 +999,10 @@
   let izzaChart = null;
   let allPoints = [];
   let obTimer = null;
+  // NEW: keep the chart sized to its container
+const chartCanvas = document.getElementById('izzaChart');
+const ro = new ResizeObserver(()=>{ try{ izzaChart && izzaChart.resize(); }catch(_){ } });
+if (chartCanvas && chartCanvas.parentElement) ro.observe(chartCanvas.parentElement);
   function startObRefresh(){
     if(obTimer) clearInterval(obTimer);
     obTimer = setInterval(()=>{ if(!orderbookModal.hidden){ loadOrderbook(); loadTradesAndDraw(); } }, 10000);
@@ -1096,12 +1115,15 @@
 
   // Open Orderbook (ensure chart libs first)
   orderbookBtn.addEventListener('click', async ()=>{
-    openModal(orderbookModal, closeOrderbookBtn);
-    await ensureChart();
-    loadOrderbook();
-    loadTradesAndDraw();
-    startObRefresh();
-  });
+  openModal(orderbookModal, closeOrderbookBtn);
+  await ensureChart();
+  loadOrderbook();
+  loadTradesAndDraw();
+  startObRefresh();
+
+  // Ensure Chart.js measures after the modal is visible
+  requestAnimationFrame(()=>{ try{ izzaChart && izzaChart.resize(); }catch(_){} });
+});
   closeOrderbookBtn.addEventListener('click', ()=>{ stopObRefresh(); closeModal(orderbookModal); });
 
   // =================== Orders / Wallet (with Stellar ensure) ===================
