@@ -1324,36 +1324,45 @@ createBtn.addEventListener('click', async ()=>{
   }
 
   try{
+    // 1) Generate locally
     const kp = StellarSdk.Keypair.random();
     NEW_WALLET = { pub: kp.publicKey(), sec: kp.secret() };
-    acctPubInput.value = NEW_WALLET.pub;
+
+    if (acctPubInput) acctPubInput.value = NEW_WALLET.pub;
     newPubEl.textContent = NEW_WALLET.pub;
     drawQR(newQRCanvas, NEW_WALLET.pub);
     box.style.display = 'block';
-    statusEl.textContent = 'Wallet created locally. Fund ~2.0 test Pi, then “Check Funding”.';
+    statusEl.textContent = 'Wallet created. Funding 2.0 Test-Pi…';
     try{ localStorage.setItem('izza_test_wallet', JSON.stringify(NEW_WALLET)); }catch(_){}
+
+    // 2) Ask server faucet to create+fund with 2 Test-Pi
+    let funded = false;
+    try{
+      const res = await fetch('/faucet', {
+        method:'POST',
+        headers:{'Content-Type':'application/json'},
+        body: JSON.stringify({ dest: NEW_WALLET.pub })
+      });
+      const json = await res.json();
+      funded = !!(res.ok && json && (json.ok || json.already));
+      if (!funded) {
+        statusEl.innerHTML = `<span style="color:#ffb3b3">Faucet failed: ${json && json.err ? json.err : 'unknown'}</span>`;
+      }
+    }catch(e){
+      statusEl.innerHTML = `<span style="color:#ffb3b3">Faucet error: ${String(e)}</span>`;
+    }
+
+    // 3) Ready state
+    if (funded){
+      statusEl.textContent = 'Funded with 2.0 Test-Pi! You can now add the IZZA trustline.';
+      addTrustlineBtn.disabled = false;
+      setOrderReady(true);
+    }else{
+      statusEl.textContent = 'Created but not funded. You can retry later with “Check Funding”.';
+    }
   }catch(e){
     statusEl.innerHTML = `<span style="color:#ffb3b3">Couldn’t create wallet: ${String(e)}</span>`;
-  }
-});
-
-checkFundingBtn.addEventListener('click', async ()=>{
-  try{
-    if(!NEW_WALLET){
-      try{ NEW_WALLET = JSON.parse(localStorage.getItem('izza_test_wallet')||'null'); }catch(_){}
-    }
-    if(!NEW_WALLET){ statusEl.textContent = 'Create a test wallet first.'; return; }
-
-    statusEl.textContent = 'Checking funding…';
-    const funded = await isFunded(NEW_WALLET.pub);
-    if(!funded){
-      statusEl.textContent = 'Still unfunded. Send ~2.0 test Pi from your Pi Testnet wallet, then press “Check Funding”.';
-      return;
-    }
-    statusEl.textContent = 'Funded! You can now add the IZZA trustline.';
-    addTrustlineBtn.disabled = false;
-  }catch(e){
-    statusEl.innerHTML = `<span style="color:#ffb3b3">Funding check failed: ${String(e)}</span>`;
+    log('wallet.create.fail',{err:String(e)});
   }
 });
 
