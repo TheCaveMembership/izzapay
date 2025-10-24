@@ -146,9 +146,7 @@
     <!-- Topbar (centered BROWSE STORES, no logo) -->
     <div class="topbar">
   <a class="btn ghost upper" href="/explore">BROWSE STORES</a>
-  <button id="tokenAuthBtn" class="btn purple upper" type="button" aria-label="View IZZA Token Showcase">
-  IZZA TOKEN
-</button>
+  <a class="btn purple upper" href="/token/izza" aria-label="View IZZA Token Showcase">IZZA TOKEN</a>
 </div>
 
     <!-- HERO -->
@@ -217,88 +215,43 @@
     </section>
   </div>
 
-  <!-- Pi SDK auth (replaces your entire previous block) -->
-<script>
-(function(){
-  const msg = document.getElementById('msg');
-  const err = document.getElementById('err');
+  <!-- Pi SDK auth -->
+  <script>
+  (function(){
+    const msg = document.getElementById('msg');
+    const err = document.getElementById('err');
+    const btnClone = document.getElementById('piSignInBtn_clone'); // "MY STORE"
+    const postUrl = "/auth/exchange";
+    const sandbox = {{ 'true' if sandbox else 'false' }};
 
-  // Buttons
-  const btnStore  = document.getElementById('piSignInBtn_clone'); // "MY STORE"
-  const btnToken  = document.getElementById('tokenAuthBtn');       // "IZZA TOKEN"
+    function setMsg(t){ if(msg) msg.textContent = t || ''; }
+    function setErr(t){ if(err) err.textContent = t || ''; }
 
-  // Server endpoints + flags
-  const postUrl = "/auth/exchange";
-  const sandbox = {{ 'true' if sandbox else 'false' }};
-  const tokenDest = "/token/izza";
-
-  function setMsg(t){ if(msg) msg.textContent = t || ''; }
-  function setErr(t){ if(err) err.textContent = t || ''; }
-
-  // Init Pi once
-  function initPi(){
-    if (!window.Pi || !Pi.init) return false;
-    try { Pi.init({ version:"2.0", sandbox:sandbox }); return true; }
-    catch(e){ console.error("Pi.init failed", e); setErr("Pi.init failed: " + (e?.message || e)); return false; }
-  }
-  if(!initPi()) setMsg("Open in Pi Browser or refresh. Pi SDK is initializing.");
-
-  // A) MY STORE (payments + username)
-  function authForStore(){
-    setErr('');
-    if (!window.Pi || !Pi.authenticate){ setMsg("Pi SDK not available. Open in Pi Browser or refresh."); return; }
-    setMsg("Requesting authorization…");
-    const scopes=['payments','username'];
-    function onIncompletePaymentFound(_p){}
-    Pi.authenticate(scopes,onIncompletePaymentFound)
-      .then(function(auth){
-        const form=document.createElement('form'); form.method='POST'; form.action=postUrl;
-        const inp=document.createElement('input'); inp.type='hidden'; inp.name='payload';
-        inp.value=JSON.stringify({ accessToken:auth.accessToken, user:auth.user });
-        form.appendChild(inp); document.body.appendChild(form); form.submit();
-      })
-      .catch(function(e){ console.error(e); setMsg("Authorization failed. Please try again."); setErr(e?.message||String(e)); });
-  }
-
-  // B) IZZA TOKEN (username only → redirect to /token/izza)
-  async function authThenGo(){
-    // Fallback if not in Pi Browser
-    if (!window.Pi || !Pi.authenticate) {
-      location.href = `/authenticate?dest=${encodeURIComponent(tokenDest)}`;
-      return;
+    function initPi(){
+      if (!window.Pi || !Pi.init) return false;
+      try { Pi.init({ version:"2.0", sandbox:sandbox }); return true; }
+      catch(e){ console.error("Pi.init failed", e); setErr("Pi.init failed: " + (e?.message || e)); return false; }
     }
-    try{
-      const scopes = ['username'];
-      const onIncompletePaymentFound = function(){};
-      const auth = await Pi.authenticate(scopes, onIncompletePaymentFound);
+    if(!initPi()) setMsg("Open in Pi Browser or refresh. Pi SDK is initializing.");
 
-      // POST to same exchange endpoint; include desired dest
-      const form = document.createElement('form');
-      form.method = 'POST';
-      form.action = postUrl;
-      const payload = document.createElement('input');
-      payload.type = 'hidden';
-      payload.name = 'payload';
-      payload.value = JSON.stringify({
-        accessToken: auth.accessToken,
-        user: auth.user,
-        dest: tokenDest
-      });
-      form.appendChild(payload);
-      document.body.appendChild(form);
-      form.submit();
-    }catch(e){
-      console.warn('Pi auth cancelled/failed', e);
-      // Optional: allow read-only access if user cancels:
-      // window.location.href = tokenDest;
+    function doAuth(){
+      setErr('');
+      if (!window.Pi || !Pi.authenticate){ setMsg("Pi SDK not available. Open in Pi Browser or refresh."); return; }
+      setMsg("Requesting authorization…");
+      const scopes=['payments','username'];
+      function onIncompletePaymentFound(_p){}
+      Pi.authenticate(scopes,onIncompletePaymentFound)
+        .then(function(auth){
+          const form=document.createElement('form'); form.method='POST'; form.action=postUrl;
+          const inp=document.createElement('input'); inp.type='hidden'; inp.name='payload';
+          inp.value=JSON.stringify({ accessToken:auth.accessToken, user:auth.user });
+          form.appendChild(inp); document.body.appendChild(form); form.submit();
+        })
+        .catch(function(e){ console.error(e); setMsg("Authorization failed. Please try again."); setErr(e?.message||String(e)); });
     }
-  }
-
-  // Wire up
-  btnStore?.addEventListener('click', authForStore);
-  btnToken?.addEventListener('click', authThenGo);
-})();
-</script>
+    btnClone?.addEventListener('click', doAuth);
+  })();
+  </script>
 
   <!-- Scroll reveals + rail glow + marker activation -->
   <script>
