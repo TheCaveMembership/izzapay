@@ -168,15 +168,27 @@ def serve_assets(filename):
 def _client_log():
     try:
         data = request.get_json(silent=True) or {}
-        print("TRUST_EVT", data)
+        # Force-flush so Render shows it immediately
+        print("TRUST_EVT", json.dumps(data, ensure_ascii=False), flush=True)
+        print("TRUST_META ua=%s referer=%s" % (
+            request.headers.get("User-Agent", "-"),
+            request.headers.get("Referer", "-"),
+        ), flush=True)
     except Exception as e:
-        print("TRUST_EVT_ERR", repr(e))
+        print("TRUST_EVT_ERR", repr(e), flush=True)
     return {"ok": True}
 
 # Alias for older clients posting to /_client-log
 @app.post("/_client-log")
 def _client_log_alias():
+    # Call the same handler so behavior is identical
     return _client_log()
+
+# Optional: quick GET to verify from phone that stdout is reaching Render
+@app.get("/_log/ping")
+def _client_log_ping():
+    print("TRUST_PING ua=%s" % (request.headers.get("User-Agent", "-")), flush=True)
+    return {"ok": True}
 
 @app.get("/trust/open")
 def trust_https_redirect():
