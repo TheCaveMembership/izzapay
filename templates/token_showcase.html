@@ -309,6 +309,14 @@
         <p class="lead">Issuer, distributor, balances and activity on Pi Testnet.</p>
       </div>
       <div class="spacer"></div>
+      <!-- Pi auth + wallet entry -->
+<div id="authRow" style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
+  <button id="piAuthBtn" class="cta" type="button">🔐 Sign in with Pi</button>
+  <button id="walletBtn" class="cta" type="button" aria-haspopup="dialog" aria-controls="myWalletModal" style="display:none">
+    💼 My IZZA Wallet
+  </button>
+  <span id="whoami" class="small" style="display:none"></span>
+</div>
     </header>
 
     <section class="hero">
@@ -549,7 +557,48 @@
       </div>
     </div>
   </div>
+<!-- MY WALLET MODAL (uses the same backdrop) -->
+<div class="modal" id="myWalletModal" role="dialog" aria-modal="true" aria-labelledby="myWalletTitle" hidden>
+  <div class="modal-card">
+    <div class="modal-header">
+      <div class="modal-title">
+        <img src="/static/izzapay-mark.svg" alt="">
+        <span id="myWalletTitle">My IZZA Wallet</span>
+      </div>
+      <button class="close-btn" type="button" id="closeMyWalletBtn">Close</button>
+    </div>
+    <div class="modal-body">
+      <div class="blox">
+        <div class="small-muted">Signed in as</div>
+        <div><strong id="mwUser">—</strong></div>
+      </div>
 
+      <div class="blox" style="margin-top:10px">
+        <div class="small-muted">Active Wallet (public key)</div>
+        <div class="mono" id="mwPub" style="word-break:break-all">—</div>
+      </div>
+
+      <div class="grid" style="gap:12px;margin-top:10px">
+        <div class="blox">
+          <h4 style="margin:0 0 8px 0">Balances</h4>
+          <div class="small-muted">Pi</div>
+          <div class="mono" id="mwPi">—</div>
+          <div class="small-muted" style="margin-top:8px">IZZA</div>
+          <div class="mono" id="mwIzza">—</div>
+        </div>
+        <div class="blox">
+          <h4 style="margin:0 0 8px 0">Actions</h4>
+          <button id="revealOnceBtn" class="cta" type="button" style="margin-right:8px">Reveal Secret (once)</button>
+          <button id="exportBackupBtn" class="cta" type="button">Export Encrypted</button>
+          <div class="help" style="margin-top:8px">
+            We never send your secret to the server. Keep it safe.
+          </div>
+          <pre id="secretOnce" style="display:none;margin-top:10px;padding:10px;border:1px dashed rgba(255,255,255,.12);border-radius:10px"></pre>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
   <!-- ORDER BOOK MODAL (reuses backdrop) -->
   <div class="modal" id="orderbookModal" role="dialog" aria-modal="true" aria-labelledby="orderbookTitle" hidden>
     <div class="modal-card">
@@ -725,7 +774,8 @@
       </div>
     </div>
   </div>
-
+<!-- Pi Platform SDK -->
+<script src="https://sdk.minepi.com/pi.js"></script>
   <!-- libs (from CDN) -->
   <!-- better: Chart first, then adapter -->
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
@@ -742,6 +792,93 @@
   ? "{{ API_BASE }}"
   : "https://api.testnet.minepi.com");
   const DEEP_LINK   = "{{ DEEP_LINK }}";
+    // =================== Pi Auth + Active Wallet (one per user) ===================
+  let USER = null;                // { uid, username }
+  let ACTIVE_PUB = null;          // active wallet public key from server
+  const VAULT_KEY = 'izza_wallets'; // local encrypted secrets by pub
+
+  // Simple local vault helpers (encrypted blob storage). For now we store a raw secret
+  // ONLY for testnet demo if user opts-in; production: replace with AES-GCM (PBKDF2).
+  function saveLocalSecret(pub, secret){
+    const all = JSON.parse(localStorage.getItem(VAULT_KEY) || '{}');
+    all[pub] = { blob: btoa(secret) };     // demo only
+    localStorage.setItem(VAULT_KEY, JSON.stringify(all));
+  }
+  function getLocalSecret(pub){
+    const all = JSON.parse(localStorage.getItem(VAULT_KEY) || '{}');
+    return all[pub] ? atob(all[pub].blob) : null;
+  }
+
+  async function piSignIn(){
+    try{
+      const scopes = ['username'];
+      const auth = await window.Pi.authenticate(scopes);
+      // verify on backend to create a session
+      await fetch('/api/auth/pi/verify', {
+        method:'POST', headers:{'Content-Type':'application/json'},
+        body: JSON.stringify({ uid: auth.user.uid, username: auth.user.username, accessToken: auth.accessToken })
+      });
+      USER = { uid: auth.user.uid, username: auth.user.username };
+      return USER;
+    }catch(e){
+      log('pi.auth.fail', { err:String(e) });
+      throw e;
+    }
+  }
+
+  async function fetchActiveWallet(){
+    try{
+      const r = await fetch('/api/wallet/active', { cache:'no-store' });
+      if (!r.ok) return null;
+      const j = await r.json();
+      ACTIVE_PUB = j && j.pub ? j.pub : null;
+      return ACTIVE_PUB;
+    }catch{ return null; }
+  }
+
+  async function linkActiveWallet(pub){
+    const r = await fetch('/api/wallet/link', {
+      method:'POST', headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({ pub })
+    });
+    if (!r.ok) {
+      const t = await r.text().catch(()=>r.statusText);
+      throw new Error('link-failed:'+t);
+    }
+    ACTIVE_PUB = pub;
+  }
+
+  // UI helpers
+  const piAuthBtn = document.getElementById('piAuthBtn');
+  const walletBtn = document.getElementById('walletBtn');
+  const whoami    = document.getElementById('whoami');
+
+  async function bootstrapAuthUI(){
+    try{
+      // silently try to get active wallet (assumes session cookie if signed in)
+      const pub = await fetchActiveWallet();
+      if (pub){
+        ACTIVE_PUB = pub;
+        acctPub.value = pub;
+        whoami.style.display = 'inline';
+        walletBtn.style.display = '';
+        piAuthBtn.style.display = 'none';
+        whoami.textContent = `Active: ${pub.slice(0,6)}…${pub.slice(-6)}`;
+        // choose Submit vs SEP-7 if local secret exists
+        const hasLocal = !!getLocalSecret(pub);
+        setOrderReady(true, hasLocal);
+      }
+    }catch(_){}
+  }
+
+  piAuthBtn?.addEventListener('click', async ()=>{
+    await piSignIn();
+    await bootstrapAuthUI();
+  });
+  walletBtn?.addEventListener('click', async ()=>{
+  await refreshMyWalletModal();
+  openModal(myWalletModal, closeMyWalletBtn);
+});
 
   // =================== Tiny logger (+ global error taps) ===================
   function log(evt, extra){
@@ -895,6 +1032,8 @@ async function ensureChart(){
   const orderbookModal= document.getElementById('orderbookModal');
   const closeOrderbookBtn = document.getElementById('closeOrderbookBtn');
   const placeOrderModal   = document.getElementById('placeOrderModal');
+  const myWalletModal   = document.getElementById('myWalletModal');
+  const closeMyWalletBtn= document.getElementById('closeMyWalletBtn');
   const orderBtn          = document.getElementById('orderBtn');
   const closePlaceOrderBtn= document.getElementById('closePlaceOrderBtn');
   const backdrop      = document.getElementById('modalBackdrop');
@@ -903,7 +1042,7 @@ async function ensureChart(){
 
   function openModal(el, focusEl){
     lastFocus = document.activeElement;
-    [modal, orderbookModal, placeOrderModal].forEach(m=>{ m.hidden = true; m.removeAttribute('open'); });
+    [modal, orderbookModal, placeOrderModal, myWalletModal].forEach(m=>{ m.hidden = true; m.removeAttribute('open'); });
     el.hidden = false; backdrop.hidden = false;
     el.setAttribute('open',''); backdrop.setAttribute('open','');
     document.body.style.overflow = 'hidden';
@@ -918,10 +1057,12 @@ async function ensureChart(){
   roadmapBtn.addEventListener('click', ()=>openModal(modal, closeModalBtn));
   badgeOpen.addEventListener('click', ()=>openModal(modal, closeModalBtn));
   closeModalBtn.addEventListener('click', ()=>closeModal(modal));
+  closeMyWalletBtn.addEventListener('click', ()=> closeModal(myWalletModal));
+  
 
   backdrop.addEventListener('click', ()=>{
     if (!orderbookModal.hidden){ stopObRefresh(); }
-    [modal, orderbookModal, placeOrderModal].forEach(m=>{ if(!m.hidden) closeModal(m); });
+    [modal, orderbookModal, placeOrderModal, myWalletModal].forEach(m=>{ if(!m.hidden) closeModal(m); });
   });
 
   // =================== Order book endpoints ===================
@@ -1267,6 +1408,22 @@ async function getAccountState(pub){
   return { funded:true, hasTrust: hasIzzaTrust(json.balances||[]) };
 }
 
+  // --- Fill "My Wallet" modal ---
+async function refreshMyWalletModal(){
+  document.getElementById('mwUser').textContent = USER?.username || '—';
+  document.getElementById('mwPub').textContent  = ACTIVE_PUB || '—';
+  document.getElementById('secretOnce').style.display = 'none';
+
+  if (!ACTIVE_PUB) return;
+  try{
+    const j = await loadAccount(ACTIVE_PUB);
+    const piBal   = (j?.balances||[]).find(b=>b.asset_type==='native')?.balance || '0';
+    const izzaBal = (j?.balances||[]).find(b=>b.asset_code===ASSET_CODE && b.asset_issuer===ISSUER)?.balance || '0';
+    document.getElementById('mwPi').textContent   = piBal;
+    document.getElementById('mwIzza').textContent = izzaBal;
+  }catch(_){}
+}
+
 // ==== UI: enable trustline button & order readiness based on account ====
 const statusEl        = document.getElementById('walletStatus');
 const checkFundingBtn = document.getElementById('checkFundingBtn');
@@ -1567,7 +1724,7 @@ function trapFocus(container){
     else if(!e.shiftKey && document.activeElement === last){ first.focus(); e.preventDefault(); }
   });
 }
-[modal, orderbookModal, placeOrderModal].forEach(trapFocus);
+  [modal, orderbookModal, placeOrderModal, myWalletModal].forEach(trapFocus);
 })(); 
 </script>
 </body>
