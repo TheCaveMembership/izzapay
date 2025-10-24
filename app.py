@@ -147,6 +147,10 @@ except Exception:
 app = Flask(__name__)
 app.register_blueprint(bp_faucet)
 app.register_blueprint(wallet_api_bp)
+app.config.update(
+    SESSION_COOKIE_SAMESITE="None",   # allow cookies in Pi frame or iframe
+    SESSION_COOKIE_SECURE=True        # required with SameSite=None
+)
 
 # ======================================================
 # PUBLIC FILE SERVING ROUTES (.well-known and /assets/)
