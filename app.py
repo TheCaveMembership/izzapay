@@ -1701,27 +1701,44 @@ def pi_clear_pending():
 @app.post("/api/auth/pi/verify")
 def api_auth_pi_verify():
     """
-    Accepts JSON: { accessToken, user: { uid, username } }
-    Verifies with Pi /v2/me, upserts user, and starts a session.
-    Returns: { ok:true }
+    Accepts either:
+      - JSON: { accessToken, user?: { id|uid, username } }
+      - FORM: payload=JSON-string with the same keys
+    Verifies token with Pi /v2/me, infers user if missing, upserts user, starts session.
+    Returns { ok:true } on success.
     """
     try:
-        data = request.get_json(silent=True) or {}
-        token = (data.get("accessToken") or "").strip()
-        user  = data.get("user") or {}
-        uid   = user.get("uid") or user.get("id")
-        uname = (user.get("username") or "").strip()
+        # Accept JSON or a form 'payload' JSON blob
+        if request.is_json:
+            data = request.get_json(silent=True) or {}
+        else:
+            raw = request.form.get("payload") or ""
+            try:
+                data = json.loads(raw) if raw else {}
+            except Exception:
+                data = {}
 
-        if not token or not uid or not uname:
+        token = (data.get("accessToken") or data.get("token") or "").strip()
+        user  = data.get("user") or {}
+
+        # If user not provided, fetch from Pi using the token
+        if token:
+            r = requests.get(f"{PI_API_BASE}/v2/me",
+                             headers={"Authorization": f"Bearer {token}"},
+                             timeout=10)
+            if r.status_code != 200:
+                return jsonify(ok=False, error="token_invalid"), 401
+            me = r.json() or {}
+            # Prefer explicit user fields if present; otherwise fill from /v2/me
+            uid   = user.get("uid") or user.get("id") or me.get("id")
+            uname = (user.get("username") or me.get("username") or "").strip()
+        else:
+            return jsonify(ok=False, error="missing_token"), 400
+
+        if not uid or not uname:
             return jsonify(ok=False, error="invalid_payload"), 400
 
-        # Verify token with Pi
-        r = requests.get(f"{PI_API_BASE}/v2/me",
-                         headers={"Authorization": f"Bearer {token}"}, timeout=10)
-        if r.status_code != 200:
-            return jsonify(ok=False, error="token_invalid"), 401
-
-        # Ensure minimal columns exist (mirrors auth_exchange safety)
+        # Ensure columns exist (matches your auth_exchange hardening)
         with conn() as cx:
             cols = [row["name"] for row in cx.execute("PRAGMA table_info(users)").fetchall()]
             if "pi_uid" not in cols:
@@ -1735,7 +1752,7 @@ def api_auth_pi_verify():
             if "ic_credits" not in cols:
                 cx.execute("ALTER TABLE users ADD COLUMN ic_credits INTEGER DEFAULT 0")
 
-        # Upsert by uid (fallback by username if needed)
+        # Upsert by pi_uid (fallback by username)
         with conn() as cx:
             row = cx.execute("SELECT * FROM users WHERE pi_uid=?", (uid,)).fetchone()
             if not row:
@@ -1749,7 +1766,7 @@ def api_auth_pi_verify():
                            (uid, uname, int(time.time())))
                 row = cx.execute("SELECT * FROM users WHERE pi_uid=?", (uid,)).fetchone()
 
-        # Start a Flask session and return ok
+        # Start a session
         try:
             session["user_id"] = row["id"]
             session.permanent = True
@@ -1760,18 +1777,10 @@ def api_auth_pi_verify():
     except Exception:
         return jsonify(ok=False, error="server_error"), 500
 
-
 @app.get("/api/wallet/active")
 def api_wallet_active():
-    """
-    Returns the user's currently linked public key from session storage.
-    404 with small JSON body if none set (matches frontend expectation).
-    """
     pub = session.get("active_pub")
-    if not pub:
-        return jsonify(error="no_active_wallet"), 404
-    return jsonify(pub=pub)
-
+    return jsonify(pub=(pub or None))
 
 @app.post("/api/wallet/link")
 def api_wallet_link():
