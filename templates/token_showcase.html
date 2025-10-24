@@ -1346,7 +1346,7 @@ ensureUserAndWalletGate();
     startObRefresh();
     requestAnimationFrame(()=>{ try{ izzaChart && izzaChart.resize(); }catch(_){} });
   });
-  closeOrderbookBtn.addEventListener('click', ()=>{ stopObRefresh(); closeModal(orderbookModal); });
+  
 
   // =================== Orders / Wallet (with Stellar ensure) ===================
   const sideBtns  = Array.from(document.querySelectorAll('.sideBtn'));
