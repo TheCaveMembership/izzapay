@@ -850,7 +850,7 @@ async function ensurePiReady({ sandbox=false } = {}){
 
   async function piSignIn(){
   // Make sure Pi SDK is ready
-  const ok = await ensurePiReady({ sandbox: false /* or {{ sandbox|tojson }} */ });
+  const ok = await ensurePiReady({ sandbox: false });
   if (!ok) {
     // fall back to the same flow as your game auth page
     // keeps routing consistent and sets the session before returning
