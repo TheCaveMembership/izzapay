@@ -831,7 +831,6 @@
   ? "{{ API_BASE }}"
   : "https://api.testnet.minepi.com");
   const DEEP_LINK   = "{{ DEEP_LINK }}";
-  <script>
 // ===== hydrate the UI with issuer/distributor + quick links/QR
 (function () {
   const $ = id => document.getElementById(id);
@@ -865,7 +864,6 @@
   // (nice-to-have) quick console proof:
   console.log('[IZZA cfg]', { ASSET_CODE, ISSUER, DISTRIBUTOR, API_BASE, DEEP_LINK });
 })();
-</script>
     // =================== Pi Auth + Active Wallet (one per user) ===================
   let USER = null;                // { uid, username }
   let ACTIVE_PUB = null;          // active wallet public key from server
