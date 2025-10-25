@@ -831,6 +831,41 @@
   ? "{{ API_BASE }}"
   : "https://api.testnet.minepi.com");
   const DEEP_LINK   = "{{ DEEP_LINK }}";
+  <script>
+// ===== hydrate the UI with issuer/distributor + quick links/QR
+(function () {
+  const $ = id => document.getElementById(id);
+  const short = s => s ? `${s.slice(0,8)}…${s.slice(-6)}` : '—';
+
+  // 1) issuer / distributor text
+  $('issuer')        && ($('issuer').textContent        = ISSUER || '—');
+  $('issuer-compact')&& ($('issuer-compact').textContent= short(ISSUER));
+  $('distributor')   && ($('distributor').textContent   = DISTRIBUTOR || '—');
+  $('d-short')       && ($('d-short').textContent       = short(DISTRIBUTOR));
+
+  // 2) deep link + QR (adjust the QR route to whatever you use)
+  $('deepPre') && ( $('deepPre').textContent = DEEP_LINK || '' );
+  const qr = $('qrimg');
+  if (qr && DEEP_LINK) {
+    // e.g. server route that returns a PNG of a QR code
+    qr.src = `/qr?text=${encodeURIComponent(DEEP_LINK)}`;
+  }
+
+  // 3) “Raw data & quick links”
+  const acct = `${API_BASE}/accounts/${encodeURIComponent(DISTRIBUTOR)}`;
+  const pays = `${acct}/payments?order=desc&limit=50`;
+  const ops  = `${acct}/operations?order=desc&limit=50`;
+  const asset= `${API_BASE}/assets?asset_code=${encodeURIComponent(ASSET_CODE)}&asset_issuer=${encodeURIComponent(ISSUER)}`;
+
+  $('link-account')   && ( $('link-account').href = acct );
+  $('link-payments')  && ( $('link-payments').href = pays );
+  $('link-ops')       && ( $('link-ops').href     = ops );
+  $('link-assets')    && ( $('link-assets').href  = asset );
+
+  // (nice-to-have) quick console proof:
+  console.log('[IZZA cfg]', { ASSET_CODE, ISSUER, DISTRIBUTOR, API_BASE, DEEP_LINK });
+})();
+</script>
     // =================== Pi Auth + Active Wallet (one per user) ===================
   let USER = null;                // { uid, username }
   let ACTIVE_PUB = null;          // active wallet public key from server
