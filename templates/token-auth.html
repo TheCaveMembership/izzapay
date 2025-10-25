@@ -34,12 +34,14 @@
     h1{margin:16px 0 6px;font-size:clamp(26px,8.5vw,56px);line-height:1.05}
     p{color:var(--muted);margin:8px 0 16px}
     .cta-row{display:flex;justify-content:center;gap:12px;flex-wrap:wrap}
-    .hero-row{
-      display:flex;align-items:center;justify-content:center;
-      gap:18px;margin:10px auto 12px;flex-wrap:wrap;
+    .token-logo{
+      height:clamp(120px,22vw,220px);
+      display:block;
+      margin:20px auto 20px;
+      filter:drop-shadow(0 0 20px rgba(183,132,255,0.3));
+      transition:transform .3s ease;
     }
-    .hero-logo{height:clamp(58px,12vw,110px);display:block}
-    .token-logo{height:clamp(42px,10vw,90px);display:block}
+    .token-logo:hover{transform:scale(1.04);}
     .err{color:#ff9aa2;white-space:pre-wrap}
   </style>
   <script src="https://sdk.minepi.com/pi-sdk.js"></script>
@@ -53,11 +55,8 @@
     <section class="section" id="s-auth">
       <h1 class="reveal">SIGN IN WITH PI</h1>
 
-      <!-- ✅ combined logo row -->
-      <div class="hero-row reveal">
-        <img src="/static/izzapay-word.svg" alt="IZZA PAY" class="hero-logo">
-        <img src="/static/assets/izza.png" alt="IZZA Token" class="token-logo">
-      </div>
+      <!-- ✅ Single enlarged coin -->
+      <img src="/static/assets/izza.png" alt="IZZA Token" class="token-logo reveal">
 
       <p class="reveal">Authenticate to view the <strong>IZZA Token</strong> page with your Pi username.</p>
 
