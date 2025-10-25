@@ -1198,11 +1198,6 @@ const trustCountEl  = document.getElementById('trust-count');
 const recentOpsEl   = document.getElementById('recentOps');
   // =================== Summary fetch ===================
 async function fetchSummary(){
-  const short = k => k ? k.slice(0,6) + '…' + k.slice(-6) : '—';
-  document.getElementById('issuer')?.textContent         = ISSUER;
-  document.getElementById('distributor')?.textContent    = DISTRIBUTOR;
-  document.getElementById('issuer-compact')?.textContent = short(ISSUER);
-  document.getElementById('d-short')?.textContent        = short(DISTRIBUTOR);
   try{
     // Build the /assets lookup URL (1 record only)
     const assetUrl =
