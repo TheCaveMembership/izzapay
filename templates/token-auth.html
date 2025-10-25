@@ -6,20 +6,40 @@
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
   <link rel="stylesheet" href="/static/themes.css">
   <style>
-    /* keep styles consistent with your game auth page */
     html,body{max-width:100%;overflow-x:hidden}
-    :root{ --bg:#000; --txt:#e8f1ff; --muted:#9fb0d6; --line:#1d2540;
-           --piPurple1:#7a44ff; --piPurple2:#b784ff; --ring:0 0 0 2px rgba(183,132,255,.28); }
-    body{font-family:Inter,Arial,Helvetica,sans-serif;background:#000;color:var(--txt);margin:0;text-align:center}
+    :root{
+      --bg:#000; --txt:#e8f1ff; --muted:#9fb0d6; --line:#1d2540;
+      --piPurple1:#7a44ff; --piPurple2:#b784ff; --ring:0 0 0 2px rgba(183,132,255,.28);
+    }
+    body{
+      font-family:Inter,Arial,Helvetica,sans-serif;
+      background:#000;color:var(--txt);
+      margin:0;text-align:center
+    }
     .wrap{max-width:1100px;margin:0 auto;padding:16px 16px 120px}
-    .topbar{display:flex;align-items:center;justify-content:center;padding:12px 0;position:sticky;top:0;z-index:50;background:rgba(0,0,0,.9);backdrop-filter:blur(10px);border-bottom:1px solid var(--line)}
-    .btn{display:inline-flex;align-items:center;justify-content:center;gap:8px;padding:14px 18px;border-radius:14px;font-weight:700;letter-spacing:.2px;cursor:pointer;text-decoration:none;border:1px solid transparent;transition:.15s;font-size:clamp(14px,3.7vw,18px);white-space:nowrap}
+    .topbar{
+      display:flex;align-items:center;justify-content:center;
+      padding:12px 0;position:sticky;top:0;z-index:50;
+      background:rgba(0,0,0,.9);backdrop-filter:blur(10px);
+      border-bottom:1px solid var(--line)
+    }
+    .btn{
+      display:inline-flex;align-items:center;justify-content:center;gap:8px;
+      padding:14px 18px;border-radius:14px;font-weight:700;letter-spacing:.2px;
+      cursor:pointer;text-decoration:none;border:1px solid transparent;
+      transition:.15s;font-size:clamp(14px,3.7vw,18px);white-space:nowrap
+    }
     .btn.purple{background:linear-gradient(180deg,var(--piPurple1),var(--piPurple2));color:#fff}
     .btn.ghost{background:transparent;color:#cfe0ff;border-color:#2a3550}
     h1{margin:16px 0 6px;font-size:clamp(26px,8.5vw,56px);line-height:1.05}
     p{color:var(--muted);margin:8px 0 16px}
     .cta-row{display:flex;justify-content:center;gap:12px;flex-wrap:wrap}
-    .hero-logo{height:clamp(58px,12vw,110px);margin:10px auto 8px;display:block}
+    .hero-row{
+      display:flex;align-items:center;justify-content:center;
+      gap:18px;margin:10px auto 12px;flex-wrap:wrap;
+    }
+    .hero-logo{height:clamp(58px,12vw,110px);display:block}
+    .token-logo{height:clamp(42px,10vw,90px);display:block}
     .err{color:#ff9aa2;white-space:pre-wrap}
   </style>
   <script src="https://sdk.minepi.com/pi-sdk.js"></script>
@@ -32,7 +52,13 @@
 
     <section class="section" id="s-auth">
       <h1 class="reveal">SIGN IN WITH PI</h1>
-      <img src="/static/izzapay-word.svg" alt="IZZA PAY" class="hero-logo reveal">
+
+      <!-- ✅ combined logo row -->
+      <div class="hero-row reveal">
+        <img src="/static/izzapay-word.svg" alt="IZZA PAY" class="hero-logo">
+        <img src="/static/assets/izza.png" alt="IZZA Token" class="token-logo">
+      </div>
+
       <p class="reveal">Authenticate to view the <strong>IZZA Token</strong> page with your Pi username.</p>
 
       <div class="cta-row reveal">
@@ -46,59 +72,58 @@
   </div>
 
   <script>
-(function(){
-  const sandbox = {{ 'true' if sandbox else 'false' }};
-  const btn = document.getElementById('piTokenAuthBtn');
-  const msg = document.getElementById('msg');
-  const err = document.getElementById('err');
+  (function(){
+    const sandbox = {{ 'true' if sandbox else 'false' }};
+    const btn = document.getElementById('piTokenAuthBtn');
+    const msg = document.getElementById('msg');
+    const err = document.getElementById('err');
 
-  function setMsg(t){ if(msg) msg.textContent = t || ''; }
-  function setErr(t){ if(err) err.textContent = t || ''; }
+    function setMsg(t){ if(msg) msg.textContent = t || ''; }
+    function setErr(t){ if(err) err.textContent = t || ''; }
 
-  function initPi(){
-    if (!window.Pi || !Pi.init) return false;
-    try { Pi.init({ version: "2.0", sandbox: sandbox }); return true; }
-    catch(e){ console.error("Pi.init failed", e); setErr("Pi.init failed: " + (e?.message || e)); return false; }
-  }
-  if (!initPi()) setMsg("Open in Pi Browser or refresh. Pi SDK is initializing.");
-
-  btn?.addEventListener('click', async function(){
-    setErr('');
-    if (!window.Pi || !Pi.authenticate) {
-      setMsg("Open this page inside Pi Browser so the Pi SDK can run.");  // <- no redirect
-      return;
+    function initPi(){
+      if (!window.Pi || !Pi.init) return false;
+      try { Pi.init({ version: "2.0", sandbox: sandbox }); return true; }
+      catch(e){ console.error("Pi.init failed", e); setErr("Pi.init failed: " + (e?.message || e)); return false; }
     }
-    setMsg("Requesting authorization…");
+    if (!initPi()) setMsg("Open in Pi Browser or refresh. Pi SDK is initializing.");
 
-    try{
-      const auth = await Pi.authenticate(['username'], function onIncompletePaymentFound(){});
-      try{ localStorage.setItem('piAuthUser', JSON.stringify(auth.user||null)); }catch{}
-      try{ localStorage.setItem('piAccessToken', auth.accessToken || ''); }catch{}
+    btn?.addEventListener('click', async function(){
+      setErr('');
+      if (!window.Pi || !Pi.authenticate) {
+        setMsg("Open this page inside Pi Browser so the Pi SDK can run.");
+        return;
+      }
+      setMsg("Requesting authorization…");
 
-      // SAME FLOW: post to /auth/exchange with payload + next
-      const form = document.createElement('form');
-      form.method = 'POST';
-      form.action = '/auth/exchange';
+      try{
+        const auth = await Pi.authenticate(['username'], function onIncompletePaymentFound(){});
+        try{ localStorage.setItem('piAuthUser', JSON.stringify(auth.user||null)); }catch{}
+        try{ localStorage.setItem('piAccessToken', auth.accessToken || ''); }catch{}
 
-      const payload = document.createElement('input');
-      payload.type='hidden'; payload.name='payload';
-      payload.value = JSON.stringify({ accessToken: auth.accessToken, user: auth.user });
-      form.appendChild(payload);
+        const form = document.createElement('form');
+        form.method = 'POST';
+        form.action = '/auth/exchange';
 
-      const next = document.createElement('input');
-      next.type='hidden'; next.name='next';
-      next.value = '/token/izza';
-      form.appendChild(next);
+        const payload = document.createElement('input');
+        payload.type='hidden'; payload.name='payload';
+        payload.value = JSON.stringify({ accessToken: auth.accessToken, user: auth.user });
+        form.appendChild(payload);
 
-      document.body.appendChild(form);
-      form.submit();
-    }catch(e){
-      console.error(e);
-      setMsg("Authorization failed. Please try again.");
-      setErr(e?.message || String(e));
-    }
-  });
-})();
-</script>
+        const next = document.createElement('input');
+        next.type='hidden'; next.name='next';
+        next.value = '/token/izza';
+        form.appendChild(next);
+
+        document.body.appendChild(form);
+        form.submit();
+      }catch(e){
+        console.error(e);
+        setMsg("Authorization failed. Please try again.");
+        setErr(e?.message || String(e));
+      }
+    });
+  })();
+  </script>
 </body>
 </html>
