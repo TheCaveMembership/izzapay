@@ -285,6 +285,36 @@ def cancel_all_izza_offers():
 
 # ================== END DEX OFFER HELPERS (STOP ADDING) ==================
 
+# =============== NATIVE (TEST PI) PAYMENT HELPER ===============
+def send_native_payment(destination_pub: str, amount_pi: str, memo_text: str = ""):
+    """
+    Send native (test Pi) from the DISTR_PUB to destination_pub.
+    amount_pi must be a string like "2300" or "2300.0000000".
+    """
+    distr_kp   = Keypair.from_secret(DISTR_SECRET)
+    distr_acct = server.load_account(distr_kp.public_key)
+
+    tb = (
+        TransactionBuilder(
+            source_account=distr_acct,
+            network_passphrase=NETWORK_PASSPHRASE,
+            base_fee=get_base_fee(),
+        )
+        .append_payment_op(
+            destination=destination_pub,
+            amount=str(Decimal(amount_pi)),
+            asset=Asset.native()
+        )
+        .set_timeout(180)
+    )
+    if memo_text:
+        tb.add_text_memo(memo_text[:28])  # Horizon text memos max 28 bytes
+
+    tx = tb.build()
+    tx.sign(distr_kp)
+    return submit_and_print(tx)
+# ===============================================================
+
 if __name__ == "__main__":
     print("Checking accounts exist on-chain …")
     maybe_create_account(ISSUER_PUB)
@@ -334,6 +364,16 @@ if __name__ == "__main__":
             )
     else:
         print("⏭️  RUN_SELL_LADDER is 0. Skipping offer creation.")
+
+    # --- OPTIONAL: send native test Pi out of distributor ---
+    DEST_PI = "GDDFUCFIWEXARKUPKBU5SKXBQSUNTBPQQEDYHGYJGSZFYCGCGZO5X7CT"
+    AMOUNT  = "500"  # test Pi to send
+
+    # If you're unsure the destination exists on-chain, you can create/fund it first:
+    # maybe_create_account(DEST_PI)
+
+    print(f"\nSending {AMOUNT} test Pi to {DEST_PI} …")
+    send_native_payment(DEST_PI, AMOUNT, memo_text="IZZA test payout")
 
     print("\nAll done. Verify balances/offers at:")
     print(f"  Issuer:      {HORIZON_URL}/accounts/{ISSUER_PUB}")
