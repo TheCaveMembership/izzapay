@@ -809,6 +809,12 @@
 
           <div class="help" id="orderMsg" aria-live="polite"></div>
         </form>
+        <div style="margin-top:14px;border-top:1px solid rgba(255,255,255,.08);padding-top:12px">
+  <button id="cancelOrdersBtn" type="button" class="cta" style="background:linear-gradient(180deg,#ff5c5c,#d63a3a)">
+    ❌ Cancel My Current Orders
+  </button>
+  <div id="cancelMsg" class="help" style="margin-top:6px"></div>
+</div>
       </div>
     </div>
   </div>
@@ -1924,7 +1930,77 @@ function updateSecretRowVisibility(pub){
         (codeLine ? `<br><span class="small-muted">${codeLine}</span>` : '');
     }
   });
+// === Cancel ALL my open IZZA orders ===
+const cancelBtn = document.getElementById('cancelOrdersBtn');
+const cancelMsg = document.getElementById('cancelMsg');
 
+cancelBtn?.addEventListener('click', async ()=>{
+  cancelBtn.disabled = true;
+  cancelMsg.textContent = 'Checking for open orders…';
+
+  const pub = ACTIVE_PUB || (document.getElementById('acctPub')?.value||'').trim();
+  if (!pub){ cancelMsg.textContent = 'No active wallet.'; cancelBtn.disabled = false; return; }
+
+  // try local secret (incl. newly created wallet)
+  const sec = getLocalSecret(pub, USER?.username) || (NEW_WALLET?.pub === pub ? NEW_WALLET.sec : null);
+  if (!sec){ cancelMsg.textContent = 'Secret missing. Import or create wallet first.'; cancelBtn.disabled = false; return; }
+
+  const ok = await ensureStellar();
+  if (!ok || !window.StellarSdk){ cancelMsg.textContent = 'Stellar SDK missing.'; cancelBtn.disabled = false; return; }
+
+  try{
+    // 1) fetch open offers from Horizon
+    const res = await fetch(`${API_BASE}/accounts/${pub}/offers?limit=200&order=asc`, { cache:'no-store' });
+    const json = res.ok ? await res.json() : null;
+    const offers = json?._embedded?.records ?? [];
+    if (!offers.length){ cancelMsg.textContent = 'No active orders to cancel.'; cancelBtn.disabled = false; return; }
+
+    // 2) build ONE tx with N cancel ops (amount=0)
+    const SDK = window.StellarSdk;
+    const server = getServer();
+    const acct = await server.loadAccount(pub);
+
+    const txb = new SDK.TransactionBuilder(acct, {
+      fee: (await server.fetchBaseFee()).toString(),
+      networkPassphrase: NETWORK_PASSPHRASE
+    });
+
+    let n = 0;
+    for (const offer of offers){
+      // only touch IZZA/PI pair
+      const sellsIzza = offer.selling?.asset_code === ASSET_CODE && offer.selling?.asset_issuer === ISSUER;
+      const buysIzza  = offer.buying?.asset_code  === ASSET_CODE && offer.buying?.asset_issuer  === ISSUER;
+      if (!(sellsIzza || buysIzza)) continue;
+
+      const izza   = new SDK.Asset(ASSET_CODE, ISSUER);
+      const native = SDK.Asset.native();
+
+      if (sellsIzza){
+        txb.addOperation(SDK.Operation.manageSellOffer({
+          selling: izza, buying: native, amount: '0', price: '1', offerId: offer.id
+        }));
+      } else {
+        txb.addOperation(SDK.Operation.manageBuyOffer({
+          buying: izza, selling: native, buyAmount: '0', price: '1', offerId: offer.id
+        }));
+      }
+      n++;
+    }
+
+    if (!n){ cancelMsg.textContent = 'No IZZA orders to cancel.'; cancelBtn.disabled = false; return; }
+
+    const tx = txb.setTimeout(180).build();
+    tx.sign(SDK.Keypair.fromSecret(sec));
+
+    const resp = await server.submitTransaction(tx);
+    cancelMsg.textContent = `✅ Cancelled ${n} open order(s). Tx: ${resp.hash}`;
+  } catch(e){
+    const info = explainHorizonError(e);
+    cancelMsg.textContent = `❌ ${info.msg}`;
+  } finally {
+    cancelBtn.disabled = false;
+  }
+});
   // =================== Create Test Wallet ===================
   const createBtn    = document.getElementById('createWalletBtn');
   const box          = document.getElementById('newWalletBox');
