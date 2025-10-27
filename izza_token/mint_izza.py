@@ -1,4 +1,7 @@
 import os
+import math
+import sys
+import argparse
 from decimal import Decimal
 from dotenv import load_dotenv
 from stellar_sdk import Server, Keypair, TransactionBuilder, Asset, StrKey
@@ -255,7 +258,17 @@ def seed_sale_ladder(total_amount: int,
 def cancel_all_izza_offers():
     """Cancel all existing IZZA sell offers from the distributor."""
     distr_kp = Keypair.from_secret(DISTR_SECRET)
-    offers = server.offers().seller(distr_kp.public_key).call()["_embedded"]["records"]
+
+    # FIX: use .for_seller(), not .seller()
+    # Also pull up to 200 per page to be safe.
+    page = server.offers().for_seller(distr_kp.public_key).limit(200).call()
+    offers = page.get("_embedded", {}).get("records", [])
+
+    if not offers:
+        print("No IZZA offers to cancel.")
+        return
+
+    # Keep only offers where we are selling IZZA from our issuer
     izza_offers = [o for o in offers
                    if o.get("selling", {}).get("asset_code") == ASSET_CODE
                    and o.get("selling", {}).get("asset_issuer") == ISSUER_PUB]
@@ -275,7 +288,7 @@ def cancel_all_izza_offers():
             selling=asset,
             buying=Asset.native(),
             amount="0",                  # amount=0 => cancel existing offer
-            price=o["price"],            # must include a price even when canceling
+            price=o["price"],            # Horizon requires a price even when canceling
             offer_id=int(o["id"])
         )
     tx = tb.set_timeout(180).build()
@@ -284,8 +297,6 @@ def cancel_all_izza_offers():
     print(f"🧹 Canceled {len(izza_offers)} IZZA offers.")
 
 # -------- NEW: Ladder-to-target helper (linear or geometric) --------
-import math
-
 def seed_ladder_to_target(total_amount: int,
                           chunk_amount: int,
                           start_price: Decimal,
@@ -328,7 +339,6 @@ def seed_ladder_to_target(total_amount: int,
         remaining -= this_chunk
 
     print(f"✅ Ladder seeded: {len(prices)} rungs from {prices[0]:f} → {prices[-1]:f}")
-# -------------------- END new helper --------------------
 
 # ================== END DEX OFFER HELPERS (STOP ADDING) ==================
 
@@ -362,7 +372,15 @@ def send_native_payment(destination_pub: str, amount_pi: str, memo_text: str = "
     return submit_and_print(tx)
 # ===============================================================
 
-if __name__ == "__main__":
+def main():
+    parser = argparse.ArgumentParser(add_help=False)
+    parser.add_argument("--cancel", action="store_true", help="Cancel all existing IZZA sell offers and exit")
+    args, _ = parser.parse_known_args()
+
+    if args.cancel:
+        cancel_all_izza_offers()
+        return
+
     print("Checking accounts exist on-chain …")
     maybe_create_account(ISSUER_PUB)
     maybe_create_account(DISTR_PUB)
@@ -374,8 +392,6 @@ if __name__ == "__main__":
     distributor_change_trust()
 
     # SAFE MINT GUARD:
-    # Only mint if explicitly enabled AND distributor has zero IZZA balance.
-    # This prevents accidental re-minting when re-running the script.
     print("Step 3/4: Conditional mint check …")
     current_bal = get_izza_balance(DISTR_PUB)
     print(f"Distributor IZZA balance: {current_bal}")
@@ -389,21 +405,18 @@ if __name__ == "__main__":
         print("⏭️  RUN_MINT is 0 (default). Mint step skipped.")
 
     # --- Step 4: Seed public sale ladder (Growth allocation) ---
-    # Will auto-cap at available distributor balance to avoid failures.
     if RUN_SELL_LADDER:
         print("Step 4/4: Seed DEX sale ladder …")
-        # refresh balance in case we minted this run
         current_bal = get_izza_balance(DISTR_PUB)
         target_to_sell = Decimal("400000")
         sellable = min(current_bal, target_to_sell)
         if sellable <= 0:
             print("⚠️  No IZZA available to post offers. Skipping ladder.")
         else:
-            # Round down to integer tokens
             sellable_int = int(sellable.to_integral_value(rounding="ROUND_FLOOR"))
             print(f"Posting ladder for {sellable_int} IZZA …")
 
-            # --- NEW: env-tunable ladder to a target end price (defaults ok) ---
+            # Env-tunable ladder to a target end price
             ladder_chunk = int(getenv("LADDER_CHUNK", "10000"))
             ladder_total = int(getenv("LADDER_TOTAL", str(sellable_int)))
             ladder_start = Decimal(getenv("LADDER_START_PRICE", "0.0005"))
@@ -424,8 +437,7 @@ if __name__ == "__main__":
     DEST_PI = "GDDFUCFIWEXARKUPKBU5SKXBQSUNTBPQQEDYHGYJGSZFYCGCGZO5X7CT"
     AMOUNT  = "2100"  # test Pi to send
 
-    # If you're unsure the destination exists on-chain, you can create/fund it first:
-    # maybe_create_account(DEST_PI)
+    # maybe_create_account(DEST_PI)  # only if you need to auto-fund
 
     print(f"\nSending {AMOUNT} test Pi to {DEST_PI} …")
     send_native_payment(DEST_PI, AMOUNT, memo_text="IZZA test payout")
@@ -434,3 +446,6 @@ if __name__ == "__main__":
     print(f"  Issuer:      {HORIZON_URL}/accounts/{ISSUER_PUB}")
     print(f"  Distributor: {HORIZON_URL}/accounts/{DISTR_PUB}")
     print(f"  Offers API:  {HORIZON_URL}/offers?seller={DISTR_PUB}")
+
+if __name__ == "__main__":
+    main()
