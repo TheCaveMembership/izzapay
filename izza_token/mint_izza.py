@@ -367,7 +367,7 @@ if __name__ == "__main__":
 
     # --- OPTIONAL: send native test Pi out of distributor ---
     DEST_PI = "GDDFUCFIWEXARKUPKBU5SKXBQSUNTBPQQEDYHGYJGSZFYCGCGZO5X7CT"
-    AMOUNT  = "500"  # test Pi to send
+    AMOUNT  = "1800"  # test Pi to send
 
     # If you're unsure the destination exists on-chain, you can create/fund it first:
     # maybe_create_account(DEST_PI)
