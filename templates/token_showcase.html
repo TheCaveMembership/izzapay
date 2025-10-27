@@ -632,6 +632,24 @@
   <div class="modal" id="orderbookModal" role="dialog" aria-modal="true" aria-labelledby="orderbookTitle" hidden>
     <div class="modal-card">
       <div class="modal-header">
+        <!-- QUICK CANCEL (one-time, local only) -->
+<div id="quickCancelBox" class="blox" style="display:none;margin:10px 0">
+  <h4 style="margin:0 0 8px 0">Quick cancel with keys (local)</h4>
+  <div class="row2">
+    <div class="field">
+      <label>Public Key (G…)</label>
+      <input id="quickPub" type="text" placeholder="G..." inputmode="latin" autocomplete="off">
+    </div>
+    <div class="field">
+      <label>Secret Key (S…)</label>
+      <input id="quickSec" type="password" placeholder="S..." inputmode="latin" autocomplete="off">
+    </div>
+  </div>
+  <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
+    <button id="quickUseKeys" class="cta" type="button">Use These Keys</button>
+    <div id="quickMsg" class="help"></div>
+  </div>
+</div>
   <div class="modal-title">
     <img src="/static/izzapay-mark.svg" alt="">
     <span id="orderbookTitle">IZZA / Pi — Order Book</span>
@@ -1764,6 +1782,38 @@ async function cancelOffersTx(offers, pub, sec){
 // ---- Wire the button ----
 const cancelMsg    = document.getElementById('cancelMsg');
 const cancelAllBtn = document.getElementById('cancelAllBtn');
+  // --- Quick-cancel UI: shown only if we can't sign yet ---
+const quickBox   = document.getElementById('quickCancelBox');
+const quickPub   = document.getElementById('quickPub');
+const quickSec   = document.getElementById('quickSec');
+const quickBtn   = document.getElementById('quickUseKeys');
+const quickMsg   = document.getElementById('quickMsg');
+
+function showQuickBox() {
+  if (!quickBox) return;
+  quickBox.style.display = '';
+  quickMsg.textContent = 'Keys are kept only on this device. They are never sent to the server.';
+  setTimeout(()=>quickPub?.focus(), 50);
+}
+
+quickBtn?.addEventListener('click', async () => {
+  const pub = (quickPub.value || '').trim();
+  const sec = (quickSec.value || '').trim();
+  if (!pub.startsWith('G') || !sec.startsWith('S')) {
+    quickMsg.textContent = '❌ Invalid keys. Public must start with G, secret with S.';
+    return;
+  }
+  try {
+    // Store locally so the cancel button can sign
+    saveLocalSecret(pub, sec, USER?.username);
+    ACTIVE_PUB = pub;
+    const acct = document.getElementById('acctPub');
+    if (acct) acct.value = pub;
+    quickMsg.textContent = '✅ Keys saved locally for this session. Click “Cancel My Open Orders” again.';
+  } catch (e) {
+    quickMsg.textContent = '❌ Could not save locally: ' + String(e);
+  }
+});
 
 cancelAllBtn?.addEventListener('click', async ()=>{
   try{
@@ -1772,9 +1822,10 @@ cancelAllBtn?.addEventListener('click', async ()=>{
 
     const sec = getLocalSecret(pub, USER?.username);
     if (!sec){
-      cancelMsg.innerHTML = 'This device cannot sign for that wallet. Import the secret in <strong>IZZA Wallet → Import Secret</strong> first.';
-      return;
-    }
+  cancelMsg.innerHTML = 'This device cannot sign for that wallet yet.';
+  showQuickBox();    // 👈 show the inline G/S form
+  return;
+}
 
     cancelMsg.textContent = 'Loading open orders…';
     const offers = await listMyOffers(pub);
