@@ -283,6 +283,53 @@ def cancel_all_izza_offers():
     submit_and_print(tx)
     print(f"🧹 Canceled {len(izza_offers)} IZZA offers.")
 
+# -------- NEW: Ladder-to-target helper (linear or geometric) --------
+import math
+
+def seed_ladder_to_target(total_amount: int,
+                          chunk_amount: int,
+                          start_price: Decimal,
+                          end_price: Decimal,
+                          mode: str = "geometric"):
+    """
+    Build a ladder from start_price up to end_price across N rungs so that the
+    last rung reaches end_price. 'mode' = 'linear' or 'geometric'.
+    """
+    total_amount = int(total_amount)
+    chunk_amount = int(chunk_amount)
+    if total_amount <= 0 or chunk_amount <= 0:
+        print("⚠️  Nothing to seed (total or chunk is 0).")
+        return
+
+    rungs = math.ceil(total_amount / chunk_amount)
+    if rungs < 1:
+        return
+
+    sp = Decimal(start_price)
+    ep = Decimal(end_price)
+
+    prices = []
+    if rungs == 1:
+        prices = [ep]
+    else:
+        if mode == "linear":
+            step = (ep - sp) / Decimal(rungs - 1)
+            prices = [sp + step * i for i in range(rungs)]
+        else:
+            factor = (ep / sp) ** (Decimal(1) / Decimal(rungs - 1))
+            prices = [sp * (factor ** i) for i in range(rungs)]
+
+    remaining = total_amount
+    for p in prices:
+        this_chunk = min(chunk_amount, remaining)
+        if this_chunk <= 0:
+            break
+        create_sell_offer(amount_izza=str(this_chunk), price_pi_per_izza=str(p))
+        remaining -= this_chunk
+
+    print(f"✅ Ladder seeded: {len(prices)} rungs from {prices[0]:f} → {prices[-1]:f}")
+# -------------------- END new helper --------------------
+
 # ================== END DEX OFFER HELPERS (STOP ADDING) ==================
 
 # =============== NATIVE (TEST PI) PAYMENT HELPER ===============
@@ -342,7 +389,6 @@ if __name__ == "__main__":
         print("⏭️  RUN_MINT is 0 (default). Mint step skipped.")
 
     # --- Step 4: Seed public sale ladder (Growth allocation) ---
-    # 400,000 IZZA total, 10,000 per rung, start at 0.0005 Pi and +0.001 each step
     # Will auto-cap at available distributor balance to avoid failures.
     if RUN_SELL_LADDER:
         print("Step 4/4: Seed DEX sale ladder …")
@@ -356,11 +402,20 @@ if __name__ == "__main__":
             # Round down to integer tokens
             sellable_int = int(sellable.to_integral_value(rounding="ROUND_FLOOR"))
             print(f"Posting ladder for {sellable_int} IZZA …")
-            seed_sale_ladder(
-                total_amount=sellable_int,
-                chunk_amount=10_000,
-                start_price=Decimal("0.0005"),
-                step=Decimal("0.001")
+
+            # --- NEW: env-tunable ladder to a target end price (defaults ok) ---
+            ladder_chunk = int(getenv("LADDER_CHUNK", "10000"))
+            ladder_total = int(getenv("LADDER_TOTAL", str(sellable_int)))
+            ladder_start = Decimal(getenv("LADDER_START_PRICE", "0.0005"))
+            ladder_end   = Decimal(getenv("LADDER_END_PRICE",  "1.0"))
+            ladder_mode  = getenv("LADDER_MODE", "geometric")  # or "linear"
+
+            seed_ladder_to_target(
+                total_amount=ladder_total,
+                chunk_amount=ladder_chunk,
+                start_price=ladder_start,
+                end_price=ladder_end,
+                mode=ladder_mode
             )
     else:
         print("⏭️  RUN_SELL_LADDER is 0. Skipping offer creation.")
