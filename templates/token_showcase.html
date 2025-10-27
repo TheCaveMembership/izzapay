@@ -632,34 +632,15 @@
   <div class="modal" id="orderbookModal" role="dialog" aria-modal="true" aria-labelledby="orderbookTitle" hidden>
     <div class="modal-card">
       <div class="modal-header">
-        <!-- QUICK CANCEL (one-time, local only) -->
-<div id="quickCancelBox" class="blox" style="display:none;margin:10px 0">
-  <h4 style="margin:0 0 8px 0">Quick cancel with keys (local)</h4>
-  <div class="row2">
-    <div class="field">
-      <label>Public Key (G…)</label>
-      <input id="quickPub" type="text" placeholder="G..." inputmode="latin" autocomplete="off">
-    </div>
-    <div class="field">
-      <label>Secret Key (S…)</label>
-      <input id="quickSec" type="password" placeholder="S..." inputmode="latin" autocomplete="off">
-    </div>
-  </div>
-  <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
-    <button id="quickUseKeys" class="cta" type="button">Use These Keys</button>
-    <div id="quickMsg" class="help"></div>
-  </div>
-</div>
-  <div class="modal-title">
-    <img src="/static/izzapay-mark.svg" alt="">
-    <span id="orderbookTitle">IZZA / Pi — Order Book</span>
-  </div>
-  <div style="display:flex;gap:8px;align-items:center">
-    <a id="addTrustBtn" class="close-btn" href="#deepSection">Add Trustline (SEP-7)</a>
-    <button class="close-btn" type="button" id="cancelAllBtn">Cancel My Open Orders</button>
-    <button class="close-btn" type="button" id="closeOrderbookBtn">Close</button>
-  </div>
-</div>
+        <div class="modal-title">
+          <img src="/static/izzapay-mark.svg" alt="">
+          <span id="orderbookTitle">IZZA / Pi — Order Book</span>
+        </div>
+        <div style="display:flex;gap:8px;align-items:center">
+          <a id="addTrustBtn" class="close-btn" style="text-decoration:none" href="#deepSection">Add Trustline (SEP-7)</a>
+          <button class="close-btn" type="button" id="closeOrderbookBtn">Close</button>
+        </div>
+      </div>
       <div class="modal-body">
         <!-- Chart toolbar -->
         <div class="ob-toolbar" style="margin-bottom:10px">
@@ -699,7 +680,6 @@
               <tbody></tbody>
             </table>
           </div>
-          <div id="cancelMsg" class="help" style="margin-top:8px"></div>
 
           <div class="blox">
             <h4 style="margin:0 0 8px 0">Buy Orders (Bids) — price in Pi</h4>
@@ -1219,7 +1199,7 @@ const recentOpsEl   = document.getElementById('recentOps');
 async function fetchSummary(){
   try{
     // Build the /assets lookup URL (1 record only)
-        const assetUrl =
+    const assetUrl =
       `${API_BASE}/assets` +
       `?asset_code=${encodeURIComponent(ASSET_CODE)}` +
       `&asset_issuer=${encodeURIComponent(ISSUER)}` +
@@ -1735,118 +1715,6 @@ walletBtn.addEventListener('click', async ()=>{
     }catch(_){ return null; }
   }
 
-  // ---- My offers: list + cancel helpers ----
-async function listMyOffers(pub){
-  const url = `${API_BASE}/offers?seller=${encodeURIComponent(pub)}&limit=200&order=asc`;
-  const r = await fetch(url, {cache:'no-store'});
-  const j = await r.json();
-  return j?._embedded?.records || [];
-}
-
-function assetFromJSON(o){
-  const SDK = window.StellarSdk;
-  return (o.asset_type === 'native')
-    ? SDK.Asset.native()
-    : new SDK.Asset(o.asset_code, o.asset_issuer);
-}
-
-async function cancelOffersTx(offers, pub, sec){
-  const SDK    = window.StellarSdk;
-  const server = getServer();
-  const acct   = await server.loadAccount(pub);
-  const tb = new SDK.TransactionBuilder(acct, {
-    fee: (await server.fetchBaseFee()).toString(),
-    networkPassphrase: NETWORK_PASSPHRASE
-  });
-
-  for (const o of offers){
-    const selling = assetFromJSON(o.selling);
-    const buying  = assetFromJSON(o.buying);
-    // Use the proper op type and set amount/buyAmount to "0"
-    if (o.selling.asset_type === 'native'){
-      tb.addOperation(SDK.Operation.manageBuyOffer({
-        buying, selling, buyAmount: "0", price: o.price, offerId: o.id
-      }));
-    } else {
-      tb.addOperation(SDK.Operation.manageSellOffer({
-        selling, buying, amount: "0",    price: o.price, offerId: o.id
-      }));
-    }
-  }
-
-  const tx = tb.setTimeout(180).build();
-  tx.sign(SDK.Keypair.fromSecret(sec));
-  return server.submitTransaction(tx);
-}
-
-// ---- Wire the button ----
-const cancelMsg    = document.getElementById('cancelMsg');
-const cancelAllBtn = document.getElementById('cancelAllBtn');
-  // --- Quick-cancel UI: shown only if we can't sign yet ---
-const quickBox   = document.getElementById('quickCancelBox');
-const quickPub   = document.getElementById('quickPub');
-const quickSec   = document.getElementById('quickSec');
-const quickBtn   = document.getElementById('quickUseKeys');
-const quickMsg   = document.getElementById('quickMsg');
-
-function showQuickBox() {
-  if (!quickBox) return;
-  quickBox.style.display = '';
-  quickMsg.textContent = 'Keys are kept only on this device. They are never sent to the server.';
-  setTimeout(()=>quickPub?.focus(), 50);
-}
-
-quickBtn?.addEventListener('click', async () => {
-  const pub = (quickPub.value || '').trim();
-  const sec = (quickSec.value || '').trim();
-  if (!pub.startsWith('G') || !sec.startsWith('S')) {
-    quickMsg.textContent = '❌ Invalid keys. Public must start with G, secret with S.';
-    return;
-  }
-  try {
-    // Store locally so the cancel button can sign
-    saveLocalSecret(pub, sec, USER?.username);
-    ACTIVE_PUB = pub;
-    const acct = document.getElementById('acctPub');
-    if (acct) acct.value = pub;
-    quickMsg.textContent = '✅ Keys saved locally for this session. Click “Cancel My Open Orders” again.';
-  } catch (e) {
-    quickMsg.textContent = '❌ Could not save locally: ' + String(e);
-  }
-});
-
-cancelAllBtn?.addEventListener('click', async ()=>{
-  try{
-    const pub = ACTIVE_PUB || (document.getElementById('acctPub')?.value||'').trim();
-    if (!pub){ cancelMsg.textContent = 'Add or select a wallet first.'; return; }
-
-    const sec = getLocalSecret(pub, USER?.username);
-    if (!sec){
-  cancelMsg.innerHTML = 'This device cannot sign for that wallet yet.';
-  showQuickBox();    // 👈 show the inline G/S form
-  return;
-}
-
-    cancelMsg.textContent = 'Loading open orders…';
-    const offers = await listMyOffers(pub);
-    if (!offers.length){
-      cancelMsg.textContent = 'No open orders for this wallet.';
-      return;
-    }
-
-    cancelMsg.textContent = `Cancelling ${offers.length} order(s)…`;
-    const res = await cancelOffersTx(offers, pub, sec);
-    cancelMsg.innerHTML = `✅ Cancelled ${offers.length} order(s). Tx: <code>${res.hash}</code>`;
-
-    // refresh UI
-    loadOrderbook();
-  }catch(e){
-    const info = explainHorizonError(e);
-    const codes = [info.opc, info.txc].filter(Boolean).join(' • ');
-    cancelMsg.innerHTML = `❌ ${info.msg || 'Cancel failed.'}` + (codes?`<br><span class="small-muted">${codes}</span>`:'');
-  }
-});
-
   // ==== Account state helpers ====
   async function loadAccount(pub){
     try{ const r = await fetch(`${API_BASE}/accounts/${pub}`, {cache:'no-store'}); return r.ok ? r.json() : null; }
@@ -2074,12 +1942,9 @@ function updateSecretRowVisibility(pub){
     }catch(e){ log('wallet.qr.fail',{err:String(e)}); }
   }
 
-  // 🛑 Stop if the user already has a wallet (server or local)
   createBtn.addEventListener('click', async ()=>{
-  if (ACTIVE_PUB) {
-    statusEl.textContent = 'You already have an active wallet linked.';
-    return;
-  }
+  // 🛑 Stop if the user already has a wallet (server or local)
+  
 
   // ✅ continue with your existing code below
   const ok = await ensureStellar();
@@ -2262,7 +2127,7 @@ try { markSecretViewedOnce(NEW_WALLET.pub, USER?.username); } catch(_){}
   function trapFocus(container){
     container.addEventListener('keydown', (e)=>{
       if(e.key !== 'Tab') return;
-      const f = container.querySelectorAll('button, [href], input, select, textarea, [tabindex]:not([tabindex="-1"])`);
+      const f = container.querySelectorAll('button, [href], input, select, textarea, [tabindex]:not([tabindex="-1"])');
       if(!f.length) return;
       const first = f[0], last = f[f.length - 1];
       if(e.shiftKey && document.activeElement === first){ last.focus(); e.preventDefault(); }
