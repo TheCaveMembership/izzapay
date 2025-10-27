@@ -836,6 +836,21 @@
   ? "{{ API_BASE }}"
   : "https://api.testnet.minepi.com");
   const DEEP_LINK   = "{{ DEEP_LINK }}";
+
+  function short(g){ return (g && g.length>14) ? `${g.slice(0,6)}…${g.slice(-6)}` : (g || '—'); }
+
+  const issEl = document.getElementById('issuer-compact');
+  if (issEl) {
+    issEl.textContent = short(ISSUER);    // or use ISSUER for full key
+    issEl.title = ISSUER;                  // full value on hover
+  }
+
+  const distEl = document.getElementById('d-short');
+  if (distEl) {
+    distEl.textContent = short(DISTRIBUTOR);
+    distEl.title = DISTRIBUTOR;
+  }
+})();
     // =================== Pi Auth + Active Wallet (one per user) ===================
   let USER = null;                // { uid, username }
   let ACTIVE_PUB = null;          // active wallet public key from server
