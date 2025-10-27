@@ -1219,7 +1219,7 @@ const recentOpsEl   = document.getElementById('recentOps');
 async function fetchSummary(){
   try{
     // Build the /assets lookup URL (1 record only)
-    const assetUrl =
+        const assetUrl =
       `${API_BASE}/assets` +
       `?asset_code=${encodeURIComponent(ASSET_CODE)}` +
       `&asset_issuer=${encodeURIComponent(ISSUER)}` +
@@ -2262,7 +2262,7 @@ try { markSecretViewedOnce(NEW_WALLET.pub, USER?.username); } catch(_){}
   function trapFocus(container){
     container.addEventListener('keydown', (e)=>{
       if(e.key !== 'Tab') return;
-      const f = container.querySelectorAll('button, [href], input, select, textarea, [tabindex]:not([tabindex="-1"])');
+      const f = container.querySelectorAll('button, [href], input, select, textarea, [tabindex]:not([tabindex="-1"])`);
       if(!f.length) return;
       const first = f[0], last = f[f.length - 1];
       if(e.shiftKey && document.activeElement === first){ last.focus(); e.preventDefault(); }
