@@ -1,6 +1,7 @@
 import os, json, uuid, time, hmac, base64, hashlib
 from faucet import bp_faucet
 from flask import current_app
+from flask_cors import CORS
 from decimal import Decimal, ROUND_HALF_UP
 from datetime import timedelta, datetime
 from urllib.parse import urlparse, urlencode
@@ -148,9 +149,15 @@ app = Flask(__name__)
 app.register_blueprint(bp_faucet)
 app.register_blueprint(wallet_api_bp)
 app.config.update(
-    SESSION_COOKIE_SAMESITE="None",   # allow cookies in Pi frame or iframe
-    SESSION_COOKIE_SECURE=True        # required with SameSite=None
+    SESSION_COOKIE_SAMESITE="None",
+    SESSION_COOKIE_SECURE=True
 )
+
+# CORS: allow wallets/explorers to fetch TOML and logos
+CORS(app, resources={
+    r"/assets/*": {"origins": "*"},
+    r"/.well-known/*": {"origins": "*"}
+})
 
 # ======================================================
 # PUBLIC FILE SERVING ROUTES (.well-known and /assets/)
@@ -163,13 +170,19 @@ import os, json
 @app.route('/.well-known/<path:filename>')
 def well_known(filename):
     directory = os.path.join(app.root_path, '.well-known')
-    return send_from_directory(directory, filename, mimetype='text/plain')
+    resp = make_response(send_from_directory(directory, filename, mimetype='text/plain'))
+    resp.headers['Access-Control-Allow-Origin'] = '*'
+    resp.headers['Cache-Control'] = 'public, max-age=3600'
+    return resp
 
 # Serve static token and asset files (like izza.png)
 @app.route('/assets/<path:filename>')
 def serve_assets(filename):
     directory = os.path.join(app.root_path, 'static/assets')
-    return send_from_directory(directory, filename)
+    resp = make_response(send_from_directory(directory, filename))
+    resp.headers['Access-Control-Allow-Origin'] = '*'
+    resp.headers['Cache-Control'] = 'public, max-age=86400'
+    return resp
 
 # ---- TRUST PAGE + LOGGING ----
 
