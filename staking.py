@@ -126,7 +126,11 @@ def build_claim_tx():
     cb_id = (j.get("balance_id") or "").strip()
     if not pub.startswith("G") or not cb_id: abort(400)
     acct = server.load_account(pub)
-    tx = TransactionBuilder(acct, server.fetch_base_fee(), network_passphrase=NET_PASSPHRASE) \
-            .append_claim_claimable_balance_op(cb_id) \
-            .set_timeout(180).build()
+    # staking.py — build_claim_tx() fix
+tx = TransactionBuilder(
+    source_account=acct,
+    network_passphrase=NET_PASSPHRASE,
+    base_fee=server.fetch_base_fee()
+).append_claim_claimable_balance_op(cb_id)\
+ .set_timeout(180).build()
     return jsonify({"ok": True, "xdr": tx.to_xdr(), "network_passphrase": NET_PASSPHRASE})
