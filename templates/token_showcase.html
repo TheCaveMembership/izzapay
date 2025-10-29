@@ -296,6 +296,18 @@
     .tabbar{display:flex;gap:8px;margin-bottom:8px}
     .tabbar button{border:1px solid rgba(255,255,255,.12);background:rgba(255,255,255,.04);padding:8px 10px;border-radius:10px;color:#fff;font-weight:800;cursor:pointer}
     .tabbar button[aria-pressed="true"]{background:rgba(122,68,255,.33)}
+    /* centered card that sits under the Live Order Book / Place Testnet Order buttons */
+.centered-stack{
+  margin-top:10px;
+  display:flex;
+  justify-content:center;
+}
+.centered-stack .blox{
+  width:100%;
+  max-width:480px;      /* normal card size */
+  text-align:center;    /* center the heading, button, help */
+}
+.centered-stack .help{ text-align:center; }
   </style>
 </head>
 <body>
@@ -367,6 +379,14 @@
           <button id="orderbookBtn" class="cta" type="button" aria-haspopup="dialog" aria-controls="orderbookModal">📊 Live Order Book</button>
           <button id="orderBtn" class="cta" type="button" aria-haspopup="dialog" aria-controls="placeOrderModal">🧾 Place Testnet Order</button>
         </div>
+        <!-- Centered info card below the buttons -->
+<div class="centered-stack">
+  <div class="blox">
+    <h4 style="margin:0 0 6px 0">Heads up</h4>
+    <div class="help">This card stays centered and narrow on wide screens.</div>
+    <!-- your content / button can go here -->
+  </div>
+</div>
       </div> <!-- end left panel -->
 
       <!-- RIGHT: quick details + QR + activity dropdown -->
