@@ -1,38 +1,54 @@
 # staking.py
-import os, time, math
+import os, time
 from decimal import Decimal
 from flask import Blueprint, request, jsonify, abort
+import requests
 from stellar_sdk import (
     Server, Network, Keypair, Asset, TransactionBuilder,
-    Claimant, ClaimPredicate
+    Claimant, ClaimPredicate, exceptions as sx
 )
 
 bp_stake = Blueprint("stake", __name__)
 
-HORIZON_URL   = os.getenv("HORIZON_URL", "https://api.testnet.minepi.com")
-NET_PASSPHRASE= os.getenv("NETWORK_PASSPHRASE", "Pi Testnet")
+HORIZON_URL    = os.getenv("HORIZON_URL", "https://api.testnet.minepi.com")
+NET_PASSPHRASE = os.getenv("NETWORK_PASSPHRASE", "Pi Testnet")
 
-ASSET_CODE    = os.getenv("ASSET_CODE", "IZZA")
-ISSUER_PUB    = os.getenv("ISSUER_PUB")   # GDKS3KFA...
-DISTR_PUB     = os.getenv("DISTR_PUB")    # GAIXMJ22...
-DISTR_SECRET  = os.getenv("DISTR_SECRET") # S...
-IZZA          = Asset(ASSET_CODE, ISSUER_PUB)
+ASSET_CODE   = os.getenv("ASSET_CODE", "IZZA")
+ISSUER_PUB   = os.getenv("ISSUER_PUB")    # G...
+DISTR_PUB    = os.getenv("DISTR_PUB")     # G...
+DISTR_SECRET = os.getenv("DISTR_SECRET")  # S...
 
 server = Server(HORIZON_URL)
 
+def _require_env():
+    missing = [k for k,v in {
+        "ISSUER_PUB": ISSUER_PUB,
+        "DISTR_PUB": DISTR_PUB,
+        "DISTR_SECRET": DISTR_SECRET
+    }.items() if not v]
+    if missing:
+        abort(500, f"staking env missing: {', '.join(missing)}")
+
+def _izza_asset() -> Asset:
+    if not ISSUER_PUB:
+        abort(500, "ISSUER_PUB not configured")
+    return Asset(ASSET_CODE, ISSUER_PUB)
+
 def _apr_for_lock(days:int)->Decimal:
-    # tune this curve as you like
-    # e.g. 30d=5% APR, 90d=10%, 180d=15%:
+    # 30d ≈ 5% APR, 180d ≈ 15% APR (linear bonus)
     base = Decimal("0.05")
     bonus = Decimal(days)/Decimal(180) * Decimal("0.10")
     return (base + bonus).quantize(Decimal("0.0001"))
 
 @bp_stake.route("/api/stake/preview", methods=["POST"])
 def preview():
-    j = request.get_json(force=True)
-    amt  = Decimal(str(j.get("amount", "0")))
-    days = int(j.get("lock_days", 0))
-    if amt <= 0 or days <= 0: abort(400)
+    j = request.get_json(force=True) or {}
+    try:
+        amt  = Decimal(str(j.get("amount", "0")))
+        days = int(j.get("lock_days", 0))
+    except Exception:
+        abort(400, "bad params")
+    if amt <= 0 or days <= 0: abort(400, "bad params")
     apr = _apr_for_lock(days)
     reward = (amt * apr * Decimal(days)/Decimal(365)).quantize(Decimal("0.0000001"))
     unlock_unix = int(time.time()) + days*86400
@@ -44,27 +60,35 @@ def build_stake_tx():
     Builds ONE tx with TWO ops:
       1) user's IZZA -> claimable balance (source = user)
       2) distributor's IZZA reward -> claimable balance (source = DISTR_PUB)
-    Server pre-signs with distributor so the user just adds their signature and submits.
+    Server pre-signs with distributor so the user adds their signature and submits.
     """
-    j = request.get_json(force=True)
+    _require_env()
+    j = request.get_json(force=True) or {}
     user_pub = (j.get("pub") or "").strip()
-    amt      = Decimal(str(j.get("amount", "0")))
-    days     = int(j.get("lock_days", 0))
+    try:
+        amt  = Decimal(str(j.get("amount", "0")))
+        days = int(j.get("lock_days", 0))
+    except Exception:
+        abort(400, "bad params")
+
     if not user_pub.startswith("G") or amt <= 0 or days <= 0:
         abort(400, "bad params")
 
-    # compute reward + predicate
     apr = _apr_for_lock(days)
     reward = (amt * apr * Decimal(days)/Decimal(365)).quantize(Decimal("0.0000001"))
     unlock_unix = int(time.time()) + days*86400
 
     pred = ClaimPredicate.predicate_not(
-              ClaimPredicate.predicate_before_absolute_time(unlock_unix)
-           )
+        ClaimPredicate.predicate_before_absolute_time(unlock_unix)
+    )
     claimant = Claimant(destination=user_pub, predicate=pred)
 
-    # load both accounts (sequence comes from the tx source: the USER)
-    user_acct = server.load_account(user_pub)
+    try:
+        user_acct = server.load_account(user_pub)
+    except sx.NotFoundError:
+        abort(400, "user account not found on network")
+    except Exception as e:
+        abort(500, f"horizon error: {e}")
 
     txb = TransactionBuilder(
         source_account=user_acct,
@@ -72,22 +96,24 @@ def build_stake_tx():
         base_fee=server.fetch_base_fee()
     )
 
-    # 1) lock user's tokens
+    # 1) lock user's tokens (principal)
     txb.append_create_claimable_balance_op(
-        asset=IZZA, amount=str(amt), claimants=[claimant], source=user_pub
+        asset=_izza_asset(), amount=str(amt), claimants=[claimant], source=user_pub
     )
 
-    # 2) create reward (paid by distributor) with same predicate
+    # 2) reward paid by distributor (same predicate)
     txb.append_create_claimable_balance_op(
-        asset=IZZA, amount=str(reward), claimants=[claimant], source=DISTR_PUB
+        asset=_izza_asset(), amount=str(reward), claimants=[claimant], source=DISTR_PUB
     )
 
     tx = txb.set_timeout(180).add_memo_text(f"stake:{days}d").build()
 
-    # Pre-sign with distributor (required because op#2 has source=DISTR_PUB)
-    tx.sign(Keypair.from_secret(DISTR_SECRET))
+    # Pre-sign with distributor (required for op#2)
+    try:
+        tx.sign(Keypair.from_secret(DISTR_SECRET))
+    except Exception:
+        abort(500, "bad DISTR_SECRET")
 
-    # Return the XDR for the client to add the USER signature and submit
     return jsonify({
         "ok": True,
         "xdr": tx.to_xdr(),
@@ -96,41 +122,96 @@ def build_stake_tx():
         "reward": str(reward)
     })
 
+def _classify_record(r: dict):
+    """Return 'reward' if sponsor == DISTR_PUB else 'principal'."""
+    kind = "reward" if (r.get("sponsor") == DISTR_PUB) else "principal"
+    return {
+        "id": r.get("id"),
+        "amount": r.get("amount"),
+        "sponsor": r.get("sponsor"),
+        "kind": kind,
+        "claimants": r.get("claimants"),
+        "last_modified_time": r.get("last_modified_time")
+    }
+
 @bp_stake.route("/api/stake/claimables", methods=["GET"])
 def list_claimables():
-    """List claimable balances the user can claim (both principal and reward)."""
+    """List claimable balances the user can claim (principal and reward)."""
     pub = request.args.get("pub","").strip()
-    if not pub.startswith("G"): abort(400)
-    # Horizon filter: ?claimant=G...&asset=CODE:ISSUER
-    url = f"{HORIZON_URL}/claimable_balances?claimant={pub}&asset={ASSET_CODE}:{ISSUER_PUB}&order=asc&limit=200"
-    data = server._session.get(url).json()  # small helper; ok for testnet
-    records = data.get("_embedded", {}).get("records", [])
-    out = []
-    for r in records:
-        # both balances will share the same predicate; no memo on CB itself
-        # distinguish by 'sponsor' (often equals source that created it)
-        out.append({
-            "id": r.get("id"),
-            "amount": r.get("amount"),
-            "sponsor": r.get("sponsor"),
-            "claimants": r.get("claimants"),
-            "last_modified_time": r.get("last_modified_time")
-        })
+    if not pub.startswith("G"): abort(400, "bad pub")
+    if not ISSUER_PUB: abort(500, "ISSUER_PUB not configured")
+
+    url = f"{HORIZON_URL}/claimable_balances"
+    params = {
+        "claimant": pub,
+        "asset": f"{ASSET_CODE}:{ISSUER_PUB}",
+        "order": "asc",
+        "limit": 200
+    }
+    try:
+        r = requests.get(url, params=params, timeout=15)
+        r.raise_for_status()
+        records = (r.json().get("_embedded", {}) or {}).get("records", []) or []
+    except Exception as e:
+        abort(502, f"horizon fetch failed: {e}")
+
+    out = [_classify_record(rec) for rec in records]
     return jsonify({"ok": True, "records": out})
 
 @bp_stake.route("/api/stake/build-claim", methods=["POST"])
 def build_claim_tx():
-    """Build a simple ClaimClaimableBalance tx the USER signs and submits."""
-    j = request.get_json(force=True)
-    pub = (j.get("pub") or "").strip()
+    """Build a single ClaimClaimableBalance tx the USER signs and submits."""
+    j = request.get_json(force=True) or {}
+    pub   = (j.get("pub") or "").strip()
     cb_id = (j.get("balance_id") or "").strip()
-    if not pub.startswith("G") or not cb_id: abort(400)
-    acct = server.load_account(pub)
-    # staking.py — build_claim_tx() fix
-tx = TransactionBuilder(
-    source_account=acct,
-    network_passphrase=NET_PASSPHRASE,
-    base_fee=server.fetch_base_fee()
-).append_claim_claimable_balance_op(cb_id)\
- .set_timeout(180).build()
+    if not pub.startswith("G") or not cb_id:
+        abort(400, "bad params")
+
+    try:
+        acct = server.load_account(pub)
+    except sx.NotFoundError:
+        abort(400, "user account not found on network")
+    except Exception as e:
+        abort(500, f"horizon error: {e}")
+
+    tx = (
+        TransactionBuilder(
+            source_account=acct,
+            network_passphrase=NET_PASSPHRASE,
+            base_fee=server.fetch_base_fee()
+        )
+        .append_claim_claimable_balance_op(cb_id)
+        .set_timeout(180)
+        .build()
+    )
+
+    return jsonify({"ok": True, "xdr": tx.to_xdr(), "network_passphrase": NET_PASSPHRASE})
+
+@bp_stake.route("/api/stake/build-claim-batch", methods=["POST"])
+def build_claim_tx_batch():
+    """Build one tx to claim multiple balance IDs."""
+    j = request.get_json(force=True) or {}
+    pub = (j.get("pub") or "").strip()
+    ids = j.get("balance_ids") or []
+    if not pub.startswith("G") or not isinstance(ids, list) or not ids:
+        abort(400, "bad params")
+
+    try:
+        acct = server.load_account(pub)
+    except sx.NotFoundError:
+        abort(400, "user account not found on network")
+    except Exception as e:
+        abort(500, f"horizon error: {e}")
+
+    tb = TransactionBuilder(
+        source_account=acct,
+        network_passphrase=NET_PASSPHRASE,
+        base_fee=server.fetch_base_fee()
+    )
+    for cb_id in ids:
+        cb = str(cb_id).strip()
+        if cb:
+            tb.append_claim_claimable_balance_op(cb)
+
+    tx = tb.set_timeout(180).build()
     return jsonify({"ok": True, "xdr": tx.to_xdr(), "network_passphrase": NET_PASSPHRASE})
