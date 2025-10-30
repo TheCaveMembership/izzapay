@@ -1748,8 +1748,7 @@ votePreviewBtn?.addEventListener('click', async ()=>{
 // Start vote-stake (build + sign/submit same as regular)
 voteStartBtn?.addEventListener('click', async ()=>{
   const pub  = (votePub.value||'').trim();
-  const raw  = String(voteAmt.value || '0').trim();
-  const amt  = Number(raw.replace(/[^0-9.]/g,''));
+  const amt  = Number(String(voteAmt.value||'0').replace(/[^0-9.]/g,''));
   const proposal = voteGame.value;
   if (!pub.startsWith('G') || !(amt>0) || !proposal){ return; }
 
@@ -1757,7 +1756,7 @@ voteStartBtn?.addEventListener('click', async ()=>{
   try{
     const r = await fetch('/api/vote/stake', {
       method:'POST', headers:{'Content-Type':'application/json'},
-      body: JSON.stringify({ pub, amount:String(Math.floor(amt*1e7)/1e7), proposal })
+      body: JSON.stringify({ pub, amount: String(Math.floor(amt*1e7)/1e7), proposal })
     });
     const j = await r.json().catch(()=> ({}));
     if (!r.ok || !j?.ok) throw new Error(j?.error || j?.message || `HTTP ${r.status}`);
@@ -1765,20 +1764,28 @@ voteStartBtn?.addEventListener('click', async ()=>{
     const xdr  = j.xdr;
     const pass = j.network_passphrase || 'Pi Testnet';
 
+    // Prefer wallet signing unless we KNOW we have a matching local secret
     const localSec = getLocalSecret(pub, USER?.username);
-    if (localSec){
+    if (localSec) {
       const ok = await ensureStellar();
       if (!ok || !window.StellarSdk){ voteMsg.textContent='❌ Stellar SDK missing.'; return; }
       const SDK = window.StellarSdk;
       const tx  = SDK.TransactionBuilder.fromXDR(xdr, pass);
       tx.sign(SDK.Keypair.fromSecret(localSec));
       const server = getServer();
-      const resp   = await server.submitTransaction(tx);
-      voteMsg.innerHTML = resp?.hash ? `✅ Votes staked. Tx: <code>${resp.hash}</code>` : 'Submitted.';
+      try{
+        const resp = await server.submitTransaction(tx);
+        voteMsg.innerHTML = resp?.hash ? `✅ Votes staked. Tx: <code>${resp.hash}</code>` : 'Submitted.';
+      }catch(e){
+        // show precise Horizon reason
+        const rc = e?.response?.data?.extras?.result_codes;
+        voteMsg.textContent = `❌ submit failed: ${JSON.stringify(rc) || String(e)}`;
+      }
     } else {
+      // Always deep-link to wallet so the USER signature is added
       const uri = `web+stellar:tx?xdr=${encodeURIComponent(xdr)}&network_passphrase=${encodeURIComponent(pass)}`;
       window.location.href = uri;
-      voteMsg.innerHTML = `Opening your wallet to sign… If nothing happens, copy this URI:<br><code style="word-break:break-all">${uri}</code>`;
+      voteMsg.innerHTML = `Opening wallet to sign…<br><small>If nothing opens, copy this into your wallet:</small><br><code style="word-break:break-all">${uri}</code>`;
     }
   }catch(e){
     voteMsg.textContent = '❌ ' + String(e);
