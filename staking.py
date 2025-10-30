@@ -1,7 +1,7 @@
 # staking.py
 import os, re, time
 from decimal import Decimal, ROUND_DOWN
-from flask import Blueprint, request, jsonify, abort
+from flask import Blueprint, request, jsonify, abort, current_app
 import requests
 from stellar_sdk import (
     Server, Keypair, Asset, TransactionBuilder,
@@ -58,10 +58,9 @@ def _normalize_days(days: int) -> int:
 def _apr_for_lock(days: int) -> Decimal:
     """
     Linear to STAKE_MAX_DAYS then flat.
-    Example: 30d ≈ 5% APR, 180d ≈ 15% APR.
+    Example (same curve): 30d ≈ 5% APR, 180d ≈ 15% APR.
     """
     d = _normalize_days(days)
-    # Keep the same curve assumptions; scale bonus by max-days
     base  = Decimal("0.05")
     bonus = (Decimal(d) / Decimal(STAKE_MAX_DAYS)) * Decimal("0.10")
     return (base + bonus).quantize(Decimal("0.0001"), rounding=ROUND_DOWN)
@@ -138,9 +137,12 @@ def preview():
         abort(400, "amount too small for selected lock; reward rounds to 0")
 
     unlock_unix = int(time.time()) + days * 86400
+    apr_percent = (apr * Decimal(100)).quantize(Decimal("0.01"), rounding=ROUND_DOWN)
+
     return jsonify({
         "ok": True,
-        "apr": str(apr),
+        "apr": str(apr),                 # e.g., "0.1500"
+        "apr_percent": str(apr_percent), # e.g., "15.00"
         "reward": _to_asset_amount(reward),
         "unlock_unix": unlock_unix,
         "lock_days_applied": days
@@ -173,10 +175,13 @@ def build_stake_tx():
         abort(400, "amount too small for selected lock; reward rounds to 0")
 
     # Preflight: trustlines and balances
-    if not _has_trust_and_bal(user_pub, amt):
-        abort(400, "user lacks IZZA balance or trustline for principal")
-    if not _has_trust_and_bal(DISTR_PUB, reward):
-        abort(500, "distributor lacks IZZA balance for reward")
+    try:
+        if not _has_trust_and_bal(user_pub, amt):
+            abort(400, "user lacks IZZA balance or trustline for principal")
+        if not _has_trust_and_bal(DISTR_PUB, reward):
+            abort(500, "distributor lacks IZZA balance for reward")
+    except Exception as e:
+        current_app.logger.warning(f"stake preflight error: {e}")
 
     unlock_unix = int(time.time()) + days * 86400
     pred = ClaimPredicate.predicate_not(
@@ -256,8 +261,8 @@ def _classify_record(r: dict):
 def list_claimables():
     """
     List claimable balances the user can claim (principal and reward).
-    If the pub key is invalid, return an empty set with a helpful message
-    (prevents Horizon "string did not match pattern" errors from bubbling to UI).
+    On Horizon failure, return an empty set with a note (never 5xx) so the UI
+    doesn't show a SyntaxError when there is nothing to claim or Horizon is flaky.
     """
     pub = (request.args.get("pub", "")).strip()
     if not _is_valid_pub(pub):
@@ -275,9 +280,12 @@ def list_claimables():
     try:
         r = requests.get(url, params=params, timeout=15)
         r.raise_for_status()
-        records = (r.json().get("_embedded", {}) or {}).get("records", []) or []
+        data = r.json()
+        records = (data.get("_embedded", {}) or {}).get("records", []) or []
     except Exception as e:
-        abort(502, f"horizon fetch failed: {e}")
+        # Soft-fail: return empty with a hint, do not 5xx
+        current_app.logger.warning(f"claimables fetch failed: {e}")
+        return jsonify({"ok": True, "records": [], "note": "horizon fetch failed"}), 200
 
     out = [_classify_record(rec) for rec in records]
     return jsonify({"ok": True, "records": out})
