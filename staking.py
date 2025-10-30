@@ -1,5 +1,6 @@
-# staking.py
-import os, re, time, logging
+# staking.py (top section)
+
+import os, re, time, logging, sqlite3, threading
 from datetime import datetime, timezone
 from decimal import Decimal, ROUND_DOWN, InvalidOperation
 from flask import Blueprint, request, jsonify, abort
@@ -15,9 +16,8 @@ log = logging.getLogger(__name__)
 # ---------------------------- env helpers ---------------------------------
 
 def _clean(s: str | None) -> str | None:
-    if s is None:
-        return None
-    return s.strip().replace("\n", "").replace("\r", "")
+    if s is None: return None
+    return s.strip().replace("\n","").replace("\r","")
 
 def _getenv(name: str, default: str | None = None, required: bool = False) -> str | None:
     v = os.getenv(name, default)
@@ -34,25 +34,54 @@ ISSUER_PUB   = _getenv("ISSUER_PUB", required=True)
 DISTR_PUB    = _getenv("DISTR_PUB", required=True)
 DISTR_SECRET = _getenv("DISTR_SECRET", required=True)
 
-# Optional vote-round env
-# VOTE_ROUND_END can be ISO8601 like "2026-04-28T03:19:52Z" or a unix epoch
 VOTE_ROUND_LENGTH_DAYS = int(_getenv("VOTE_ROUND_LENGTH_DAYS", "180") or "180")
-VOTE_ROUND_END_ENV = _getenv("VOTE_ROUND_END", None)
+VOTE_ROUND_END_ENV     = _getenv("VOTE_ROUND_END", None)
+
+# % of ad revenue allocated to *voters of the winning game*
+AD_REVENUE_POOL_PCT = Decimal(_getenv("AD_REVENUE_POOL_PCT", "0.25") or "0.25")
 
 # Validate keys early
 _env_problems = []
-if not StrKey.is_valid_ed25519_public_key(ISSUER_PUB or ""):
-    _env_problems.append("ISSUER_PUB invalid")
-if not StrKey.is_valid_ed25519_public_key(DISTR_PUB or ""):
-    _env_problems.append("DISTR_PUB invalid")
-try:
-    Keypair.from_secret(DISTR_SECRET or "")
-except Exception:
-    _env_problems.append("DISTR_SECRET invalid")
-if _env_problems:
-    raise RuntimeError("staking env invalid: " + ", ".join(_env_problems))
+if not StrKey.is_valid_ed25519_public_key(ISSUER_PUB or ""): _env_problems.append("ISSUER_PUB invalid")
+if not StrKey.is_valid_ed25519_public_key(DISTR_PUB  or ""): _env_problems.append("DISTR_PUB invalid")
+try: Keypair.from_secret(DISTR_SECRET or "")
+except Exception: _env_problems.append("DISTR_SECRET invalid")
+if _env_problems: raise RuntimeError("staking env invalid: " + ", ".join(_env_problems))
 
 server = Server(HORIZON_URL)
+
+# ------------------------- vote-intent mini store -------------------------
+
+_SQLITE_PATH = _getenv("SQLITE_DB_PATH", "/var/data/izzapay/app.sqlite") or "/var/data/izzapay/app.sqlite"
+_vote_lock = threading.Lock()
+
+def _vote_cx():
+    cx = sqlite3.connect(_SQLITE_PATH, check_same_thread=False)
+    cx.execute("""CREATE TABLE IF NOT EXISTS vote_intents(
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      round_end INTEGER NOT NULL,
+      proposal   TEXT NOT NULL,
+      pub        TEXT NOT NULL,
+      amount7    TEXT NOT NULL,
+      created_at INTEGER NOT NULL
+    )""")
+    return cx
+
+def _vote_add(round_end, proposal, pub, amount7):
+    with _vote_lock:
+        cx = _vote_cx()
+        cx.execute("INSERT INTO vote_intents(round_end,proposal,pub,amount7,created_at) VALUES(?,?,?,?,?)",
+                   (int(round_end), proposal, pub, str(amount7), int(time.time())))
+        cx.commit(); cx.close()
+
+def _vote_total(round_end, proposal) -> Decimal:
+    with _vote_lock:
+        cx = _vote_cx()
+        cur = cx.execute("SELECT COALESCE(SUM(CAST(amount7 AS REAL)),0) FROM vote_intents WHERE round_end=? AND proposal=?",
+                         (int(round_end), proposal))
+        total = cur.fetchone()[0]
+        cx.close()
+        return Decimal(str(total or 0))
 
 # ---------------------------- helpers ---------------------------------
 
@@ -383,7 +412,11 @@ def build_vote_stake_tx():
 
     tx = txb.set_timeout(180).add_text_memo(memo_txt).build()
 
-    
+    # persist this vote amount so preview math is accurate for everyone
+try:
+    _vote_add(unlock_unix, proposal, user_pub, _q7(amt))
+except Exception as e:
+    log.warning("vote intent log failed: %s", e)
 
     return jsonify({
         "ok": True,
@@ -416,6 +449,27 @@ def _classify_record(r: dict):
         "last_modified_time": r.get("last_modified_time"),
         "unlock_ts": unlock_unix or 0,         # unix seconds
     }
+
+@bp_stake.route("/api/vote/preview", methods=["POST"])
+def vote_preview():
+    j = request.get_json(force=True) or {}
+    proposal = _clean(j.get("proposal") or "")
+    amt = _sanitize_amount(j)
+    if not proposal or amt <= 0:
+        abort(400, "bad params")
+    end_unix = _vote_round_end_unix()
+    pool_before = _vote_total(end_unix, proposal)
+    pool_after  = pool_before + amt
+    share_pct   = (amt / pool_after * Decimal(100)) if pool_after > 0 else Decimal(100)
+    return jsonify({
+        "ok": True,
+        "round_end_unix": int(end_unix),
+        "days_remaining": _vote_days_remaining(),
+        "pool_before": str(pool_before),
+        "pool_after":  str(pool_after),
+        "your_share_pct_if_wins": str(share_pct.quantize(Decimal("0.01"))),
+        "ad_pool_pct": str((AD_REVENUE_POOL_PCT * Decimal(100)).quantize(Decimal("0.01")))
+    })
 
 @bp_stake.route("/api/stake/claimables", methods=["GET"])
 def list_claimables():
