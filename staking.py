@@ -361,17 +361,16 @@ def list_claimables():
 
     out = []
     for rec in norm:
-    u = rec.get("unlock_ts") or 0
-    b = buckets.get(u, {})
-    is_vote = bool(b.get("has_principal") and not b.get("has_reward"))
-    kind = "vote" if is_vote else "regular"
-    rec_out = {
-        **rec,
-        "kind": kind,
-        # make each contract distinct even if unlock_ts matches others
-        "contract_id": f"{int(u)}|{kind}|{rec.get('id','')[:8]}",
-    }
-    out.append(rec_out)
+        u = rec.get("unlock_ts") or 0
+        b = buckets.get(u, {})
+        is_vote = bool(b.get("has_principal") and not b.get("has_reward"))
+        kind = "vote" if is_vote else "regular"
+        rec_out = {
+            **rec,
+            "kind": kind,
+            "contract_id": f"{int(u)}|{kind}|{rec.get('id','')[:8]}",
+        }
+        out.append(rec_out)
 
     # Back-compat field name and new name the UI expects
     return jsonify({"ok": True, "claimables": out, "records": out})
