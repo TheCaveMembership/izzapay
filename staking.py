@@ -305,7 +305,29 @@ def build_claim_tx():
         .build()
     )
     return jsonify({"ok": True, "xdr": tx.to_xdr(), "network_passphrase": NET_PASSPHRASE})
+# ----------------------------- arcade proposals ------------------------------
 
+@bp_stake.route("/api/arcade/proposals", methods=["GET"])
+def arcade_proposals():
+    """
+    Static list of current arcade game proposals users can stake/vote on.
+    """
+    proposals = [
+        {
+            "id": "rooftop_rumble",
+            "title": "Rooftop Rumble",
+            "desc": "Leap across skyscrapers, dodge drones, and collect IZZA Coins in this high-speed rooftop race. Each vote powers its development.",
+            "img": "/static/assets/arcade_rooftop_rumble.jpg"
+        },
+        {
+            "id": "pizza_panic",
+            "title": "Pizza Panic",
+            "desc": "Dash through IZZA City traffic delivering hot pizzas before time runs out. Each stake vote funds new vehicles, upgrades, and levels.",
+            "img": "/static/assets/arcade_pizza_panic.jpg"
+        }
+    ]
+    return jsonify({"ok": True, "proposals": proposals})
+    
 @bp_stake.route("/api/stake/build-claim-batch", methods=["POST"])
 def build_claim_tx_batch():
     """Build one tx to claim multiple balance IDs; skips invalid; errors if none valid."""
