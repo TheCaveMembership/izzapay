@@ -383,10 +383,7 @@ def build_vote_stake_tx():
 
     tx = txb.set_timeout(180).add_text_memo(memo_txt).build()
 
-    try:
-        tx.sign(Keypair.from_secret(DISTR_SECRET))
-    except Exception:
-        abort(500, "bad DISTR_SECRET")
+    
 
     return jsonify({
         "ok": True,
