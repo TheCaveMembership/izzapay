@@ -1,87 +1,93 @@
 # staking.py
-import os, re, time
-from decimal import Decimal, ROUND_DOWN
-from flask import Blueprint, request, jsonify, abort, current_app
+import os, re, time, logging
+from decimal import Decimal, ROUND_DOWN, InvalidOperation
+from flask import Blueprint, request, jsonify, abort
 import requests
 from stellar_sdk import (
     Server, Keypair, Asset, TransactionBuilder,
-    Claimant, ClaimPredicate, exceptions as sx
+    Claimant, ClaimPredicate, StrKey, exceptions as sx
 )
 
 bp_stake = Blueprint("stake", __name__)
+log = logging.getLogger(__name__)
 
-# ---------------------------- config ---------------------------------
-HORIZON_URL       = os.getenv("HORIZON_URL", "https://api.testnet.minepi.com")
-NET_PASSPHRASE    = os.getenv("NETWORK_PASSPHRASE", "Pi Testnet")
-ASSET_CODE        = os.getenv("ASSET_CODE", "IZZA")
-ISSUER_PUB        = os.getenv("ISSUER_PUB")     # G...
-DISTR_PUB         = os.getenv("DISTR_PUB")      # G...
-DISTR_SECRET      = os.getenv("DISTR_SECRET")   # S...
-STAKE_MAX_DAYS    = int(os.getenv("STAKE_MAX_DAYS", "180"))
-STAKE_MIN_DAYS    = int(os.getenv("STAKE_MIN_DAYS", "1"))
+# ---------------------------- env helpers ---------------------------------
+
+def _clean(s: str | None) -> str | None:
+    if s is None:
+        return None
+    # remove leading/trailing space and any stray newlines/carriage returns
+    return s.strip().replace("\n", "").replace("\r", "")
+
+def _getenv(name: str, default: str | None = None, required: bool = False) -> str | None:
+    v = os.getenv(name, default)
+    v = _clean(v) if isinstance(v, str) else v
+    if required and not v:
+        raise RuntimeError(f"Missing required env var: {name}")
+    return v
+
+HORIZON_URL    = _getenv("HORIZON_URL", "https://api.testnet.minepi.com", required=True)
+NET_PASSPHRASE = _getenv("NETWORK_PASSPHRASE", "Pi Testnet", required=True)
+
+ASSET_CODE   = _getenv("ASSET_CODE", "IZZA") or "IZZA"
+ISSUER_PUB   = _getenv("ISSUER_PUB", required=True)
+DISTR_PUB    = _getenv("DISTR_PUB", required=True)
+DISTR_SECRET = _getenv("DISTR_SECRET", required=True)
+
+# Validate keys early so failures are obvious
+_env_problems = []
+if not StrKey.is_valid_ed25519_public_key(ISSUER_PUB or ""):
+    _env_problems.append("ISSUER_PUB invalid")
+if not StrKey.is_valid_ed25519_public_key(DISTR_PUB or ""):
+    _env_problems.append("DISTR_PUB invalid")
+try:
+    Keypair.from_secret(DISTR_SECRET or "")
+except Exception:
+    _env_problems.append("DISTR_SECRET invalid")
+if _env_problems:
+    raise RuntimeError("staking env invalid: " + ", ".join(_env_problems))
 
 server = Server(HORIZON_URL)
 
 # ---------------------------- helpers ---------------------------------
 
-def _require_env():
-    missing = [k for k, v in {
-        "ISSUER_PUB": ISSUER_PUB,
-        "DISTR_PUB": DISTR_PUB,
-        "DISTR_SECRET": DISTR_SECRET
-    }.items() if not v]
-    if missing:
-        abort(500, f"staking env missing: {', '.join(missing)}")
-
-def _is_valid_pub(pub: str) -> bool:
-    try:
-        Keypair.from_public_key((pub or "").strip())
-        return True
-    except Exception:
-        return False
-
 def _izza_asset() -> Asset:
-    if not ISSUER_PUB:
-        abort(500, "ISSUER_PUB not configured")
     return Asset(ASSET_CODE, ISSUER_PUB)
 
-def _normalize_days(days: int) -> int:
-    """Strictly enforce the configured range."""
+def _clamp_days(days: int) -> int:
+    # enforce 1..180
     try:
         d = int(days)
     except Exception:
         d = 0
-    if d < STAKE_MIN_DAYS or d > STAKE_MAX_DAYS:
-        abort(400, f"lock_days must be between {STAKE_MIN_DAYS} and {STAKE_MAX_DAYS}")
-    return d
+    return max(1, min(180, d))
 
 def _apr_for_lock(days: int) -> Decimal:
     """
-    Linear to STAKE_MAX_DAYS then flat.
-    Example (same curve): 30d ≈ 5% APR, 180d ≈ 15% APR.
+    Linear until 180d, then flat.
+    30d ≈ 5% APR, 180d ≈ 15% APR.
     """
-    d = _normalize_days(days)
+    d = _clamp_days(days)
     base  = Decimal("0.05")
-    bonus = (Decimal(d) / Decimal(STAKE_MAX_DAYS)) * Decimal("0.10")
+    bonus = (Decimal(d) / Decimal(180)) * Decimal("0.10")
     return (base + bonus).quantize(Decimal("0.0001"), rounding=ROUND_DOWN)
 
-def _to_asset_amount(x: Decimal) -> str:
-    """Stellar assets have up to 7 decimal places."""
-    return x.quantize(Decimal("0.0000001"), rounding=ROUND_DOWN).normalize().to_eng_string()
+def _q7(x: Decimal) -> str:
+    # Stellar amounts are up to 7 decimals
+    return str(x.quantize(Decimal("0.0000001"), rounding=ROUND_DOWN))
 
 def _reward_for(amt: Decimal, days: int) -> Decimal:
-    d = _normalize_days(days)
-    apr = _apr_for_lock(d)
-    reward = (amt * apr * Decimal(d) / Decimal(365)).quantize(Decimal("0.0000001"), rounding=ROUND_DOWN)
-    return reward
+    apr = _apr_for_lock(days)
+    return (amt * apr * Decimal(_clamp_days(days)) / Decimal(365)).quantize(
+        Decimal("0.0000001"), rounding=ROUND_DOWN
+    )
 
 _hex64 = re.compile(r"^[0-9a-fA-F]{64}$")
 def _valid_balance_id(s: str) -> bool:
-    return bool(_hex64.match((s or "").strip()))
+    return bool(_hex64.match(s or ""))
 
 def _account_balances(pub: str):
-    a = server.accounts().account_id(pub).call()
-    return a.get("balances", [])
+    return server.accounts().account_id(pub).call().get("balances", [])
 
 def _has_trust_and_bal(pub: str, need: Decimal) -> bool:
     for b in _account_balances(pub):
@@ -93,86 +99,69 @@ def _has_trust_and_bal(pub: str, need: Decimal) -> bool:
     return False
 
 def _compute_unlock_unix_from_predicate(pred_obj) -> int | None:
-    """
-    Our predicate is: NOT(abs_before: unlock_unix)
-    Horizon claimants look like:
-      {"destination":"G...","predicate":{"not":{"abs_before":"1700000000"}}}
-    """
     try:
         not_obj = pred_obj.get("not") or {}
         abs_before = not_obj.get("abs_before")
-        if abs_before is None:
-            return None
-        return int(abs_before)
+        return int(abs_before) if abs_before is not None else None
     except Exception:
         return None
 
-# ----------------------------- routes ---------------------------------
+# ----------------------------- public rules ------------------------------
 
 @bp_stake.route("/api/stake/rules", methods=["GET"])
 def rules():
-    """Small helper so the UI can learn constraints without hardcoding."""
     return jsonify({
         "ok": True,
         "asset_code": ASSET_CODE,
         "issuer": ISSUER_PUB,
-        "max_days": STAKE_MAX_DAYS,
-        "min_days": STAKE_MIN_DAYS
+        "max_days": 180,
+        "min_days": 1
     })
+
+# ----------------------------- routes ---------------------------------
 
 @bp_stake.route("/api/stake/preview", methods=["POST"])
 def preview():
     j = request.get_json(force=True) or {}
     try:
         amt  = Decimal(str(j.get("amount", "0")))
-    except Exception:
-        abort(400, "bad amount")
-    days = _normalize_days(j.get("lock_days", 0))
+        days = _clamp_days(int(j.get("lock_days", 0)))
+    except (InvalidOperation, ValueError, TypeError):
+        abort(400, "bad params")
+
     if amt <= 0:
-        abort(400, "amount must be > 0")
+        abort(400, "bad params")
 
     apr = _apr_for_lock(days)
     reward = _reward_for(amt, days)
     if reward <= 0:
-        abort(400, "amount too small for selected lock; reward rounds to 0")
+        abort(400, "amount too small; reward rounds to 0")
 
     unlock_unix = int(time.time()) + days * 86400
-    apr_percent = (apr * Decimal(100)).quantize(Decimal("0.01"), rounding=ROUND_DOWN)
-
-    return jsonify({
-        "ok": True,
-        "apr": str(apr),                 # e.g., "0.1500"
-        "apr_percent": str(apr_percent), # e.g., "15.00"
-        "reward": _to_asset_amount(reward),
-        "unlock_unix": unlock_unix,
-        "lock_days_applied": days
-    })
+    return jsonify({"ok": True, "apr": str(apr), "reward": _q7(reward), "unlock_unix": unlock_unix, "days": days})
 
 @bp_stake.route("/api/stake/build", methods=["POST"])
 def build_stake_tx():
     """
-    Builds ONE tx with TWO ops:
-      1) user's IZZA -> claimable balance (source = user)
-      2) distributor's IZZA reward -> claimable balance (source = DISTR_PUB)
+    ONE tx, TWO ops:
+      1) user's IZZA -> claimable balance (principal)
+      2) distributor's IZZA -> claimable balance (reward)
     Server pre-signs with distributor so the user adds their signature and submits.
     """
-    _require_env()
     j = request.get_json(force=True) or {}
-    user_pub = (j.get("pub") or "").strip()
-    if not _is_valid_pub(user_pub):
-        abort(400, "bad pub format")
-
+    user_pub = _clean(j.get("pub") or "")
     try:
-        amt = Decimal(str(j.get("amount", "0")))
-    except Exception:
-        abort(400, "bad amount")
-    days = _normalize_days(j.get("lock_days", 0))
-    if amt <= 0:
-        abort(400, "amount must be > 0")
+        amt  = Decimal(str(j.get("amount", "0")))
+        days = _clamp_days(int(j.get("lock_days", 0)))
+    except (InvalidOperation, ValueError, TypeError):
+        abort(400, "bad params")
+
+    if not (user_pub and user_pub.startswith("G")) or amt <= 0:
+        abort(400, "bad params")
 
     reward = _reward_for(amt, days)
     if reward <= 0:
-        abort(400, "amount too small for selected lock; reward rounds to 0")
+        abort(400, "amount too small; reward rounds to 0")
 
     # Preflight: trustlines and balances
     try:
@@ -180,13 +169,11 @@ def build_stake_tx():
             abort(400, "user lacks IZZA balance or trustline for principal")
         if not _has_trust_and_bal(DISTR_PUB, reward):
             abort(500, "distributor lacks IZZA balance for reward")
-    except Exception as e:
-        current_app.logger.warning(f"stake preflight error: {e}")
+    except sx.NotFoundError:
+        abort(400, "user account not found on network")
 
     unlock_unix = int(time.time()) + days * 86400
-    pred = ClaimPredicate.predicate_not(
-        ClaimPredicate.predicate_before_absolute_time(unlock_unix)
-    )
+    pred = ClaimPredicate.predicate_not(ClaimPredicate.predicate_before_absolute_time(unlock_unix))
     claimant = Claimant(destination=user_pub, predicate=pred)
 
     try:
@@ -202,14 +189,14 @@ def build_stake_tx():
         base_fee=server.fetch_base_fee()
     )
 
-    # 1) lock user's tokens (principal)
+    # 1) principal
     txb.append_create_claimable_balance_op(
-        asset=_izza_asset(), amount=_to_asset_amount(amt), claimants=[claimant], source=user_pub
+        asset=_izza_asset(), amount=_q7(amt), claimants=[claimant], source=user_pub
     )
 
-    # 2) reward paid by distributor (same predicate)
+    # 2) reward
     txb.append_create_claimable_balance_op(
-        asset=_izza_asset(), amount=_to_asset_amount(reward), claimants=[claimant], source=DISTR_PUB
+        asset=_izza_asset(), amount=_q7(reward), claimants=[claimant], source=DISTR_PUB
     )
 
     memo_txt = f"stake:{days}d"
@@ -218,7 +205,7 @@ def build_stake_tx():
 
     tx = txb.set_timeout(180).add_memo_text(memo_txt).build()
 
-    # Pre-sign with distributor (required for op#2)
+    # Pre-sign with distributor (required for op #2)
     try:
         tx.sign(Keypair.from_secret(DISTR_SECRET))
     except Exception:
@@ -229,17 +216,17 @@ def build_stake_tx():
         "xdr": tx.to_xdr(),
         "network_passphrase": NET_PASSPHRASE,
         "unlock_unix": unlock_unix,
-        "reward": _to_asset_amount(reward),
-        "lock_days_applied": days
+        "reward": _q7(reward),
+        "days": days
     })
 
 def _classify_record(r: dict):
-    """Return 'reward' if sponsor == DISTR_PUB else 'principal', plus unlock and claimable_now."""
+    """Return kind + unlock + claimable_now for UI."""
     kind = "reward" if (r.get("sponsor") == DISTR_PUB) else "principal"
     unlock_unix = None
     claimable_now = None
     try:
-        cl = (r.get("claimants") or [])[0]  # our balances have exactly one claimant
+        cl = (r.get("claimants") or [])[0]
         unlock_unix = _compute_unlock_unix_from_predicate(cl.get("predicate") or {})
         if unlock_unix is not None:
             claimable_now = int(time.time()) >= int(unlock_unix)
@@ -259,50 +246,45 @@ def _classify_record(r: dict):
 
 @bp_stake.route("/api/stake/claimables", methods=["GET"])
 def list_claimables():
-    """
-    List claimable balances the user can claim (principal and reward).
-    On Horizon failure, return an empty set with a note (never 5xx) so the UI
-    doesn't show a SyntaxError when there is nothing to claim or Horizon is flaky.
-    """
-    pub = (request.args.get("pub", "")).strip()
-    if not _is_valid_pub(pub):
-        return jsonify({"ok": True, "records": [], "note": "invalid pub key format"}), 200
-    if not ISSUER_PUB:
-        abort(500, "ISSUER_PUB not configured")
+    """List claimable balances (principal and reward). Returns empty list on Horizon 400s."""
+    pub = _clean(request.args.get("pub", ""))
+    if not (pub and pub.startswith("G")):
+        abort(400, "bad pub")
 
+    # Build asset filter safely
+    asset_param = f"{ASSET_CODE}:{ISSUER_PUB}"
     url = f"{HORIZON_URL}/claimable_balances"
     params = {
         "claimant": pub,
-        "asset": f"{ASSET_CODE}:{ISSUER_PUB}",
+        "asset": asset_param,
         "order": "asc",
         "limit": 200
     }
     try:
         r = requests.get(url, params=params, timeout=15)
         r.raise_for_status()
-        data = r.json()
-        records = (data.get("_embedded", {}) or {}).get("records", []) or []
+        records = (r.json().get("_embedded", {}) or {}).get("records", []) or []
+    except requests.HTTPError as e:
+        # If asset or claimant is malformed, Horizon returns 400; surface "no records" to UI.
+        log.warning("claimables fetch failed: %s", e)
+        return jsonify({"ok": True, "records": []})
     except Exception as e:
-        # Soft-fail: return empty with a hint, do not 5xx
-        current_app.logger.warning(f"claimables fetch failed: {e}")
-        return jsonify({"ok": True, "records": [], "note": "horizon fetch failed"}), 200
+        # Network or other errors: still fail soft to keep UI stable
+        log.warning("claimables fetch error: %s", e)
+        return jsonify({"ok": True, "records": []})
 
     out = [_classify_record(rec) for rec in records]
     return jsonify({"ok": True, "records": out})
 
 @bp_stake.route("/api/stake/build-claim", methods=["POST"])
 def build_claim_tx():
-    """
-    Build a single ClaimClaimableBalance tx the USER signs and submits.
-    Strong validation so the UI doesn't hit vague SyntaxErrors.
-    """
+    """Build a single ClaimClaimableBalance tx."""
     j = request.get_json(force=True) or {}
-    pub   = (j.get("pub") or "").strip()
-    cb_id = (j.get("balance_id") or "").strip()
-
-    if not _is_valid_pub(pub):
-        abort(400, "bad pub format")
-    if not _valid_balance_id(cb_id):
+    pub   = _clean(j.get("pub") or "")
+    cb_id = _clean(j.get("balance_id") or "")
+    if not (pub and pub.startswith("G")):
+        abort(400, "bad pub")
+    if not _valid_balance_id(cb_id or ""):
         abort(400, "bad balance_id format")
 
     try:
@@ -322,25 +304,20 @@ def build_claim_tx():
         .set_timeout(180)
         .build()
     )
-
     return jsonify({"ok": True, "xdr": tx.to_xdr(), "network_passphrase": NET_PASSPHRASE})
 
 @bp_stake.route("/api/stake/build-claim-batch", methods=["POST"])
 def build_claim_tx_batch():
-    """
-    Build one tx to claim multiple balance IDs.
-    Skips invalid ids; errors if none valid, to avoid client-side SyntaxErrors.
-    """
+    """Build one tx to claim multiple balance IDs; skips invalid; errors if none valid."""
     j = request.get_json(force=True) or {}
-    pub = (j.get("pub") or "").strip()
+    pub = _clean(j.get("pub") or "")
     ids = j.get("balance_ids") or []
-
-    if not _is_valid_pub(pub):
-        abort(400, "bad pub format")
+    if not (pub and pub.startswith("G")):
+        abort(400, "bad pub")
     if not isinstance(ids, list) or not ids:
         abort(400, "no balance_ids provided")
 
-    valid_ids = [s for s in (str(x).strip() for x in ids) if _valid_balance_id(s)]
+    valid_ids = [s for s in ( (_clean(str(x)) or "") for x in ids ) if _valid_balance_id(s)]
     if not valid_ids:
         abort(400, "no valid balance_ids")
 
