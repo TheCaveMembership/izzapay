@@ -296,18 +296,6 @@
     .tabbar{display:flex;gap:8px;margin-bottom:8px}
     .tabbar button{border:1px solid rgba(255,255,255,.12);background:rgba(255,255,255,.04);padding:8px 10px;border-radius:10px;color:#fff;font-weight:800;cursor:pointer}
     .tabbar button[aria-pressed="true"]{background:rgba(122,68,255,.33)}
-    /* centered card that sits under the Live Order Book / Place Testnet Order buttons */
-.centered-stack{
-  margin-top:10px;
-  display:flex;
-  justify-content:center;
-}
-.centered-stack .blox{
-  width:100%;
-  max-width:480px;      /* normal card size */
-  text-align:center;    /* center the heading, button, help */
-}
-.centered-stack .help{ text-align:center; }
   </style>
 </head>
 <body>
@@ -376,22 +364,12 @@
 
         <!-- Order book + order UI launchers -->
         <div class="top-cta" style="margin-top:10px; display:flex; gap:8px; justify-content:center; flex-wrap:wrap">
-          <button id="orderbookBtn" class="cta" type="button" aria-haspopup="dialog" aria-controls="orderbookModal">📊 Live Order Book</button>
-          <button id="orderBtn" class="cta" type="button" aria-haspopup="dialog" aria-controls="placeOrderModal">🧾 Place Testnet Order</button>
-        </div>
-        <!-- Centered info card below the buttons -->
-<div class="centered-stack">
-  <div class="blox" id="stakeCard">
-    <h4 style="margin:0 0 6px 0">Stake (Testnet)</h4>
-    <p class="small-muted" style="margin:6px 0 10px">
-      On testnet we do <strong>snapshot staking</strong>: we take periodic snapshots of your wallet’s IZZA balance and
-      award seasonal boosts in-game. No tokens are locked or moved.
-    </p>
-    <button id="stakeBtn" class="cta" type="button">🪙 Stake / View My Stake</button>
-    <div class="help" style="margin-top:8px">
-      You keep full control of your tokens. If your balance changes, your next snapshot changes too.
-    </div>
-  </div>
+  <button id="orderbookBtn" class="cta" type="button" aria-haspopup="dialog" aria-controls="orderbookModal">📊 Live Order Book</button>
+  <button id="orderBtn" class="cta" type="button" aria-haspopup="dialog" aria-controls="placeOrderModal">🧾 Place Testnet Order</button>
+</div>
+<div class="top-cta" style="margin-top:8px; display:flex; gap:8px; justify-content:center; flex-wrap:wrap">
+  <button id="stakeQuickBtn" class="cta" type="button" aria-haspopup="dialog" aria-controls="stakeModal">📥 Stake</button>
+  <button id="claimQuickBtn" class="cta" type="button" aria-haspopup="dialog" aria-controls="claimModal">💰 Claim</button>
 </div>
       </div> <!-- end left panel -->
 
@@ -600,12 +578,9 @@
     </div>
     <div class="modal-body">
       <div class="blox">
-  <div class="small-muted">Signed in as</div>
-  <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap">
-    <strong id="mwUser">—</strong>
-    <button id="stakeFromWalletBtn" class="cta" type="button">🪙 Stake</button>
-  </div>
-</div>
+        <div class="small-muted">Signed in as</div>
+        <div><strong id="mwUser">—</strong></div>
+      </div>
 
       <div class="blox" style="margin-top:10px">
         <div class="small-muted">Active Wallet (public key)</div>
@@ -623,6 +598,10 @@
         <div class="blox">
           <h4 style="margin:0 0 8px 0">Actions</h4>
           <button id="revealOnceBtn" class="cta" type="button" style="margin-right:8px">Reveal Secret (once)</button>
+            <div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:8px">
+    <button id="openStakeBtn"  class="cta" type="button">📥 Stake IZZA</button>
+    <button id="openClaimBtn"  class="cta" type="button">💰 Claim Rewards</button>
+  </div>
           
           <div class="help" style="margin-top:8px">
   This is a <strong>non-custodial</strong> wallet. We never send your secret to the server.
@@ -747,7 +726,96 @@
   <button id="createWalletBtn" type="button" class="cta">✚ Create Test Wallet</button>
   <div id="walletStatus" class="help" aria-live="polite"></div>
 </div>
+<!-- STAKE MODAL (top-level, not nested) -->
+<div class="modal" id="stakeModal" role="dialog" aria-modal="true" aria-labelledby="stakeTitle" hidden>
+  <div class="modal-card">
+    <div class="modal-header">
+      <div class="modal-title">
+        <img src="/static/izzapay-mark.svg" alt="">
+        <span id="stakeTitle">Stake IZZA</span>
+      </div>
+      <button class="close-btn" type="button" id="closeStakeBtn">Close</button>
+    </div>
+    <div class="modal-body">
+      <div class="blox">
+        <div class="small-muted">Staker (public key)</div>
+        <div><input id="stakePub" class="mono" style="width:100%;background:rgba(255,255,255,.06);border:1px solid rgba(255,255,255,.12);color:#fff;padding:10px;border-radius:10px"></div>
+      </div>
 
+      <div class="row2" style="margin-top:10px">
+        <div class="field">
+          <label>Amount (IZZA)</label>
+          <input id="stakeAmt" type="number" step="0.0000001" inputmode="decimal" placeholder="e.g. 1000">
+        </div>
+        <div class="field">
+          <label>Lock length</label>
+          <select id="stakeDays">
+            <option value="30">30 days</option>
+            <option value="90">90 days</option>
+            <option value="180">180 days</option>
+          </select>
+        </div>
+      </div>
+
+      <div id="stakePreviewBox" class="blox" style="margin-top:10px;display:none">
+        <div class="grid" style="gap:10px">
+          <div><div class="small-muted">APR</div><strong id="stakeAPR">—</strong></div>
+          <div><div class="small-muted">Estimated reward</div><strong id="stakeReward">—</strong></div>
+          <div><div class="small-muted">Unlocks (UTC)</div><strong id="stakeUnlock">—</strong></div>
+        </div>
+      </div>
+
+      <div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:12px">
+        <button id="stakePreviewBtn" class="cta" type="button">Preview</button>
+        <button id="stakeStartBtn"   class="cta" type="button" disabled>Start Stake</button>
+      </div>
+
+      <div id="stakeMsg" class="help" style="margin-top:8px"></div>
+    </div>
+  </div>
+</div>
+
+<!-- CLAIM MODAL (top-level, not nested) -->
+<div class="modal" id="claimModal" role="dialog" aria-modal="true" aria-labelledby="claimTitle" hidden>
+  <div class="modal-card">
+    <div class="modal-header">
+      <div class="modal-title">
+        <img src="/static/izzapay-mark.svg" alt="">
+        <span id="claimTitle">Claim Rewards / Principal</span>
+      </div>
+      <button class="close-btn" type="button" id="closeClaimBtn">Close</button>
+    </div>
+    <div class="modal-body">
+      <div class="blox">
+        <div class="small-muted">Wallet (public key)</div>
+        <div><input id="claimPub" class="mono" style="width:100%;background:rgba(255,255,255,.06);border:1px solid rgba(255,255,255,.12);color:#fff;padding:10px;border-radius:10px"></div>
+      </div>
+
+      <div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:10px">
+        <button id="claimRefreshBtn" class="cta" type="button">Refresh</button>
+        <button id="claimSelectedBtn" class="cta" type="button" disabled>Claim Selected</button>
+      </div>
+
+      <div class="blox" style="margin-top:10px">
+        <div class="small-muted">Claimable balances</div>
+        <table id="claimTbl" style="width:100%;border-collapse:collapse;margin-top:8px">
+          <thead>
+            <tr>
+              <th style="text-align:left;padding:8px;border-bottom:1px solid rgba(255,255,255,.08)">Pick</th>
+              <th style="text-align:left;padding:8px;border-bottom:1px solid rgba(255,255,255,.08)">Kind</th>
+              <th style="text-align:right;padding:8px;border-bottom:1px solid rgba(255,255,255,.08)">Amount</th>
+              <th style="text-align:left;padding:8px;border-bottom:1px solid rgba(255,255,255,.08)">Balance ID</th>
+              <th style="text-align:left;padding:8px;border-bottom:1px solid rgba(255,255,255,.08)">Last modified (UTC)</th>
+            </tr>
+          </thead>
+          <tbody></tbody>
+        </table>
+      </div>
+
+      <div id="claimMsg" class="help" style="margin-top:8px"></div>
+    </div>
+  </div>
+</div>
 <!-- Shows after creation -->
 <div id="newWalletBox" class="blox" style="display:none;margin-bottom:10px">
   <h4 style="margin:0 0 6px 0">Your IZZA Test Wallet</h4>
@@ -847,56 +915,6 @@
       </div>
     </div>
   </div>
-  <div class="modal" id="stakeModal" role="dialog" aria-modal="true" aria-labelledby="stakeTitle" hidden>
-  <div class="modal-card">
-    <div class="modal-header">
-      <div class="modal-title">
-        <img src="/static/izzapay-mark.svg" alt="">
-        <span id="stakeTitle">Stake IZZA — Testnet</span>
-      </div>
-      <button class="close-btn" type="button" id="closeStakeBtn">Close</button>
-    </div>
-    <div class="modal-body">
-      <div class="blox">
-        <div class="small-muted">Active Wallet</div>
-        <div class="mono" id="stakePub" style="word-break:break-all">—</div>
-      </div>
-
-      <div class="grid" style="gap:12px;margin-top:10px">
-        <div class="blox">
-          <h4 style="margin:0 0 8px 0">Current Balances</h4>
-          <div class="small-muted">Pi</div>
-          <div class="mono" id="stakePi">—</div>
-          <div class="small-muted" style="margin-top:8px">IZZA</div>
-          <div class="mono" id="stakeIzza">—</div>
-        </div>
-
-        <div class="blox">
-          <h4 style="margin:0 0 8px 0">Stake Intent</h4>
-          <div class="small-muted" style="margin-bottom:6px">
-            Enter the amount of IZZA you wish to <em>declare</em> for staking snapshots.
-          </div>
-          <input id="stakeAmount" type="number" step="0.0000001" inputmode="decimal" placeholder="e.g. 10000" style="width:100%;padding:10px;border-radius:10px;background:rgba(255,255,255,.06);border:1px solid rgba(255,255,255,.12);color:#fff">
-          <div class="help" style="margin-top:8px">
-            Testnet mode: tokens are NOT locked. Each epoch we verify your wallet still holds at least this amount.
-          </div>
-          <button id="stakeSubmitBtn" class="cta" type="button" style="margin-top:10px">Save Stake Intent</button>
-          <div id="stakeMsg" class="help" style="margin-top:8px"></div>
-        </div>
-      </div>
-
-      <div class="blox" style="margin-top:12px">
-        <h4 style="margin:0 0 8px 0">How staking works here</h4>
-        <ul class="list" style="margin:0">
-          <li>We take periodic snapshots of your wallet’s IZZA balance.</li>
-          <li>Your declared stake is a <em>cap</em> — reward math uses <code>min(snapshotBalance, declaredStake)</code>.</li>
-          <li>Rewards are <strong>in-game boosts</strong> and seasonal badges during testnet.</li>
-          <li>On mainnet we can upgrade to true on-chain lock (trustline flags or escrow) if Pi enables it.</li>
-        </ul>
-      </div>
-    </div>
-  </div>
-</div>
 <!-- Pi Platform SDK -->
 <script src="https://sdk.minepi.com/pi-sdk.js" defer></script>
   <!-- libs (from CDN) -->
@@ -1414,10 +1432,215 @@ let lastFocus = null;
   // My Wallet modal (Actions)
 const revealOnceBtn = document.getElementById('revealOnceBtn');
 const secretOnce    = document.getElementById('secretOnce');
+// ======== STAKING CONSTANTS / REFS ========
+const stakeModal    = document.getElementById('stakeModal');
+const claimModal    = document.getElementById('claimModal');
+const closeStakeBtn = document.getElementById('closeStakeBtn');
+const closeClaimBtn = document.getElementById('closeClaimBtn');
+const openStakeBtn  = document.getElementById('openStakeBtn');   // optional internal button
+const openClaimBtn  = document.getElementById('openClaimBtn');   // optional internal button
+const stakeQuickBtn = document.getElementById('stakeQuickBtn');  // your top-cta buttons
+const claimQuickBtn = document.getElementById('claimQuickBtn');
 
+const stakePub     = document.getElementById('stakePub');
+const stakeAmt     = document.getElementById('stakeAmt');
+const stakeDays    = document.getElementById('stakeDays');
+const stakePreview = document.getElementById('stakePreviewBtn');
+const stakeStart   = document.getElementById('stakeStartBtn');
+const stakeMsg     = document.getElementById('stakeMsg');
+
+const stakePreviewBox = document.getElementById('stakePreviewBox');
+const stakeAPR     = document.getElementById('stakeAPR');
+const stakeReward  = document.getElementById('stakeReward');
+const stakeUnlock  = document.getElementById('stakeUnlock');
+
+const claimPub       = document.getElementById('claimPub');
+const claimRefresh   = document.getElementById('claimRefreshBtn');
+const claimSelected  = document.getElementById('claimSelectedBtn');
+const claimTblBody   = document.querySelector('#claimTbl tbody');
+const claimMsg       = document.getElementById('claimMsg');
+
+function fmtNum(n, dp=7){ const x=Number(n); return isFinite(x)?x.toLocaleString(undefined,{minimumFractionDigits:dp,maximumFractionDigits:dp}):'—'; }
+function toUTC(ts){ try{ return new Date(ts*1000).toISOString().replace('T',' ').replace('Z',' UTC'); }catch{ return '—'; } }
+  // ======== OPEN/CLOSE ========
+openStakeBtn?.addEventListener('click', ()=>{
+  stakePub.value = (ACTIVE_PUB || document.getElementById('acctPub')?.value || '');
+  stakeMsg.textContent = '';
+  stakePreviewBox.style.display = 'none';
+  stakeStart.disabled = true;
+  openModal(stakeModal, closeStakeBtn);
+});
+openClaimBtn?.addEventListener('click', ()=>{
+  claimPub.value = (ACTIVE_PUB || document.getElementById('acctPub')?.value || '');
+  claimMsg.textContent = '';
+  claimTblBody.innerHTML = '';
+  claimSelected.disabled = true;
+  openModal(claimModal, closeClaimBtn);
+  listClaimables();
+});
+// optional quick buttons near top
+stakeQuickBtn?.addEventListener('click', ()=> openStakeBtn?.click());
+claimQuickBtn?.addEventListener('click', ()=> openClaimBtn?.click());
+
+closeStakeBtn?.addEventListener('click', ()=> closeModal(stakeModal));
+closeClaimBtn?.addEventListener('click', ()=> closeModal(claimModal));
+
+// ======== PREVIEW ========
+stakePreview?.addEventListener('click', async ()=>{
+  const pub = (stakePub.value||'').trim();
+  const amt = Number(stakeAmt.value||'0');
+  const days= parseInt(stakeDays.value||'0',10);
+  if (!pub.startsWith('G')){ stakeMsg.textContent='Enter a valid G… public key.'; return; }
+  if (!(amt>0) || !(days>0)){ stakeMsg.textContent='Enter a positive amount and lock length.'; return; }
+
+  stakeMsg.textContent = 'Calculating…';
+  try{
+    const r = await fetch('/api/stake/preview', {
+      method:'POST', headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({ amount: String(amt), lock_days: days })
+    });
+    const j = await r.json();
+    if (!r.ok || !j?.ok) throw new Error(j?.error || 'preview failed');
+    stakeAPR.textContent    = `${Number(j.apr).toFixed(2)}%`;
+    stakeReward.textContent = `${fmtNum(j.reward,7)} IZZA`;
+    stakeUnlock.textContent = toUTC(j.unlock_unix);
+    stakePreviewBox.style.display = '';
+    stakeStart.disabled = false;
+    stakeMsg.textContent = '';
+  }catch(e){
+    stakeMsg.textContent = '❌ ' + String(e);
+  }
+});
+
+// ======== START STAKE (build XDR, then local sign or SEP-7) ========
+stakeStart?.addEventListener('click', async ()=>{
+  const pub = (stakePub.value||'').trim();
+  const amt = Number(stakeAmt.value||'0');
+  const days= parseInt(stakeDays.value||'0',10);
+  if (!pub.startsWith('G') || !(amt>0) || !(days>0)){ return; }
+
+  stakeMsg.textContent = 'Preparing staking transaction…';
+  try{
+    const r = await fetch('/api/stake/build', {
+      method:'POST', headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({ pub, amount: String(amt), lock_days: days })
+    });
+    const j = await r.json();
+    if (!r.ok || !j?.ok) throw new Error(j?.error || 'build failed');
+
+    const xdr = j.xdr;
+    const pass = j.network_passphrase || 'Pi Testnet';
+
+    // If we have the local secret for this pub, sign+submit directly
+    const localSec = getLocalSecret(pub, USER?.username);
+    if (localSec){
+      const ok = await ensureStellar();
+      if (!ok || !window.StellarSdk){ stakeMsg.textContent = '❌ Stellar SDK missing.'; return; }
+      const SDK = window.StellarSdk;
+      const tx  = SDK.TransactionBuilder.fromXDR(xdr, pass);
+      tx.sign(SDK.Keypair.fromSecret(localSec));
+      const server = getServer();
+      const resp   = await server.submitTransaction(tx);
+      if (resp?.hash){
+        stakeMsg.innerHTML = `✅ Staked. Tx: <code>${resp.hash}</code>`;
+      } else {
+        stakeMsg.textContent = 'Submitted; awaiting confirmation.';
+      }
+    } else {
+      // Fallback to SEP-7 (external wallet signs alongside distributor)
+      const uri = `web+stellar:tx?xdr=${encodeURIComponent(xdr)}&network_passphrase=${encodeURIComponent(pass)}`;
+      window.location.href = uri;
+      stakeMsg.innerHTML = `Opening your wallet to sign… If nothing happens, copy this URI:<br><code style="word-break:break-all">${uri}</code>`;
+    }
+  }catch(e){
+    stakeMsg.textContent = '❌ ' + String(e);
+  }
+});
+
+// ======== LIST CLAIMABLES ========
+async function listClaimables(){
+  const pub = (claimPub.value||'').trim();
+  if (!pub.startsWith('G')){ claimMsg.textContent='Enter a valid G… public key.'; return; }
+  claimMsg.textContent = 'Loading…';
+  claimTblBody.innerHTML = '';
+  try{
+    const r = await fetch(`/api/stake/claimables?pub=${encodeURIComponent(pub)}`, { cache:'no-store' });
+    const j = await r.json();
+    if (!r.ok || !j?.ok) throw new Error(j?.error || 'fetch failed');
+
+    if (!j.records?.length){
+      claimTblBody.innerHTML = `<tr><td colspan="5" class="help" style="padding:8px">No claimable balances.</td></tr>`;
+      claimSelected.disabled = true;
+      claimMsg.textContent = '';
+      return;
+    }
+
+    for (const rec of j.records){
+      const tr = document.createElement('tr');
+      tr.innerHTML =
+        `<td style="padding:8px"><input type="checkbox" class="cbPick" value="${rec.id}"></td>`+
+        `<td style="padding:8px">${rec.kind || '—'}</td>`+
+        `<td style="padding:8px;text-align:right">${fmtNum(rec.amount,7)}</td>`+
+        `<td style="padding:8px;word-break:break-all" class="mono">${rec.id}</td>`+
+        `<td style="padding:8px">${rec.last_modified_time || '—'}</td>`;
+      claimTblBody.appendChild(tr);
+    }
+    claimSelected.disabled = false;
+    claimMsg.textContent = '';
+  }catch(e){
+    claimMsg.textContent = '❌ ' + String(e);
+  }
+}
+claimRefresh?.addEventListener('click', listClaimables);
+
+// ======== CLAIM SELECTED (batch) ========
+claimSelected?.addEventListener('click', async ()=>{
+  const pub = (claimPub.value||'').trim();
+  if (!pub.startsWith('G')) return;
+
+  const picks = Array.from(document.querySelectorAll('.cbPick:checked')).map(x=>x.value);
+  if (!picks.length){ claimMsg.textContent='Pick at least one balance.'; return; }
+
+  claimMsg.textContent = 'Building claim transaction…';
+
+  try{
+    const r = await fetch('/api/stake/build-claim-batch', {
+      method:'POST', headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({ pub, balance_ids: picks })
+    });
+    const j = await r.json();
+    if (!r.ok || !j?.ok) throw new Error(j?.error || 'build failed');
+
+    const xdr  = j.xdr;
+    const pass = j.network_passphrase || 'Pi Testnet';
+
+    const localSec = getLocalSecret(pub, USER?.username);
+    if (localSec){
+      const ok = await ensureStellar();
+      if (!ok || !window.StellarSdk){ claimMsg.textContent='❌ Stellar SDK missing.'; return; }
+      const SDK = window.StellarSdk;
+      const tx  = SDK.TransactionBuilder.fromXDR(xdr, pass);
+      tx.sign(SDK.Keypair.fromSecret(localSec));
+      const server = getServer();
+      const resp   = await server.submitTransaction(tx);
+      if (resp?.hash){
+        claimMsg.innerHTML = `✅ Claimed. Tx: <code>${resp.hash}</code>`;
+        listClaimables();
+      } else {
+        claimMsg.textContent = 'Submitted; awaiting confirmation.';
+      }
+    } else {
+      const uri = `web+stellar:tx?xdr=${encodeURIComponent(xdr)}&network_passphrase=${encodeURIComponent(pass)}`;
+      window.location.href = uri;
+      claimMsg.innerHTML = `Opening your wallet to sign… If nothing happens, copy this URI:<br><code style="word-break:break-all">${uri}</code>`;
+    }
+  }catch(e){
+    claimMsg.textContent = '❌ ' + String(e);
+  }
+});
 function openModal(el, focusEl){
   lastFocus = document.activeElement;
-  [modal, orderbookModal, placeOrderModal, myWalletModal, stakeModal].forEach(m=>{
+  [modal, orderbookModal, placeOrderModal, myWalletModal].forEach(m=>{
     m.hidden = true;
     m.removeAttribute('open');
   });
@@ -1428,6 +1651,7 @@ function openModal(el, focusEl){
   document.body.style.overflow = 'hidden';
   (focusEl || el.querySelector('.close-btn'))?.focus?.();
 }
+
 function closeModal(el){
   el.removeAttribute('open');
   backdrop.removeAttribute('open');
@@ -1450,7 +1674,7 @@ closePlaceOrderBtn.addEventListener('click',()=> closeModal(placeOrderModal));
 // Backdrop click closes whichever is open (and stops OB refresh if needed)
 backdrop.addEventListener('click', ()=>{
   if (!orderbookModal.hidden){ stopObRefresh(); }
-  [modal, orderbookModal, placeOrderModal, myWalletModal, stakeModal].forEach(m=>{
+  [modal, orderbookModal, placeOrderModal, myWalletModal].forEach(m=>{
     if (!m.hidden) closeModal(m);
   });
 });
@@ -1486,70 +1710,7 @@ walletBtn.addEventListener('click', async ()=>{
 });
 
 // ✅ Call the gate AFTER everything above exists
-// === Staking wiring ===
-const stakeBtn = document.getElementById('stakeBtn');
-const stakeFromWalletBtn = document.getElementById('stakeFromWalletBtn');
-const stakeModal = document.getElementById('stakeModal');
-const closeStakeBtn = document.getElementById('closeStakeBtn');
 
-const stakePubEl = document.getElementById('stakePub');
-const stakePiEl = document.getElementById('stakePi');
-const stakeIzzaEl = document.getElementById('stakeIzza');
-const stakeAmountEl = document.getElementById('stakeAmount');
-const stakeSubmitBtn = document.getElementById('stakeSubmitBtn');
-const stakeMsg = document.getElementById('stakeMsg');
-
-async function openStakeModal() {
-  // Ensure we know the active wallet and balances
-  if (!ACTIVE_PUB) { await fetchActiveWallet(); }
-  if (!ACTIVE_PUB) {
-    stakeMsg.textContent = 'No active wallet. Create or link one first.';
-  }
-  stakePubEl.textContent = ACTIVE_PUB || '—';
-
-  // Fill balances
-  try {
-    const j = await (await fetch(`${API_BASE}/accounts/${ACTIVE_PUB}`, { cache:'no-store' })).json();
-    const pi   = (j?.balances||[]).find(b=>b.asset_type==='native')?.balance || '0';
-    const izza = (j?.balances||[]).find(b=>b.asset_code===ASSET_CODE && b.asset_issuer===ISSUER)?.balance || '0';
-    stakePiEl.textContent = pi;
-    stakeIzzaEl.textContent = izza;
-
-    // Prefill last declared stake from server if available
-    try {
-      const cur = await fetch('/api/stake/me', { credentials:'include' }).then(r=>r.ok?r.json():null);
-      if (cur?.amount) stakeAmountEl.value = cur.amount;
-    } catch(_) {}
-  } catch(_) {}
-
-  openModal(stakeModal, closeStakeBtn);
-}
-
-stakeBtn?.addEventListener('click', openStakeModal);
-stakeFromWalletBtn?.addEventListener('click', openStakeModal);
-closeStakeBtn?.addEventListener('click', ()=> closeModal(stakeModal));
-
-// Save stake intent to server (non-custodial, just a record)
-stakeSubmitBtn?.addEventListener('click', async ()=>{
-  const amt = Number(stakeAmountEl.value);
-  if (!ACTIVE_PUB) { stakeMsg.textContent = 'No active wallet.'; return; }
-  if (!isFinite(amt) || amt <= 0) { stakeMsg.textContent = 'Enter a valid amount.'; return; }
-
-  stakeMsg.textContent = 'Saving…';
-  try {
-    const res = await fetch('/api/stake/intent', {
-      method:'POST',
-      headers:{ 'Content-Type':'application/json' },
-      credentials:'include',
-      body: JSON.stringify({ pub: ACTIVE_PUB, amount: String(amt) })
-    });
-    const j = await res.json().catch(()=>null);
-    if (!res.ok) throw new Error(j?.error || res.status);
-    stakeMsg.textContent = '✅ Stake intent saved. Snapshots will use min(wallet balance, declared amount).';
-  } catch(e) {
-    stakeMsg.textContent = '❌ Could not save stake intent: ' + String(e);
-  }
-});
 
   // =================== Order book endpoints ===================
   const ORDERBOOK_URL = `${API_BASE}/order_book`
@@ -2365,7 +2526,7 @@ try { markSecretViewedOnce(NEW_WALLET.pub, USER?.username); } catch(_){}
       else if(!e.shiftKey && document.activeElement === last){ first.focus(); e.preventDefault(); }
     });
   }
-  [modal, orderbookModal, placeOrderModal, myWalletModal, stakeModal].forEach(trapFocus);
+  [modal, orderbookModal, placeOrderModal, myWalletModal].forEach(trapFocus);
 })();
 </script>
 </body>
