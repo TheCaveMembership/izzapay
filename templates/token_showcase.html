@@ -1706,26 +1706,37 @@ async function loadVoteProposals(){
   }
 }
 
-// Preview (reuses your /api/stake/preview math server-side)
+// Preview (vote)
 votePreviewBtn?.addEventListener('click', async ()=>{
   const pub  = (votePub.value||'').trim();
-  const amt  = Number(voteAmt.value||'0');
-  const days = Math.max(1, Math.min(180, parseInt(voteDays.value||'30',10)));
+  const raw  = String(voteAmt.value||'0').trim();
+  const amt  = Number(raw.replace(/[^0-9.]/g,''));
+  const proposal = voteGame.value;
   if (!pub.startsWith('G')){ voteMsg.textContent='Enter a valid G… public key.'; return; }
   if (!(amt>0)){ voteMsg.textContent='Enter a positive amount.'; return; }
-  if (!voteGame.value){ voteMsg.textContent='Pick a proposal.'; return; }
+  if (!proposal){ voteMsg.textContent='Pick a proposal.'; return; }
 
   voteMsg.textContent = 'Calculating…';
   try{
-    const r = await fetch('/api/stake/preview', {
+    // 1) get vote-round timing (authoritative for vote stakes)
+    const r1 = await fetch('/api/vote/rules', {cache:'no-store'});
+    const j1 = await r1.json();
+    if (!r1.ok || !j1?.ok) throw new Error('rules failed');
+    const days = Number(j1.days_remaining) || 1;
+    const unlockUnix = Number(j1.round_end_unix);
+
+    // 2) reuse preview APR math using those days
+    const r2 = await fetch('/api/stake/preview', {
       method:'POST', headers:{'Content-Type':'application/json'},
-      body: JSON.stringify({ amount: String(amt), lock_days: days, bucket: `arcade:${voteGame.value}` })
+      body: JSON.stringify({ amount: String(Math.floor(amt*1e7)/1e7), lock_days: days })
     });
-    const j = await r.json();
-    if (!r.ok || !j?.ok) throw new Error(j?.error || 'preview failed');
-    voteAPR.textContent   = `${Number(j.apr).toFixed(2)}%`;
-    voteVotes.textContent = `${amt.toLocaleString(undefined,{maximumFractionDigits:7})}`;
-    voteUnlock.textContent= (new Date(j.unlock_unix*1000)).toISOString().replace('T',' ').replace('Z',' UTC');
+    const j2 = await r2.json();
+    if (!r2.ok || !j2?.ok) throw new Error(j2?.error || 'preview failed');
+
+    voteAPR.textContent    = `${Number(j2.apr).toFixed(2)}%`;
+    voteVotes.textContent  = amt.toLocaleString(undefined,{maximumFractionDigits:7});
+    voteUnlock.textContent = (new Date(unlockUnix*1000)).toISOString().replace('T',' ').replace('Z',' UTC');
+
     votePreviewBox.style.display = '';
     voteStartBtn.disabled = false;
     voteMsg.textContent = '';
@@ -1734,12 +1745,11 @@ votePreviewBtn?.addEventListener('click', async ()=>{
   }
 });
 
-// Start vote-stake (server builds XDR tagged to proposal)
+// Start vote-stake (build + sign/submit same as regular)
 voteStartBtn?.addEventListener('click', async ()=>{
   const pub  = (votePub.value||'').trim();
   const raw  = String(voteAmt.value || '0').trim();
-  const norm = raw.replace(/[^0-9.]/g,'');             // strip commas/spaces
-  const amt  = Number(norm);
+  const amt  = Number(raw.replace(/[^0-9.]/g,''));
   const proposal = voteGame.value;
   if (!pub.startsWith('G') || !(amt>0) || !proposal){ return; }
 
@@ -1766,9 +1776,9 @@ voteStartBtn?.addEventListener('click', async ()=>{
       const resp   = await server.submitTransaction(tx);
       voteMsg.innerHTML = resp?.hash ? `✅ Votes staked. Tx: <code>${resp.hash}</code>` : 'Submitted.';
     } else {
-      // fall back to SEP-7 or your existing deep link path if present
-      voteMsg.textContent = 'XDR built. Sign in wallet.';
-      // openWalletDeepLink(xdr, pass) ... if you keep that flow
+      const uri = `web+stellar:tx?xdr=${encodeURIComponent(xdr)}&network_passphrase=${encodeURIComponent(pass)}`;
+      window.location.href = uri;
+      voteMsg.innerHTML = `Opening your wallet to sign… If nothing happens, copy this URI:<br><code style="word-break:break-all">${uri}</code>`;
     }
   }catch(e){
     voteMsg.textContent = '❌ ' + String(e);
