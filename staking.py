@@ -97,11 +97,35 @@ def _has_trust_and_bal(pub: str, need: Decimal) -> bool:
     return False
 
 def _compute_unlock_unix_from_predicate(pred_obj) -> int | None:
+    """
+    Robustly extracts unlock time (abs_before) from claim predicate JSON.
+    Handles both string and nested object formats from Horizon.
+    """
     try:
-        not_obj = pred_obj.get("not") or {}
-        abs_before = not_obj.get("abs_before")
-        return int(abs_before) if abs_before is not None else None
-    except Exception:
+        # Example formats:
+        # {"not":{"abs_before":"1738444680"}}
+        # {"not":{"and":[{"abs_before":"1738444680"}]}}
+        not_obj = pred_obj.get("not")
+        if not not_obj:
+            return None
+
+        # direct case
+        if "abs_before" in not_obj:
+            return int(float(not_obj["abs_before"]))
+
+        # nested under "and" or similar
+        if isinstance(not_obj, dict):
+            for v in not_obj.values():
+                if isinstance(v, list):
+                    for item in v:
+                        if isinstance(item, dict) and "abs_before" in item:
+                            return int(float(item["abs_before"]))
+                elif isinstance(v, dict) and "abs_before" in v:
+                    return int(float(v["abs_before"]))
+
+        return None
+    except Exception as e:
+        log.warning(f"unlock parse failed: {e}")
         return None
 
 def _sanitize_amount(j) -> Decimal:
