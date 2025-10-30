@@ -203,7 +203,7 @@ def build_stake_tx():
     if len(memo_txt.encode("utf-8")) > 28:
         memo_txt = "stake"
 
-    tx = txb.set_timeout(180).add_memo_text(memo_txt).build()
+    tx = txb.set_timeout(180).add_text_memo(memo_txt).build()
 
     # Pre-sign with distributor (required for op #2)
     try:
