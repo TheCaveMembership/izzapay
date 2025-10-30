@@ -867,15 +867,18 @@
         </div>
 
         <div id="votePreviewBox" style="display:none; margin-top:8px">
-          <div class="grid" style="gap:10px">
-            <div><div class="small-muted">Est. APR Boost</div><strong id="voteAPR">—</strong></div>
-            <div><div class="small-muted">Your Votes</div><strong id="voteVotes">—</strong></div>
-            <div><div class="small-muted">Unlock</div><strong id="voteUnlock">—</strong></div>
-          </div>
-          <div class="help" style="margin-top:6px">
-            Distribution happens to stakers of the <em>winning</em> game. If your pick doesn’t win, you can restake in the next round after unlock.
-          </div>
-        </div>
+  <div class="grid" style="gap:10px">
+    <div><div class="small-muted">Boost (×)</div><strong id="voteBoost">—</strong></div>
+    <div><div class="small-muted">Your Weight</div><strong id="voteWeight">—</strong></div>
+    <div><div class="small-muted">Pool Weight After</div><strong id="votePoolAfter">—</strong></div>
+    <div><div class="small-muted">Est. Share</div><strong id="voteShare">—</strong></div>
+  </div>
+  <div class="help" style="margin-top:6px" id="voteShareHelp" aria-live="polite"></div>
+</div>
+
+<div class="help" style="margin-top:8px">
+  Distribution happens to stakers of the <em>winning</em> game. If your pick doesn’t win, you can restake in the next round after unlock.
+</div>
 
         <div style="display:flex; gap:8px; margin-top:10px">
           <button id="votePreviewBtn" class="cta">Preview</button>
@@ -1687,6 +1690,10 @@ voteQuickBtn?.addEventListener('click', async ()=>{
   voteMsg.textContent = '';
   votePreviewBox.style.display = 'none';
   voteStartBtn.disabled = true;
+
+  // HIDE lock-days for vote-staking
+  try { voteDays.closest('.field').style.display = 'none'; } catch(_) {}
+
   await loadVoteProposals();
   openModal(voteModal, closeVoteBtn);
 });
