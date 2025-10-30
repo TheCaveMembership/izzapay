@@ -1745,99 +1745,100 @@ voteStartBtn?.addEventListener('click', async ()=>{
     voteMsg.textContent = '❌ ' + String(e);
   }
 });
-// ======== LIST CLAIMABLES ========
+// ======== LIST CLAIMABLES (grouped: one toggle, principal+reward in one box) ========
 async function listClaimables(){
   const pub = (claimPub.value||'').trim();
   if (!pub.startsWith('G')){ claimMsg.textContent='Enter a valid G… public key.'; return; }
   claimMsg.textContent = 'Loading…';
   claimTblBody.innerHTML = '';
+
   try{
     const r = await fetch(`/api/stake/claimables?pub=${encodeURIComponent(pub)}`, { cache:'no-store' });
     const j = await r.json();
     if (!r.ok || !j?.ok) throw new Error(j?.error || 'fetch failed');
 
-    if (!j.records?.length){
-  claimTblBody.innerHTML = `<tr><td colspan="4" class="help" style="padding:8px">No claimable balances.</td></tr>`;
-  claimSelected.disabled = true;
-  claimMsg.textContent = '';
-  return;
-}
+    const rows = Array.isArray(j.claimables) ? j.claimables : (j.records||[]);
+    if (!rows.length){
+      claimTblBody.innerHTML = `<tr><td colspan="4" class="help" style="padding:8px">No claimable balances.</td></tr>`;
+      claimSelected.disabled = true;
+      claimMsg.textContent = '';
+      return;
+    }
 
-/* ---- group records by stake ----
-   Prefer explicit keys if your API has them; otherwise fall back to a stable composite.
-*/
-const groups = {};
-for (const r of j.records){
-  const key =
-    r.stake_id || r.group_id || r.parent_id || r.pool_id || r.batch_id ||
-    `${r.unlock_time||r.unlock||''}|${r.pool||''}|${String(r.vote||r.is_vote||r.kind).includes('vote')?'vote':'reg'}`;
-  (groups[key] ||= []).push(r);
-}
+    // Build groups by contract_id (server provides "<unlock_ts>|<kind>")
+    const groups = {};
+    for (const r of rows){
+      const gid = r.contract_id || `${r.unlock_ts||0}|${r.kind||'regular'}`;
+      (groups[gid] ||= []).push(r);
+    }
 
-// Sort groups by unlock date (soonest first)
-const order = Object.entries(groups).sort((a,b)=>{
-  const au = Date.parse(a[1][0].unlock_time || a[1][0].unlock || a[1][0].last_modified_time || 0) || 0;
-  const bu = Date.parse(b[1][0].unlock_time || b[1][0].unlock || b[1][0].last_modified_time || 0) || 0;
-  return au - bu;
-});
+    // Sort by unlock time ascending
+    const ordered = Object.entries(groups).sort((a,b)=>{
+      const au = Number((a[1][0] && a[1][0].unlock_ts) || 0);
+      const bu = Number((b[1][0] && b[1][0].unlock_ts) || 0);
+      return au - bu;
+    });
 
-for (const [, recs] of order){
-  // infer shared attributes for the group
-  const any = recs[0] || {};
-  const unlockISO  = any.unlock_time || any.unlock || any.last_modified_time || '';
-  const unlockDate = unlockISO ? unlockISO.slice(0,10) : '—';
-  const isVote     = !!(any.is_vote || any.vote || (typeof any.kind === 'string' && any.kind.includes('vote')) || any.pool === 'vote');
+    for (const [, recs] of ordered){
+      // infer shared attributes
+      const any = recs[0];
+      const unlockTs   = Number(any.unlock_ts||0);
+      const unlockStr  = unlockTs ? new Date(unlockTs*1000).toISOString().slice(0,10) : '—';
+      const kind       = (any.kind === 'vote') ? 'vote' : 'regular';
+      const pillClass  = (kind === 'vote') ? 'pill-vote' : 'pill-regular';
+      const labelKind  = (kind === 'vote') ? 'VOTE' : 'NORMAL';
+      const unlocked   = unlockTs ? (Date.now() >= unlockTs*1000) : true;
 
-  // Determine if the whole group is claimable (all parts share the same unlock time)
-  const unlockMs = unlockISO ? Date.parse(unlockISO) : null;
-  const groupClaimable = !unlockMs || (Date.now() >= unlockMs);
+      // totals
+      let principal = 0, reward = 0;
+      const ids = [];
+      for (const r of recs){
+        ids.push(r.id);
+        if (r.role === 'reward') reward += Number(r.amount||0);
+        else principal += Number(r.amount||0);
+      }
 
-  // Collect all ids in this contract (principal + reward if present)
-  const idList = recs.map(r=>r.id).filter(Boolean);
-  const idsCSV = idList.join(',');
+      // header row with ONE checkbox for the whole contract
+      const trHead = document.createElement('tr');
+      trHead.className = `group-head is-${kind}` + (unlocked ? '' : ' locked');
+      trHead.innerHTML = `
+        <td colspan="4">
+          <label class="group-toggle" style="display:flex;align-items:center;gap:10px;">
+            <input type="checkbox" class="cbPick" value="${ids.join(',')}" ${unlocked ? '' : 'disabled'}>
+            <span class="pill ${pillClass}">${labelKind}</span>
+            <strong>Stake • unlock ${unlockStr}</strong>
+          </label>
+        </td>`;
+      claimTblBody.appendChild(trHead);
 
-  // group header row with ONE toggle that represents the whole contract
-  const head = document.createElement('tr');
-  head.className = 'group-head ' + (isVote ? 'is-vote' : 'is-regular');
-  head.innerHTML =
-    `<td colspan="4">
-       <label class="group-toggle">
-         <input type="checkbox" class="cbPick" value="${idsCSV}" ${groupClaimable ? '' : 'disabled'}>
-         <span class="${isVote ? 'pill pill-vote' : 'pill pill-regular'}">${isVote ? 'vote' : 'normal'}</span>
-         <span class="meta">Stake • unlock ${unlockDate}</span>
-       </label>
-     </td>`;
-  claimTblBody.appendChild(head);
+      // single block: principal and reward together
+      const trBlock = document.createElement('tr');
+      trBlock.className = `group-row is-${kind}` + (unlocked ? '' : ' locked');
+      trBlock.innerHTML = `
+        <td colspan="4">
+          <div class="block">
+            <div class="line">
+              <span class="pill ${pillClass}" aria-hidden="true">PRINCIPAL</span>
+              <span class="num">${fmtNum(principal)}</span>
+            </div>
+            <div class="line">
+              <span class="pill ${pillClass}" aria-hidden="true">REWARD</span>
+              <span class="num">${fmtNum(reward)}</span>
+            </div>
+            ${unlocked ? '' : `<span class="lockhint">Locked until ${unlockStr}</span>`}
+          </div>
+        </td>`;
+      claimTblBody.appendChild(trBlock);
+    }
 
-  // Inside the block, render compact rows WITHOUT individual checkboxes
-  recs.sort((x,y)=> String(x.kind).localeCompare(String(y.kind))); // principal first
-  for (const rec of recs){
-    const tr = document.createElement('tr');
-    tr.className = 'group-row ' + (isVote ? 'is-vote' : 'is-regular') + (groupClaimable ? '' : ' locked');
-
-    const unlock  = rec.unlock_time || rec.unlock || unlockISO;
-    const when    = unlock ? unlock.slice(0,10) : '—';
-    const pillCls = isVote ? 'pill pill-vote' : 'pill pill-regular';
-
-    tr.innerHTML =
-      `<td class="pick" style="padding:8px;text-align:center">—</td>`+  // no per-row toggles
-      `<td class="kind" style="padding:8px">
-         <span class="${pillCls}">${rec.kind || '—'}</span>
-         ${groupClaimable ? '' : `<small class="lockhint">Locked until ${when}</small>`}
-       </td>`+
-      `<td class="num"  style="padding:8px">${fmtNum(rec.amount,7)}</td>`+
-      `<td class="when" style="padding:8px">${when}</td>`;
-    claimTblBody.appendChild(tr);
-  }
-}
-claimSelected.disabled = false;
-claimMsg.textContent = '';
+    claimSelected.disabled = false;
+    claimMsg.textContent = '';
   }catch(e){
     claimMsg.textContent = '❌ ' + String(e);
   }
 }
-claimRefresh?.addEventListener('click', listClaimables);
 
+claimRefresh?.addEventListener('click', listClaimables);
 // ======== CLAIM SELECTED (batch) ========
 claimSelected?.addEventListener('click', async ()=>{
   const pub = (claimPub.value||'').trim();
