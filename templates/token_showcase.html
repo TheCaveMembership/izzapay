@@ -465,108 +465,105 @@
     <footer>IZZA PAY — Testnet showcase · Built for demo & diagnostics</footer>
   </div>
 
-  <!-- Modal Backdrop + Roadmap Modal -->
-  <div class="modal-backdrop" id="modalBackdrop" hidden></div>
-  <div class="modal" id="roadmapModal" role="dialog" aria-modal="true" aria-labelledby="roadmapTitle" hidden>
-    <div class="modal-card">
-      <div class="modal-header">
-        <div class="modal-title">
-          <img src="/static/izzapay-mark.svg" alt="">
-          <span id="roadmapTitle">MAINNET ROADMAP</span>
-        </div>
-        <button class="close-btn" type="button" id="closeModalBtn">Close</button>
+  <!-- Modal Backdrop -->
+<div class="modal-backdrop" id="modalBackdrop" hidden></div>
+
+<!-- ROADMAP MODAL -->
+<div class="modal" id="roadmapModal" role="dialog" aria-modal="true" aria-labelledby="roadmapTitle" hidden>
+  <div class="modal-card">
+    <div class="modal-header">
+      <div class="modal-title">
+        <img src="/static/izzapay-mark.svg" alt="">
+        <span id="roadmapTitle">MAINNET ROADMAP</span>
       </div>
-      <div class="modal-body">
-        <span class="pill">Total Supply Target: 33.33 Billion (Mainnet)</span>
-
-        <div class="road-grid" style="margin-top:12px">
-          <div class="blox">
-            <h4>Why a Token at All?</h4>
-            <p>IZZA Coins power gameplay.<br><strong>IZZA Token</strong> powers the ecosystem.</p>
-            <ul class="list">
-              <li><strong>Governance</strong>: Vote on new mini-games, IZZA City expansions, creator marketplace rules.</li>
-              <li><strong>Staking</strong>: Stake tokens to earn boosted Crafting Credits / seasonal IZZA Coin boosts.</li>
-              <li><strong>Access</strong>: Token-gated drops, rare blueprints, early creator tools.</li>
-              <li><strong>Biz Utility</strong>: Merchant fee discounts and premium IZZA Pay tiers for holders.</li>
-              <li><strong>Dev Listing</strong>: Arcade listings prioritized via stake + quality score.</li>
-            </ul>
-
-            <div class="img-row" style="margin-top:10px">
-              <img src="{{ url_for('serve_assets', filename='izza.png') }}" alt="IZZA coin">
-              <img src="/static/izzapay-mark.svg" alt="IZZA mark">
-            </div>
-          </div>
-
-          <div class="blox">
-            <h4>Economy Layering</h4>
-            <div class="grid-2">
-              <div class="statline">
-                <div class="mini-mark" aria-hidden="true" style="font-size:18px;line-height:1">👾</div>
-                <div><strong>IZZA Coins</strong><div class="small" style="color:var(--muted)">Soft in-game currency</div></div>
-              </div>
-              <div class="statline">
-                <div class="mini-mark">💎</div>
-                <div><strong>Crafting Credits</strong><div class="small" style="color:var(--muted)">Premium consumable via Pi</div></div>
-              </div>
-              <div class="statline center-span">
-                <div class="mini-mark"><img src="{{ url_for('serve_assets', filename='izza.png') }}" alt="" style="width:18px;height:18px"></div>
-                <div style="text-align:center;width:100%">
-                  <strong>IZZA Token</strong>
-                  <div class="small" style="color:var(--muted)">Scarce, stake + govern</div>
-                </div>
-              </div>
-            </div>
-            <p style="margin-top:10px">Peg reference stays for in-game economics (2,000 Coins ≈ 1 Pi). Token remains <em>non-inflationary</em> with utility via staking + access.</p>
-          </div>
-        </div>
-
-        <div class="blox" style="margin-top:12px">
-          <h4>Distribution Plan (Illustrative)</h4>
-          <div class="grid-2">
-            <ul class="list">
-              <li><strong>40%</strong> Growth: public sale + staking rewards</li>
-              <li><strong>25%</strong> Ecosystem: new games, marketplace, tools</li>
-              <li><strong>20%</strong> Team: 12-month cliff, 36-month vest</li>
-              <li><strong>10%</strong> Partners: merchants, collabs</li>
-              <li><strong>5%</strong> Community: airdrops for early testers</li>
-            </ul>
-            <div>
-              <p style="margin:4px 0 0 0;color:#cfe0ff">
-                Vesting &amp; emissions published on-chain. Staking yields are dynamic and balanced vs. arcade earnings to avoid inflation shocks.
-              </p>
-
-              <!-- Smaller, tidy glow chips (unchanged sizes/positioning) -->
-              <div class="glow-stack" style="margin-top:14px;">
-                <div class="glow violet" style="--sz: 45px; --img: 48px; --offset-x: 0px; --offset-y: -4px;">
-                  <img src="/static/izzapay-mark.svg" alt="">
-                </div>
-                <div class="glow gold" style="--sz: 40px; --img: 66px; --offset-x: 0px; --offset-y: 6px;">
-                  <img src="{{ url_for('serve_assets', filename='izza.png') }}" alt="IZZA coin">
-                </div>
-              </div>
-            </div>
-          </div>
-        </div>
-
-        <div class="blox" style="margin-top:12px">
-          <h4>Launch Roadmap</h4>
+      <button class="close-btn" type="button" id="closeModalBtn">Close</button>
+    </div>
+    <div class="modal-body">
+      <span class="pill">Total Supply Target: 33.33 Billion (Mainnet)</span>
+      <div class="road-grid" style="margin-top:12px">
+        <div class="blox">
+          <h4>Why a Token at All?</h4>
+          <p>IZZA Coins power gameplay.<br><strong>IZZA Token</strong> powers the ecosystem.</p>
           <ul class="list">
-            <li><strong>Phase 1 — Testnet Live</strong>: Issuer/distributor diagnostics, faucet &amp; trustlines, IZZA City + Arcade earn loop validated.</li>
-            <li><strong>Phase 2 — Staking Beta</strong>: Token staking → soft boosts to Crafting Credit earnings, seasonal badges, holder quests.</li>
-            <li><strong>Phase 3 — Governance v1</strong>: On-chain votes for new Arcade titles, blueprint rarity schedules, and marketplace fees.</li>
-            <li><strong>Phase 4 — Merchant Utility</strong>: IZZA Pay fee rebates for holders, business dashboards with token-gated promos.</li>
-            <li><strong>Phase 5 — Mainnet Mint (33.33B)</strong>: Final supply + vesting on chain, liquidity bootstrapping, cross-ecosystem creator drops.</li>
+            <li><strong>Governance</strong>: Vote on new mini-games, IZZA City expansions, creator marketplace rules.</li>
+            <li><strong>Staking</strong>: Stake tokens to earn boosted Crafting Credits / seasonal IZZA Coin boosts.</li>
+            <li><strong>Access</strong>: Token-gated drops, rare blueprints, early creator tools.</li>
+            <li><strong>Biz Utility</strong>: Merchant fee discounts and premium IZZA Pay tiers for holders.</li>
+            <li><strong>Dev Listing</strong>: Arcade listings prioritized via stake + quality score.</li>
           </ul>
+          <div class="img-row" style="margin-top:10px">
+            <img src="{{ url_for('serve_assets', filename='izza.png') }}" alt="IZZA coin">
+            <img src="/static/izzapay-mark.svg" alt="IZZA mark">
+          </div>
         </div>
 
-        <div class="blox" style="margin-top:12px">
-          <h4>Value Loop</h4>
-          <p>Players earn Coins → buy Crafting Credits (via Pi) → craft &amp; trade → creators/merchants thrive. <strong>IZZA Token</strong> captures upside by governing, staking, and unlocking the best parts of the ecosystem.</p>
+        <div class="blox">
+          <h4>Economy Layering</h4>
+          <div class="grid-2">
+            <div class="statline">
+              <div class="mini-mark" style="font-size:18px;line-height:1">👾</div>
+              <div><strong>IZZA Coins</strong><div class="small" style="color:var(--muted)">Soft in-game currency</div></div>
+            </div>
+            <div class="statline">
+              <div class="mini-mark">💎</div>
+              <div><strong>Crafting Credits</strong><div class="small" style="color:var(--muted)">Premium consumable via Pi</div></div>
+            </div>
+            <div class="statline center-span">
+              <div class="mini-mark"><img src="{{ url_for('serve_assets', filename='izza.png') }}" style="width:18px;height:18px"></div>
+              <div style="text-align:center;width:100%">
+                <strong>IZZA Token</strong>
+                <div class="small" style="color:var(--muted)">Scarce, stake + govern</div>
+              </div>
+            </div>
+          </div>
+          <p style="margin-top:10px">Peg reference stays for in-game economics (2,000 Coins ≈ 1 Pi). Token remains <em>non-inflationary</em> with utility via staking + access.</p>
         </div>
+      </div>
+
+      <div class="blox" style="margin-top:12px">
+        <h4>Distribution Plan (Illustrative)</h4>
+        <div class="grid-2">
+          <ul class="list">
+            <li><strong>40%</strong> Growth: public sale + staking rewards</li>
+            <li><strong>25%</strong> Ecosystem: new games, marketplace, tools</li>
+            <li><strong>20%</strong> Team: 12-month cliff, 36-month vest</li>
+            <li><strong>10%</strong> Partners: merchants, collabs</li>
+            <li><strong>5%</strong> Community: airdrops for early testers</li>
+          </ul>
+          <div>
+            <p style="margin:4px 0 0 0;color:#cfe0ff">Vesting &amp; emissions published on-chain. Staking yields are dynamic and balanced vs. arcade earnings to avoid inflation shocks.</p>
+            <div class="glow-stack" style="margin-top:14px;">
+              <div class="glow violet" style="--sz:45px;--img:48px;--offset-x:0;--offset-y:-4px;">
+                <img src="/static/izzapay-mark.svg" alt="">
+              </div>
+              <div class="glow gold" style="--sz:40px;--img:66px;--offset-x:0;--offset-y:6px;">
+                <img src="{{ url_for('serve_assets', filename='izza.png') }}" alt="IZZA coin">
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div class="blox" style="margin-top:12px">
+        <h4>Launch Roadmap</h4>
+        <ul class="list">
+          <li><strong>Phase 1 — Testnet Live</strong>: Issuer/distributor diagnostics, faucet &amp; trustlines, IZZA City + Arcade earn loop validated.</li>
+          <li><strong>Phase 2 — Staking Beta</strong>: Token staking → soft boosts to Crafting Credit earnings, seasonal badges, holder quests.</li>
+          <li><strong>Phase 3 — Governance v1</strong>: On-chain votes for new Arcade titles, blueprint rarity schedules, and marketplace fees.</li>
+          <li><strong>Phase 4 — Merchant Utility</strong>: IZZA Pay fee rebates for holders, business dashboards with token-gated promos.</li>
+          <li><strong>Phase 5 — Mainnet Mint (33.33B)</strong>: Final supply + vesting on chain, liquidity bootstrapping, cross-ecosystem creator drops.</li>
+        </ul>
+      </div>
+
+      <div class="blox" style="margin-top:12px">
+        <h4>Value Loop</h4>
+        <p>Players earn Coins → buy Crafting Credits (via Pi) → craft &amp; trade → creators/merchants thrive. <strong>IZZA Token</strong> captures upside by governing, staking, and unlocking the best parts of the ecosystem.</p>
       </div>
     </div>
   </div>
-<!-- MY WALLET MODAL (uses the same backdrop) -->
+</div>
+
+<!-- MY WALLET MODAL -->
 <div class="modal" id="myWalletModal" role="dialog" aria-modal="true" aria-labelledby="myWalletTitle" hidden>
   <div class="modal-card">
     <div class="modal-header">
@@ -581,135 +578,146 @@
         <div class="small-muted">Signed in as</div>
         <div><strong id="mwUser">—</strong></div>
       </div>
-
       <div class="blox" style="margin-top:10px">
         <div class="small-muted">Active Wallet (public key)</div>
         <div class="mono" id="mwPub" style="word-break:break-all">—</div>
       </div>
-
       <div class="grid" style="gap:12px;margin-top:10px">
         <div class="blox">
-          <h4 style="margin:0 0 8px 0">Balances</h4>
-          <div class="small-muted">Pi</div>
-          <div class="mono" id="mwPi">—</div>
-          <div class="small-muted" style="margin-top:8px">IZZA</div>
-          <div class="mono" id="mwIzza">—</div>
+          <h4>Balances</h4>
+          <div class="small-muted">Pi</div><div class="mono" id="mwPi">—</div>
+          <div class="small-muted" style="margin-top:8px">IZZA</div><div class="mono" id="mwIzza">—</div>
         </div>
         <div class="blox">
-          <h4 style="margin:0 0 8px 0">Actions</h4>
-          <button id="revealOnceBtn" class="cta" type="button" style="margin-right:8px">Reveal Secret (once)</button>
-            <div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:8px">
-    <button id="openStakeBtn"  class="cta" type="button">📥 Stake IZZA</button>
-    <button id="openClaimBtn"  class="cta" type="button">💰 Claim Rewards</button>
-  </div>
-          
+          <h4>Actions</h4>
+          <button id="revealOnceBtn" class="cta">Reveal Secret (once)</button>
+          <div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:8px">
+            <button id="openStakeBtn" class="cta">📥 Stake IZZA</button>
+            <button id="openClaimBtn" class="cta">💰 Claim Rewards</button>
+          </div>
           <div class="help" style="margin-top:8px">
-  This is a <strong>non-custodial</strong> wallet. We never send your secret to the server.
-  <br><em>Fine print:</em> You can reveal your secret <strong>one more time</strong> on this device during this session only.
-</div>
+            <strong>Non-custodial wallet</strong> — secret never sent to server.
+            <br><em>Reveal once per session only.</em>
+          </div>
           <pre id="secretOnce" style="display:none;margin-top:10px;padding:10px;border:1px dashed rgba(255,255,255,.12);border-radius:10px"></pre>
-                <!-- ADD: Import Secret box (existing wallet) -->
-      <div class="blox" style="margin-top:10px">
-        <h4 style="margin:0 0 8px 0">Import Secret (existing wallet)</h4>
-        <div class="field">
-          <label>Public Key (G…)</label>
-          <input id="impPub" type="text" placeholder="G..." inputmode="latin" autocomplete="off">
-        </div>
-        <div class="field">
-          <label>Secret Key (S…)</label>
-          <input id="impSec" type="password" placeholder="S..." inputmode="latin" autocomplete="off">
-        </div>
-        <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center">
-          <button id="importSecretBtn" class="cta" type="button">Save Secret Locally</button>
-          <label style="display:flex;gap:8px;align-items:center">
-            <input id="impUseForOrders" type="checkbox" checked>
-            <span>Set as Active for Orders</span>
-          </label>
-          <!-- Optional (server escrow, see section C): -->
-          <button id="saveSecretServerBtn" class="cta" type="button" style="display:none">Save Encrypted to Server</button>
-          <button id="restoreSecretServerBtn" class="cta" type="button" style="display:none">Restore from Server</button>
-        </div>
-        <div id="impMsg" class="help" style="margin-top:6px"></div>
-      </div>
+          <div class="blox" style="margin-top:10px">
+            <h4>Import Secret (existing wallet)</h4>
+            <div class="field"><label>Public Key (G…)</label><input id="impPub" type="text" placeholder="G..." autocomplete="off"></div>
+            <div class="field"><label>Secret Key (S…)</label><input id="impSec" type="password" placeholder="S..." autocomplete="off"></div>
+            <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center">
+              <button id="importSecretBtn" class="cta">Save Secret Locally</button>
+              <label style="display:flex;gap:8px;align-items:center"><input id="impUseForOrders" type="checkbox" checked><span>Set as Active for Orders</span></label>
+            </div>
+            <div id="impMsg" class="help" style="margin-top:6px"></div>
+          </div>
         </div>
       </div>
     </div>
   </div>
 </div>
-  <!-- ORDER BOOK MODAL (reuses backdrop) -->
-  <div class="modal" id="orderbookModal" role="dialog" aria-modal="true" aria-labelledby="orderbookTitle" hidden>
-    <div class="modal-card">
-      <div class="modal-header">
-        <div class="modal-title">
-          <img src="/static/izzapay-mark.svg" alt="">
-          <span id="orderbookTitle">IZZA / Pi — Order Book</span>
+
+<!-- ORDER BOOK MODAL -->
+<div class="modal" id="orderbookModal" role="dialog" aria-modal="true" aria-labelledby="orderbookTitle" hidden>
+  <div class="modal-card">
+    <div class="modal-header">
+      <div class="modal-title">
+        <img src="/static/izzapay-mark.svg" alt="">
+        <span id="orderbookTitle">IZZA / Pi — Order Book</span>
+      </div>
+      <div style="display:flex;gap:8px;align-items:center">
+        <a id="addTrustBtn" class="close-btn" style="text-decoration:none" href="#deepSection">Add Trustline (SEP-7)</a>
+        <button class="close-btn" id="closeOrderbookBtn">Close</button>
+      </div>
+    </div>
+    <div class="modal-body">
+      <div class="ob-toolbar" style="margin-bottom:10px">
+        <div class="seg" role="tablist">
+          <button class="rangeBtn" data-range="1D" aria-pressed="true">1D</button>
+          <button class="rangeBtn" data-range="1W">1W</button>
+          <button class="rangeBtn" data-range="1M">1M</button>
+          <button class="rangeBtn" data-range="1Y">1Y</button>
+          <button class="rangeBtn" data-range="ALL">ALL</button>
         </div>
-        <div style="display:flex;gap:8px;align-items:center">
-          <a id="addTrustBtn" class="close-btn" style="text-decoration:none" href="#deepSection">Add Trustline (SEP-7)</a>
-          <button class="close-btn" type="button" id="closeOrderbookBtn">Close</button>
+        <span class="help">Purple = Price (Pi/IZZA), Gold = Volume</span>
+      </div>
+
+      <div class="chart-wrap"><canvas id="izzaChart"></canvas></div>
+
+      <div class="row" style="margin:12px 0">
+        <div class="pill">Best Ask: <span id="obBestAsk">–</span> Pi</div>
+        <div class="pill">Best Bid: <span id="obBestBid">–</span> Pi</div>
+        <div class="pill">Spread: <span id="obSpread">–</span></div>
+        <div class="pill">Total Asks: <span id="obSumAsks">–</span> IZZA</div>
+        <div class="pill">Updated: <span id="obUpdated">–</span></div>
+      </div>
+
+      <div class="grid" style="gap:12px">
+        <div class="blox">
+          <h4>Sell Orders (Asks)</h4>
+          <table id="asksTbl"><thead><tr><th>Price (Pi)</th><th>Amount (IZZA)</th><th>Total (Pi)</th></tr></thead><tbody></tbody></table>
+        </div>
+        <div class="blox">
+          <h4>Buy Orders (Bids)</h4>
+          <table id="bidsTbl"><thead><tr><th>Price (Pi)</th><th>Amount (IZZA)</th><th>Total (Pi)</th></tr></thead><tbody></tbody></table>
         </div>
       </div>
-      <div class="modal-body">
-        <!-- Chart toolbar -->
-        <div class="ob-toolbar" style="margin-bottom:10px">
-          <div class="seg" role="tablist" aria-label="Chart range">
-            <button class="rangeBtn" data-range="1D" aria-pressed="true">1D</button>
-            <button class="rangeBtn" data-range="1W">1W</button>
-            <button class="rangeBtn" data-range="1M">1M</button>
-            <button class="rangeBtn" data-range="1Y">1Y</button>
-            <button class="rangeBtn" data-range="ALL">ALL</button>
-          </div>
-          <span class="help">Purple = Price (Pi/IZZA), Gold = Volume</span>
-        </div>
-
-        <div class="chart-wrap">
-          <canvas id="izzaChart"></canvas>
-        </div>
-
-        <div class="row" style="margin:12px 0">
-          <div class="pill">Best Ask: <span id="obBestAsk">–</span> Pi</div>
-          <div class="pill">Best Bid: <span id="obBestBid">–</span> Pi</div>
-          <div class="pill">Spread: <span id="obSpread">–</span></div>
-          <div class="pill">Total Asks: <span id="obSumAsks">–</span> IZZA</div>
-          <div class="pill">Updated: <span id="obUpdated">–</span></div>
-        </div>
-
-        <div class="grid" style="gap:12px">
-          <div class="blox">
-            <h4 style="margin:0 0 8px 0">Sell Orders (Asks) — price in Pi</h4>
-            <table id="asksTbl" style="width:100%;border-collapse:collapse">
-              <thead>
-                <tr>
-                  <th style="text-align:left;padding:8px;border-bottom:1px solid rgba(255,255,255,.08)">Price (Pi)</th>
-                  <th style="text-align:right;padding:8px;border-bottom:1px solid rgba(255,255,255,.08)">Amount (IZZA)</th>
-                  <th style="text-align:right;padding:8px;border-bottom:1px solid rgba(255,255,255,.08)">Total (Pi)</th>
-                </tr>
-              </thead>
-              <tbody></tbody>
-            </table>
-          </div>
-
-          <div class="blox">
-            <h4 style="margin:0 0 8px 0">Buy Orders (Bids) — price in Pi</h4>
-            <table id="bidsTbl" style="width:100%;border-collapse:collapse">
-              <thead>
-                <tr>
-                  <th style="text-align:left;padding:8px;border-bottom:1px solid rgba(255,255,255,.08)">Price (Pi)</th>
-                  <th style="text-align:right;padding:8px;border-bottom:1px solid rgba(255,255,255,.08)">Amount (IZZA)</th>
-                  <th style="text-align:right;padding:8px;border-bottom:1px solid rgba(255,255,255,.08)">Total (Pi)</th>
-                </tr>
-              </thead>
-              <tbody></tbody>
-            </table>
-          </div>
-        </div>
-
-        <div class="small-muted" style="margin-top:10px">
-          Data source: Pi Testnet Horizon. Auto-refreshes every 10s. <a id="rawOrderbookLink" target="_blank" rel="noopener" style="color:#8ab4ff">Raw JSON</a>
-        </div>
+      <div class="small-muted" style="margin-top:10px">
+        Data source: Pi Testnet Horizon. Auto-refreshes every 10s. <a id="rawOrderbookLink" target="_blank">Raw JSON</a>
       </div>
     </div>
   </div>
+</div>
+
+<!-- STAKE MODAL -->
+<div class="modal" id="stakeModal" role="dialog" aria-modal="true" aria-labelledby="stakeTitle" hidden>
+  <div class="modal-card">
+    <div class="modal-header">
+      <div class="modal-title"><img src="/static/izzapay-mark.svg"><span id="stakeTitle">Stake IZZA</span></div>
+      <button class="close-btn" id="closeStakeBtn">Close</button>
+    </div>
+    <div class="modal-body">
+      <div class="blox"><div class="small-muted">Public Key</div><input id="stakePub" class="mono"></div>
+      <div class="row2" style="margin-top:10px">
+        <div class="field"><label>Amount (IZZA)</label><input id="stakeAmt" type="number" step="0.0000001"></div>
+        <div class="field"><label>Lock Days</label><input id="stakeDays" type="number" min="1" max="365" value="30"></div>
+      </div>
+      <div id="stakePreviewBox" style="margin-top:10px;display:none">
+        <div class="grid" style="gap:10px">
+          <div><div class="small-muted">APR</div><strong id="stakeAPR">—</strong></div>
+          <div><div class="small-muted">Reward</div><strong id="stakeReward">—</strong></div>
+          <div><div class="small-muted">Unlock</div><strong id="stakeUnlock">—</strong></div>
+        </div>
+      </div>
+      <div style="margin-top:10px;display:flex;gap:8px">
+        <button id="stakePreviewBtn" class="cta">Preview</button>
+        <button id="stakeStartBtn" class="cta" disabled>Start Stake</button>
+      </div>
+      <div id="stakeMsg" class="help" style="margin-top:8px"></div>
+    </div>
+  </div>
+</div>
+
+<!-- CLAIM MODAL -->
+<div class="modal" id="claimModal" role="dialog" aria-modal="true" aria-labelledby="claimTitle" hidden>
+  <div class="modal-card">
+    <div class="modal-header">
+      <div class="modal-title"><img src="/static/izzapay-mark.svg"><span id="claimTitle">Claim Rewards / Principal</span></div>
+      <button class="close-btn" id="closeClaimBtn">Close</button>
+    </div>
+    <div class="modal-body">
+      <div class="blox"><div class="small-muted">Public Key</div><input id="claimPub" class="mono"></div>
+      <div style="margin-top:10px;display:flex;gap:8px">
+        <button id="claimRefreshBtn" class="cta">Refresh</button>
+        <button id="claimSelectedBtn" class="cta" disabled>Claim Selected</button>
+      </div>
+      <div class="blox" style="margin-top:10px">
+        <div class="small-muted">Claimable Balances</div>
+        <table id="claimTbl"><thead><tr><th>Pick</th><th>Kind</th><th>Amount</th><th>ID</th><th>Modified</th></tr></thead><tbody></tbody></table>
+      </div>
+      <div id="claimMsg" class="help" style="margin-top:8px"></div>
+    </div>
+  </div>
+</div>
 
   <!-- PLACE ORDER MODAL -->
   <div class="modal" id="placeOrderModal" role="dialog" aria-modal="true" aria-labelledby="placeOrderTitle" hidden>
@@ -726,96 +734,7 @@
   <button id="createWalletBtn" type="button" class="cta">✚ Create Test Wallet</button>
   <div id="walletStatus" class="help" aria-live="polite"></div>
 </div>
-<!-- STAKE MODAL (top-level, not nested) -->
-<div class="modal" id="stakeModal" role="dialog" aria-modal="true" aria-labelledby="stakeTitle" hidden>
-  <div class="modal-card">
-    <div class="modal-header">
-      <div class="modal-title">
-        <img src="/static/izzapay-mark.svg" alt="">
-        <span id="stakeTitle">Stake IZZA</span>
-      </div>
-      <button class="close-btn" type="button" id="closeStakeBtn">Close</button>
-    </div>
-    <div class="modal-body">
-      <div class="blox">
-        <div class="small-muted">Staker (public key)</div>
-        <div><input id="stakePub" class="mono" style="width:100%;background:rgba(255,255,255,.06);border:1px solid rgba(255,255,255,.12);color:#fff;padding:10px;border-radius:10px"></div>
-      </div>
 
-      <div class="row2" style="margin-top:10px">
-        <div class="field">
-          <label>Amount (IZZA)</label>
-          <input id="stakeAmt" type="number" step="0.0000001" inputmode="decimal" placeholder="e.g. 1000">
-        </div>
-        <div class="field">
-          <label>Lock length</label>
-          <select id="stakeDays">
-            <option value="30">30 days</option>
-            <option value="90">90 days</option>
-            <option value="180">180 days</option>
-          </select>
-        </div>
-      </div>
-
-      <div id="stakePreviewBox" class="blox" style="margin-top:10px;display:none">
-        <div class="grid" style="gap:10px">
-          <div><div class="small-muted">APR</div><strong id="stakeAPR">—</strong></div>
-          <div><div class="small-muted">Estimated reward</div><strong id="stakeReward">—</strong></div>
-          <div><div class="small-muted">Unlocks (UTC)</div><strong id="stakeUnlock">—</strong></div>
-        </div>
-      </div>
-
-      <div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:12px">
-        <button id="stakePreviewBtn" class="cta" type="button">Preview</button>
-        <button id="stakeStartBtn"   class="cta" type="button" disabled>Start Stake</button>
-      </div>
-
-      <div id="stakeMsg" class="help" style="margin-top:8px"></div>
-    </div>
-  </div>
-</div>
-
-<!-- CLAIM MODAL (top-level, not nested) -->
-<div class="modal" id="claimModal" role="dialog" aria-modal="true" aria-labelledby="claimTitle" hidden>
-  <div class="modal-card">
-    <div class="modal-header">
-      <div class="modal-title">
-        <img src="/static/izzapay-mark.svg" alt="">
-        <span id="claimTitle">Claim Rewards / Principal</span>
-      </div>
-      <button class="close-btn" type="button" id="closeClaimBtn">Close</button>
-    </div>
-    <div class="modal-body">
-      <div class="blox">
-        <div class="small-muted">Wallet (public key)</div>
-        <div><input id="claimPub" class="mono" style="width:100%;background:rgba(255,255,255,.06);border:1px solid rgba(255,255,255,.12);color:#fff;padding:10px;border-radius:10px"></div>
-      </div>
-
-      <div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:10px">
-        <button id="claimRefreshBtn" class="cta" type="button">Refresh</button>
-        <button id="claimSelectedBtn" class="cta" type="button" disabled>Claim Selected</button>
-      </div>
-
-      <div class="blox" style="margin-top:10px">
-        <div class="small-muted">Claimable balances</div>
-        <table id="claimTbl" style="width:100%;border-collapse:collapse;margin-top:8px">
-          <thead>
-            <tr>
-              <th style="text-align:left;padding:8px;border-bottom:1px solid rgba(255,255,255,.08)">Pick</th>
-              <th style="text-align:left;padding:8px;border-bottom:1px solid rgba(255,255,255,.08)">Kind</th>
-              <th style="text-align:right;padding:8px;border-bottom:1px solid rgba(255,255,255,.08)">Amount</th>
-              <th style="text-align:left;padding:8px;border-bottom:1px solid rgba(255,255,255,.08)">Balance ID</th>
-              <th style="text-align:left;padding:8px;border-bottom:1px solid rgba(255,255,255,.08)">Last modified (UTC)</th>
-            </tr>
-          </thead>
-          <tbody></tbody>
-        </table>
-      </div>
-
-      <div id="claimMsg" class="help" style="margin-top:8px"></div>
-    </div>
-  </div>
-</div>
 <!-- Shows after creation -->
 <div id="newWalletBox" class="blox" style="display:none;margin-bottom:10px">
   <h4 style="margin:0 0 6px 0">Your IZZA Test Wallet</h4>
