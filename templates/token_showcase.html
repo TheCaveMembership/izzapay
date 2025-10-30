@@ -1829,15 +1829,12 @@ const kindStr  = (r.kind || r.bucket || r.pool || '').toString().toLowerCase().i
 // 🔑 group id
 let gid;
 if (kindStr === 'vote'){
-  // For VOTE: use the most specific stable identifier so
-  // different vote contracts never collapse into one block.
+  // Always prefer the most specific identifiers so each vote contract stays separate
   gid =
-    r.contract_id || r.vote_id || r.parent_id || r.batch_id ||
+    r.contract_id || r.vote_id || r.id || r.parent_id || r.batch_id ||
     r.tx || r.tx_hash || r.source ||
-    // last resort: make a synthetic—but still per-contract—key:
     ['vote', unlockTs || 0, (r.memo || ''), (r.created_at || r.id || '').toString().slice(-12)].join('|');
 }else{
-  // Regular: keep your previous grouping behavior
   gid =
     r.contract_id || r.stake_id || r.group_id || r.parent_id || r.batch_id ||
     [unlockTs || 0, kindStr, (r.tx || r.tx_hash || r.source || r.created_at || r.id || '').toString().slice(-12)].join('|');
@@ -1889,36 +1886,53 @@ function getVoteAprBoostPct(recs){
       }
 
       // ---- Header row (ONE checkbox per contract)
-      const trHead = document.createElement('tr');
-      trHead.className = `group-head is-${kind}` + (unlocked ? '' : ' locked');
-      trHead.innerHTML = `
-        <td colspan="4">
-          <label class="group-toggle" style="display:flex;align-items:center;gap:10px;white-space:nowrap;">
-            <input type="checkbox" class="cbPick" value="${ids.join(',')}" ${unlocked ? '' : 'disabled'}>
-            <span class="pill ${pillClass}">${labelKind}</span>
-            <strong>Stake • unlock ${unlockStr}</strong>
-          </label>
-        </td>`;
-      claimTblBody.appendChild(trHead);
+const trHead = document.createElement('tr');
+trHead.className = `group-head is-${kind}` + (unlocked ? '' : ' locked');
+trHead.innerHTML = `
+  <td colspan="4">
+    <label class="group-toggle" style="display:flex;align-items:center;gap:10px;white-space:nowrap;">
+      <input type="checkbox" class="cbPick" value="${ids.join(',')}" ${unlocked ? '' : 'disabled'}>
+      <span class="pill ${pillClass}">${labelKind}</span>
+      <strong>Stake • unlock ${unlockStr}</strong>
+    </label>
+  </td>`;
+claimTblBody.appendChild(trHead);
 
-      // ---- Compact block: principal + reward together (no wrap)
-      const trBlock = document.createElement('tr');
-      trBlock.className = `group-row is-${kind}` + (unlocked ? '' : ' locked');
-      trBlock.innerHTML = `
-        <td colspan="4">
-          <div class="block" style="display:flex;flex-direction:column;gap:8px;">
-            <div class="line" style="display:flex;justify-content:space-between;align-items:center;white-space:nowrap;">
-              <span class="pill ${pillClass}" aria-hidden="true">PRINCIPAL</span>
-              <span class="num">${fmtNum(principal)}</span>
-            </div>
-            <div class="line" style="display:flex;justify-content:space-between;align-items:center;white-space:nowrap;">
-              <span class="pill ${pillClass}" aria-hidden="true">REWARD</span>
-              <span class="num">${fmtNum(reward)}</span>
-            </div>
-            ${unlocked ? '' : `<span class="lockhint">Locked until ${unlockStr}</span>`}
-          </div>
-        </td>`;
-      claimTblBody.appendChild(trBlock);
+// ============================================================
+// ⬇️ REPLACE everything below this comment
+// ============================================================
+
+// ---- Compact block: principal + reward together (no wrap)
+const trBlock = document.createElement('tr');
+trBlock.className = `group-row is-${kind}` + (unlocked ? '' : ' locked');
+
+const rewardHTML = (kind === 'vote')
+  ? (() => {
+      const pct = getVoteAprBoostPct(recs);
+      return `
+        <div class="line" style="display:flex;justify-content:space-between;align-items:center;white-space:nowrap;">
+          <span class="pill ${pillClass}" aria-hidden="true">EST. APR BOOST</span>
+          <span class="num">${(isFinite(pct) ? pct : 0).toFixed(2)}%</span>
+        </div>`;
+    })()
+  : `
+    <div class="line" style="display:flex;justify-content:space-between;align-items:center;white-space:nowrap;">
+      <span class="pill ${pillClass}" aria-hidden="true">REWARD</span>
+      <span class="num">${fmtNum(reward)}</span>
+    </div>`;
+
+trBlock.innerHTML = `
+  <td colspan="4">
+    <div class="block" style="display:flex;flex-direction:column;gap:8px;">
+      <div class="line" style="display:flex;justify-content:space-between;align-items:center;white-space:nowrap;">
+        <span class="pill ${pillClass}" aria-hidden="true">PRINCIPAL</span>
+        <span class="num">${fmtNum(principal)}</span>
+      </div>
+      ${rewardHTML}
+      ${unlocked ? '' : `<span class="lockhint">Locked until ${unlockStr}</span>`}
+    </div>
+  </td>`;
+claimTblBody.appendChild(trBlock);
     }
 
     claimSelected.disabled = false;
