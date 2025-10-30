@@ -373,6 +373,22 @@
     .tabbar{display:flex;gap:8px;margin-bottom:8px}
     .tabbar button{border:1px solid rgba(255,255,255,.12);background:rgba(255,255,255,.04);padding:8px 10px;border-radius:10px;color:#fff;font-weight:800;cursor:pointer}
     .tabbar button[aria-pressed="true"]{background:rgba(122,68,255,.33)}
+    /* Mobile-first claim blocks */
+.claim-block{
+  border-radius:14px;
+  padding:12px;
+  margin:10px 6px;
+  box-shadow: 0 0 0 1px var(--line) inset;
+}
+.claim-block.regular{ background: rgba(122,68,255,0.08); } /* purple */
+.claim-block.vote{    background: rgba(255,205,96,0.10); } /* gold */
+.cb-head{ display:flex; align-items:center; gap:10px; }
+.cb-head .meta{ color:var(--muted); font-size:12px; margin-left:auto; }
+.cb-head .pick{ display:flex; align-items:center; gap:6px; font-size:14px; }
+.cb-body{ margin-top:8px; display:flex; flex-direction:column; gap:6px; }
+.cb-body .line{ display:flex; justify-content:space-between; align-items:center; }
+.cb-body .line.sub{ font-size:13px; opacity:.9; }
+@media (min-width:760px){ .claim-block{ margin:10px 0; } }
   </style>
 </head>
 <body>
