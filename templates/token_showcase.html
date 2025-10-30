@@ -1413,16 +1413,6 @@ const orderBtn          = document.getElementById('orderBtn');
 const closePlaceOrderBtn= document.getElementById('closePlaceOrderBtn');
 const backdrop      = document.getElementById('modalBackdrop');
 const closeModalBtn = document.getElementById('closeModalBtn');
-  // include all modals here so only one is ever open
-const modals = [
-  modal,                // roadmapModal
-  orderbookModal,
-  placeOrderModal,
-  myWalletModal,
-  stakeModal,
-  claimModal,
-  voteModal
-];
 let lastFocus = null;
   // My Wallet modal (Actions)
 const revealOnceBtn = document.getElementById('revealOnceBtn');
@@ -1765,7 +1755,10 @@ claimSelected?.addEventListener('click', async ()=>{
 });
 function openModal(el, focusEl){
   lastFocus = document.activeElement;
-  modals.forEach(m => { if (m) { m.hidden = true; m.removeAttribute('open'); } });
+  [modal, orderbookModal, placeOrderModal, myWalletModal].forEach(m=>{
+    m.hidden = true;
+    m.removeAttribute('open');
+  });
   el.hidden = false;
   backdrop.hidden = false;
   el.setAttribute('open','');
@@ -1796,8 +1789,7 @@ closePlaceOrderBtn.addEventListener('click',()=> closeModal(placeOrderModal));
 // Backdrop click closes whichever is open (and stops OB refresh if needed)
 backdrop.addEventListener('click', ()=>{
   if (!orderbookModal.hidden){ stopObRefresh(); }
-  modals.forEach(m => { if (m && !m.hidden) closeModal(m); });
-});
+  [modal, orderbookModal, placeOrderModal, myWalletModal].forEach(m=>{
     if (!m.hidden) closeModal(m);
   });
 });
