@@ -1730,7 +1730,79 @@ function setVotePreview(j, amt){
   votePreviewBox.style.display = 'block';
   voteStartBtn.disabled = false;
 }
+// expects payload from /api/claim like:
+// { ok:true, items:[{type:'regular'|'vote', contract_id:'...', unlock_unix, principal_izza, reward_izza, label:'...', ...}, ...] }
 
+function renderClaims(payload){
+  const tbody = document.querySelector('#claimTbl tbody');
+  if (!tbody) return;
+  tbody.innerHTML = '';
+
+  const now = Math.floor(Date.now()/1000);
+
+  // group by type + contract_id (combine principal+reward per contract)
+  const groups = {};
+  for (const it of (payload.items||[])){
+    const key = `${it.type}|${it.contract_id}`;
+    if (!groups[key]){
+      groups[key] = {
+        type: it.type,
+        contract_id: it.contract_id,
+        unlock_unix: it.unlock_unix,
+        label: it.label || (it.type==='vote' ? 'Vote stake' : 'Stake'),
+        principal: 0,
+        reward: 0
+      };
+    }
+    groups[key].principal += Number(it.principal_izza||0);
+    groups[key].reward    += Number(it.reward_izza||0);
+  }
+
+  const byType = { regular:[], vote:[] };
+  Object.values(groups).forEach(g => byType[g.type]?.push(g));
+  byType.regular.sort((a,b)=>a.unlock_unix-b.unlock_unix);
+  byType.vote.sort((a,b)=>a.unlock_unix-b.unlock_unix);
+
+  function addSection(list, cssType){
+    if (!list.length) return;
+
+    // section head
+    const head = document.createElement('tr');
+    head.className = `group-head is-${cssType}`;
+    head.innerHTML = `<td colspan="5">
+        <span class="pill pill-${cssType}">${cssType === 'vote' ? 'VOTE' : 'REGULAR'}</span>
+        <strong style="margin-left:8px">${cssType === 'vote' ? 'Vote-stake contracts' : 'Stake contracts'}</strong>
+      </td>`;
+    tbody.appendChild(head);
+
+    // rows (each contract separate)
+    for (const g of list){
+      const total = g.principal + g.reward;
+      const locked = (g.unlock_unix ?? 0) > now;
+
+      const tr = document.createElement('tr');
+      tr.className = `group-row is-${cssType}` + (locked ? ' locked' : '');
+
+      tr.innerHTML = `
+        <td>
+          <label class="pick">
+            <input type="checkbox" data-contract="${g.contract_id}" ${locked ? 'disabled' : ''}>
+            <span>${g.label}</span>
+          </label>
+          <span class="lockhint">${locked ? `Unlocks ${new Date(g.unlock_unix*1000).toLocaleString()}` : 'Ready'}</span>
+        </td>
+        <td class="num">${g.principal.toLocaleString(undefined,{maximumFractionDigits:7})}</td>
+        <td class="num">${g.reward.toLocaleString(undefined,{maximumFractionDigits:7})}</td>
+        <td class="num"><strong>${total.toLocaleString(undefined,{maximumFractionDigits:7})}</strong></td>
+        <td class="num mono">${g.contract_id.slice(0,6)}…${g.contract_id.slice(-4)}</td>
+      `;
+      tbody.appendChild(tr);
+    }
+  }
+
+  addSection(byType.regular, 'regular');
+  addSection(byType.vote, 'vote');
+}
 // ==== PREVIEW CLICK ====
 votePreviewBtn?.addEventListener('click', async ()=>{
   const pub  = (votePub.value||'').trim();
