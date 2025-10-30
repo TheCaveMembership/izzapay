@@ -1685,49 +1685,59 @@ const voteVotes       = document.getElementById('voteVotes');
 const voteUnlock      = document.getElementById('voteUnlock');
 
 // Open/close
+// ==== VOTE MODAL OPEN (hide Lock Days via JS) ====
 voteQuickBtn?.addEventListener('click', async ()=>{
-  votePub.value = (ACTIVE_PUB || document.getElementById('acctPub')?.value || '');
+  votePub.value = (window.ACTIVE_PUB || document.getElementById('acctPub')?.value || '');
   voteMsg.textContent = '';
   votePreviewBox.style.display = 'none';
   voteStartBtn.disabled = true;
 
-  // HIDE lock-days for vote-staking
-  try { voteDays.closest('.field').style.display = 'none'; } catch(_) {}
+  const fld = document.getElementById('voteDays')?.closest('.field');
+  if (fld) fld.style.display = 'none';
 
   await loadVoteProposals();
   openModal(voteModal, closeVoteBtn);
 });
-closeVoteBtn?.addEventListener('click', ()=> closeModal(voteModal));
 
-// Fetch proposals (title + id/slug) from your API
-async function loadVoteProposals(){
-  try{
-    const r = await fetch('/api/arcade/proposals', { cache:'no-store' });
-    const j = await r.json();
-    const items = Array.isArray(j?.proposals) ? j.proposals : [];
-    voteGame.innerHTML = items.length
-      ? items.map(p=>`<option value="${p.id || p.slug}">${p.title}</option>`).join('')
-      : `<option disabled selected>No active proposals</option>`;
-  }catch{
-    voteGame.innerHTML = `<option disabled selected>Couldn’t load proposals</option>`;
+// Single writer for preview panel (no #voteAPR anywhere)
+function setVotePreview(j, amt){
+  // Boost ×
+  const boost = Number(j.boost ?? 1);
+  document.getElementById('voteBoost').textContent = `×${boost.toFixed(2)}`;
+
+  // Your Weight (votes)
+  const weight = Number(j.your_weight ?? amt ?? 0);
+  document.getElementById('voteWeight').textContent =
+    weight.toLocaleString(undefined,{maximumFractionDigits:7});
+
+  // Pool after your stake
+  const poolAfter = Number(j.pool_after ?? 0);
+  document.getElementById('votePoolAfter').textContent =
+    poolAfter.toLocaleString(undefined,{maximumFractionDigits:7});
+
+  // Est. Share (% if this game wins)
+  const pct = Number(j.your_share_pct_if_wins ?? 0);
+  document.getElementById('voteShare').textContent = `${pct.toFixed(2)}%`;
+
+  // helper
+  const helper = document.getElementById('voteShareHelp');
+  if (helper) {
+    const before = Number(j.pool_before ?? 0).toLocaleString();
+    const adpct  = Number(j.ad_pool_pct ?? 0).toFixed(0);
+    helper.textContent = `Assumes current pool ${before} votes. ${adpct}% of ad revenue goes to the winning game’s voters.`;
   }
+
+  votePreviewBox.style.display = 'block';
+  voteStartBtn.disabled = false;
 }
 
-// Preview (vote)
-// Safe label swap
-(() => {
-  const lbl = document.querySelector('#voteAPR')
-              ?.closest('.row')
-              ?.querySelector('.label');
-  if (lbl) lbl.textContent = 'Your share if this game wins';
-})();
-
-// preview handler (replace the block that used /api/stake/preview)
+// ==== PREVIEW CLICK ====
 votePreviewBtn?.addEventListener('click', async ()=>{
   const pub  = (votePub.value||'').trim();
   const raw  = String(voteAmt.value||'0').trim();
   const amt  = Number(raw.replace(/[^0-9.]/g,''));
   const proposal = voteGame.value;
+
   if (!pub.startsWith('G')){ voteMsg.textContent='Enter a valid G… public key.'; return; }
   if (!(amt>0)){ voteMsg.textContent='Enter a positive amount.'; return; }
   if (!proposal){ voteMsg.textContent='Pick a proposal.'; return; }
@@ -1741,25 +1751,14 @@ votePreviewBtn?.addEventListener('click', async ()=>{
     const j = await r.json();
     if (!r.ok || !j?.ok) throw new Error(j?.error || 'preview failed');
 
-    voteAPR.textContent    = `${Number(j.your_share_pct_if_wins).toFixed(2)}%`;
-    voteVotes.textContent  = amt.toLocaleString(undefined,{maximumFractionDigits:7});
-    voteUnlock.textContent = new Date(j.round_end_unix*1000).toISOString().replace('T',' ').replace('Z',' UTC');
-
-    // optional helper line
-    const helper = document.getElementById('voteShareHelp');
-    if (helper) helper.textContent =
-      `Assumes current pool ${Number(j.pool_before).toLocaleString()} votes. ` +
-      `${Number(j.ad_pool_pct).toFixed(0)}% of ad revenue goes to voters of the winning game.`;
-
-    votePreviewBox.style.display = '';
-    voteStartBtn.disabled = false;
+    setVotePreview(j, amt);
     voteMsg.textContent = '';
   }catch(e){
     voteMsg.textContent = '❌ ' + String(e);
   }
 });
 
-// Start vote-stake (build + sign/submit same as regular)
+// ==== START VOTE-STAKE (unchanged flow) ====
 voteStartBtn?.addEventListener('click', async ()=>{
   const pub  = (votePub.value||'').trim();
   const amt  = Number(String(voteAmt.value||'0').replace(/[^0-9.]/g,''));
@@ -1778,7 +1777,6 @@ voteStartBtn?.addEventListener('click', async ()=>{
     const xdr  = j.xdr;
     const pass = j.network_passphrase || 'Pi Testnet';
 
-    // Prefer wallet signing unless we KNOW we have a matching local secret
     const localSec = getLocalSecret(pub, USER?.username);
     if (localSec) {
       const ok = await ensureStellar();
@@ -1791,12 +1789,10 @@ voteStartBtn?.addEventListener('click', async ()=>{
         const resp = await server.submitTransaction(tx);
         voteMsg.innerHTML = resp?.hash ? `✅ Votes staked. Tx: <code>${resp.hash}</code>` : 'Submitted.';
       }catch(e){
-        // show precise Horizon reason
         const rc = e?.response?.data?.extras?.result_codes;
         voteMsg.textContent = `❌ submit failed: ${JSON.stringify(rc) || String(e)}`;
       }
     } else {
-      // Always deep-link to wallet so the USER signature is added
       const uri = `web+stellar:tx?xdr=${encodeURIComponent(xdr)}&network_passphrase=${encodeURIComponent(pass)}`;
       window.location.href = uri;
       voteMsg.innerHTML = `Opening wallet to sign…<br><small>If nothing opens, copy this into your wallet:</small><br><code style="word-break:break-all">${uri}</code>`;
