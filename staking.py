@@ -16,7 +16,6 @@ log = logging.getLogger(__name__)
 def _clean(s: str | None) -> str | None:
     if s is None:
         return None
-    # remove leading/trailing space and any stray newlines/carriage returns
     return s.strip().replace("\n", "").replace("\r", "")
 
 def _getenv(name: str, default: str | None = None, required: bool = False) -> str | None:
@@ -34,7 +33,7 @@ ISSUER_PUB   = _getenv("ISSUER_PUB", required=True)
 DISTR_PUB    = _getenv("DISTR_PUB", required=True)
 DISTR_SECRET = _getenv("DISTR_SECRET", required=True)
 
-# Validate keys early so failures are obvious
+# Validate keys early
 _env_problems = []
 if not StrKey.is_valid_ed25519_public_key(ISSUER_PUB or ""):
     _env_problems.append("ISSUER_PUB invalid")
@@ -55,7 +54,6 @@ def _izza_asset() -> Asset:
     return Asset(ASSET_CODE, ISSUER_PUB)
 
 def _clamp_days(days: int) -> int:
-    # enforce 1..180
     try:
         d = int(days)
     except Exception:
@@ -83,8 +81,8 @@ def _reward_for(amt: Decimal, days: int) -> Decimal:
     )
 
 _hex64 = re.compile(r"^[0-9a-fA-F]{64}$")
-def _valid_balance_id(s: str) -> bool:
-    return bool(_hex64.match(s or ""))
+def _valid_balance_id(s: str | None) -> bool:
+    return bool(s) and bool(_hex64.match(s))
 
 def _account_balances(pub: str):
     return server.accounts().account_id(pub).call().get("balances", [])
@@ -118,7 +116,7 @@ def rules():
         "min_days": 1
     })
 
-# ----------------------------- routes ---------------------------------
+# ----------------------------- preview/build stake -----------------------
 
 @bp_stake.route("/api/stake/preview", methods=["POST"])
 def preview():
@@ -163,7 +161,7 @@ def build_stake_tx():
     if reward <= 0:
         abort(400, "amount too small; reward rounds to 0")
 
-    # Preflight: trustlines and balances
+    # Preflight
     try:
         if not _has_trust_and_bal(user_pub, amt):
             abort(400, "user lacks IZZA balance or trustline for principal")
@@ -189,12 +187,11 @@ def build_stake_tx():
         base_fee=server.fetch_base_fee()
     )
 
-    # 1) principal
+    # 1) principal from user
     txb.append_create_claimable_balance_op(
         asset=_izza_asset(), amount=_q7(amt), claimants=[claimant], source=user_pub
     )
-
-    # 2) reward
+    # 2) reward from distributor
     txb.append_create_claimable_balance_op(
         asset=_izza_asset(), amount=_q7(reward), claimants=[claimant], source=DISTR_PUB
     )
@@ -205,7 +202,6 @@ def build_stake_tx():
 
     tx = txb.set_timeout(180).add_text_memo(memo_txt).build()
 
-    # Pre-sign with distributor (required for op #2)
     try:
         tx.sign(Keypair.from_secret(DISTR_SECRET))
     except Exception:
@@ -219,6 +215,88 @@ def build_stake_tx():
         "reward": _q7(reward),
         "days": days
     })
+
+# ----------------------------- vote staking ------------------------------
+
+@bp_stake.route("/api/vote/stake", methods=["POST"])
+def build_vote_stake_tx():
+    """
+    Stake tokens as votes for a proposal.
+    Uses fixed 180d lock so all vote rounds align, and tags memo with 'vote:<proposal>'.
+    """
+    j = request.get_json(force=True) or {}
+    user_pub = _clean(j.get("pub") or "")
+    proposal = _clean(j.get("proposal") or "")
+    try:
+        amt = Decimal(str(j.get("amount", "0")))
+    except (InvalidOperation, ValueError, TypeError):
+        abort(400, "bad amount")
+
+    if not (user_pub and user_pub.startswith("G")) or amt <= 0:
+        abort(400, "bad params")
+
+    days = 180
+    reward = _reward_for(amt, days)
+    if reward <= 0:
+        abort(400, "amount too small; reward rounds to 0")
+
+    try:
+        if not _has_trust_and_bal(user_pub, amt):
+            abort(400, "user lacks IZZA balance or trustline")
+        if not _has_trust_and_bal(DISTR_PUB, reward):
+            abort(500, "distributor lacks IZZA balance for reward")
+    except sx.NotFoundError:
+        abort(400, "user account not found on network")
+
+    unlock_unix = int(time.time()) + days * 86400
+    pred = ClaimPredicate.predicate_not(
+        ClaimPredicate.predicate_before_absolute_time(unlock_unix)
+    )
+    claimant = Claimant(destination=user_pub, predicate=pred)
+
+    try:
+        user_acct = server.load_account(user_pub)
+    except sx.NotFoundError:
+        abort(400, "user account not found on network")
+    except Exception as e:
+        abort(500, f"horizon error: {e}")
+
+    txb = TransactionBuilder(
+        source_account=user_acct,
+        network_passphrase=NET_PASSPHRASE,
+        base_fee=server.fetch_base_fee()
+    )
+
+    # principal votes (user funds)
+    txb.append_create_claimable_balance_op(
+        asset=_izza_asset(), amount=_q7(amt), claimants=[claimant], source=user_pub
+    )
+    # reward (distributor funds)
+    txb.append_create_claimable_balance_op(
+        asset=_izza_asset(), amount=_q7(reward), claimants=[claimant], source=DISTR_PUB
+    )
+
+    memo_txt = f"vote:{proposal or 'arcade'}"
+    if len(memo_txt.encode("utf-8")) > 28:
+        memo_txt = "vote"
+
+    tx = txb.set_timeout(180).add_text_memo(memo_txt).build()
+
+    try:
+        tx.sign(Keypair.from_secret(DISTR_SECRET))
+    except Exception:
+        abort(500, "bad DISTR_SECRET")
+
+    return jsonify({
+        "ok": True,
+        "xdr": tx.to_xdr(),
+        "network_passphrase": NET_PASSPHRASE,
+        "unlock_unix": unlock_unix,
+        "days": days,
+        "proposal": proposal
+    })
+
+# ----------------------------- classify/list claimables -------------------
 
 def _classify_record(r: dict):
     """Return kind + unlock + claimable_now for UI."""
@@ -251,30 +329,24 @@ def list_claimables():
     if not (pub and pub.startswith("G")):
         abort(400, "bad pub")
 
-    # Build asset filter safely
     asset_param = f"{ASSET_CODE}:{ISSUER_PUB}"
     url = f"{HORIZON_URL}/claimable_balances"
-    params = {
-        "claimant": pub,
-        "asset": asset_param,
-        "order": "asc",
-        "limit": 200
-    }
+    params = {"claimant": pub, "asset": asset_param, "order": "asc", "limit": 200}
     try:
         r = requests.get(url, params=params, timeout=15)
         r.raise_for_status()
         records = (r.json().get("_embedded", {}) or {}).get("records", []) or []
     except requests.HTTPError as e:
-        # If asset or claimant is malformed, Horizon returns 400; surface "no records" to UI.
         log.warning("claimables fetch failed: %s", e)
         return jsonify({"ok": True, "records": []})
     except Exception as e:
-        # Network or other errors: still fail soft to keep UI stable
         log.warning("claimables fetch error: %s", e)
         return jsonify({"ok": True, "records": []})
 
     out = [_classify_record(rec) for rec in records]
     return jsonify({"ok": True, "records": out})
+
+# ----------------------------- build claim(s) -----------------------------
 
 @bp_stake.route("/api/stake/build-claim", methods=["POST"])
 def build_claim_tx():
@@ -284,7 +356,7 @@ def build_claim_tx():
     cb_id = _clean(j.get("balance_id") or "")
     if not (pub and pub.startswith("G")):
         abort(400, "bad pub")
-    if not _valid_balance_id(cb_id or ""):
+    if not _valid_balance_id(cb_id):
         abort(400, "bad balance_id format")
 
     try:
@@ -305,29 +377,7 @@ def build_claim_tx():
         .build()
     )
     return jsonify({"ok": True, "xdr": tx.to_xdr(), "network_passphrase": NET_PASSPHRASE})
-# ----------------------------- arcade proposals ------------------------------
 
-@bp_stake.route("/api/arcade/proposals", methods=["GET"])
-def arcade_proposals():
-    """
-    Static list of current arcade game proposals users can stake/vote on.
-    """
-    proposals = [
-        {
-            "id": "rooftop_rumble",
-            "title": "Rooftop Rumble",
-            "desc": "Leap across skyscrapers, dodge drones, and collect IZZA Coins in this high-speed rooftop race. Each vote powers its development.",
-            "img": "/static/assets/arcade_rooftop_rumble.jpg"
-        },
-        {
-            "id": "pizza_panic",
-            "title": "Pizza Panic",
-            "desc": "Dash through IZZA City traffic delivering hot pizzas before time runs out. Each stake vote funds new vehicles, upgrades, and levels.",
-            "img": "/static/assets/arcade_pizza_panic.jpg"
-        }
-    ]
-    return jsonify({"ok": True, "proposals": proposals})
-    
 @bp_stake.route("/api/stake/build-claim-batch", methods=["POST"])
 def build_claim_tx_batch():
     """Build one tx to claim multiple balance IDs; skips invalid; errors if none valid."""
@@ -339,7 +389,7 @@ def build_claim_tx_batch():
     if not isinstance(ids, list) or not ids:
         abort(400, "no balance_ids provided")
 
-    valid_ids = [s for s in ( (_clean(str(x)) or "") for x in ids ) if _valid_balance_id(s)]
+    valid_ids = [s for s in ((_clean(str(x)) or "") for x in ids) if _valid_balance_id(s)]
     if not valid_ids:
         abort(400, "no valid balance_ids")
 
@@ -360,3 +410,24 @@ def build_claim_tx_batch():
 
     tx = tb.set_timeout(180).build()
     return jsonify({"ok": True, "xdr": tx.to_xdr(), "network_passphrase": NET_PASSPHRASE})
+
+# ----------------------------- arcade proposals ---------------------------
+
+@bp_stake.route("/api/arcade/proposals", methods=["GET"])
+def arcade_proposals():
+    """Static list of current arcade game proposals users can stake/vote on."""
+    proposals = [
+        {
+            "id": "rooftop_rumble",
+            "title": "Rooftop Rumble",
+            "desc": "Leap across skyscrapers, dodge drones, and collect IZZA Coins in this high-speed rooftop race. Each vote powers its development.",
+            "img": "/static/assets/arcade_rooftop_rumble.jpg"
+        },
+        {
+            "id": "pizza_panic",
+            "title": "Pizza Panic",
+            "desc": "Dash through IZZA City traffic delivering hot pizzas before time runs out. Each stake vote funds new vehicles, upgrades, and levels.",
+            "img": "/static/assets/arcade_pizza_panic.jpg"
+        }
+    ]
+    return jsonify({"ok": True, "proposals": proposals})
