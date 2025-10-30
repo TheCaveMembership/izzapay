@@ -210,31 +210,46 @@
 #claimTbl { width:100%; border-collapse:separate; border-spacing:0 10px; }
 #claimTbl td { padding:10px 12px; }
 
-#claimTbl .group-head td {
-  border-top-left-radius:12px; border-top-right-radius:12px;
-  font-weight:800; letter-spacing:.2px; display:flex; align-items:center; gap:10px;
+/* headers and rows */
+#claimTbl tr.group-head > td {
+  border-top-left-radius:12px;
+  border-top-right-radius:12px;
+  font-weight:800;
+  letter-spacing:.2px;
   padding:12px;
 }
-#claimTbl .group-row td {
-  border-bottom-left-radius:12px; border-bottom-right-radius:12px;
-  display:flex; justify-content:space-between; align-items:center;
+#claimTbl tr.group-row:last-child > td {
+  border-bottom-left-radius:12px;
+  border-bottom-right-radius:12px;
 }
 
-/* color schemes */
-#claimTbl .is-regular .group-head td,
-#claimTbl .is-regular .group-row td { background:rgba(122,68,255,.10); border:1px solid rgba(122,68,255,.35); }
-#claimTbl .is-vote .group-head td,
-#claimTbl .is-vote .group-row td { background:rgba(255,205,96,.12); border:1px solid rgba(255,205,96,.45); }
+/* color schemes — match the actual row classes */
+#claimTbl tr.group-head.is-regular > td,
+#claimTbl tr.group-row.is-regular > td {
+  background:rgba(122,68,255,.10);
+  border:1px solid rgba(122,68,255,.35);
+}
+#claimTbl tr.group-head.is-vote > td,
+#claimTbl tr.group-row.is-vote   > td {
+  background:rgba(255,205,96,.12);
+  border:1px solid rgba(255,205,96,.45);
+}
 
-#claimTbl .pill { display:inline-block; padding:2px 8px; border-radius:12px; font-size:12px; font-weight:800; text-transform:uppercase; }
-#claimTbl .pill-regular { background:#7a44ff22; border:1px solid #7a44ff66; }
-#claimTbl .pill-vote    { background:#ffcd6022; border:1px solid #ffcd6080; color:#2a1b00; }
+/* pills */
+#claimTbl .pill{
+  display:inline-block; padding:2px 8px; border-radius:12px;
+  font-size:12px; font-weight:800; text-transform:uppercase;
+}
+#claimTbl .pill-regular{ background:#7a44ff22; border:1px solid #7a44ff66; }
+#claimTbl .pill-vote   { background:#ffcd6022; border:1px solid #ffcd6080; color:#2a1b00; }
 
-#claimTbl .num { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-variant-numeric: tabular-nums; }
-#claimTbl .lockhint { font-size:12px; opacity:.8; }
+/* numbers and hints */
+#claimTbl .num{ font-family:ui-monospace,SFMono-Regular,Menlo,monospace; font-variant-numeric:tabular-nums; text-align:right; }
+#claimTbl .lockhint{ font-size:12px; opacity:.8; display:block; }
 
-#claimTbl .group.locked { opacity:.55; }
-#claimTbl .group.locked input[type="checkbox"]{ pointer-events:none; }
+/* locked state actually used by the rows */
+#claimTbl tr.locked{ opacity:.55; }
+#claimTbl tr.locked input[type="checkbox"]{ pointer-events:none; }
     /* quick one-shot flash for the create-wallet button */
 @keyframes izza-flash {
   0% { box-shadow: 0 0 0 rgba(183,132,255,0); transform: translateY(0); }
