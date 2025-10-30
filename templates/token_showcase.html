@@ -360,6 +360,24 @@
     .cb-body .line{ display:flex; justify-content:space-between; align-items:center; }
     .cb-body .line.sub{ font-size:13px; opacity:.9; }
     @media (min-width:760px){ .claim-block{ margin:10px 0; } }
+    /* === CLAIM MODAL: surgical fixes === */
+
+/* 1) remove the column labels row */
+#claimTbl thead { display:none !important; }
+
+/* 2) keep rows inside the card, no right-edge creep */
+#claimTbl{ width:100%; table-layout:fixed; }          /* predictable cell widths */
+#claimTbl td{ padding:10px 12px; overflow:hidden; text-overflow:ellipsis; }
+#claimTbl .num{ white-space:nowrap; }                 /* numbers don’t wrap weirdly */
+.modal-body{ overflow-x:hidden; }                     /* belt-and-suspenders */
+
+/* 3) make the legend's VOTE pill gold (override generic .pill) */
+#claimLegend .pill-vote,
+#claimTbl .pill-vote{
+  background: rgba(255,205,96,.18) !important;
+  border: 1px solid rgba(255,205,96,.65) !important;
+  color: #2a1b00 !important;
+}
   </style>
 </head>
 <body>
