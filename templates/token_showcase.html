@@ -1789,146 +1789,200 @@ voteStartBtn?.addEventListener('click', async ()=>{
     voteMsg.textContent = '❌ ' + String(e);
   }
 });
-// ======== LIST CLAIMABLES ========
-async function listClaimables(){
-  const pub = (claimPub.value||'').trim();
-  if (!pub.startsWith('G')){ claimMsg.textContent='Enter a valid G… public key.'; return; }
-  claimMsg.textContent = 'Loading…';
-  claimTblBody.innerHTML = '';
-  try{
-    const r = await fetch(`/api/stake/claimables?pub=${encodeURIComponent(pub)}`, { cache:'no-store' });
-    const j = await r.json();
-    if (!r.ok || !j?.ok) throw new Error(j?.error || 'fetch failed');
+// ===== CLAIM UI: group principal + rewards per contract (single toggle) =====
+const claimState = {
+  raw: [],
+  groups: [],                 // [{id, kind, unlock, unlocked, principal, rewardTotal, ids: {principal:[], reward:[]}}]
+  selected: new Set(),        // contract ids selected
+};
 
-    if (!j.records?.length){
-  claimTblBody.innerHTML = `<tr><td colspan="4" class="help" style="padding:8px">No claimable balances.</td></tr>`;
-  claimSelected.disabled = true;
-  claimMsg.textContent = '';
-  return;
+const fmtNum = (v) => {
+  if (v == null) return '—';
+  const n = Number(v);
+  return n.toLocaleString(undefined, { maximumFractionDigits: 7 });
+};
+const fmtDate = (ts) => {
+  if (!ts) return '—';
+  const d = new Date((String(ts).length > 10 ? Number(ts) : Number(ts) * 1000));
+  return d.toLocaleDateString(undefined, { year:'numeric', month:'short', day:'2-digit' });
+};
+
+// normalize backend fields so this renderer is tolerant to small schema differences
+function normalizeItem(it) {
+  return {
+    id:          it.id || it.balance_id || it.claim_id,
+    contractId:  it.contract_id || it.contract || it.group || it.stake_id,
+    kind:        (it.kind || it.type || '').toLowerCase().includes('vote') ? 'vote' : 'regular',
+    role:        (it.role || it.part || it.category || it.subtype || it.kind2 || it.type2 || it.kind_detail || it.detail || it.label || it.name || '').toLowerCase(),
+    // fallbacks: 'principal' vs 'reward'
+    isPrincipal: String(it.role || it.category || it.subtype || it.kind2 || it.type2 || it.label || it.part || it.name || '').toLowerCase().includes('principal') ||
+                 String(it.kind || '').toLowerCase() === 'principal',
+    amount:      Number(it.amount ?? it.value ?? it.balance ?? it.token_amount ?? 0),
+    unlockTs:    it.unlock_ts || it.unlock || it.available_at || it.unlock_time || 0,
+  };
 }
 
-/* ---- group records by stake ----
-   Prefer explicit keys if your API has them; otherwise fall back to a stable composite.
-*/
-const groups = {};
-for (const r of j.records){
-  const key =
-    r.stake_id || r.group_id || r.parent_id || r.pool_id || r.batch_id ||
-    `${r.unlock_time||r.unlock||''}|${r.pool||''}|${String(r.vote||r.is_vote||r.kind).includes('vote')?'vote':'reg'}`;
-  (groups[key] ||= []).push(r);
-}
+function buildGroups(list) {
+  const byKey = new Map();  // key = `${contractId}|${kind}`
+  for (const raw of list) {
+    const it = normalizeItem(raw);
+    if (!it.contractId || !it.id) continue;
 
-// Sort groups by unlock date (soonest first)
-const order = Object.entries(groups).sort((a,b)=>{
-  const au = Date.parse(a[1][0].unlock_time || a[1][0].unlock || a[1][0].last_modified_time || 0) || 0;
-  const bu = Date.parse(b[1][0].unlock_time || b[1][0].unlock || b[1][0].last_modified_time || 0) || 0;
-  return au - bu;
-});
-
-for (const [, recs] of order){
-  // infer shared attributes for the group
-  const any = recs[0] || {};
-  const unlockISO  = any.unlock_time || any.unlock || any.last_modified_time || '';
-  const unlockDate = unlockISO ? unlockISO.slice(0,10) : '—';
-  const isVote     = !!(any.is_vote || any.vote || (typeof any.kind === 'string' && any.kind.includes('vote')) || any.pool === 'vote');
-
-  // Determine if the whole group is claimable (all parts share the same unlock time)
-  const unlockMs = unlockISO ? Date.parse(unlockISO) : null;
-  const groupClaimable = !unlockMs || (Date.now() >= unlockMs);
-
-  // Collect all ids in this contract (principal + reward if present)
-  const idList = recs.map(r=>r.id).filter(Boolean);
-  const idsCSV = idList.join(',');
-
-  // group header row with ONE toggle that represents the whole contract
-  const head = document.createElement('tr');
-  head.className = 'group-head ' + (isVote ? 'is-vote' : 'is-regular');
-  head.innerHTML =
-    `<td colspan="4">
-       <label class="group-toggle">
-         <input type="checkbox" class="cbPick" value="${idsCSV}" ${groupClaimable ? '' : 'disabled'}>
-         <span class="${isVote ? 'pill pill-vote' : 'pill pill-regular'}">${isVote ? 'vote' : 'normal'}</span>
-         <span class="meta">Stake • unlock ${unlockDate}</span>
-       </label>
-     </td>`;
-  claimTblBody.appendChild(head);
-
-  // Inside the block, render compact rows WITHOUT individual checkboxes
-  recs.sort((x,y)=> String(x.kind).localeCompare(String(y.kind))); // principal first
-  for (const rec of recs){
-    const tr = document.createElement('tr');
-    tr.className = 'group-row ' + (isVote ? 'is-vote' : 'is-regular') + (groupClaimable ? '' : ' locked');
-
-    const unlock  = rec.unlock_time || rec.unlock || unlockISO;
-    const when    = unlock ? unlock.slice(0,10) : '—';
-    const pillCls = isVote ? 'pill pill-vote' : 'pill pill-regular';
-
-    tr.innerHTML =
-      `<td class="pick" style="padding:8px;text-align:center">—</td>`+  // no per-row toggles
-      `<td class="kind" style="padding:8px">
-         <span class="${pillCls}">${rec.kind || '—'}</span>
-         ${groupClaimable ? '' : `<small class="lockhint">Locked until ${when}</small>`}
-       </td>`+
-      `<td class="num"  style="padding:8px">${fmtNum(rec.amount,7)}</td>`+
-      `<td class="when" style="padding:8px">${when}</td>`;
-    claimTblBody.appendChild(tr);
-  }
-}
-claimSelected.disabled = false;
-claimMsg.textContent = '';
-  }catch(e){
-    claimMsg.textContent = '❌ ' + String(e);
-  }
-}
-claimRefresh?.addEventListener('click', listClaimables);
-
-// ======== CLAIM SELECTED (batch) ========
-claimSelected?.addEventListener('click', async ()=>{
-  const pub = (claimPub.value||'').trim();
-  if (!pub.startsWith('G')) return;
-
-  // Split group selections like "id1,id2" into individual ids
-  const rawPicks = Array.from(document.querySelectorAll('.cbPick:checked')).map(x=>x.value);
-  const picks = rawPicks.flatMap(v => String(v).split(',').map(s=>s.trim()).filter(Boolean));
-  if (!picks.length){ claimMsg.textContent='Pick at least one balance.'; return; }
-
-  claimMsg.textContent = 'Building claim transaction…';
-
-  try{
-    const r = await fetch('/api/stake/build-claim-batch', {
-      method:'POST', headers:{'Content-Type':'application/json'},
-      body: JSON.stringify({ pub, balance_ids: picks })
-    });
-    const j = await r.json();
-    if (!r.ok || !j?.ok) throw new Error(j?.error || 'build failed');
-
-    const xdr  = j.xdr;
-    const pass = j.network_passphrase || 'Pi Testnet';
-
-    const localSec = getLocalSecret(pub, USER?.username);
-    if (localSec){
-      const ok = await ensureStellar();
-      if (!ok || !window.StellarSdk){ claimMsg.textContent='❌ Stellar SDK missing.'; return; }
-      const SDK = window.StellarSdk;
-      const tx  = SDK.TransactionBuilder.fromXDR(xdr, pass);
-      tx.sign(SDK.Keypair.fromSecret(localSec));
-      const server = getServer();
-      const resp   = await server.submitTransaction(tx);
-      if (resp?.hash){
-        claimMsg.innerHTML = `✅ Claimed. Tx: <code>${resp.hash}</code>`;
-        listClaimables();
-      } else {
-        claimMsg.textContent = 'Submitted; awaiting confirmation.';
-      }
-    } else {
-      const uri = `web+stellar:tx?xdr=${encodeURIComponent(xdr)}&network_passphrase=${encodeURIComponent(pass)}`;
-      window.location.href = uri;
-      claimMsg.innerHTML = `Opening your wallet to sign… If nothing happens, copy this URI:<br><code style="word-break:break-all">${uri}</code>`;
+    const key = `${it.contractId}|${it.kind}`;
+    if (!byKey.has(key)) {
+      byKey.set(key, {
+        id: it.contractId,
+        kind: it.kind,                      // 'regular' | 'vote'
+        unlock: it.unlockTs || 0,
+        principal: 0,
+        rewardTotal: 0,
+        ids: { principal: [], reward: [] },
+      });
     }
-  }catch(e){
-    claimMsg.textContent = '❌ ' + String(e);
+    const g = byKey.get(key);
+    g.unlock = Math.max(g.unlock, Number(it.unlockTs || 0)); // keep max if mixed
+    if (it.isPrincipal) {
+      g.principal += it.amount;
+      g.ids.principal.push(it.id);
+    } else {
+      g.rewardTotal += it.amount;
+      g.ids.reward.push(it.id);
+    }
   }
-});
+
+  const now = Date.now();
+  const out = Array.from(byKey.values()).map(g => ({
+    ...g,
+    unlocked: (g.unlock ? (String(g.unlock).length > 10 ? g.unlock : g.unlock * 1000) <= now : true),
+  }));
+
+  // sort: locked first (closest unlock soonest), then unlocked, by unlock date asc
+  out.sort((a,b) => {
+    if (a.unlocked !== b.unlocked) return a.unlocked ? 1 : -1;
+    return (a.unlock||0) - (b.unlock||0);
+  });
+  return out;
+}
+
+function renderClaimTable() {
+  const tbody = document.querySelector('#claimTbl tbody');
+  const btnClaim = document.getElementById('claimSelectedBtn');
+  const msg = document.getElementById('claimMsg');
+  if (!tbody) return;
+
+  tbody.innerHTML = '';
+  msg.textContent = '';
+
+  for (const g of claimState.groups) {
+    const pillClass = g.kind === 'vote' ? 'pill-vote' : 'pill-regular';
+    const lockedNote = g.unlocked ? '' : `<span class="lockhint">unlocks ${fmtDate(g.unlock)}</span>`;
+
+    // group header: single checkbox per contract
+    const trHead = document.createElement('tr');
+    trHead.className = `group-head is-${g.kind}`;
+    trHead.innerHTML = `
+      <td colspan="4">
+        <div class="group-toggle">
+          <label style="display:flex;align-items:center;gap:8px;">
+            <input type="checkbox" class="pickGroup" value="${g.id}" ${g.unlocked ? '' : 'disabled'}>
+            <span class="pill ${pillClass}" aria-hidden="true">${g.kind === 'vote' ? 'VOTE' : 'NORMAL'}</span>
+            <strong>Stake • unlock ${fmtDate(g.unlock)}</strong>
+          </label>
+          <span class="meta">${lockedNote}</span>
+        </div>
+      </td>`;
+    tbody.appendChild(trHead);
+
+    // principal row
+    const trP = document.createElement('tr');
+    trP.className = `group-row is-${g.kind}`;
+    trP.innerHTML = `
+      <td>—</td>
+      <td><span class="pill ${pillClass}" aria-hidden="true">PRINCIPAL</span></td>
+      <td class="num">${fmtNum(g.principal)}</td>
+      <td>${g.unlocked ? 'ready' : 'locked'}</td>`;
+    tbody.appendChild(trP);
+
+    // reward row (sum of rewards)
+    const trR = document.createElement('tr');
+    trR.className = `group-row is-${g.kind}`;
+    trR.innerHTML = `
+      <td>—</td>
+      <td><span class="pill ${pillClass}" aria-hidden="true">REWARD</span></td>
+      <td class="num">${fmtNum(g.rewardTotal)}</td>
+      <td>${g.unlocked ? 'ready' : 'locked'}</td>`;
+    tbody.appendChild(trR);
+  }
+
+  // selection handlers
+  claimState.selected.clear();
+  tbody.querySelectorAll('.pickGroup').forEach(cb => {
+    cb.addEventListener('change', (e) => {
+      const id = e.currentTarget.value;
+      if (e.currentTarget.checked) claimState.selected.add(id);
+      else claimState.selected.delete(id);
+      btnClaim.disabled = claimState.selected.size === 0;
+    });
+  });
+
+  btnClaim.disabled = claimState.selected.size === 0;
+}
+
+async function refreshClaims() {
+  const pub = document.getElementById('claimPub')?.value?.trim();
+  const msg = document.getElementById('claimMsg');
+  if (!pub) {
+    renderClaimTable();
+    return;
+  }
+  msg.textContent = 'Loading…';
+  try {
+    // NOTE: keep your existing endpoint; this only formats what it returns
+    const res = await axios.get(`/api/stake/claimables`, { params: { pub } });
+    const list = res.data?.claimables || res.data || [];
+    claimState.raw = list;
+    claimState.groups = buildGroups(list);
+    renderClaimTable();
+    msg.textContent = '';
+  } catch (err) {
+    const serverMsg = err.response?.data?.error || err.response?.data?.message || err.message;
+    msg.textContent = '❌ ' + serverMsg;
+  }
+}
+
+async function claimSelected() {
+  const msg = document.getElementById('claimMsg');
+  if (claimState.selected.size === 0) return;
+
+  // build payload as a flat list of all ids in the selected groups
+  const ids = [];
+  for (const gid of claimState.selected) {
+    const g = claimState.groups.find(x => x.id === gid);
+    if (!g || !g.unlocked) continue;
+    ids.push(...g.ids.principal, ...g.ids.reward);
+  }
+  if (ids.length === 0) {
+    msg.textContent = '❌ Nothing claimable yet.';
+    return;
+  }
+  msg.textContent = 'Claiming…';
+  try {
+    const res = await axios.post('/api/stake/claim', { ids });
+    msg.textContent = '✅ ' + (res.data?.message || 'Claim submitted.');
+    // refresh to reflect removals
+    refreshClaims();
+  } catch (err) {
+    const serverMsg = err.response?.data?.error || err.response?.data?.message || err.message;
+    msg.textContent = '❌ ' + serverMsg;
+  }
+}
+
+// wire buttons you already have
+document.getElementById('claimRefreshBtn')?.addEventListener('click', refreshClaims);
+document.getElementById('claimSelectedBtn')?.addEventListener('click', claimSelected);
+
+// optional: auto-refresh when the modal opens
+document.getElementById('claimQuickBtn')?.addEventListener('click', refreshClaims);
 function openModal(el, focusEl){
   lastFocus = document.activeElement;
   [modal, orderbookModal, placeOrderModal, myWalletModal].forEach(m=>{
