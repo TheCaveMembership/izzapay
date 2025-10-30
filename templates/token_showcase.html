@@ -241,6 +241,39 @@
 #claimModal #claimTbl td:nth-child(3){ width:26%; text-align:right } /* Amount */
 #claimModal #claimTbl th:last-child,
 #claimModal #claimTbl td:last-child{ width:auto }              /* Modified */
+    /* legend + pill styles */
+#claimModal #claimLegend .pill{
+  display:inline-block; padding:4px 10px; border-radius:999px; font-weight:800;
+  font-size:12px; letter-spacing:.2px; white-space:nowrap; border:1px solid transparent;
+  box-shadow:0 0 10px rgba(0,0,0,.25) inset;
+}
+#claimModal .pill-regular{
+  background:linear-gradient(180deg,var(--accent1),var(--accent2));
+  border-color:rgba(183,132,255,.45);
+}
+#claimModal .pill-vote{
+  background:linear-gradient(180deg,#ffd56a,#ffb83a);
+  border-color:rgba(255,205,96,.6);
+  color:#2a1b00;
+}
+
+/* grouped blocks */
+#claimModal #claimTbl tr.group-head > td{
+  padding:10px; background:rgba(255,255,255,.03);
+  border-top:1px solid rgba(255,255,255,.08);
+  font-weight:800; letter-spacing:.2px;
+}
+#claimModal #claimTbl tr.group-head .meta{ color:var(--muted); font-weight:600; margin-left:6px }
+
+/* locked rows */
+#claimModal #claimTbl tr.locked{ opacity:.55 }
+#claimModal #claimTbl tr.locked input[type="checkbox"]{ pointer-events:none }
+#claimModal #claimTbl .lockhint{ display:block; font-size:11px; color:var(--muted) }
+
+/* tidy numeric column */
+#claimModal #claimTbl .num{
+  text-align:right; font-family:var(--mono); font-variant-numeric:tabular-nums;
+}
     /* quick one-shot flash for the create-wallet button */
 @keyframes izza-flash {
   0% { box-shadow: 0 0 0 rgba(183,132,255,0); transform: translateY(0); }
@@ -765,14 +798,23 @@
         <button id="claimSelectedBtn" class="cta" disabled>Claim Selected</button>
       </div>
       <div class="blox" style="margin-top:10px">
-        <div class="small-muted">Claimable Balances</div>
-        <table id="claimTbl">
-  <thead>
-    <tr><th>Pick</th><th>Kind</th><th>Amount</th><th>Modified</th></tr>
-  </thead>
-  <tbody></tbody>
-</table>
-      </div>
+  <div class="small-muted">Claimable Balances</div>
+
+  <!-- legend -->
+  <div id="claimLegend" style="display:flex;align-items:center;gap:12px;margin:6px 0 8px">
+    <span class="pill pill-regular" aria-hidden="true">normal</span>
+    <small class="small-muted">= regular stake</small>
+    <span class="pill pill-vote" aria-hidden="true">vote</span>
+    <small class="small-muted">= vote stake</small>
+  </div>
+
+  <table id="claimTbl">
+    <thead>
+      <tr><th>Pick</th><th>Kind</th><th>Amount</th><th>Unlock</th></tr>
+    </thead>
+    <tbody></tbody>
+  </table>
+</div>
       <div id="claimMsg" class="help" style="margin-top:8px"></div>
     </div>
   </div>
@@ -1733,35 +1775,74 @@ async function listClaimables(){
     if (!r.ok || !j?.ok) throw new Error(j?.error || 'fetch failed');
 
     if (!j.records?.length){
-      claimTblBody.innerHTML = `<tr><td colspan="5" class="help" style="padding:8px">No claimable balances.</td></tr>`;
-      claimSelected.disabled = true;
-      claimMsg.textContent = '';
-      return;
-    }
-
-    for (const rec of j.records){
-  const tr = document.createElement('tr');
-
-  const whenISO = rec.last_modified_time || '';
-  const when    = whenISO ? whenISO.slice(0,10) : '—';  // YYYY-MM-DD
-  const kindPill = (rec.kind === 'principal')
-    ? '<span class="pill pill-principal">principal</span>'
-    : '<span class="pill pill-reward">reward</span>';
-
-  tr.innerHTML =
-    `<td class="pick" style="padding:8px;text-align:center">
-        <input type="checkbox" class="cbPick" value="${rec.id}">
-      </td>`+
-    `<td class="kind" style="padding:8px">${kindPill}</td>`+
-    `<td class="num"  style="padding:8px;text-align:right;font-family:var(--mono);font-variant-numeric:tabular-nums">
-        ${fmtNum(rec.amount,4)}
-      </td>`+
-    `<td class="when" style="padding:8px">${when}</td>`;
-
-  claimTblBody.appendChild(tr);
+  claimTblBody.innerHTML = `<tr><td colspan="4" class="help" style="padding:8px">No claimable balances.</td></tr>`;
+  claimSelected.disabled = true;
+  claimMsg.textContent = '';
+  return;
 }
-    claimSelected.disabled = false;
-    claimMsg.textContent = '';
+
+/* ---- group records by stake ----
+   Prefer explicit keys if your API has them; otherwise fall back to a stable composite.
+*/
+const groups = {};
+for (const r of j.records){
+  const key =
+    r.stake_id || r.group_id || r.parent_id || r.pool_id || r.batch_id ||
+    `${r.unlock_time||r.unlock||''}|${r.pool||''}|${String(r.vote||r.is_vote||r.kind).includes('vote')?'vote':'reg'}`;
+  (groups[key] ||= []).push(r);
+}
+
+// Sort groups by unlock date (soonest first)
+const order = Object.entries(groups).sort((a,b)=>{
+  const au = Date.parse(a[1][0].unlock_time || a[1][0].unlock || a[1][0].last_modified_time || 0) || 0;
+  const bu = Date.parse(b[1][0].unlock_time || b[1][0].unlock || b[1][0].last_modified_time || 0) || 0;
+  return au - bu;
+});
+
+for (const [, recs] of order){
+  // infer shared attributes for the group
+  const any = recs[0] || {};
+  const unlockISO  = any.unlock_time || any.unlock || any.last_modified_time || '';
+  const unlockDate = unlockISO ? unlockISO.slice(0,10) : '—';
+  const isVote     = !!(any.is_vote || any.vote || (typeof any.kind === 'string' && any.kind.includes('vote')) || any.pool === 'vote');
+
+  // group header row
+  const head = document.createElement('tr');
+  head.className = 'group-head';
+  head.innerHTML =
+    `<td colspan="4">
+       <span class="${isVote ? 'pill pill-vote' : 'pill pill-regular'}">${isVote ? 'vote' : 'normal'}</span>
+       <span class="meta">Stake • unlock ${unlockDate}</span>
+     </td>`;
+  claimTblBody.appendChild(head);
+
+  // within each group, render principal + reward rows (order: principal first)
+  recs.sort((x,y)=> String(x.kind).localeCompare(String(y.kind)));
+  for (const rec of recs){
+    const tr = document.createElement('tr');
+
+    const unlock      = rec.unlock_time || rec.unlock || unlockISO;
+    const unlockMs    = unlock ? Date.parse(unlock) : null;
+    const claimable   = !unlockMs || (Date.now() >= unlockMs);
+
+    const pillClass   = isVote ? 'pill pill-vote' : 'pill pill-regular';
+    const kindPill    = `<span class="${pillClass}">${rec.kind || '—'}</span>`;
+    const when        = unlock ? unlock.slice(0,10) : '—';
+
+    tr.innerHTML =
+      `<td class="pick" style="padding:8px;text-align:center">
+         <input type="checkbox" class="cbPick" value="${rec.id}" ${claimable ? '' : 'disabled'}>
+       </td>`+
+      `<td class="kind" style="padding:8px">${kindPill}${claimable ? '' : `<small class="lockhint">Locked until ${when}</small>`}</td>`+
+      `<td class="num"  style="padding:8px">${fmtNum(rec.amount,7)}</td>`+
+      `<td class="when" style="padding:8px">${when}</td>`;
+
+    if (!claimable) tr.classList.add('locked');
+    claimTblBody.appendChild(tr);
+  }
+}
+claimSelected.disabled = false;
+claimMsg.textContent = '';
   }catch(e){
     claimMsg.textContent = '❌ ' + String(e);
   }
