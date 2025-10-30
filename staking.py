@@ -354,7 +354,7 @@ def build_vote_stake_tx():
     """
     j = request.get_json(force=True) or {}
     try:
-        log.info("VOTE_STAKE_IN %s", {k: j.get(k) for k in ("pub","amount","proposal")})
+        log.info("VOTE_STAKE_IN %s", {k: j.get(k) for k in ("pub", "amount", "proposal")})
     except Exception:
         pass
 
@@ -410,13 +410,14 @@ def build_vote_stake_tx():
     if len(memo_txt.encode("utf-8")) > 28:
         memo_txt = "vote"
 
+    # Always build the transaction
     tx = txb.set_timeout(180).add_text_memo(memo_txt).build()
 
     # persist this vote amount so preview math is accurate for everyone
-try:
-    _vote_add(unlock_unix, proposal, user_pub, _q7(amt))
-except Exception as e:
-    log.warning("vote intent log failed: %s", e)
+    try:
+        _vote_add(unlock_unix, proposal, user_pub, _q7(amt))
+    except Exception as e:
+        log.warning("vote intent log failed: %s", e)
 
     return jsonify({
         "ok": True,
