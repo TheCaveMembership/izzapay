@@ -1787,50 +1787,45 @@ function closeModal(el){
 roadmapBtn.addEventListener('click', ()=>openModal(modal, closeModalBtn));
 badgeOpen.addEventListener('click',  ()=>openModal(modal, closeModalBtn));
 
-// Close buttons
-closeModalBtn.addEventListener('click',     ()=>closeModal(modal));
-closeMyWalletBtn.addEventListener('click',  ()=>closeModal(myWalletModal));
-closeOrderbookBtn.addEventListener('click', ()=>{ stopObRefresh(); closeModal(orderbookModal); });
-closePlaceOrderBtn.addEventListener('click',()=> closeModal(placeOrderModal));
+  // Close buttons
+  closeModalBtn.addEventListener('click',     ()=>closeModal(modal));
+  closeMyWalletBtn.addEventListener('click',  ()=>closeModal(myWalletModal));
+  closeOrderbookBtn.addEventListener('click', ()=>{ stopObRefresh(); closeModal(orderbookModal); });
+  closePlaceOrderBtn.addEventListener('click',()=> closeModal(placeOrderModal));
 
-// Backdrop click closes whichever is open (and stops OB refresh if needed)
-backdrop.addEventListener('click', ()=>{
-  if (!orderbookModal.hidden){ stopObRefresh(); }
-  modals.forEach(m => { if (m && !m.hidden) closeModal(m); });
-});
-    if (!m.hidden) closeModal(m);
+  // Backdrop click closes whichever is open (and stops OB refresh if needed)
+  backdrop.addEventListener('click', ()=>{
+    if (!orderbookModal.hidden){ stopObRefresh(); }
+    modals.forEach(m => { if (m && !m.hidden) closeModal(m); });
   });
-});
+
   // Reveal Secret (one-time local reveal)
-revealOnceBtn?.addEventListener('click', ()=>{
-  if (!ACTIVE_PUB) return;
-  if (hasViewedOnce(ACTIVE_PUB, USER?.username)) {
+  revealOnceBtn?.addEventListener('click', ()=>{
+    if (!ACTIVE_PUB) return;
+    if (hasViewedOnce(ACTIVE_PUB, USER?.username)) {
+      secretOnce.style.display = 'block';
+      secretOnce.textContent = 'Secret was already revealed once on this device.';
+      return;
+    }
+    const sec = getLocalSecret(ACTIVE_PUB, USER?.username);
     secretOnce.style.display = 'block';
-    secretOnce.textContent = 'Secret was already revealed once on this device.';
-    return;
-  }
-  const sec = getLocalSecret(ACTIVE_PUB, USER?.username);
-  secretOnce.style.display = 'block';
-  secretOnce.textContent = sec ? sec : 'No secret stored locally for this wallet.';
-  if (sec) markSecretViewedOnce(ACTIVE_PUB, USER?.username);
-});
+    secretOnce.textContent = sec ? sec : 'No secret stored locally for this wallet.';
+    if (sec) markSecretViewedOnce(ACTIVE_PUB, USER?.username);
+  });
 
-// Add the missing Wallet button handler
-// Wallet button — ensure user auth first so mwUser is filled
-walletBtn.addEventListener('click', async ()=>{
-  if (!USER) {                    // <- get username from Pi auth
-    try { await piSignIn(); } catch(_) { /* ignore if user cancels */ }
-  }
-
-  // get an active pub (server or the fresh local one)
-  if (!ACTIVE_PUB){
-    await fetchActiveWallet();
-    if (!ACTIVE_PUB && NEW_WALLET) ACTIVE_PUB = NEW_WALLET.pub;
-  }
-
-  await refreshMyWalletModal();   // this now sees USER.username
-  openModal(myWalletModal, closeMyWalletBtn);
-});
+  // Wallet button — ensure user auth first so mwUser is filled
+  walletBtn.addEventListener('click', async ()=>{
+    if (!USER) {                    // get username from Pi auth
+      try { await piSignIn(); } catch(_) { /* ignore if user cancels */ }
+    }
+    // get an active pub (server or the fresh local one)
+    if (!ACTIVE_PUB){
+      await fetchActiveWallet();
+      if (!ACTIVE_PUB && NEW_WALLET) ACTIVE_PUB = NEW_WALLET.pub;
+    }
+    await refreshMyWalletModal();   // this now sees USER.username
+    openModal(myWalletModal, closeMyWalletBtn);
+  });
 
 // ✅ Call the gate AFTER everything above exists
 
