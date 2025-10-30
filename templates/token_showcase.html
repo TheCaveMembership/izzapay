@@ -1829,17 +1829,13 @@ const kindStr  = (r.kind || r.bucket || r.pool || '').toString().toLowerCase().i
 // 🔑 group id
 let gid;
 if (kindStr === 'vote'){
-  // Always prefer the most specific identifiers so each vote contract stays separate
-  gid =
-    r.contract_id || r.vote_id || r.id || r.parent_id || r.batch_id ||
-    r.tx || r.tx_hash || r.source ||
-    ['vote', unlockTs || 0, (r.memo || ''), (r.created_at || r.id || '').toString().slice(-12)].join('|');
+  // One vote balance === one UI contract
+  gid = r.contract_id || r.id;    // <— keep it this simple for votes
 }else{
   gid =
     r.contract_id || r.stake_id || r.group_id || r.parent_id || r.batch_id ||
     [unlockTs || 0, kindStr, (r.tx || r.tx_hash || r.source || r.created_at || r.id || '').toString().slice(-12)].join('|');
 }
-
 (groups[gid] ||= []).push({ ...r, __unlockTs: unlockTs, __kind: kindStr });
     }
 
@@ -1853,20 +1849,26 @@ if (kindStr === 'vote'){
     // ================================================================
 // 🔸 Helper: calculate Est. APR Boost % for VOTE contracts
 // ================================================================
-function getVoteAprBoostPct(recs){
-  // try direct field first
-  for (const r of recs){
-    if (typeof r.est_apr_boost_pct === 'number') return r.est_apr_boost_pct;
-    if (r.preview && typeof r.preview.aprBoostPct === 'number') return r.preview.aprBoostPct;
-  }
-  // optional: global calc fallback (if preview function exists)
-  if (typeof calcVoteAprBoostPct === 'function'){
-    try { return calcVoteAprBoostPct(recs); } catch(e){}
-  }
-  return 0;
-}
 
-    for (const [, recs] of ordered){
+
+// ================================================================
+// 🔸 Fetch current vote-round boost (shown for vote contracts)
+// ================================================================
+let voteBoostPct = 0;
+try {
+  const rRules = await fetch('/api/vote/rules', { cache: 'no-store' });
+  const jRules = await rRules.json();
+  if (rRules.ok && jRules?.ok) {
+    // preview uses (boost_multiplier - 1) * 100
+    const mult = Number(jRules.early_bonus_max)
+      ? (1 + (Number(jRules.days_remaining) / Number(jRules.length_days)) * (Number(jRules.early_bonus_max)/100))
+      : Number(jRules.boost_multiplier || 1);
+    voteBoostPct = Math.max(0, (mult - 1) * 100);
+  }
+} catch(_) {}
+
+// …then your loop…
+for (const [, recs] of ordered) {
       const any       = recs[0];
       const unlockTs  = any.__unlockTs || 0;
       const unlockStr = unlockTs ? new Date(unlockTs*1000).toISOString().slice(0,10) : '—';
@@ -1907,19 +1909,14 @@ const trBlock = document.createElement('tr');
 trBlock.className = `group-row is-${kind}` + (unlocked ? '' : ' locked');
 
 const rewardHTML = (kind === 'vote')
-  ? (() => {
-      const pct = getVoteAprBoostPct(recs);
-      return `
-        <div class="line" style="display:flex;justify-content:space-between;align-items:center;white-space:nowrap;">
-          <span class="pill ${pillClass}" aria-hidden="true">EST. APR BOOST</span>
-          <span class="num">${(isFinite(pct) ? pct : 0).toFixed(2)}%</span>
-        </div>`;
-    })()
-  : `
-    <div class="line" style="display:flex;justify-content:space-between;align-items:center;white-space:nowrap;">
-      <span class="pill ${pillClass}" aria-hidden="true">REWARD</span>
-      <span class="num">${fmtNum(reward)}</span>
-    </div>`;
+  ? `<div class="line" style="display:flex;justify-content:space-between;align-items:center;white-space:nowrap;">
+       <span class="pill pill-vote" aria-hidden="true">EST. APR BOOST</span>
+       <span class="num">${(isFinite(voteBoostPct) ? voteBoostPct : 0).toFixed(2)}%</span>
+     </div>`
+  : (reward>0 ? `<div class="line" style="display:flex;justify-content:space-between;align-items:center;">
+       <span class="pill ${pillClass}" aria-hidden="true">REWARD</span>
+       <span class="num">${fmtNum(reward)}</span>
+     </div>` : '');
 
 trBlock.innerHTML = `
   <td colspan="4">
