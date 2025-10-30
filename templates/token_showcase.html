@@ -370,6 +370,8 @@
 <div class="top-cta" style="margin-top:8px; display:flex; gap:8px; justify-content:center; flex-wrap:wrap">
   <button id="stakeQuickBtn" class="cta" type="button" aria-haspopup="dialog" aria-controls="stakeModal">📥 Stake</button>
   <button id="claimQuickBtn" class="cta" type="button" aria-haspopup="dialog" aria-controls="claimModal">💰 Claim</button>
+  <!-- NEW -->
+  <button id="voteQuickBtn"  class="cta" type="button" aria-haspopup="dialog" aria-controls="voteModal">🗳️ Vote (Stake)</button>
 </div>
       </div> <!-- end left panel -->
 
@@ -678,8 +680,16 @@
     <div class="modal-body">
       <div class="blox"><div class="small-muted">Public Key</div><input id="stakePub" class="mono"></div>
       <div class="row2" style="margin-top:10px">
-        <div class="field"><label>Amount (IZZA)</label><input id="stakeAmt" type="number" step="0.0000001"></div>
-        <div class="field"><label>Lock Days</label><input id="stakeDays" type="number" min="1" max="365" value="30"></div>
+  <div class="field">
+    <label>Amount (IZZA)</label>
+    <input id="stakeAmt" type="number" step="0.0000001" inputmode="decimal" placeholder="e.g. 1000">
+  </div>
+  <div class="field">
+    <label>Lock Days</label>
+    <input id="stakeDays" type="number" min="1" max="180" value="30">
+    <small id="stakeDaysMsg" class="small-muted">Max 180 days.</small>
+  </div>
+</div>
       </div>
       <div id="stakePreviewBox" style="margin-top:10px;display:none">
         <div class="grid" style="gap:10px">
@@ -718,7 +728,63 @@
     </div>
   </div>
 </div>
+<!-- VOTE MODAL -->
+<div class="modal" id="voteModal" role="dialog" aria-modal="true" aria-labelledby="voteTitle" hidden>
+  <div class="modal-card">
+    <div class="modal-header">
+      <div class="modal-title"><img src="/static/izzapay-mark.svg" alt=""><span id="voteTitle">Vote for Next Arcade Game</span></div>
+      <button class="close-btn" id="closeVoteBtn">Close</button>
+    </div>
+    <div class="modal-body">
+      <div class="blox" style="margin-bottom:10px">
+        <div class="small-muted">How it works</div>
+        <div class="help">
+          Each staked token = <strong>1 vote</strong> toward the game you pick.  
+          The winning game is built, and <strong>100% of its Pi Ad Network revenue</strong> is distributed to accounts that staked votes on that game, pro-rata to their staked amount and lock duration.
+        </div>
+      </div>
 
+      <div class="row2" style="margin-top:6px">
+        <div class="field">
+          <label>Public Key</label>
+          <input id="votePub" class="mono" placeholder="G…">
+        </div>
+        <div class="field">
+          <label>Lock Days</label>
+          <input id="voteDays" type="number" min="1" max="180" value="30">
+          <small class="small-muted">Max 180 days.</small>
+        </div>
+      </div>
+
+      <div class="field">
+        <label>Choose Arcade Proposal</label>
+        <select id="voteGame"></select>
+      </div>
+
+      <div class="field">
+        <label>Amount to Stake (IZZA)</label>
+        <input id="voteAmt" type="number" step="0.0000001" inputmode="decimal" placeholder="e.g. 1000">
+      </div>
+
+      <div id="votePreviewBox" style="display:none; margin-top:8px">
+        <div class="grid" style="gap:10px">
+          <div><div class="small-muted">Est. APR Boost</div><strong id="voteAPR">—</strong></div>
+          <div><div class="small-muted">Your Votes</div><strong id="voteVotes">—</strong></div>
+          <div><div class="small-muted">Unlock</div><strong id="voteUnlock">—</strong></div>
+        </div>
+        <div class="help" style="margin-top:6px">
+          Distribution happens to stakers of the <em>winning</em> game. If your pick doesn’t win, you can restake in the next round after unlock.
+        </div>
+      </div>
+
+      <div style="display:flex; gap:8px; margin-top:10px">
+        <button id="votePreviewBtn" class="cta">Preview</button>
+        <button id="voteStartBtn" class="cta" disabled>Stake Votes</button>
+      </div>
+      <div id="voteMsg" class="help" style="margin-top:8px"></div>
+    </div>
+  </div>
+</div>
   <!-- PLACE ORDER MODAL -->
   <div class="modal" id="placeOrderModal" role="dialog" aria-modal="true" aria-labelledby="placeOrderTitle" hidden>
     <div class="modal-card">
@@ -1367,6 +1433,27 @@ const stakeDays    = document.getElementById('stakeDays');
 const stakePreview = document.getElementById('stakePreviewBtn');
 const stakeStart   = document.getElementById('stakeStartBtn');
 const stakeMsg     = document.getElementById('stakeMsg');
+  // Cap days at [1..180] and show a hint if we clamp
+const stakeDaysMsg = document.getElementById('stakeDaysMsg');
+
+function clampStakeDays(v){
+  const n = parseInt(v || 0, 10);
+  const d = Math.max(1, Math.min(180, n));
+  if (stakeDaysMsg){
+    if (n !== d){
+      stakeDaysMsg.textContent = 'Capped at 180 days.';
+      stakeDaysMsg.style.color = '#ffcd60';
+    } else {
+      stakeDaysMsg.textContent = 'Max 180 days.';
+      stakeDaysMsg.style.color = '';
+    }
+  }
+  return d;
+}
+
+stakeDays?.addEventListener('input', ()=>{
+  stakeDays.value = clampStakeDays(stakeDays.value);
+});
 
 const stakePreviewBox = document.getElementById('stakePreviewBox');
 const stakeAPR     = document.getElementById('stakeAPR');
@@ -1408,7 +1495,7 @@ closeClaimBtn?.addEventListener('click', ()=> closeModal(claimModal));
 stakePreview?.addEventListener('click', async ()=>{
   const pub = (stakePub.value||'').trim();
   const amt = Number(stakeAmt.value||'0');
-  const days= parseInt(stakeDays.value||'0',10);
+  const days = clampStakeDays(stakeDays.value);
   if (!pub.startsWith('G')){ stakeMsg.textContent='Enter a valid G… public key.'; return; }
   if (!(amt>0) || !(days>0)){ stakeMsg.textContent='Enter a positive amount and lock length.'; return; }
 
@@ -1435,7 +1522,7 @@ stakePreview?.addEventListener('click', async ()=>{
 stakeStart?.addEventListener('click', async ()=>{
   const pub = (stakePub.value||'').trim();
   const amt = Number(stakeAmt.value||'0');
-  const days= parseInt(stakeDays.value||'0',10);
+  const days = clampStakeDays(stakeDays.value);
   if (!pub.startsWith('G') || !(amt>0) || !(days>0)){ return; }
 
   stakeMsg.textContent = 'Preparing staking transaction…';
@@ -1475,7 +1562,116 @@ stakeStart?.addEventListener('click', async ()=>{
     stakeMsg.textContent = '❌ ' + String(e);
   }
 });
+// --- Vote modal refs
+const voteModal    = document.getElementById('voteModal');
+const closeVoteBtn = document.getElementById('closeVoteBtn');
+const voteQuickBtn = document.getElementById('voteQuickBtn');
 
+const votePub   = document.getElementById('votePub');
+const voteDays  = document.getElementById('voteDays');
+const voteGame  = document.getElementById('voteGame');
+const voteAmt   = document.getElementById('voteAmt');
+
+const votePreviewBtn  = document.getElementById('votePreviewBtn');
+const voteStartBtn    = document.getElementById('voteStartBtn');
+const voteMsg         = document.getElementById('voteMsg');
+const votePreviewBox  = document.getElementById('votePreviewBox');
+const voteAPR         = document.getElementById('voteAPR');
+const voteVotes       = document.getElementById('voteVotes');
+const voteUnlock      = document.getElementById('voteUnlock');
+
+// Open/close
+voteQuickBtn?.addEventListener('click', async ()=>{
+  votePub.value = (ACTIVE_PUB || document.getElementById('acctPub')?.value || '');
+  voteMsg.textContent = '';
+  votePreviewBox.style.display = 'none';
+  voteStartBtn.disabled = true;
+  await loadVoteProposals();
+  openModal(voteModal, closeVoteBtn);
+});
+closeVoteBtn?.addEventListener('click', ()=> closeModal(voteModal));
+
+// Fetch proposals (title + id/slug) from your API
+async function loadVoteProposals(){
+  try{
+    const r = await fetch('/api/arcade/proposals', { cache:'no-store' });
+    const j = await r.json();
+    const items = Array.isArray(j?.proposals) ? j.proposals : [];
+    voteGame.innerHTML = items.length
+      ? items.map(p=>`<option value="${p.id || p.slug}">${p.title}</option>`).join('')
+      : `<option disabled selected>No active proposals</option>`;
+  }catch{
+    voteGame.innerHTML = `<option disabled selected>Couldn’t load proposals</option>`;
+  }
+}
+
+// Preview (reuses your /api/stake/preview math server-side)
+votePreviewBtn?.addEventListener('click', async ()=>{
+  const pub  = (votePub.value||'').trim();
+  const amt  = Number(voteAmt.value||'0');
+  const days = Math.max(1, Math.min(180, parseInt(voteDays.value||'30',10)));
+  if (!pub.startsWith('G')){ voteMsg.textContent='Enter a valid G… public key.'; return; }
+  if (!(amt>0)){ voteMsg.textContent='Enter a positive amount.'; return; }
+  if (!voteGame.value){ voteMsg.textContent='Pick a proposal.'; return; }
+
+  voteMsg.textContent = 'Calculating…';
+  try{
+    const r = await fetch('/api/stake/preview', {
+      method:'POST', headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({ amount: String(amt), lock_days: days, bucket: `arcade:${voteGame.value}` })
+    });
+    const j = await r.json();
+    if (!r.ok || !j?.ok) throw new Error(j?.error || 'preview failed');
+    voteAPR.textContent   = `${Number(j.apr).toFixed(2)}%`;
+    voteVotes.textContent = `${amt.toLocaleString(undefined,{maximumFractionDigits:7})}`;
+    voteUnlock.textContent= (new Date(j.unlock_unix*1000)).toISOString().replace('T',' ').replace('Z',' UTC');
+    votePreviewBox.style.display = '';
+    voteStartBtn.disabled = false;
+    voteMsg.textContent = '';
+  }catch(e){
+    voteMsg.textContent = '❌ ' + String(e);
+  }
+});
+
+// Start vote-stake (server builds XDR tagged to proposal)
+voteStartBtn?.addEventListener('click', async ()=>{
+  const pub  = (votePub.value||'').trim();
+  const amt  = Number(voteAmt.value||'0');
+  const days = Math.max(1, Math.min(180, parseInt(voteDays.value||'30',10)));
+  const proposal = voteGame.value;
+  if (!pub.startsWith('G') || !(amt>0) || !proposal){ return; }
+
+  voteMsg.textContent = 'Preparing vote-stake transaction…';
+  try{
+    const r = await fetch('/api/vote/stake', {
+      method:'POST', headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({ pub, amount:String(amt), lock_days:days, proposal })
+    });
+    const j = await r.json();
+    if (!r.ok || !j?.ok) throw new Error(j?.error || 'build failed');
+
+    const xdr  = j.xdr;
+    const pass = j.network_passphrase || 'Pi Testnet';
+
+    const localSec = getLocalSecret(pub, USER?.username);
+    if (localSec){
+      const ok = await ensureStellar();
+      if (!ok || !window.StellarSdk){ voteMsg.textContent='❌ Stellar SDK missing.'; return; }
+      const SDK = window.StellarSdk;
+      const tx  = SDK.TransactionBuilder.fromXDR(xdr, pass);
+      tx.sign(SDK.Keypair.fromSecret(localSec));
+      const server = getServer();
+      const resp   = await server.submitTransaction(tx);
+      voteMsg.innerHTML = resp?.hash ? `✅ Votes staked. Tx: <code>${resp.hash}</code>` : 'Submitted.';
+    } else {
+      const uri = `web+stellar:tx?xdr=${encodeURIComponent(xdr)}&network_passphrase=${encodeURIComponent(pass)}`;
+      window.location.href = uri;
+      voteMsg.innerHTML = `Opening your wallet… If nothing happens, copy this URI:<br><code style="word-break:break-all">${uri}</code>`;
+    }
+  }catch(e){
+    voteMsg.textContent = '❌ ' + String(e);
+  }
+});
 // ======== LIST CLAIMABLES ========
 async function listClaimables(){
   const pub = (claimPub.value||'').trim();
