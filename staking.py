@@ -1,4 +1,4 @@
-# staking.py (top section)
+# staking.py
 
 import os, re, time, logging, sqlite3, threading
 from datetime import datetime, timezone
@@ -37,8 +37,11 @@ DISTR_SECRET = _getenv("DISTR_SECRET", required=True)
 VOTE_ROUND_LENGTH_DAYS = int(_getenv("VOTE_ROUND_LENGTH_DAYS", "180") or "180")
 VOTE_ROUND_END_ENV     = _getenv("VOTE_ROUND_END", None)
 
-# % of ad revenue allocated to *voters of the winning game*
+# % of ad revenue allocated to voters of the winning game (for display/preview)
 AD_REVENUE_POOL_PCT = Decimal(_getenv("AD_REVENUE_POOL_PCT", "0.25") or "0.25")
+
+# Early voter max bonus (linear → 0 at deadline). 0.30 = up to +30% weight.
+EARLY_BONUS_MAX = Decimal(_getenv("EARLY_BONUS_MAX", "0.30") or "0.30")
 
 # Validate keys early
 _env_problems = []
@@ -63,22 +66,34 @@ def _vote_cx():
       proposal   TEXT NOT NULL,
       pub        TEXT NOT NULL,
       amount7    TEXT NOT NULL,
+      weight7    TEXT NOT NULL,
       created_at INTEGER NOT NULL
     )""")
+    # Backfill safety: older tables may lack weight7
+    try:
+        cx.execute("ALTER TABLE vote_intents ADD COLUMN weight7 TEXT")
+    except Exception:
+        pass  # already exists or SQLite variant without IF NOT EXISTS
     return cx
 
-def _vote_add(round_end, proposal, pub, amount7):
+def _vote_add(round_end, proposal, pub, amount7, weight7):
     with _vote_lock:
         cx = _vote_cx()
-        cx.execute("INSERT INTO vote_intents(round_end,proposal,pub,amount7,created_at) VALUES(?,?,?,?,?)",
-                   (int(round_end), proposal, pub, str(amount7), int(time.time())))
+        cx.execute(
+            "INSERT INTO vote_intents(round_end,proposal,pub,amount7,weight7,created_at) VALUES(?,?,?,?,?,?)",
+            (int(round_end), proposal, pub, str(amount7), str(weight7), int(time.time()))
+        )
         cx.commit(); cx.close()
 
-def _vote_total(round_end, proposal) -> Decimal:
+def _vote_total_weight(round_end, proposal) -> Decimal:
+    # Sum weight7, fallback to amount7 if weight7 is NULL (legacy rows)
     with _vote_lock:
         cx = _vote_cx()
-        cur = cx.execute("SELECT COALESCE(SUM(CAST(amount7 AS REAL)),0) FROM vote_intents WHERE round_end=? AND proposal=?",
-                         (int(round_end), proposal))
+        cur = cx.execute(
+            "SELECT COALESCE(SUM(CAST(COALESCE(weight7,amount7) AS REAL)),0) "
+            "FROM vote_intents WHERE round_end=? AND proposal=?",
+            (int(round_end), proposal)
+        )
         total = cur.fetchone()[0]
         cx.close()
         return Decimal(str(total or 0))
@@ -203,7 +218,6 @@ def _vote_round_end_unix() -> int:
     """
     If VOTE_ROUND_END is provided, use it.
     Otherwise, end = start_of_today_utc + VOTE_ROUND_LENGTH_DAYS * 86400.
-    This makes today's max 180, tomorrow 179, etc.
     """
     env_end = _to_unix(VOTE_ROUND_END_ENV) if VOTE_ROUND_END_ENV else None
     if env_end:
@@ -217,9 +231,24 @@ def _vote_days_remaining(now_ts: int | None = None) -> int:
     now_ts = int(now_ts or time.time())
     end = _vote_round_end_unix()
     secs = max(0, end - now_ts)
-    # ceil division by 86400
-    days = (secs + 86400 - 1) // 86400
+    days = (secs + 86400 - 1) // 86400  # ceil
     return max(1, int(days))
+
+def _vote_boost_multiplier(days_remaining: int) -> Decimal:
+    """
+    Linear early bonus: 1.0 .. 1.0+EARLY_BONUS_MAX depending on remaining days.
+    """
+    try:
+        dr = Decimal(int(days_remaining))
+        mult = Decimal("1.0") + (dr / Decimal(VOTE_ROUND_LENGTH_DAYS)) * EARLY_BONUS_MAX
+        return mult.quantize(Decimal("0.0001"), rounding=ROUND_DOWN)
+    except Exception:
+        return Decimal("1.0")
+
+def _vote_weight_for(amount: Decimal, days_remaining: int) -> Decimal:
+    return (amount * _vote_boost_multiplier(days_remaining)).quantize(
+        Decimal("0.0000001"), rounding=ROUND_DOWN
+    )
 
 # ----------------------------- public rules ------------------------------
 
@@ -241,7 +270,8 @@ def vote_rules():
         "round_end_unix": end_unix,
         "days_remaining": _vote_days_remaining(),
         "length_days": VOTE_ROUND_LENGTH_DAYS,
-        "note": "All vote stakes unlock at round end, max days decrease daily."
+        "early_bonus_max": str((EARLY_BONUS_MAX * Decimal(100)).quantize(Decimal("0.01"))),  # percent
+        "note": "Vote stakes unlock at round end. Early stakes get higher weight."
     })
 
 # ----------------------------- preview/build stake -----------------------
@@ -268,10 +298,7 @@ def preview():
 @bp_stake.route("/api/stake/build", methods=["POST"])
 def build_stake_tx():
     """
-    ONE tx, TWO ops:
-      1) user's IZZA -> claimable balance (principal)
-      2) distributor's IZZA -> claimable balance (reward)
-    Server pre-signs with distributor so the user adds their signature and submits.
+    Regular APR staking: principal + reward claimables in one tx.
     """
     j = request.get_json(force=True) or {}
     user_pub = _clean(j.get("pub") or "")
@@ -348,9 +375,8 @@ def build_stake_tx():
 @bp_stake.route("/api/vote/stake", methods=["POST"])
 def build_vote_stake_tx():
     """
-    Vote stakes always unlock at the vote round end.
-    Today's max days = VOTE_ROUND_LENGTH_DAYS.
-    Tomorrow it decreases by 1, and so on.
+    Vote stakes: fixed unlock at round end, no reward claimable now.
+    Early stakes get a higher WEIGHT used for future ad-revenue share if this proposal wins.
     """
     j = request.get_json(force=True) or {}
     try:
@@ -370,7 +396,7 @@ def build_vote_stake_tx():
     if amt <= 0:
         abort(400, "bad params: amount <= 0")
 
-    # Round end and decreasing max days
+    # Round end + early boost
     unlock_unix = _vote_round_end_unix()
     days_remaining = _vote_days_remaining()
     if days_remaining < 1:
@@ -410,12 +436,13 @@ def build_vote_stake_tx():
     if len(memo_txt.encode("utf-8")) > 28:
         memo_txt = "vote"
 
-    # Always build the transaction
+    # Build the transaction
     tx = txb.set_timeout(180).add_text_memo(memo_txt).build()
 
-    # persist this vote amount so preview math is accurate for everyone
+    # persist this vote (amount + computed weight) for pool math
     try:
-        _vote_add(unlock_unix, proposal, user_pub, _q7(amt))
+        weight = _vote_weight_for(amt, days_remaining)
+        _vote_add(unlock_unix, proposal, user_pub, _q7(amt), _q7(weight))
     except Exception as e:
         log.warning("vote intent log failed: %s", e)
 
@@ -426,7 +453,9 @@ def build_vote_stake_tx():
         "unlock_unix": unlock_unix,
         "days": int(days_remaining),
         "proposal": proposal,
-        "note": "Vote stake locks principal until the vote round end."
+        "boost_multiplier": str(_vote_boost_multiplier(days_remaining)),
+        "weight_amount": _q7(_vote_weight_for(amt, days_remaining)),
+        "note": "Vote stake locks principal until the vote round end. Weight includes early bonus."
     })
 
 # ----------------------------- classify/list claimables -------------------
@@ -458,16 +487,24 @@ def vote_preview():
     amt = _sanitize_amount(j)
     if not proposal or amt <= 0:
         abort(400, "bad params")
+
     end_unix = _vote_round_end_unix()
-    pool_before = _vote_total(end_unix, proposal)
-    pool_after  = pool_before + amt
-    share_pct   = (amt / pool_after * Decimal(100)) if pool_after > 0 else Decimal(100)
+    days_rem = _vote_days_remaining()
+
+    # Pool math is in WEIGHTS, not raw amounts
+    your_weight = _vote_weight_for(amt, days_rem)
+    pool_before_w = _vote_total_weight(end_unix, proposal)
+    pool_after_w  = pool_before_w + your_weight
+    share_pct     = (your_weight / pool_after_w * Decimal(100)) if pool_after_w > 0 else Decimal(100)
+
     return jsonify({
         "ok": True,
         "round_end_unix": int(end_unix),
-        "days_remaining": _vote_days_remaining(),
-        "pool_before": str(pool_before),
-        "pool_after":  str(pool_after),
+        "days_remaining": days_rem,
+        "boost_multiplier": str(_vote_boost_multiplier(days_rem)),
+        "your_weight": _q7(your_weight),
+        "pool_weight_before": str(pool_before_w),
+        "pool_weight_after":  str(pool_after_w),
         "your_share_pct_if_wins": str(share_pct.quantize(Decimal("0.01"))),
         "ad_pool_pct": str((AD_REVENUE_POOL_PCT * Decimal(100)).quantize(Decimal("0.01")))
     })
