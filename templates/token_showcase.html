@@ -207,21 +207,7 @@
 }
 
 /* Constrain claim table so long IDs don't blow out the layout */
-#claimModal #claimTbl{
-  width: 100%;
-  table-layout: fixed;                               /* lock column widths */
-  border-collapse: collapse;
-}
-#claimModal #claimTbl th,
-#claimModal #claimTbl td{
-  white-space: nowrap;                               /* one line per cell */
-  overflow: hidden;
-  text-overflow: ellipsis;                           /* … for long text */
-}
-#claimModal #claimTbl td:nth-child(4){               /* ID column */
-  font-family: var(--mono, ui-monospace, monospace);
-  max-width: 40vw;                                   /* cap width on mobile */
-}
+
 #claimModal .blox{ overflow: hidden; }               /* clip any inner spill */
 #claimModal .modal-card{ width: min(680px, 96vw); }  /* sensible cap */
 
@@ -312,13 +298,7 @@
   #claimModal .badge{ padding:4px 8px; font-size:11px }  /* group chip smaller */
 }
 
-/* compact header labels on small screens */
-@media (max-width: 420px){
-  #claimTbl thead th.col-kind::after   { content:"Kind"; }
-  #claimTbl thead th.col-amount::after { content:"Amt"; }
-  #claimTbl thead th.col-unlock::after { content:"Unlock"; }
-  #claimTbl thead th{ color:var(--muted); }
-} 
+
     /* quick one-shot flash for the create-wallet button */
 @keyframes izza-flash {
   0% { box-shadow: 0 0 0 rgba(183,132,255,0); transform: translateY(0); }
