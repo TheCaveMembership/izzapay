@@ -1856,12 +1856,15 @@ if (kindStr === 'vote'){
 //     We compute a single % from rules.days_remaining / rules.length_days
 //     and early_bonus_max, same math as preview.
 // ================================================================
-let voteRules = { length_days: 180, days_remaining: 180, early_bonus_max: "30.00" };
-try {
-  const r = await fetch('/api/vote/rules', { cache: 'no-store' });
-  const j = await r.json();
-  if (r.ok && j?.ok) voteRules = j;
-} catch(_) {}
+let voteRules = { length_days: 180, early_bonus_max: '30.00' };
+
+async function loadVoteRules(){
+  try{
+    const r = await fetch('/api/vote/rules', { cache:'no-store' });
+    const j = await r.json();
+    if (j?.ok) voteRules = j;
+  }catch(_){}
+}
 
 /** Est. APR Boost % — mirrors preview math */
 function calcVoteBoostFromRules(rules){
@@ -1928,7 +1931,8 @@ for (const [, recs] of ordered) {
   // ---- Compact block
   const trBlock = document.createElement('tr');
   trBlock.className = `group-row is-${kind}` + (unlocked ? '' : ' locked');
-
+// per-row boost for vote rows (derived from unlockTs vs round end)
+const votePct = (kind === 'vote') ? calcVoteBoostPct(unlockTs, voteRules) : 0;
   const rewardHTML = (kind === 'vote')
     ? `<div class="line" style="display:flex;justify-content:space-between;align-items:center;white-space:nowrap;">
          <span class="pill pill-vote" aria-hidden="true">EST. APR BOOST</span>
