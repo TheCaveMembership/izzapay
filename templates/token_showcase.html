@@ -1707,6 +1707,11 @@ async function loadVoteProposals(){
 }
 
 // Preview (vote)
+// label swap (one-time)
+document.querySelector('#voteAPR')?.closest('.row')?.querySelector('.label').textContent =
+  'Your share if this game wins';
+
+// preview handler (replace the block that used /api/stake/preview)
 votePreviewBtn?.addEventListener('click', async ()=>{
   const pub  = (votePub.value||'').trim();
   const raw  = String(voteAmt.value||'0').trim();
@@ -1718,24 +1723,22 @@ votePreviewBtn?.addEventListener('click', async ()=>{
 
   voteMsg.textContent = 'Calculating…';
   try{
-    // 1) get vote-round timing (authoritative for vote stakes)
-    const r1 = await fetch('/api/vote/rules', {cache:'no-store'});
-    const j1 = await r1.json();
-    if (!r1.ok || !j1?.ok) throw new Error('rules failed');
-    const days = Number(j1.days_remaining) || 1;
-    const unlockUnix = Number(j1.round_end_unix);
-
-    // 2) reuse preview APR math using those days
-    const r2 = await fetch('/api/stake/preview', {
+    const r = await fetch('/api/vote/preview', {
       method:'POST', headers:{'Content-Type':'application/json'},
-      body: JSON.stringify({ amount: String(Math.floor(amt*1e7)/1e7), lock_days: days })
+      body: JSON.stringify({ proposal, amount: String(Math.floor(amt*1e7)/1e7) })
     });
-    const j2 = await r2.json();
-    if (!r2.ok || !j2?.ok) throw new Error(j2?.error || 'preview failed');
+    const j = await r.json();
+    if (!r.ok || !j?.ok) throw new Error(j?.error || 'preview failed');
 
-    voteAPR.textContent    = `${Number(j2.apr).toFixed(2)}%`;
+    voteAPR.textContent    = `${Number(j.your_share_pct_if_wins).toFixed(2)}%`;
     voteVotes.textContent  = amt.toLocaleString(undefined,{maximumFractionDigits:7});
-    voteUnlock.textContent = (new Date(unlockUnix*1000)).toISOString().replace('T',' ').replace('Z',' UTC');
+    voteUnlock.textContent = new Date(j.round_end_unix*1000).toISOString().replace('T',' ').replace('Z',' UTC');
+
+    // optional helper line
+    const helper = document.getElementById('voteShareHelp');
+    if (helper) helper.textContent =
+      `Assumes current pool ${Number(j.pool_before).toLocaleString()} votes. ` +
+      `${Number(j.ad_pool_pct).toFixed(0)}% of ad revenue goes to voters of the winning game.`;
 
     votePreviewBox.style.display = '';
     voteStartBtn.disabled = false;
