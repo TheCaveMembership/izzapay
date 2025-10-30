@@ -221,19 +221,17 @@ def build_stake_tx():
     })
 
 # ----------------------------- vote staking ------------------------------
-# Vote stakes lock principal for 180d. No IZZA reward is minted at stake time.
 
 @bp_stake.route("/api/vote/stake", methods=["POST"])
 def build_vote_stake_tx():
     j = request.get_json(force=True) or {}
-    # debug breadcrumb to confirm what hit the server
     try:
         log.info("VOTE_STAKE_IN %s", {k: j.get(k) for k in ("pub","amount","proposal")})
     except Exception:
         pass
 
     user_pub = _clean(j.get("pub") or "")
-    proposal = _clean(j.get("proposal") or "")
+    proposal = _clean(j.get("proposal") or "") or "arcade"
     try:
         amt = _sanitize_amount(j)
     except (InvalidOperation, ValueError, TypeError):
@@ -277,15 +275,13 @@ def build_vote_stake_tx():
         asset=_izza_asset(), amount=_q7(amt), claimants=[claimant], source=user_pub
     )
 
-    # tag tx for later identification of vote round & proposal
-    memo_txt = f"vote:{proposal or 'arcade'}"
+    memo_txt = f"vote:{proposal}"
     if len(memo_txt.encode("utf-8")) > 28:
         memo_txt = "vote"
 
     tx = txb.set_timeout(180).add_text_memo(memo_txt).build()
 
     try:
-        # Optional: distributor signs too if you want a consistent signature pattern
         tx.sign(Keypair.from_secret(DISTR_SECRET))
     except Exception:
         abort(500, "bad DISTR_SECRET")
@@ -303,15 +299,13 @@ def build_vote_stake_tx():
 # ----------------------------- classify/list claimables -------------------
 
 def _classify_record(r: dict):
-    """Return kind + unlock + claimable_now for UI."""
-    kind = "reward" if (r.get("sponsor") == DISTR_PUB) else "principal"
+    """Normalize for UI grouping."""
+    # role/principal vs reward is based on sponsor
+    role = "reward" if (r.get("sponsor") == DISTR_PUB) else "principal"
     unlock_unix = None
-    claimable_now = None
     try:
         cl = (r.get("claimants") or [])[0]
         unlock_unix = _compute_unlock_unix_from_predicate(cl.get("predicate") or {})
-        if unlock_unix is not None:
-            claimable_now = int(time.time()) >= int(unlock_unix)
     except Exception:
         pass
 
@@ -319,17 +313,22 @@ def _classify_record(r: dict):
         "id": r.get("id"),
         "amount": r.get("amount"),
         "sponsor": r.get("sponsor"),
-        "kind": kind,
-        "claimants": r.get("claimants"),
+        "role": role,                          # "principal" | "reward"
         "last_modified_time": r.get("last_modified_time"),
-        "unlock_unix": unlock_unix,
-        "claimable_now": claimable_now
+        "unlock_ts": unlock_unix or 0,         # unix seconds
     }
 
 @bp_stake.route("/api/stake/claimables", methods=["GET"])
 def list_claimables():
-    """List claimable balances (principal and reward). Returns empty list on Horizon 400s.
-       Adds derived flag 'is_vote' so UI can display vote stakes distinctly."""
+    """
+    List claimable balances for this asset and claimant.
+    Returns: {"ok": True, "claimables": [...], "records": [...back-compat...]}
+    Each item also includes:
+      - role: "principal"|"reward"
+      - kind: "regular"|"vote"
+      - unlock_ts (unix seconds)
+      - contract_id: "<unlock_ts>|<kind>"
+    """
     pub = _clean(request.args.get("pub", ""))
     if not (pub and pub.startswith("G")):
         abort(400, "bad pub")
@@ -343,33 +342,54 @@ def list_claimables():
         records = (r.json().get("_embedded", {}) or {}).get("records", []) or []
     except requests.HTTPError as e:
         log.warning("claimables fetch failed: %s", e)
-        return jsonify({"ok": True, "records": []})
+        return jsonify({"ok": True, "claimables": [], "records": []})
     except Exception as e:
         log.warning("claimables fetch error: %s", e)
-        return jsonify({"ok": True, "records": []})
+        return jsonify({"ok": True, "claimables": [], "records": []})
 
-    out = [_classify_record(rec) for rec in records]
+    norm = [_classify_record(rec) for rec in records]
 
-    # ---- Derive vote vs regular groupings (no DB required) ----
-    groups = {}
-    for rec in out:
-        u = rec.get("unlock_unix")
-        if u is None:
-            continue
-        g = groups.setdefault(u, {"has_principal": False, "has_reward": False})
-        if rec.get("kind") == "principal":
-            g["has_principal"] = True
-        elif rec.get("kind") == "reward":
-            g["has_reward"] = True
+    # derive vote vs regular: if an unlock bucket has principal but no reward => vote stake
+    buckets = {}
+    for rec in norm:
+        u = rec.get("unlock_ts") or 0
+        b = buckets.setdefault(u, {"has_principal": False, "has_reward": False})
+        if rec["role"] == "principal":
+            b["has_principal"] = True
+        else:
+            b["has_reward"] = True
 
-    for rec in out:
-        u = rec.get("unlock_unix")
-        g = groups.get(u) or {}
-        rec["is_vote"] = bool(g.get("has_principal") and not g.get("has_reward"))
+    out = []
+    for rec in norm:
+        u = rec.get("unlock_ts") or 0
+        b = buckets.get(u, {})
+        is_vote = bool(b.get("has_principal") and not b.get("has_reward"))
+        kind = "vote" if is_vote else "regular"
+        rec_out = {
+            **rec,
+            "kind": kind,
+            "contract_id": f"{int(u)}|{kind}",
+        }
+        out.append(rec_out)
 
-    return jsonify({"ok": True, "records": out})
+    # Back-compat field name and new name the UI expects
+    return jsonify({"ok": True, "claimables": out, "records": out})
 
 # ----------------------------- build claim(s) -----------------------------
+
+def _infer_claimant_from_balance_id(cb_id: str) -> str | None:
+    """Look up a balance and return claimant G... if present."""
+    try:
+        url = f"{HORIZON_URL}/claimable_balances/{cb_id}"
+        r = requests.get(url, timeout=15)
+        r.raise_for_status()
+        rec = r.json()
+        cl = (rec.get("claimants") or [])[0]
+        dest = (cl.get("destination") or "").strip()
+        return dest if dest.startswith("G") else None
+    except Exception as e:
+        log.warning("infer claimant failed for %s: %s", cb_id, e)
+        return None
 
 @bp_stake.route("/api/stake/build-claim", methods=["POST"])
 def build_claim_tx():
@@ -377,10 +397,14 @@ def build_claim_tx():
     j = request.get_json(force=True) or {}
     pub   = _clean(j.get("pub") or "")
     cb_id = _clean(j.get("balance_id") or "")
-    if not (pub and pub.startswith("G")):
-        abort(400, "bad pub")
     if not _valid_balance_id(cb_id):
         abort(400, "bad balance_id format")
+
+    if not (pub and pub.startswith("G")):
+        # try to infer from Horizon
+        pub = _infer_claimant_from_balance_id(cb_id)
+        if not pub:
+            abort(400, "bad pub")
 
     try:
         acct = server.load_account(pub)
@@ -407,14 +431,26 @@ def build_claim_tx_batch():
     j = request.get_json(force=True) or {}
     pub = _clean(j.get("pub") or "")
     ids = j.get("balance_ids") or []
-    if not (pub and pub.startswith("G")):
-        abort(400, "bad pub")
     if not isinstance(ids, list) or not ids:
         abort(400, "no balance_ids provided")
 
     valid_ids = [s for s in ((_clean(str(x)) or "") for x in ids) if _valid_balance_id(s)]
     if not valid_ids:
         abort(400, "no valid balance_ids")
+
+    # If pub not provided, infer from first id and ensure all ids share same claimant
+    if not (pub and pub.startswith("G")):
+        pub = _infer_claimant_from_balance_id(valid_ids[0])
+        if not pub:
+            abort(400, "bad pub")
+        # sanity check: all ids must share claimant
+        try:
+            for cb in valid_ids[1:]:
+                p2 = _infer_claimant_from_balance_id(cb)
+                if p2 != pub:
+                    abort(400, "mixed claimants in batch")
+        except Exception:
+            abort(400, "claimant check failed")
 
     try:
         acct = server.load_account(pub)
@@ -433,6 +469,23 @@ def build_claim_tx_batch():
 
     tx = tb.set_timeout(180).build()
     return jsonify({"ok": True, "xdr": tx.to_xdr(), "network_passphrase": NET_PASSPHRASE})
+
+# ---- New: UI-friendly alias matching your latest frontend (/api/stake/claim)
+
+@bp_stake.route("/api/stake/claim", methods=["POST"])
+def claim_batch_ui_alias():
+    """
+    UI alias for batch claim.
+    Body: { ids: [...], pub?: "G..." }
+    Returns XDR + network_passphrase.
+    """
+    j = request.get_json(force=True) or {}
+    ids = j.get("ids") or j.get("balance_ids") or []
+    pub = _clean(j.get("pub") or "")
+    # Reuse the batch builder logic
+    return build_claim_tx_batch.__wrapped__({  # type: ignore
+        "get_json": lambda *_, **__: {"balance_ids": ids, "pub": pub}
+    })
 
 # ----------------------------- arcade proposals ---------------------------
 
