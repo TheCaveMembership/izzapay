@@ -197,6 +197,33 @@
       box-shadow:0 40px 120px rgba(0,0,0,.55), 0 0 80px rgba(122,68,255,.35) inset;
       animation:pop .18s ease-out;
     }
+    /* --- Claim modal overflow fix (mobile-safe) --- */
+.modal-body{ overflow-x: hidden; }                   /* never push modal sideways */
+
+/* Keep modals comfortably centered on phones */
+@media (max-width: 480px){
+  .modal{ align-items: flex-start; }                /* avoid being forced too low */
+  .modal-card{ margin-top: max(10px, env(safe-area-inset-top)); }
+}
+
+/* Constrain claim table so long IDs don't blow out the layout */
+#claimModal #claimTbl{
+  width: 100%;
+  table-layout: fixed;                               /* lock column widths */
+  border-collapse: collapse;
+}
+#claimModal #claimTbl th,
+#claimModal #claimTbl td{
+  white-space: nowrap;                               /* one line per cell */
+  overflow: hidden;
+  text-overflow: ellipsis;                           /* … for long text */
+}
+#claimModal #claimTbl td:nth-child(4){               /* ID column */
+  font-family: var(--mono, ui-monospace, monospace);
+  max-width: 40vw;                                   /* cap width on mobile */
+}
+#claimModal .blox{ overflow: hidden; }               /* clip any inner spill */
+#claimModal .modal-card{ width: min(680px, 96vw); }  /* sensible cap */
     /* quick one-shot flash for the create-wallet button */
 @keyframes izza-flash {
   0% { box-shadow: 0 0 0 rgba(183,132,255,0); transform: translateY(0); }
