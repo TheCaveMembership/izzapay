@@ -1950,7 +1950,7 @@ async function listClaimables(){
         tr.innerHTML = `
           <td>
             <label class="pick">
-              <input type="checkbox" data-contract="${g.contract_id}" ${locked ? 'disabled' : ''}>
+              <input type="checkbox" class="cbPick" value="${g.contract_id}" ${locked ? 'disabled' : ''}>
               <span>${g.label}</span>
             </label>
             <span class="lockhint">${locked ? `Locked until ${toDate(g.unlock_unix)}` : 'Ready'}</span>
