@@ -867,18 +867,15 @@
         </div>
 
         <div id="votePreviewBox" style="display:none; margin-top:8px">
-  <div class="grid" style="gap:10px">
-    <div><div class="small-muted">Boost (×)</div><strong id="voteBoost">—</strong></div>
-    <div><div class="small-muted">Your Weight</div><strong id="voteWeight">—</strong></div>
-    <div><div class="small-muted">Pool Weight After</div><strong id="votePoolAfter">—</strong></div>
-    <div><div class="small-muted">Est. Share</div><strong id="voteShare">—</strong></div>
-  </div>
-  <div class="help" style="margin-top:6px" id="voteShareHelp" aria-live="polite"></div>
-</div>
-
-<div class="help" style="margin-top:8px">
-  Distribution happens to stakers of the <em>winning</em> game. If your pick doesn’t win, you can restake in the next round after unlock.
-</div>
+          <div class="grid" style="gap:10px">
+            <div><div class="small-muted">Est. APR Boost</div><strong id="voteAPR">—</strong></div>
+            <div><div class="small-muted">Your Votes</div><strong id="voteVotes">—</strong></div>
+            <div><div class="small-muted">Unlock</div><strong id="voteUnlock">—</strong></div>
+          </div>
+          <div class="help" style="margin-top:6px">
+            Distribution happens to stakers of the <em>winning</em> game. If your pick doesn’t win, you can restake in the next round after unlock.
+          </div>
+        </div>
 
         <div style="display:flex; gap:8px; margin-top:10px">
           <button id="votePreviewBtn" class="cta">Preview</button>
@@ -1685,131 +1682,45 @@ const voteVotes       = document.getElementById('voteVotes');
 const voteUnlock      = document.getElementById('voteUnlock');
 
 // Open/close
-// ==== VOTE MODAL OPEN (hide Lock Days via JS) ====
 voteQuickBtn?.addEventListener('click', async ()=>{
-  votePub.value = (window.ACTIVE_PUB || document.getElementById('acctPub')?.value || '');
+  votePub.value = (ACTIVE_PUB || document.getElementById('acctPub')?.value || '');
   voteMsg.textContent = '';
   votePreviewBox.style.display = 'none';
   voteStartBtn.disabled = true;
-
-  const fld = document.getElementById('voteDays')?.closest('.field');
-  if (fld) fld.style.display = 'none';
-
   await loadVoteProposals();
   openModal(voteModal, closeVoteBtn);
 });
+closeVoteBtn?.addEventListener('click', ()=> closeModal(voteModal));
 
-// Single writer for preview panel (no #voteAPR anywhere)
-function setVotePreview(j, amt){
-  // Boost ×
-  const boost = Number(j.boost ?? 1);
-  document.getElementById('voteBoost').textContent = `×${boost.toFixed(2)}`;
-
-  // Your Weight (votes)
-  const weight = Number(j.your_weight ?? amt ?? 0);
-  document.getElementById('voteWeight').textContent =
-    weight.toLocaleString(undefined,{maximumFractionDigits:7});
-
-  // Pool after your stake
-  const poolAfter = Number(j.pool_after ?? 0);
-  document.getElementById('votePoolAfter').textContent =
-    poolAfter.toLocaleString(undefined,{maximumFractionDigits:7});
-
-  // Est. Share (% if this game wins)
-  const pct = Number(j.your_share_pct_if_wins ?? 0);
-  document.getElementById('voteShare').textContent = `${pct.toFixed(2)}%`;
-
-  // helper
-  const helper = document.getElementById('voteShareHelp');
-  if (helper) {
-    const before = Number(j.pool_before ?? 0).toLocaleString();
-    const adpct  = Number(j.ad_pool_pct ?? 0).toFixed(0);
-    helper.textContent = `Assumes current pool ${before} votes. ${adpct}% of ad revenue goes to the winning game’s voters.`;
+// Fetch proposals (title + id/slug) from your API
+async function loadVoteProposals(){
+  try{
+    const r = await fetch('/api/arcade/proposals', { cache:'no-store' });
+    const j = await r.json();
+    const items = Array.isArray(j?.proposals) ? j.proposals : [];
+    voteGame.innerHTML = items.length
+      ? items.map(p=>`<option value="${p.id || p.slug}">${p.title}</option>`).join('')
+      : `<option disabled selected>No active proposals</option>`;
+  }catch{
+    voteGame.innerHTML = `<option disabled selected>Couldn’t load proposals</option>`;
   }
-
-  votePreviewBox.style.display = 'block';
-  voteStartBtn.disabled = false;
 }
-// expects payload from /api/claim like:
-// { ok:true, items:[{type:'regular'|'vote', contract_id:'...', unlock_unix, principal_izza, reward_izza, label:'...', ...}, ...] }
 
-function renderClaims(payload){
-  const tbody = document.querySelector('#claimTbl tbody');
-  if (!tbody) return;
-  tbody.innerHTML = '';
+// Preview (vote)
+// Safe label swap
+(() => {
+  const lbl = document.querySelector('#voteAPR')
+              ?.closest('.row')
+              ?.querySelector('.label');
+  if (lbl) lbl.textContent = 'Your share if this game wins';
+})();
 
-  const now = Math.floor(Date.now()/1000);
-
-  // group by type + contract_id (combine principal+reward per contract)
-  const groups = {};
-  for (const it of (payload.items||[])){
-    const key = `${it.type}|${it.contract_id}`;
-    if (!groups[key]){
-      groups[key] = {
-        type: it.type,
-        contract_id: it.contract_id,
-        unlock_unix: it.unlock_unix,
-        label: it.label || (it.type==='vote' ? 'Vote stake' : 'Stake'),
-        principal: 0,
-        reward: 0
-      };
-    }
-    groups[key].principal += Number(it.principal_izza||0);
-    groups[key].reward    += Number(it.reward_izza||0);
-  }
-
-  const byType = { regular:[], vote:[] };
-  Object.values(groups).forEach(g => byType[g.type]?.push(g));
-  byType.regular.sort((a,b)=>a.unlock_unix-b.unlock_unix);
-  byType.vote.sort((a,b)=>a.unlock_unix-b.unlock_unix);
-
-  function addSection(list, cssType){
-    if (!list.length) return;
-
-    // section head
-    const head = document.createElement('tr');
-    head.className = `group-head is-${cssType}`;
-    head.innerHTML = `<td colspan="5">
-        <span class="pill pill-${cssType}">${cssType === 'vote' ? 'VOTE' : 'REGULAR'}</span>
-        <strong style="margin-left:8px">${cssType === 'vote' ? 'Vote-stake contracts' : 'Stake contracts'}</strong>
-      </td>`;
-    tbody.appendChild(head);
-
-    // rows (each contract separate)
-    for (const g of list){
-      const total = g.principal + g.reward;
-      const locked = (g.unlock_unix ?? 0) > now;
-
-      const tr = document.createElement('tr');
-      tr.className = `group-row is-${cssType}` + (locked ? ' locked' : '');
-
-      tr.innerHTML = `
-        <td>
-          <label class="pick">
-            <input type="checkbox" data-contract="${g.contract_id}" ${locked ? 'disabled' : ''}>
-            <span>${g.label}</span>
-          </label>
-          <span class="lockhint">${locked ? `Unlocks ${new Date(g.unlock_unix*1000).toLocaleString()}` : 'Ready'}</span>
-        </td>
-        <td class="num">${g.principal.toLocaleString(undefined,{maximumFractionDigits:7})}</td>
-        <td class="num">${g.reward.toLocaleString(undefined,{maximumFractionDigits:7})}</td>
-        <td class="num"><strong>${total.toLocaleString(undefined,{maximumFractionDigits:7})}</strong></td>
-        <td class="num mono">${g.contract_id.slice(0,6)}…${g.contract_id.slice(-4)}</td>
-      `;
-      tbody.appendChild(tr);
-    }
-  }
-
-  addSection(byType.regular, 'regular');
-  addSection(byType.vote, 'vote');
-}
-// ==== PREVIEW CLICK ====
+// preview handler (replace the block that used /api/stake/preview)
 votePreviewBtn?.addEventListener('click', async ()=>{
   const pub  = (votePub.value||'').trim();
   const raw  = String(voteAmt.value||'0').trim();
   const amt  = Number(raw.replace(/[^0-9.]/g,''));
   const proposal = voteGame.value;
-
   if (!pub.startsWith('G')){ voteMsg.textContent='Enter a valid G… public key.'; return; }
   if (!(amt>0)){ voteMsg.textContent='Enter a positive amount.'; return; }
   if (!proposal){ voteMsg.textContent='Pick a proposal.'; return; }
@@ -1823,14 +1734,25 @@ votePreviewBtn?.addEventListener('click', async ()=>{
     const j = await r.json();
     if (!r.ok || !j?.ok) throw new Error(j?.error || 'preview failed');
 
-    setVotePreview(j, amt);
+    voteAPR.textContent    = `${Number(j.your_share_pct_if_wins).toFixed(2)}%`;
+    voteVotes.textContent  = amt.toLocaleString(undefined,{maximumFractionDigits:7});
+    voteUnlock.textContent = new Date(j.round_end_unix*1000).toISOString().replace('T',' ').replace('Z',' UTC');
+
+    // optional helper line
+    const helper = document.getElementById('voteShareHelp');
+    if (helper) helper.textContent =
+      `Assumes current pool ${Number(j.pool_before).toLocaleString()} votes. ` +
+      `${Number(j.ad_pool_pct).toFixed(0)}% of ad revenue goes to voters of the winning game.`;
+
+    votePreviewBox.style.display = '';
+    voteStartBtn.disabled = false;
     voteMsg.textContent = '';
   }catch(e){
     voteMsg.textContent = '❌ ' + String(e);
   }
 });
 
-// ==== START VOTE-STAKE (unchanged flow) ====
+// Start vote-stake (build + sign/submit same as regular)
 voteStartBtn?.addEventListener('click', async ()=>{
   const pub  = (votePub.value||'').trim();
   const amt  = Number(String(voteAmt.value||'0').replace(/[^0-9.]/g,''));
@@ -1849,6 +1771,7 @@ voteStartBtn?.addEventListener('click', async ()=>{
     const xdr  = j.xdr;
     const pass = j.network_passphrase || 'Pi Testnet';
 
+    // Prefer wallet signing unless we KNOW we have a matching local secret
     const localSec = getLocalSecret(pub, USER?.username);
     if (localSec) {
       const ok = await ensureStellar();
@@ -1861,10 +1784,12 @@ voteStartBtn?.addEventListener('click', async ()=>{
         const resp = await server.submitTransaction(tx);
         voteMsg.innerHTML = resp?.hash ? `✅ Votes staked. Tx: <code>${resp.hash}</code>` : 'Submitted.';
       }catch(e){
+        // show precise Horizon reason
         const rc = e?.response?.data?.extras?.result_codes;
         voteMsg.textContent = `❌ submit failed: ${JSON.stringify(rc) || String(e)}`;
       }
     } else {
+      // Always deep-link to wallet so the USER signature is added
       const uri = `web+stellar:tx?xdr=${encodeURIComponent(xdr)}&network_passphrase=${encodeURIComponent(pass)}`;
       window.location.href = uri;
       voteMsg.innerHTML = `Opening wallet to sign…<br><small>If nothing opens, copy this into your wallet:</small><br><code style="word-break:break-all">${uri}</code>`;
