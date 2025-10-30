@@ -1414,14 +1414,8 @@ const closePlaceOrderBtn= document.getElementById('closePlaceOrderBtn');
 const backdrop      = document.getElementById('modalBackdrop');
 const closeModalBtn = document.getElementById('closeModalBtn');
   // include all modals here so only one is ever open
-const modals = [
-  modal,                // roadmapModal
-  orderbookModal,
-  placeOrderModal,
-  myWalletModal,
-  stakeModal,
-  claimModal,
-  voteModal
+// include all modals here so only one is ever open
+const modals = [ modal, orderbookModal, placeOrderModal, myWalletModal ];
 ];
 let lastFocus = null;
   // My Wallet modal (Actions)
@@ -1430,6 +1424,7 @@ const secretOnce    = document.getElementById('secretOnce');
 // ======== STAKING CONSTANTS / REFS ========
 const stakeModal    = document.getElementById('stakeModal');
 const claimModal    = document.getElementById('claimModal');
+  modals.push(stakeModal, claimModal);
 const closeStakeBtn = document.getElementById('closeStakeBtn');
 const closeClaimBtn = document.getElementById('closeClaimBtn');
 const openStakeBtn  = document.getElementById('openStakeBtn');   // optional internal button
@@ -1574,6 +1569,7 @@ stakeStart?.addEventListener('click', async ()=>{
 });
 // --- Vote modal refs
 const voteModal    = document.getElementById('voteModal');
+  modals.push(voteModal);
 const closeVoteBtn = document.getElementById('closeVoteBtn');
 const voteQuickBtn = document.getElementById('voteQuickBtn');
 
@@ -1814,19 +1810,18 @@ badgeOpen.addEventListener('click',  ()=>openModal(modal, closeModalBtn));
   });
 
   // Wallet button — ensure user auth first so mwUser is filled
-  walletBtn.addEventListener('click', async ()=>{
-    if (!USER) {                    // get username from Pi auth
-      try { await piSignIn(); } catch(_) { /* ignore if user cancels */ }
-    }
-    // get an active pub (server or the fresh local one)
-    if (!ACTIVE_PUB){
-      await fetchActiveWallet();
-      if (!ACTIVE_PUB && NEW_WALLET) ACTIVE_PUB = NEW_WALLET.pub;
-    }
-    await refreshMyWalletModal();   // this now sees USER.username
-    openModal(myWalletModal, closeMyWalletBtn);
-  });
-
+  const walletBtn = document.getElementById('walletBtn');
+  walletBtn?.addEventListener('click', async ()=>{
+  if (!USER) {
+    try { await piSignIn(); } catch(_) {}
+  }
+  if (!ACTIVE_PUB){
+    await fetchActiveWallet();
+    if (!ACTIVE_PUB && NEW_WALLET) ACTIVE_PUB = NEW_WALLET.pub;
+  }
+  await refreshMyWalletModal();
+  openModal(myWalletModal, closeMyWalletBtn);
+});
 // ✅ Call the gate AFTER everything above exists
 
 
@@ -1844,7 +1839,7 @@ badgeOpen.addEventListener('click',  ()=>openModal(modal, closeModalBtn));
     + `&counter_asset_type=native`
     + `&order=desc&limit=200`;
 
-  document.getElementById('rawOrderbookLink').href = ORDERBOOK_URL;
+  document.getElementById('rawOrderbookLink')?.setAttribute('href', ORDERBOOK_URL);
 
   // =================== Order book table UI ===================
   const obBestAsk = document.getElementById('obBestAsk');
@@ -2644,7 +2639,7 @@ try { markSecretViewedOnce(NEW_WALLET.pub, USER?.username); } catch(_){}
       else if(!e.shiftKey && document.activeElement === last){ first.focus(); e.preventDefault(); }
     });
   }
-  [modal, orderbookModal, placeOrderModal, myWalletModal].forEach(trapFocus);
+  [modal, orderbookModal, placeOrderModal, myWalletModal, stakeModal, claimModal, voteModal].forEach(m => { if (m) trapFocus(m); });
 })();
 </script>
 </body>
