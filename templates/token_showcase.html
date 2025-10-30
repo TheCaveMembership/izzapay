@@ -1798,12 +1798,60 @@ voteStartBtn?.addEventListener('click', async ()=>{
     voteMsg.textContent = '❌ ' + String(e);
   }
 });
-// ======== LIST CLAIMABLES (grouped: one toggle, principal+reward in one box) ========
+// ======== LIST CLAIMABLES (separate rows for each contract; vote shows % as reward) ========
 async function listClaimables(){
   const pub = (claimPub.value||'').trim();
   if (!pub.startsWith('G')){ claimMsg.textContent='Enter a valid G… public key.'; return; }
   claimMsg.textContent = 'Loading…';
   claimTblBody.innerHTML = '';
+
+  // helpers
+  const fmtAmt = (n)=>Number(n||0).toLocaleString(undefined,{maximumFractionDigits:7});
+  const toDate = (unix)=> new Date((Number(unix)||0)*1000).toISOString().slice(0,10);
+
+  // derive a stable id if server doesn't provide one
+  const deriveId = (r, kind) => {
+    if (r.contract_id) return String(r.contract_id);
+    if (r.stake_id)    return `S:${r.stake_id}`;
+    // fallback: unlock + kind + tail of any tx/id/source so different vote rounds never collapse
+    const tail = (r.tx || r.tx_hash || r.id || r.source || r.created_at || '').toString().slice(-12) || Math.random().toString(36).slice(2,8);
+    const u = Number(r.unlock_unix || r.unlock_ts || 0) || 0;
+    return `${kind}|${u}|${tail}`;
+  };
+
+  // try to compute "your share %" for a vote stake if the row doesn't include it
+  async function computeVoteSharePct(r){
+    // use any percent already present
+    const found =
+      r.your_share_pct_if_wins ??
+      r.share_pct ??
+      r.apr_pct ??
+      r.apr;
+    if (found != null) return Number(found);
+
+    // need fields to compute: proposal id/name + amount (principal)
+    const proposal =
+      r.proposal_id || r.game_id || r.proposal || r.bucket || r.pool || '';
+    const principal =
+      Number(r.principal || r.amount_principal || r.amount || 0);
+
+    if (!proposal || !(principal>0)) return null;
+
+    try{
+      const resp = await fetch('/api/vote/preview', {
+        method:'POST', headers:{'Content-Type':'application/json'},
+        body: JSON.stringify({
+          proposal: String(proposal),
+          amount:   String(Math.floor(principal*1e7)/1e7)
+        })
+      });
+      const j = await resp.json().catch(()=>null);
+      if (resp.ok && j && j.ok){
+        return Number(j.your_share_pct_if_wins ?? j.apr ?? j.share_pct ?? 0);
+      }
+    }catch(_){}
+    return null;
+  }
 
   try{
     const r = await fetch(`/api/stake/claimables?pub=${encodeURIComponent(pub)}`, { cache:'no-store' });
@@ -1818,83 +1866,106 @@ async function listClaimables(){
       return;
     }
 
-    // ---- STRONG GROUPING (don't collapse different contracts)
-    // Prefer a real id from server; else derive a unique signature.
+    // group strictly by (type, contract_id we derive), so each vote stake stays separate
     const groups = {};
-    for (const r of rows){
-      const unlockTs = Number(r.unlock_ts || r.unlock_unix || 0);
-      const kindStr  = (r.kind || r.bucket || r.pool || '').toString().toLowerCase().includes('vote') ? 'vote' : 'regular';
+    for (const raw of rows){
+      const kind = ((raw.kind || raw.bucket || raw.pool || '').toString().toLowerCase().includes('vote')) ? 'vote' : 'regular';
+      const id   = deriveId(raw, kind);
+      const unlock = Number(raw.unlock_unix || raw.unlock_ts || 0) || 0;
 
-      const gid =
-        r.contract_id || r.stake_id || r.group_id || r.parent_id || r.batch_id ||
-        // fallback: unlock_ts + kind + trailing hash/source/time to avoid merging:
-        [
-          unlockTs || 0,
-          kindStr,
-          (r.tx || r.tx_hash || r.source || r.created_at || r.id || '').toString().slice(-12)
-        ].join('|');
+      const label =
+        raw.label || raw.proposal_name || raw.game_name ||
+        (kind==='vote' ? 'Vote stake' : 'Stake');
 
-      (groups[gid] ||= []).push({ ...r, __unlockTs: unlockTs, __kind: kindStr });
-    }
+      // classify amounts we got
+      const role = (raw.role || raw.kind || '').toString().toLowerCase();
+      const isRewardish = role.includes('reward');
+      const amt = Number(raw.amount || 0);
 
-    // ---- Sort contracts by unlock date (ascending; unknowns last)
-    const ordered = Object.entries(groups).sort((a,b)=>{
-      const au = a[1][0].__unlockTs || Number.MAX_SAFE_INTEGER;
-      const bu = b[1][0].__unlockTs || Number.MAX_SAFE_INTEGER;
-      return au - bu;
-    });
+      (groups[id] ||= {
+        type: kind,
+        contract_id: id,
+        unlock_unix: unlock,
+        label,
+        principal: 0,
+        rewardNum: 0,      // numeric reward for regular stakes
+        votePct:  null,    // percent for vote stakes (computed below)
+        proposal: raw.proposal_id || raw.game_id || raw.proposal || raw.bucket || raw.pool || ''
+      });
 
-    for (const [, recs] of ordered){
-      const any       = recs[0];
-      const unlockTs  = any.__unlockTs || 0;
-      const unlockStr = unlockTs ? new Date(unlockTs*1000).toISOString().slice(0,10) : '—';
-      const kind      = any.__kind === 'vote' ? 'vote' : 'regular';
-      const pillClass = kind === 'vote' ? 'pill-vote' : 'pill-regular';
-      const labelKind = kind === 'vote' ? 'VOTE' : 'NORMAL';
-      const unlocked  = unlockTs ? (Date.now() >= unlockTs*1000) : true;
-
-      // Collect ids and totals per contract
-      const ids = [];
-      let principal = 0, reward = 0;
-      for (const r of recs){
-        if (r.id) ids.push(r.id);
-        const role = (r.role || r.kind || '').toString().toLowerCase();
-        if (role.includes('reward')) reward += Number(r.amount||0);
-        else                         principal += Number(r.amount||0);
+      if (kind === 'regular'){
+        if (isRewardish) groups[id].rewardNum += amt; else groups[id].principal += amt;
+      } else {
+        // vote stake: treat everything as principal (actual reward is future distribution)
+        if (!isRewardish) groups[id].principal += amt;
       }
-
-      // ---- Header row (ONE checkbox per contract)
-      const trHead = document.createElement('tr');
-      trHead.className = `group-head is-${kind}` + (unlocked ? '' : ' locked');
-      trHead.innerHTML = `
-        <td colspan="4">
-          <label class="group-toggle" style="display:flex;align-items:center;gap:10px;white-space:nowrap;">
-            <input type="checkbox" class="cbPick" value="${ids.join(',')}" ${unlocked ? '' : 'disabled'}>
-            <span class="pill ${pillClass}">${labelKind}</span>
-            <strong>Stake • unlock ${unlockStr}</strong>
-          </label>
-        </td>`;
-      claimTblBody.appendChild(trHead);
-
-      // ---- Compact block: principal + reward together (no wrap)
-      const trBlock = document.createElement('tr');
-      trBlock.className = `group-row is-${kind}` + (unlocked ? '' : ' locked');
-      trBlock.innerHTML = `
-        <td colspan="4">
-          <div class="block" style="display:flex;flex-direction:column;gap:8px;">
-            <div class="line" style="display:flex;justify-content:space-between;align-items:center;white-space:nowrap;">
-              <span class="pill ${pillClass}" aria-hidden="true">PRINCIPAL</span>
-              <span class="num">${fmtNum(principal)}</span>
-            </div>
-            <div class="line" style="display:flex;justify-content:space-between;align-items:center;white-space:nowrap;">
-              <span class="pill ${pillClass}" aria-hidden="true">REWARD</span>
-              <span class="num">${fmtNum(reward)}</span>
-            </div>
-            ${unlocked ? '' : `<span class="lockhint">Locked until ${unlockStr}</span>`}
-          </div>
-        </td>`;
-      claimTblBody.appendChild(trBlock);
     }
+
+    // if any vote group lacks a percent, compute it (best-effort)
+    const voteIds = Object.keys(groups).filter(k => groups[k].type==='vote' && groups[k].votePct==null);
+    await Promise.all(voteIds.map(async gid=>{
+      const g = groups[gid];
+      const fakeRow = {
+        proposal_id: g.proposal,
+        principal: g.principal
+      };
+      const pct = await computeVoteSharePct(fakeRow);
+      if (pct != null) g.votePct = pct;
+    }));
+
+    // split and sort by unlock time
+    const regs  = Object.values(groups).filter(g=>g.type==='regular').sort((a,b)=>a.unlock_unix-b.unlock_unix);
+    const votes = Object.values(groups).filter(g=>g.type==='vote').sort((a,b)=>a.unlock_unix-b.unlock_unix);
+
+    function addSection(list, cssType){
+      if (!list.length) return;
+
+      // section head
+      const head = document.createElement('tr');
+      head.className = `group-head is-${cssType}`;
+      head.innerHTML = `<td colspan="5">
+        <span class="pill pill-${cssType}">${cssType==='vote'?'VOTE':'REGULAR'}</span>
+        <strong style="margin-left:8px">${cssType==='vote'?'Vote-stake contracts':'Stake contracts'}</strong>
+      </td>`;
+      claimTblBody.appendChild(head);
+
+      // rows
+      const now = Math.floor(Date.now()/1000);
+      for (const g of list){
+        const locked = (g.unlock_unix||0) > now;
+        const total  = g.principal + (g.type==='regular' ? g.rewardNum : 0);
+
+        const tr = document.createElement('tr');
+        tr.className = `group-row is-${cssType}` + (locked ? ' locked' : '');
+
+        // reward cell content:
+        let rewardHTML;
+        if (cssType === 'vote'){
+          const pct = g.votePct;
+          rewardHTML = `<span>${pct!=null ? pct.toFixed(2) : '—'}%</span>`;
+        }else{
+          rewardHTML = fmtAmt(g.rewardNum);
+        }
+
+        tr.innerHTML = `
+          <td>
+            <label class="pick">
+              <input type="checkbox" data-contract="${g.contract_id}" ${locked ? 'disabled' : ''}>
+              <span>${g.label}</span>
+            </label>
+            <span class="lockhint">${locked ? `Locked until ${toDate(g.unlock_unix)}` : 'Ready'}</span>
+          </td>
+          <td class="num">${fmtAmt(g.principal)}</td>
+          <td class="num">${rewardHTML}</td>
+          <td class="num"><strong>${fmtAmt(total)}</strong></td>
+          <td class="num mono">${g.contract_id.slice(0,6)}…${g.contract_id.slice(-4)}</td>
+        `;
+        claimTblBody.appendChild(tr);
+      }
+    }
+
+    addSection(regs, 'regular');
+    addSection(votes, 'vote');
 
     claimSelected.disabled = false;
     claimMsg.textContent = '';
@@ -1902,8 +1973,6 @@ async function listClaimables(){
     claimMsg.textContent = '❌ ' + String(e);
   }
 }
-
-claimRefresh?.addEventListener('click', listClaimables);
 
 // ======== CLAIM SELECTED (batch) ========
 claimSelected?.addEventListener('click', async ()=>{
