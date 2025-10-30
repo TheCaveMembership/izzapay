@@ -1929,32 +1929,42 @@ for (const [, recs] of ordered) {
   claimTblBody.appendChild(trHead);
 
   // ---- Compact block
-  const trBlock = document.createElement('tr');
-  trBlock.className = `group-row is-${kind}` + (unlocked ? '' : ' locked');
-// per-row boost for vote rows (derived from unlockTs vs round end)
-const votePct = (kind === 'vote') ? calcVoteBoostPct(unlockTs, voteRules) : 0;
-  const rewardHTML = (kind === 'vote')
-    ? `<div class="line" style="display:flex;justify-content:space-between;align-items:center;white-space:nowrap;">
-         <span class="pill pill-vote" aria-hidden="true">EST. APR BOOST</span>
-         <span class="num">${(isFinite(VOTE_BOOST_PCT) ? VOTE_BOOST_PCT : 0).toFixed(2)}%</span>
-       </div>`
-    : (reward > 0 ? `<div class="line" style="display:flex;justify-content:space-between;align-items:center;">
-         <span class="pill pill-reward" aria-hidden="true">REWARD</span>
-         <span class="num">${fmtNum(reward)}</span>
-       </div>` : '');
+const trBlock = document.createElement('tr');
+trBlock.className = `group-row is-${kind}` + (unlocked ? '' : ' locked');
 
-  trBlock.innerHTML = `
-    <td colspan="4">
-      <div class="block" style="display:flex;flex-direction:column;gap:8px;">
-        <div class="line" style="display:flex;justify-content:space-between;align-items:center;white-space:nowrap;">
-          <span class="pill ${pillClass}" aria-hidden="true">PRINCIPAL</span>
-          <span class="num">${fmtNum(principal)}</span>
-        </div>
-        ${rewardHTML}
-        ${unlocked ? '' : `<span class="lockhint">Locked until ${unlockStr}</span>`}
+// For VOTE rows, use API-provided fields (exactly matches preview)
+const isVote   = (kind === 'vote');
+const votePct  = (isVote && any.vote_est_share_pct != null)
+  ? Number(any.vote_est_share_pct)
+  : NaN;
+const voteGame = (isVote && any.proposal)
+  ? String(any.proposal).replaceAll('_',' ').toUpperCase()
+  : '';
+
+const rewardHTML = isVote
+  ? `<div class="line" style="display:flex;justify-content:space-between;align-items:center;white-space:nowrap;">
+       <span class="pill pill-vote" aria-hidden="true">
+         EST. SHARE${voteGame ? ` • ${voteGame}` : ''}
+       </span>
+       <span class="num">${Number.isFinite(votePct) ? votePct.toFixed(2) : '0.00'}%</span>
+     </div>`
+  : (reward > 0 ? `<div class="line" style="display:flex;justify-content:space-between;align-items:center;">
+       <span class="pill pill-reward" aria-hidden="true">REWARD</span>
+       <span class="num">${fmtNum(reward)}</span>
+     </div>` : '');
+
+trBlock.innerHTML = `
+  <td colspan="4">
+    <div class="block" style="display:flex;flex-direction:column;gap:8px;">
+      <div class="line" style="display:flex;justify-content:space-between;align-items:center;white-space:nowrap;">
+        <span class="pill ${pillClass}" aria-hidden="true">PRINCIPAL</span>
+        <span class="num">${fmtNum(principal)}</span>
       </div>
-    </td>`;
-  claimTblBody.appendChild(trBlock);
+      ${rewardHTML}
+      ${unlocked ? '' : `<span class="lockhint">Locked until ${unlockStr}</span>`}
+    </div>
+  </td>`;
+claimTblBody.appendChild(trBlock);
 }
 
     claimSelected.disabled = false;
