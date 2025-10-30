@@ -224,6 +224,23 @@
 }
 #claimModal .blox{ overflow: hidden; }               /* clip any inner spill */
 #claimModal .modal-card{ width: min(680px, 96vw); }  /* sensible cap */
+    /* Claim modal: remove ID column completely */
+#claimModal #claimTbl th:nth-child(4),
+#claimModal #claimTbl td:nth-child(4){ display:none }
+
+/* Keep layout tight and clean */
+#claimModal #claimTbl{ width:100%; table-layout:fixed; border-collapse:collapse }
+#claimModal #claimTbl th, #claimModal #claimTbl td{
+  white-space:nowrap; overflow:hidden; text-overflow:ellipsis;
+}
+#claimModal #claimTbl th:nth-child(1),
+#claimModal #claimTbl td:nth-child(1){ width:56px }            /* Pick */
+#claimModal #claimTbl th:nth-child(2),
+#claimModal #claimTbl td:nth-child(2){ width:34% }             /* Kind */
+#claimModal #claimTbl th:nth-child(3),
+#claimModal #claimTbl td:nth-child(3){ width:26%; text-align:right } /* Amount */
+#claimModal #claimTbl th:last-child,
+#claimModal #claimTbl td:last-child{ width:auto }              /* Modified */
     /* quick one-shot flash for the create-wallet button */
 @keyframes izza-flash {
   0% { box-shadow: 0 0 0 rgba(183,132,255,0); transform: translateY(0); }
@@ -742,7 +759,7 @@
       <button class="close-btn" id="closeClaimBtn">Close</button>
     </div>
     <div class="modal-body">
-      <div class="blox"><div class="small-muted">Public Key</div><input id="claimPub" class="mono"></div>
+      <div class="blox"><div class="small-muted">Public Key</div><input id="claimPub" class="mono" readonly aria-readonly="true"></div>
       <div style="margin-top:10px;display:flex;gap:8px">
         <button id="claimRefreshBtn" class="cta">Refresh</button>
         <button id="claimSelectedBtn" class="cta" disabled>Claim Selected</button>
