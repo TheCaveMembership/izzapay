@@ -1765,45 +1765,57 @@ async function listClaimables(){
       return;
     }
 
-    // Build groups by contract_id (server provides "<unlock_ts>|<kind>")
+    // ---- STRONG GROUPING (don't collapse different contracts)
+    // Prefer a real id from server; else derive a unique signature.
     const groups = {};
     for (const r of rows){
-      const gid = r.contract_id || `${r.unlock_ts||0}|${r.kind||'regular'}`;
-      (groups[gid] ||= []).push(r);
+      const unlockTs = Number(r.unlock_ts || r.unlock_unix || 0);
+      const kindStr  = (r.kind || r.bucket || r.pool || '').toString().toLowerCase().includes('vote') ? 'vote' : 'regular';
+
+      const gid =
+        r.contract_id || r.stake_id || r.group_id || r.parent_id || r.batch_id ||
+        // fallback: unlock_ts + kind + trailing hash/source/time to avoid merging:
+        [
+          unlockTs || 0,
+          kindStr,
+          (r.tx || r.tx_hash || r.source || r.created_at || r.id || '').toString().slice(-12)
+        ].join('|');
+
+      (groups[gid] ||= []).push({ ...r, __unlockTs: unlockTs, __kind: kindStr });
     }
 
-    // Sort by unlock time ascending
+    // ---- Sort contracts by unlock date (ascending; unknowns last)
     const ordered = Object.entries(groups).sort((a,b)=>{
-      const au = Number((a[1][0] && a[1][0].unlock_ts) || 0);
-      const bu = Number((b[1][0] && b[1][0].unlock_ts) || 0);
+      const au = a[1][0].__unlockTs || Number.MAX_SAFE_INTEGER;
+      const bu = b[1][0].__unlockTs || Number.MAX_SAFE_INTEGER;
       return au - bu;
     });
 
     for (const [, recs] of ordered){
-      // infer shared attributes
-      const any = recs[0];
-      const unlockTs   = Number(any.unlock_ts||0);
-      const unlockStr  = unlockTs ? new Date(unlockTs*1000).toISOString().slice(0,10) : '—';
-      const kind       = (any.kind === 'vote') ? 'vote' : 'regular';
-      const pillClass  = (kind === 'vote') ? 'pill-vote' : 'pill-regular';
-      const labelKind  = (kind === 'vote') ? 'VOTE' : 'NORMAL';
-      const unlocked   = unlockTs ? (Date.now() >= unlockTs*1000) : true;
+      const any       = recs[0];
+      const unlockTs  = any.__unlockTs || 0;
+      const unlockStr = unlockTs ? new Date(unlockTs*1000).toISOString().slice(0,10) : '—';
+      const kind      = any.__kind === 'vote' ? 'vote' : 'regular';
+      const pillClass = kind === 'vote' ? 'pill-vote' : 'pill-regular';
+      const labelKind = kind === 'vote' ? 'VOTE' : 'NORMAL';
+      const unlocked  = unlockTs ? (Date.now() >= unlockTs*1000) : true;
 
-      // totals
-      let principal = 0, reward = 0;
+      // Collect ids and totals per contract
       const ids = [];
+      let principal = 0, reward = 0;
       for (const r of recs){
-        ids.push(r.id);
-        if (r.role === 'reward') reward += Number(r.amount||0);
-        else principal += Number(r.amount||0);
+        if (r.id) ids.push(r.id);
+        const role = (r.role || r.kind || '').toString().toLowerCase();
+        if (role.includes('reward')) reward += Number(r.amount||0);
+        else                         principal += Number(r.amount||0);
       }
 
-      // header row with ONE checkbox for the whole contract
+      // ---- Header row (ONE checkbox per contract)
       const trHead = document.createElement('tr');
       trHead.className = `group-head is-${kind}` + (unlocked ? '' : ' locked');
       trHead.innerHTML = `
         <td colspan="4">
-          <label class="group-toggle" style="display:flex;align-items:center;gap:10px;">
+          <label class="group-toggle" style="display:flex;align-items:center;gap:10px;white-space:nowrap;">
             <input type="checkbox" class="cbPick" value="${ids.join(',')}" ${unlocked ? '' : 'disabled'}>
             <span class="pill ${pillClass}">${labelKind}</span>
             <strong>Stake • unlock ${unlockStr}</strong>
@@ -1811,17 +1823,17 @@ async function listClaimables(){
         </td>`;
       claimTblBody.appendChild(trHead);
 
-      // single block: principal and reward together
+      // ---- Compact block: principal + reward together (no wrap)
       const trBlock = document.createElement('tr');
       trBlock.className = `group-row is-${kind}` + (unlocked ? '' : ' locked');
       trBlock.innerHTML = `
         <td colspan="4">
-          <div class="block">
-            <div class="line">
+          <div class="block" style="display:flex;flex-direction:column;gap:8px;">
+            <div class="line" style="display:flex;justify-content:space-between;align-items:center;white-space:nowrap;">
               <span class="pill ${pillClass}" aria-hidden="true">PRINCIPAL</span>
               <span class="num">${fmtNum(principal)}</span>
             </div>
-            <div class="line">
+            <div class="line" style="display:flex;justify-content:space-between;align-items:center;white-space:nowrap;">
               <span class="pill ${pillClass}" aria-hidden="true">REWARD</span>
               <span class="num">${fmtNum(reward)}</span>
             </div>
@@ -1839,6 +1851,7 @@ async function listClaimables(){
 }
 
 claimRefresh?.addEventListener('click', listClaimables);
+
 // ======== CLAIM SELECTED (batch) ========
 claimSelected?.addEventListener('click', async ()=>{
   const pub = (claimPub.value||'').trim();
