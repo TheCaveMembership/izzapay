@@ -104,6 +104,11 @@ def _compute_unlock_unix_from_predicate(pred_obj) -> int | None:
     except Exception:
         return None
 
+def _sanitize_amount(j) -> Decimal:
+    raw = str(j.get("amount", "0"))
+    safe = raw.replace(",", "").replace(" ", "")
+    return Decimal(safe)
+
 # ----------------------------- public rules ------------------------------
 
 @bp_stake.route("/api/stake/rules", methods=["GET"])
@@ -122,13 +127,12 @@ def rules():
 def preview():
     j = request.get_json(force=True) or {}
     try:
-        amt  = Decimal(str(j.get("amount", "0")))
+        amt  = _sanitize_amount(j)
         days = _clamp_days(int(j.get("lock_days", 0)))
     except (InvalidOperation, ValueError, TypeError):
-        abort(400, "bad params")
-
+        abort(400, "bad params: amount")
     if amt <= 0:
-        abort(400, "bad params")
+        abort(400, "bad params: amount <= 0")
 
     apr = _apr_for_lock(days)
     reward = _reward_for(amt, days)
@@ -149,13 +153,13 @@ def build_stake_tx():
     j = request.get_json(force=True) or {}
     user_pub = _clean(j.get("pub") or "")
     try:
-        amt  = Decimal(str(j.get("amount", "0")))
+        amt  = _sanitize_amount(j)
         days = _clamp_days(int(j.get("lock_days", 0)))
     except (InvalidOperation, ValueError, TypeError):
-        abort(400, "bad params")
+        abort(400, "bad params: amount/lock_days")
 
     if not (user_pub and user_pub.startswith("G")) or amt <= 0:
-        abort(400, "bad params")
+        abort(400, "bad params: pub/amount")
 
     reward = _reward_for(amt, days)
     if reward <= 0:
@@ -217,30 +221,32 @@ def build_stake_tx():
     })
 
 # ----------------------------- vote staking ------------------------------
-# CHANGED: vote stakes DO NOT mint an IZZA reward now; they only lock principal for 180d.
+# Vote stakes lock principal for 180d. No IZZA reward is minted at stake time.
 
 @bp_stake.route("/api/vote/stake", methods=["POST"])
 def build_vote_stake_tx():
-    """
-    Stake tokens as votes for a proposal.
-    Uses fixed 180d lock so all vote rounds align, and tags memo with 'vote:<proposal>'.
-    Vote stakes DO NOT earn IZZA tokens at stake time; rewards are a future % of ad revenue
-    if the voted game wins the round (set/distributed later).
-    """
     j = request.get_json(force=True) or {}
+    # debug breadcrumb to confirm what hit the server
+    try:
+        log.info("VOTE_STAKE_IN %s", {k: j.get(k) for k in ("pub","amount","proposal")})
+    except Exception:
+        pass
+
     user_pub = _clean(j.get("pub") or "")
     proposal = _clean(j.get("proposal") or "")
     try:
-        amt = Decimal(str(j.get("amount", "0")))
+        amt = _sanitize_amount(j)
     except (InvalidOperation, ValueError, TypeError):
         abort(400, "bad amount")
 
-    if not (user_pub and user_pub.startswith("G")) or amt <= 0:
-        abort(400, "bad params")
+    if not (user_pub and user_pub.startswith("G")):
+        abort(400, "bad params: pub")
+    if amt <= 0:
+        abort(400, "bad params: amount <= 0")
 
     days = 180  # fixed for vote rounds
 
-    # Preflight: user has IZZA principal
+    # Preflight: user has IZZA principal available
     try:
         if not _has_trust_and_bal(user_pub, amt):
             abort(400, "user lacks IZZA balance or trustline")
@@ -291,8 +297,7 @@ def build_vote_stake_tx():
         "unlock_unix": unlock_unix,
         "days": days,
         "proposal": proposal,
-        # for UI: show this as “Amount / Share”; percentage is assigned later at payout
-        "note": "Vote stake locks principal for 180d. Reward is a future % of ad revenue if your game wins."
+        "note": "Vote stake locks principal for 180d."
     })
 
 # ----------------------------- classify/list claimables -------------------
@@ -324,7 +329,7 @@ def _classify_record(r: dict):
 @bp_stake.route("/api/stake/claimables", methods=["GET"])
 def list_claimables():
     """List claimable balances (principal and reward). Returns empty list on Horizon 400s.
-       Adds derived flag 'is_vote' so UI can display vote stakes as % of future revenue."""
+       Adds derived flag 'is_vote' so UI can display vote stakes distinctly."""
     pub = _clean(request.args.get("pub", ""))
     if not (pub and pub.startswith("G")):
         abort(400, "bad pub")
@@ -346,8 +351,6 @@ def list_claimables():
     out = [_classify_record(rec) for rec in records]
 
     # ---- Derive vote vs regular groupings (no DB required) ----
-    # We group by unlock_unix and look for a distributor-funded reward sibling.
-    # If a group has ONLY a principal (no DISTR_PUB reward), we flag it as vote-like.
     groups = {}
     for rec in out:
         u = rec.get("unlock_unix")
@@ -359,11 +362,9 @@ def list_claimables():
         elif rec.get("kind") == "reward":
             g["has_reward"] = True
 
-    # annotate each record with is_vote for UI (gold styling, % share display)
     for rec in out:
         u = rec.get("unlock_unix")
         g = groups.get(u) or {}
-        # Vote stake ≈ principal-only group (no distributor reward minted at stake time)
         rec["is_vote"] = bool(g.get("has_principal") and not g.get("has_reward"))
 
     return jsonify({"ok": True, "records": out})
