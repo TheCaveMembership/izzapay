@@ -559,7 +559,7 @@ def list_claimables():
         rec_out = {
             **rec,
             "kind": kind,
-            "contract_id": f"{int(u)}|{kind}|{rec.get('id','')[:8]}",
+            "contract_id": f"{int(u)}|{kind}|{rec.get('id','')[-16:]}",
         }
         out.append(rec_out)
 
