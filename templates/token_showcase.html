@@ -1707,9 +1707,13 @@ async function loadVoteProposals(){
 }
 
 // Preview (vote)
-// label swap (one-time)
-document.querySelector('#voteAPR')?.closest('.row')?.querySelector('.label').textContent =
-  'Your share if this game wins';
+// Safe label swap
+(() => {
+  const lbl = document.querySelector('#voteAPR')
+              ?.closest('.row')
+              ?.querySelector('.label');
+  if (lbl) lbl.textContent = 'Your share if this game wins';
+})();
 
 // preview handler (replace the block that used /api/stake/preview)
 votePreviewBtn?.addEventListener('click', async ()=>{
