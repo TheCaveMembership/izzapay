@@ -1799,11 +1799,58 @@ voteStartBtn?.addEventListener('click', async ()=>{
   }
 });
 // ======== LIST CLAIMABLES (grouped: one toggle, principal+reward in one box) ========
+// === CLAIM: each contract separate; VOTE shows Est. APR Boost in "reward" slot ===
 async function listClaimables(){
   const pub = (claimPub.value||'').trim();
   if (!pub.startsWith('G')){ claimMsg.textContent='Enter a valid G… public key.'; return; }
   claimMsg.textContent = 'Loading…';
   claimTblBody.innerHTML = '';
+
+  // helpers
+  const fmtAmt = (n)=>Number(n||0).toLocaleString(undefined,{maximumFractionDigits:7});
+  const ymd = (unix)=> new Date((Number(unix)||0)*1000).toISOString().slice(0,10);
+
+  // derive stable contract id if backend didn’t provide one
+  const contractIdOf = (row, kind) => {
+    if (row.contract_id) return String(row.contract_id);
+    if (row.stake_id)    return `S:${row.stake_id}`;
+    const tail = (row.tx || row.tx_hash || row.id || row.source || row.created_at || '').toString().slice(-12)
+                 || Math.random().toString(36).slice(2,8);
+    const u = Number(row.unlock_unix || row.unlock_ts || 0) || 0;
+    return `${kind}|${u}|${tail}`;
+  };
+
+  // pull Est. APR Boost from row; if not present and we have inputs, compute via /api/vote/preview
+  async function voteAprBoost(row){
+    // direct fields first (prefer what you set server-side)
+    const direct =
+      row.est_apr_boost ??
+      row.your_share_pct_if_wins ??
+      row.vote_apr ??
+      row.apr_pct ??
+      row.apr;
+    if (direct != null) return Number(direct);
+
+    // compute if we can (needs proposal + amount [+ lock_days if present])
+    const proposal  = row.proposal_id || row.game_id || row.proposal || row.bucket || '';
+    const principal = Number(row.principal || row.amount_principal || row.amount || 0);
+    const lockDays  = Number(row.lock_days || row.days || 0) || undefined;
+    if (!proposal || !(principal>0)) return null;
+
+    try{
+      const body = { proposal, amount: String(Math.floor(principal*1e7)/1e7) };
+      if (lockDays) body.lock_days = lockDays;
+      const r = await fetch('/api/vote/preview', {
+        method:'POST', headers:{'Content-Type':'application/json'},
+        body: JSON.stringify(body)
+      });
+      const j = await r.json().catch(()=>null);
+      if (r.ok && j && j.ok){
+        return Number(j.your_share_pct_if_wins ?? j.apr ?? j.share_pct ?? 0);
+      }
+    }catch(_){}
+    return null;
+  }
 
   try{
     const r = await fetch(`/api/stake/claimables?pub=${encodeURIComponent(pub)}`, { cache:'no-store' });
@@ -1813,87 +1860,93 @@ async function listClaimables(){
     const rows = Array.isArray(j.claimables) ? j.claimables : (j.records||[]);
     if (!rows.length){
       claimTblBody.innerHTML = `<tr><td colspan="4" class="help" style="padding:8px">No claimable balances.</td></tr>`;
-      claimSelected.disabled = true;
-      claimMsg.textContent = '';
-      return;
+      claimSelected.disabled = true; claimMsg.textContent = ''; return;
     }
 
-    // ---- STRONG GROUPING (don't collapse different contracts)
-    // Prefer a real id from server; else derive a unique signature.
+    // group strictly by contract id so vote stakes never collapse together
     const groups = {};
-    for (const r of rows){
-      const unlockTs = Number(r.unlock_ts || r.unlock_unix || 0);
-      const kindStr  = (r.kind || r.bucket || r.pool || '').toString().toLowerCase().includes('vote') ? 'vote' : 'regular';
-
-      const gid =
-        r.contract_id || r.stake_id || r.group_id || r.parent_id || r.batch_id ||
-        // fallback: unlock_ts + kind + trailing hash/source/time to avoid merging:
-        [
-          unlockTs || 0,
-          kindStr,
-          (r.tx || r.tx_hash || r.source || r.created_at || r.id || '').toString().slice(-12)
-        ].join('|');
-
-      (groups[gid] ||= []).push({ ...r, __unlockTs: unlockTs, __kind: kindStr });
+    for (const raw of rows){
+      const kind = ((raw.kind||raw.bucket||raw.pool||'')+'').toLowerCase().includes('vote') ? 'vote' : 'regular';
+      const id   = contractIdOf(raw, kind);
+      (groups[id] ||= { rows:[], kind, unlock:Number(raw.unlock_unix||raw.unlock_ts||0) });
+      groups[id].rows.push(raw);
     }
 
-    // ---- Sort contracts by unlock date (ascending; unknowns last)
-    const ordered = Object.entries(groups).sort((a,b)=>{
-      const au = a[1][0].__unlockTs || Number.MAX_SAFE_INTEGER;
-      const bu = b[1][0].__unlockTs || Number.MAX_SAFE_INTEGER;
-      return au - bu;
-    });
+    // sort by unlock ascending
+    const ordered = Object.values(groups).sort((a,b)=>(a.unlock||1e15)-(b.unlock||1e15));
 
-    for (const [, recs] of ordered){
-      const any       = recs[0];
-      const unlockTs  = any.__unlockTs || 0;
-      const unlockStr = unlockTs ? new Date(unlockTs*1000).toISOString().slice(0,10) : '—';
-      const kind      = any.__kind === 'vote' ? 'vote' : 'regular';
-      const pillClass = kind === 'vote' ? 'pill-vote' : 'pill-regular';
-      const labelKind = kind === 'vote' ? 'VOTE' : 'NORMAL';
-      const unlocked  = unlockTs ? (Date.now() >= unlockTs*1000) : true;
-
-      // Collect ids and totals per contract
-      const ids = [];
-      let principal = 0, reward = 0;
-      for (const r of recs){
-        if (r.id) ids.push(r.id);
-        const role = (r.role || r.kind || '').toString().toLowerCase();
-        if (role.includes('reward')) reward += Number(r.amount||0);
-        else                         principal += Number(r.amount||0);
+    // render
+    for (const g of ordered){
+      const unlocked = g.unlock ? (Date.now()/1000 >= g.unlock) : true;
+      let principal = 0, reward = 0, ids=[];
+      for (const row of g.rows){
+        if (row.id) ids.push(row.id);
+        const role = (row.role||row.kind||'').toLowerCase();
+        if (role.includes('reward')) reward += Number(row.amount||0);
+        else                         principal += Number(row.amount||0);
       }
 
-      // ---- Header row (ONE checkbox per contract)
-      const trHead = document.createElement('tr');
-      trHead.className = `group-head is-${kind}` + (unlocked ? '' : ' locked');
-      trHead.innerHTML = `
+      const pillClass = g.kind==='vote' ? 'pill-vote' : 'pill-regular';
+      const labelKind = g.kind==='vote' ? 'VOTE' : 'NORMAL';
+      const unlockStr = g.unlock ? ymd(g.unlock) : '—';
+
+      // header (one checkbox per contract)
+      const head = document.createElement('tr');
+      head.className = `group-head is-${g.kind}` + (unlocked?'':' locked');
+      head.innerHTML = `
         <td colspan="4">
           <label class="group-toggle" style="display:flex;align-items:center;gap:10px;white-space:nowrap;">
-            <input type="checkbox" class="cbPick" value="${ids.join(',')}" ${unlocked ? '' : 'disabled'}>
+            <input type="checkbox" class="cbPick" value="${ids.join(',')}" ${unlocked?'':'disabled'}>
             <span class="pill ${pillClass}">${labelKind}</span>
             <strong>Stake • unlock ${unlockStr}</strong>
           </label>
         </td>`;
-      claimTblBody.appendChild(trHead);
+      claimTblBody.appendChild(head);
 
-      // ---- Compact block: principal + reward together (no wrap)
-      const trBlock = document.createElement('tr');
-      trBlock.className = `group-row is-${kind}` + (unlocked ? '' : ' locked');
-      trBlock.innerHTML = `
-        <td colspan="4">
-          <div class="block" style="display:flex;flex-direction:column;gap:8px;">
-            <div class="line" style="display:flex;justify-content:space-between;align-items:center;white-space:nowrap;">
-              <span class="pill ${pillClass}" aria-hidden="true">PRINCIPAL</span>
-              <span class="num">${fmtNum(principal)}</span>
+      // row body
+      const body = document.createElement('tr');
+      body.className = `group-row is-${g.kind}` + (unlocked?'':' locked');
+
+      if (g.kind === 'vote'){
+        // show Est. APR Boost instead of numeric reward
+        const any = g.rows[0];
+        const pct = await voteAprBoost({
+          ...any,
+          principal, // ensure amount present if rows were split
+        });
+        body.innerHTML = `
+          <td colspan="4">
+            <div class="block" style="display:flex;flex-direction:column;gap:8px;">
+              <div class="line" style="display:flex;justify-content:space-between;align-items:center;">
+                <span class="pill ${pillClass}" aria-hidden="true">PRINCIPAL</span>
+                <span class="num">${fmtAmt(principal)}</span>
+              </div>
+              <div class="line" style="display:flex;justify-content:space-between;align-items:center;">
+                <span class="pill ${pillClass}" aria-hidden="true">EST. APR BOOST</span>
+                <span class="num">${pct==null ? '—' : pct.toFixed(2)+'%'}</span>
+              </div>
+              ${unlocked ? '' : `<span class="lockhint">Locked until ${unlockStr}</span>`}
             </div>
-            <div class="line" style="display:flex;justify-content:space-between;align-items:center;white-space:nowrap;">
-              <span class="pill ${pillClass}" aria-hidden="true">REWARD</span>
-              <span class="num">${fmtNum(reward)}</span>
+          </td>`;
+      } else {
+        // regular: show principal + real reward amount
+        body.innerHTML = `
+          <td colspan="4">
+            <div class="block" style="display:flex;flex-direction:column;gap:8px;">
+              <div class="line" style="display:flex;justify-content:space-between;align-items:center;">
+                <span class="pill ${pillClass}" aria-hidden="true">PRINCIPAL</span>
+                <span class="num">${fmtAmt(principal)}</span>
+              </div>
+              <div class="line" style="display:flex;justify-content:space-between;align-items:center;">
+                <span class="pill ${pillClass}" aria-hidden="true">REWARD</span>
+                <span class="num">${fmtAmt(reward)}</span>
+              </div>
+              ${unlocked ? '' : `<span class="lockhint">Locked until ${unlockStr}</span>`}
             </div>
-            ${unlocked ? '' : `<span class="lockhint">Locked until ${unlockStr}</span>`}
-          </div>
-        </td>`;
-      claimTblBody.appendChild(trBlock);
+          </td>`;
+      }
+
+      claimTblBody.appendChild(body);
     }
 
     claimSelected.disabled = false;
