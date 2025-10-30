@@ -507,14 +507,18 @@ def vote_preview():
 @bp_stake.route("/api/stake/claimables", methods=["GET"])
 def list_claimables():
     """
-    List claimable balances for this asset and claimant.
-    Returns: {"ok": True, "claimables": [...]}
-    Each item includes:
-      - role: "principal"|"reward"
-      - kind: "regular"|"vote"
-      - unlock_ts (unix seconds)
-      - contract_id: "<unlock_ts>|<kind>|<suffix>"  (regular: 8 chars, vote: 16 chars)
-      - proposal: "<id>" (on vote principal rows when known)
+    Returns normalized claimables with UI hints.
+    - role: "principal" | "reward"
+    - kind: "regular" | "vote"
+    - unlock_ts: unix seconds
+    - contract_id:
+        * regular → "<unlock>|regular|<id[-8:]>"
+        * vote    → "<unlock>|vote|<id[-16:]>"
+    - For vote rows (principal side), also includes:
+        * proposal
+        * vote_weight7
+        * vote_boost_multiplier
+        * vote_est_share_pct
     """
     pub = _clean(request.args.get("pub", ""))
     if not (pub and pub.startswith("G")):
@@ -526,57 +530,81 @@ def list_claimables():
     try:
         r = requests.get(url, params=params, timeout=15)
         r.raise_for_status()
-        records = (r.json().get("_embedded", {}) or {}).get("records", []) or []
+        raw = (r.json().get("_embedded", {}) or {}).get("records", []) or []
     except requests.HTTPError as e:
         log.warning("claimables fetch failed: %s", e)
-        return jsonify({"ok": True, "claimables": []})
+        return jsonify({"ok": True, "claimables": [], "records": []})
     except Exception as e:
         log.warning("claimables fetch error: %s", e)
-        return jsonify({"ok": True, "claimables": []})
+        return jsonify({"ok": True, "claimables": [], "records": []})
 
-    norm = [_classify_record(rec) for rec in records]
+    # normalize minimal fields
+    def _norm(rec):
+        role = "reward" if (rec.get("sponsor") == DISTR_PUB) else "principal"
+        try:
+            cl = (rec.get("claimants") or [])[0]
+            unlock_unix = _compute_unlock_unix_from_predicate(cl.get("predicate") or {}) or 0
+        except Exception:
+            unlock_unix = 0
+        return {
+            "id": rec.get("id",""),
+            "amount": rec.get("amount","0"),
+            "sponsor": rec.get("sponsor",""),
+            "role": role,
+            "last_modified_time": rec.get("last_modified_time"),
+            "unlock_ts": int(unlock_unix),
+        }
 
-    # Detect which unlock buckets look like votes (principal only)
-    buckets = {}
+    norm = [_norm(x) for x in raw]
+
+    # detect vote buckets (principal with no reward at same unlock)
+    has_pr = {}
+    has_rw = {}
     for rec in norm:
-        u = rec.get("unlock_ts") or 0
-        b = buckets.setdefault(u, {"has_principal": False, "has_reward": False})
+        u = rec["unlock_ts"]
         if rec["role"] == "principal":
-            b["has_principal"] = True
+            has_pr[u] = True
         else:
-            b["has_reward"] = True
+            has_rw[u] = True
 
     out = []
+    round_end = _vote_round_end_unix()
+    days_rem  = _vote_days_remaining()
+    boost_mult = str(_vote_boost_multiplier(days_rem))
+
     for rec in norm:
-        u = rec.get("unlock_ts") or 0
-        b = buckets.get(u, {})
-        is_vote = bool(b.get("has_principal") and not b.get("has_reward"))
+        u = rec["unlock_ts"]
+        is_vote = bool(has_pr.get(u) and not has_rw.get(u))
         kind = "vote" if is_vote else "regular"
 
-        # Contract id suffix length rule (your request):
-        suffix = (rec.get("id","")[-16:] if kind == "vote" else rec.get("id","")[-8:])
-        cid = f"{int(u)}|{kind}|{suffix}"
-
-        # Attach proposal (only for vote principal, best-effort)
-        proposal = None
-        if kind == "vote" and rec["role"] == "principal":
-            try:
-                amount7 = str(Decimal(str(rec.get("amount","0"))).quantize(Decimal("0.0000001"), rounding=ROUND_DOWN))
-                proposal = _lookup_vote_proposal(pub, int(u), amount7)
-            except Exception:
-                proposal = None
-
+        # contract_id length rule
+        id_suffix = (rec["id"][-16:] if kind == "vote" else rec["id"][-8:])
         rec_out = {
             **rec,
             "kind": kind,
-            "contract_id": cid,
+            "contract_id": f"{u}|{kind}|{id_suffix}",
         }
-        if proposal:
-            rec_out["proposal"] = proposal
 
+        # For VOTE principal rows, attach preview-identical fields
+        if kind == "vote" and rec["role"] == "principal":
+            # match persisted intent row (round_end, pub, amount7)
+            look = _vote_lookup(round_end, pub, str(rec["amount"]))
+            if look:
+                proposal = look.get("proposal") or "arcade"
+                try:
+                    your_w = Decimal(str(look.get("weight7","0") or "0"))
+                except Exception:
+                    your_w = Decimal("0")
+                share = _vote_share_pct(round_end, proposal, your_w)  # 0.01 precision
+                rec_out.update({
+                    "proposal": proposal,
+                    "vote_weight7": _q7(your_w),
+                    "vote_boost_multiplier": boost_mult,
+                    "vote_est_share_pct": str(share),  # e.g. "12.34"
+                })
         out.append(rec_out)
 
-    return jsonify({"ok": True, "claimables": out})
+    return jsonify({"ok": True, "claimables": out, "records": out})
 
 # ----------------------------- build claim(s) -----------------------------
 
