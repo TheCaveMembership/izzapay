@@ -1,5 +1,6 @@
 # staking.py
 import os, re, time, logging
+from datetime import datetime, timezone
 from decimal import Decimal, ROUND_DOWN, InvalidOperation
 from flask import Blueprint, request, jsonify, abort
 import requests
@@ -32,6 +33,11 @@ ASSET_CODE   = _getenv("ASSET_CODE", "IZZA") or "IZZA"
 ISSUER_PUB   = _getenv("ISSUER_PUB", required=True)
 DISTR_PUB    = _getenv("DISTR_PUB", required=True)
 DISTR_SECRET = _getenv("DISTR_SECRET", required=True)
+
+# Optional vote-round env
+# VOTE_ROUND_END can be ISO8601 like "2026-04-28T03:19:52Z" or a unix epoch
+VOTE_ROUND_LENGTH_DAYS = int(_getenv("VOTE_ROUND_LENGTH_DAYS", "180") or "180")
+VOTE_ROUND_END_ENV = _getenv("VOTE_ROUND_END", None)
 
 # Validate keys early
 _env_problems = []
@@ -96,34 +102,59 @@ def _has_trust_and_bal(pub: str, need: Decimal) -> bool:
                 return False
     return False
 
+# ---------- robust unlock-time parsing (ISO8601 or epoch, nested predicates)
+
+def _extract_abs_before(obj):
+    """Recursively find an 'abs_before' value anywhere in a predicate structure."""
+    if obj is None:
+        return None
+    if isinstance(obj, dict):
+        if "abs_before" in obj:
+            return obj["abs_before"]
+        for v in obj.values():  # handles {"not":{...}}, {"and":[...]}, {"or":[...]} etc.
+            found = _extract_abs_before(v)
+            if found is not None:
+                return found
+    elif isinstance(obj, list):
+        for item in obj:
+            found = _extract_abs_before(item)
+            if found is not None:
+                return found
+    return None
+
+def _to_unix(ts_val) -> int | None:
+    """Convert abs_before value (epoch number or ISO8601 string) to unix seconds."""
+    if ts_val is None:
+        return None
+    if isinstance(ts_val, (int, float)):
+        return int(ts_val)
+    s = str(ts_val).strip()
+    if s.isdigit():  # numeric string epoch
+        return int(s)
+    # ISO8601 formats like 'YYYY-MM-DDTHH:MM:SSZ' or with '+00:00'
+    try:
+        if s.endswith("Z"):
+            dt = datetime.strptime(s, "%Y-%m-%dT%H:%M:%SZ").replace(tzinfo=timezone.utc)
+        else:
+            dt = datetime.fromisoformat(s.replace("Z", "+00:00"))
+            if dt.tzinfo is None:
+                dt = dt.replace(tzinfo=timezone.utc)
+        return int(dt.timestamp())
+    except Exception:
+        return None
+
 def _compute_unlock_unix_from_predicate(pred_obj) -> int | None:
     """
-    Robustly extracts unlock time (abs_before) from claim predicate JSON.
-    Handles both string and nested object formats from Horizon.
+    Robustly extract unlock time from Horizon claim predicate JSON.
+    Supports:
+      {"not":{"abs_before":"1738444680"}}
+      {"not":{"and":[{"abs_before":"2025-11-29T01:29:36Z"}]}}
+      {"not":{"abs_before":"2025-11-29T01:29:36Z"}}
     """
     try:
-        # Example formats:
-        # {"not":{"abs_before":"1738444680"}}
-        # {"not":{"and":[{"abs_before":"1738444680"}]}}
-        not_obj = pred_obj.get("not")
-        if not not_obj:
-            return None
-
-        # direct case
-        if "abs_before" in not_obj:
-            return int(float(not_obj["abs_before"]))
-
-        # nested under "and" or similar
-        if isinstance(not_obj, dict):
-            for v in not_obj.values():
-                if isinstance(v, list):
-                    for item in v:
-                        if isinstance(item, dict) and "abs_before" in item:
-                            return int(float(item["abs_before"]))
-                elif isinstance(v, dict) and "abs_before" in v:
-                    return int(float(v["abs_before"]))
-
-        return None
+        root = pred_obj.get("not") if isinstance(pred_obj, dict) else None
+        val = _extract_abs_before(root if root is not None else pred_obj)
+        return _to_unix(val)
     except Exception as e:
         log.warning(f"unlock parse failed: {e}")
         return None
@@ -132,6 +163,34 @@ def _sanitize_amount(j) -> Decimal:
     raw = str(j.get("amount", "0"))
     safe = raw.replace(",", "").replace(" ", "")
     return Decimal(safe)
+
+# --------------------- vote-round helpers: decreasing max days ------------
+
+def _start_of_today_utc() -> int:
+    now = int(time.time())
+    return (now // 86400) * 86400
+
+def _vote_round_end_unix() -> int:
+    """
+    If VOTE_ROUND_END is provided, use it.
+    Otherwise, end = start_of_today_utc + VOTE_ROUND_LENGTH_DAYS * 86400.
+    This makes today's max 180, tomorrow 179, etc.
+    """
+    env_end = _to_unix(VOTE_ROUND_END_ENV) if VOTE_ROUND_END_ENV else None
+    if env_end:
+        return env_end
+    return _start_of_today_utc() + VOTE_ROUND_LENGTH_DAYS * 86400
+
+def _vote_days_remaining(now_ts: int | None = None) -> int:
+    """
+    Ceiling days remaining until round end, minimum 1.
+    """
+    now_ts = int(now_ts or time.time())
+    end = _vote_round_end_unix()
+    secs = max(0, end - now_ts)
+    # ceil division by 86400
+    days = (secs + 86400 - 1) // 86400
+    return max(1, int(days))
 
 # ----------------------------- public rules ------------------------------
 
@@ -143,6 +202,17 @@ def rules():
         "issuer": ISSUER_PUB,
         "max_days": 180,
         "min_days": 1
+    })
+
+@bp_stake.route("/api/vote/rules", methods=["GET"])
+def vote_rules():
+    end_unix = _vote_round_end_unix()
+    return jsonify({
+        "ok": True,
+        "round_end_unix": end_unix,
+        "days_remaining": _vote_days_remaining(),
+        "length_days": VOTE_ROUND_LENGTH_DAYS,
+        "note": "All vote stakes unlock at round end, max days decrease daily."
     })
 
 # ----------------------------- preview/build stake -----------------------
@@ -248,6 +318,11 @@ def build_stake_tx():
 
 @bp_stake.route("/api/vote/stake", methods=["POST"])
 def build_vote_stake_tx():
+    """
+    Vote stakes always unlock at the vote round end.
+    Today's max days = VOTE_ROUND_LENGTH_DAYS.
+    Tomorrow it decreases by 1, and so on.
+    """
     j = request.get_json(force=True) or {}
     try:
         log.info("VOTE_STAKE_IN %s", {k: j.get(k) for k in ("pub","amount","proposal")})
@@ -266,7 +341,11 @@ def build_vote_stake_tx():
     if amt <= 0:
         abort(400, "bad params: amount <= 0")
 
-    days = 180  # fixed for vote rounds
+    # Round end and decreasing max days
+    unlock_unix = _vote_round_end_unix()
+    days_remaining = _vote_days_remaining()
+    if days_remaining < 1:
+        abort(400, "vote round ended")
 
     # Preflight: user has IZZA principal available
     try:
@@ -275,7 +354,6 @@ def build_vote_stake_tx():
     except sx.NotFoundError:
         abort(400, "user account not found on network")
 
-    unlock_unix = int(time.time()) + days * 86400
     pred = ClaimPredicate.predicate_not(
         ClaimPredicate.predicate_before_absolute_time(unlock_unix)
     )
@@ -294,7 +372,7 @@ def build_vote_stake_tx():
         base_fee=server.fetch_base_fee()
     )
 
-    # principal votes (user funds) — reward is NOT created now
+    # principal votes — reward is NOT created now
     txb.append_create_claimable_balance_op(
         asset=_izza_asset(), amount=_q7(amt), claimants=[claimant], source=user_pub
     )
@@ -315,9 +393,9 @@ def build_vote_stake_tx():
         "xdr": tx.to_xdr(),
         "network_passphrase": NET_PASSPHRASE,
         "unlock_unix": unlock_unix,
-        "days": days,
+        "days": int(days_remaining),
         "proposal": proposal,
-        "note": "Vote stake locks principal for 180d."
+        "note": "Vote stake locks principal until the vote round end."
     })
 
 # ----------------------------- classify/list claimables -------------------
@@ -351,7 +429,7 @@ def list_claimables():
       - role: "principal"|"reward"
       - kind: "regular"|"vote"
       - unlock_ts (unix seconds)
-      - contract_id: "<unlock_ts>|<kind>"
+      - contract_id: "<unlock_ts>|<kind>|<idprefix>"
     """
     pub = _clean(request.args.get("pub", ""))
     if not (pub and pub.startswith("G")):
@@ -396,7 +474,6 @@ def list_claimables():
         }
         out.append(rec_out)
 
-    # Back-compat field name and new name the UI expects
     return jsonify({"ok": True, "claimables": out, "records": out})
 
 # ----------------------------- build claim(s) -----------------------------
@@ -451,7 +528,7 @@ def build_claim_tx():
 
 @bp_stake.route("/api/stake/build-claim-batch", methods=["POST"])
 def build_claim_tx_batch():
-    """Build one tx to claim multiple balance IDs; skips invalid; errors if none valid."""
+    """Build one tx to claim multiple balance IDs, skips invalid, errors if none valid."""
     j = request.get_json(force=True) or {}
     pub = _clean(j.get("pub") or "")
     ids = j.get("balance_ids") or []
@@ -467,7 +544,6 @@ def build_claim_tx_batch():
         pub = _infer_claimant_from_balance_id(valid_ids[0])
         if not pub:
             abort(400, "bad pub")
-        # sanity check: all ids must share claimant
         try:
             for cb in valid_ids[1:]:
                 p2 = _infer_claimant_from_balance_id(cb)
@@ -494,7 +570,7 @@ def build_claim_tx_batch():
     tx = tb.set_timeout(180).build()
     return jsonify({"ok": True, "xdr": tx.to_xdr(), "network_passphrase": NET_PASSPHRASE})
 
-# ---- New: UI-friendly alias matching your latest frontend (/api/stake/claim)
+# ---- UI-friendly alias for batch claim
 
 @bp_stake.route("/api/stake/claim", methods=["POST"])
 def claim_batch_ui_alias():
