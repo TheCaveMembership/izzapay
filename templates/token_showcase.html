@@ -1939,7 +1939,7 @@ async function refreshClaims() {
   try {
     // NOTE: keep your existing endpoint; this only formats what it returns
     const res = await axios.get(`/api/stake/claimables`, { params: { pub } });
-    const list = res.data?.claimables || res.data || [];
+    const list = res.data?.claimables || res.data?.records || [];
     claimState.raw = list;
     claimState.groups = buildGroups(list);
     renderClaimTable();
