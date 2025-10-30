@@ -1822,19 +1822,28 @@ async function listClaimables(){
     // Prefer a real id from server; else derive a unique signature.
     const groups = {};
     for (const r of rows){
-      const unlockTs = Number(r.unlock_ts || r.unlock_unix || 0);
-      const kindStr  = (r.kind || r.bucket || r.pool || '').toString().toLowerCase().includes('vote') ? 'vote' : 'regular';
+      // figure out kind
+const unlockTs = Number(r.unlock_ts || r.unlock_unix || 0);
+const kindStr  = (r.kind || r.bucket || r.pool || '').toString().toLowerCase().includes('vote') ? 'vote' : 'regular';
 
-      const gid =
-        r.contract_id || r.stake_id || r.group_id || r.parent_id || r.batch_id ||
-        // fallback: unlock_ts + kind + trailing hash/source/time to avoid merging:
-        [
-          unlockTs || 0,
-          kindStr,
-          (r.tx || r.tx_hash || r.source || r.created_at || r.id || '').toString().slice(-12)
-        ].join('|');
+// 🔑 group id
+let gid;
+if (kindStr === 'vote'){
+  // For VOTE: use the most specific stable identifier so
+  // different vote contracts never collapse into one block.
+  gid =
+    r.contract_id || r.vote_id || r.parent_id || r.batch_id ||
+    r.tx || r.tx_hash || r.source ||
+    // last resort: make a synthetic—but still per-contract—key:
+    ['vote', unlockTs || 0, (r.memo || ''), (r.created_at || r.id || '').toString().slice(-12)].join('|');
+}else{
+  // Regular: keep your previous grouping behavior
+  gid =
+    r.contract_id || r.stake_id || r.group_id || r.parent_id || r.batch_id ||
+    [unlockTs || 0, kindStr, (r.tx || r.tx_hash || r.source || r.created_at || r.id || '').toString().slice(-12)].join('|');
+}
 
-      (groups[gid] ||= []).push({ ...r, __unlockTs: unlockTs, __kind: kindStr });
+(groups[gid] ||= []).push({ ...r, __unlockTs: unlockTs, __kind: kindStr });
     }
 
     // ---- Sort contracts by unlock date (ascending; unknowns last)
@@ -1843,6 +1852,22 @@ async function listClaimables(){
       const bu = b[1][0].__unlockTs || Number.MAX_SAFE_INTEGER;
       return au - bu;
     });
+
+    // ================================================================
+// 🔸 Helper: calculate Est. APR Boost % for VOTE contracts
+// ================================================================
+function getVoteAprBoostPct(recs){
+  // try direct field first
+  for (const r of recs){
+    if (typeof r.est_apr_boost_pct === 'number') return r.est_apr_boost_pct;
+    if (r.preview && typeof r.preview.aprBoostPct === 'number') return r.preview.aprBoostPct;
+  }
+  // optional: global calc fallback (if preview function exists)
+  if (typeof calcVoteAprBoostPct === 'function'){
+    try { return calcVoteAprBoostPct(recs); } catch(e){}
+  }
+  return 0;
+}
 
     for (const [, recs] of ordered){
       const any       = recs[0];
