@@ -217,12 +217,15 @@ def build_stake_tx():
     })
 
 # ----------------------------- vote staking ------------------------------
+# CHANGED: vote stakes DO NOT mint an IZZA reward now; they only lock principal for 180d.
 
 @bp_stake.route("/api/vote/stake", methods=["POST"])
 def build_vote_stake_tx():
     """
     Stake tokens as votes for a proposal.
     Uses fixed 180d lock so all vote rounds align, and tags memo with 'vote:<proposal>'.
+    Vote stakes DO NOT earn IZZA tokens at stake time; rewards are a future % of ad revenue
+    if the voted game wins the round (set/distributed later).
     """
     j = request.get_json(force=True) or {}
     user_pub = _clean(j.get("pub") or "")
@@ -235,16 +238,12 @@ def build_vote_stake_tx():
     if not (user_pub and user_pub.startswith("G")) or amt <= 0:
         abort(400, "bad params")
 
-    days = 180
-    reward = _reward_for(amt, days)
-    if reward <= 0:
-        abort(400, "amount too small; reward rounds to 0")
+    days = 180  # fixed for vote rounds
 
+    # Preflight: user has IZZA principal
     try:
         if not _has_trust_and_bal(user_pub, amt):
             abort(400, "user lacks IZZA balance or trustline")
-        if not _has_trust_and_bal(DISTR_PUB, reward):
-            abort(500, "distributor lacks IZZA balance for reward")
     except sx.NotFoundError:
         abort(400, "user account not found on network")
 
@@ -267,15 +266,12 @@ def build_vote_stake_tx():
         base_fee=server.fetch_base_fee()
     )
 
-    # principal votes (user funds)
+    # principal votes (user funds) — reward is NOT created now
     txb.append_create_claimable_balance_op(
         asset=_izza_asset(), amount=_q7(amt), claimants=[claimant], source=user_pub
     )
-    # reward (distributor funds)
-    txb.append_create_claimable_balance_op(
-        asset=_izza_asset(), amount=_q7(reward), claimants=[claimant], source=DISTR_PUB
-    )
 
+    # tag tx for later identification of vote round & proposal
     memo_txt = f"vote:{proposal or 'arcade'}"
     if len(memo_txt.encode("utf-8")) > 28:
         memo_txt = "vote"
@@ -283,6 +279,7 @@ def build_vote_stake_tx():
     tx = txb.set_timeout(180).add_text_memo(memo_txt).build()
 
     try:
+        # Optional: distributor signs too if you want a consistent signature pattern
         tx.sign(Keypair.from_secret(DISTR_SECRET))
     except Exception:
         abort(500, "bad DISTR_SECRET")
@@ -293,7 +290,9 @@ def build_vote_stake_tx():
         "network_passphrase": NET_PASSPHRASE,
         "unlock_unix": unlock_unix,
         "days": days,
-        "proposal": proposal
+        "proposal": proposal,
+        # for UI: show this as “Amount / Share”; percentage is assigned later at payout
+        "note": "Vote stake locks principal for 180d. Reward is a future % of ad revenue if your game wins."
     })
 
 # ----------------------------- classify/list claimables -------------------
@@ -324,7 +323,8 @@ def _classify_record(r: dict):
 
 @bp_stake.route("/api/stake/claimables", methods=["GET"])
 def list_claimables():
-    """List claimable balances (principal and reward). Returns empty list on Horizon 400s."""
+    """List claimable balances (principal and reward). Returns empty list on Horizon 400s.
+       Adds derived flag 'is_vote' so UI can display vote stakes as % of future revenue."""
     pub = _clean(request.args.get("pub", ""))
     if not (pub and pub.startswith("G")):
         abort(400, "bad pub")
@@ -344,6 +344,28 @@ def list_claimables():
         return jsonify({"ok": True, "records": []})
 
     out = [_classify_record(rec) for rec in records]
+
+    # ---- Derive vote vs regular groupings (no DB required) ----
+    # We group by unlock_unix and look for a distributor-funded reward sibling.
+    # If a group has ONLY a principal (no DISTR_PUB reward), we flag it as vote-like.
+    groups = {}
+    for rec in out:
+        u = rec.get("unlock_unix")
+        if u is None:
+            continue
+        g = groups.setdefault(u, {"has_principal": False, "has_reward": False})
+        if rec.get("kind") == "principal":
+            g["has_principal"] = True
+        elif rec.get("kind") == "reward":
+            g["has_reward"] = True
+
+    # annotate each record with is_vote for UI (gold styling, % share display)
+    for rec in out:
+        u = rec.get("unlock_unix")
+        g = groups.get(u) or {}
+        # Vote stake ≈ principal-only group (no distributor reward minted at stake time)
+        rec["is_vote"] = bool(g.get("has_principal") and not g.get("has_reward"))
+
     return jsonify({"ok": True, "records": out})
 
 # ----------------------------- build claim(s) -----------------------------
