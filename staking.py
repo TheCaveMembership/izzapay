@@ -73,7 +73,7 @@ def _vote_cx():
     try:
         cx.execute("ALTER TABLE vote_intents ADD COLUMN weight7 TEXT")
     except Exception:
-        pass  # already exists or SQLite variant without IF NOT EXISTS
+        pass
     return cx
 
 def _vote_add(round_end, proposal, pub, amount7, weight7):
@@ -86,7 +86,6 @@ def _vote_add(round_end, proposal, pub, amount7, weight7):
         cx.commit(); cx.close()
 
 def _vote_total_weight(round_end, proposal) -> Decimal:
-    # Sum weight7, fallback to amount7 if weight7 is NULL (legacy rows)
     with _vote_lock:
         cx = _vote_cx()
         cur = cx.execute(
@@ -99,10 +98,6 @@ def _vote_total_weight(round_end, proposal) -> Decimal:
         return Decimal(str(total or 0))
 
 def _lookup_vote_proposal(pub: str, round_end: int, amount7: str) -> str | None:
-    """
-    Find the proposal tied to this user's vote intent by (pub, round_end, amount7),
-    newest first.
-    """
     try:
         with _vote_lock:
             cx = _vote_cx()
@@ -119,9 +114,6 @@ def _lookup_vote_proposal(pub: str, round_end: int, amount7: str) -> str | None:
         return None
 
 def _vote_est_share_pct(round_end: int, proposal: str, your_weight7: str) -> str:
-    """
-    Compute the exact preview %: your_weight / (pool_before + your_weight), 2dp.
-    """
     try:
         your_w = Decimal(str(your_weight7 or "0"))
     except Exception:
@@ -144,17 +136,12 @@ def _clamp_days(days: int) -> int:
     return max(1, min(180, d))
 
 def _apr_for_lock(days: int) -> Decimal:
-    """
-    Linear until 180d, then flat.
-    30d ≈ 5% APR, 180d ≈ 15% APR.
-    """
     d = _clamp_days(days)
     base  = Decimal("0.05")
     bonus = (Decimal(d) / Decimal(180)) * Decimal("0.10")
     return (base + bonus).quantize(Decimal("0.0001"), rounding=ROUND_DOWN)
 
 def _q7(x: Decimal) -> str:
-    # Stellar amounts are up to 7 decimals
     return str(x.quantize(Decimal("0.0000001"), rounding=ROUND_DOWN))
 
 def _reward_for(amt: Decimal, days: int) -> Decimal:
@@ -182,13 +169,12 @@ def _has_trust_and_bal(pub: str, need: Decimal) -> bool:
 # ---------- robust unlock-time parsing (ISO8601 or epoch, nested predicates)
 
 def _extract_abs_before(obj):
-    """Recursively find an 'abs_before' value anywhere in a predicate structure."""
     if obj is None:
         return None
     if isinstance(obj, dict):
         if "abs_before" in obj:
             return obj["abs_before"]
-        for v in obj.values():  # handles {"not":{...}}, {"and":[...]}, {"or":[...]} etc.
+        for v in obj.values():
             found = _extract_abs_before(v)
             if found is not None:
                 return found
@@ -200,15 +186,13 @@ def _extract_abs_before(obj):
     return None
 
 def _to_unix(ts_val) -> int | None:
-    """Convert abs_before value (epoch number or ISO8601 string) to unix seconds."""
     if ts_val is None:
         return None
     if isinstance(ts_val, (int, float)):
         return int(ts_val)
     s = str(ts_val).strip()
-    if s.isdigit():  # numeric string epoch
+    if s.isdigit():
         return int(s)
-    # ISO8601 formats like 'YYYY-MM-DDTHH:MM:SSZ' or with '+00:00'
     try:
         if s.endswith("Z"):
             dt = datetime.strptime(s, "%Y-%m-%dT%H:%M:%SZ").replace(tzinfo=timezone.utc)
@@ -221,13 +205,6 @@ def _to_unix(ts_val) -> int | None:
         return None
 
 def _compute_unlock_unix_from_predicate(pred_obj) -> int | None:
-    """
-    Robustly extract unlock time from Horizon claim predicate JSON.
-    Supports:
-      {"not":{"abs_before":"1738444680"}}
-      {"not":{"and":[{"abs_before":"2025-11-29T01:29:36Z"}]}}
-      {"not":{"abs_before":"2025-11-29T01:29:36Z"}}
-    """
     try:
         root = pred_obj.get("not") if isinstance(pred_obj, dict) else None
         val = _extract_abs_before(root if root is not None else pred_obj)
@@ -248,29 +225,19 @@ def _start_of_today_utc() -> int:
     return (now // 86400) * 86400
 
 def _vote_round_end_unix() -> int:
-    """
-    If VOTE_ROUND_END is provided, use it.
-    Otherwise, end = start_of_today_utc + VOTE_ROUND_LENGTH_DAYS * 86400.
-    """
     env_end = _to_unix(VOTE_ROUND_END_ENV) if VOTE_ROUND_END_ENV else None
     if env_end:
         return env_end
     return _start_of_today_utc() + VOTE_ROUND_LENGTH_DAYS * 86400
 
 def _vote_days_remaining(now_ts: int | None = None) -> int:
-    """
-    Ceiling days remaining until round end, minimum 1.
-    """
     now_ts = int(now_ts or time.time())
     end = _vote_round_end_unix()
     secs = max(0, end - now_ts)
-    days = (secs + 86400 - 1) // 86400  # ceil
+    days = (secs + 86400 - 1) // 86400
     return max(1, int(days))
 
 def _vote_boost_multiplier(days_remaining: int) -> Decimal:
-    """
-    Linear early bonus: 1.0 .. 1.0+EARLY_BONUS_MAX depending on remaining days.
-    """
     try:
         dr = Decimal(int(days_remaining))
         mult = Decimal("1.0") + (dr / Decimal(VOTE_ROUND_LENGTH_DAYS)) * EARLY_BONUS_MAX
@@ -303,7 +270,7 @@ def vote_rules():
         "round_end_unix": end_unix,
         "days_remaining": _vote_days_remaining(),
         "length_days": VOTE_ROUND_LENGTH_DAYS,
-        "early_bonus_max": str((EARLY_BONUS_MAX * Decimal(100)).quantize(Decimal("0.01"))),  # percent
+        "early_bonus_max": str((EARLY_BONUS_MAX * Decimal(100)).quantize(Decimal("0.01"))),
         "note": "Vote stakes unlock at round end. Early stakes get higher weight."
     })
 
@@ -330,9 +297,6 @@ def preview():
 
 @bp_stake.route("/api/stake/build", methods=["POST"])
 def build_stake_tx():
-    """
-    Regular APR staking: principal + reward claimables in one tx.
-    """
     j = request.get_json(force=True) or {}
     user_pub = _clean(j.get("pub") or "")
     try:
@@ -348,7 +312,6 @@ def build_stake_tx():
     if reward <= 0:
         abort(400, "amount too small; reward rounds to 0")
 
-    # Preflight
     try:
         if not _has_trust_and_bal(user_pub, amt):
             abort(400, "user lacks IZZA balance or trustline for principal")
@@ -374,11 +337,9 @@ def build_stake_tx():
         base_fee=server.fetch_base_fee()
     )
 
-    # 1) principal from user
     txb.append_create_claimable_balance_op(
         asset=_izza_asset(), amount=_q7(amt), claimants=[claimant], source=user_pub
     )
-    # 2) reward from distributor
     txb.append_create_claimable_balance_op(
         asset=_izza_asset(), amount=_q7(reward), claimants=[claimant], source=DISTR_PUB
     )
@@ -407,10 +368,6 @@ def build_stake_tx():
 
 @bp_stake.route("/api/vote/stake", methods=["POST"])
 def build_vote_stake_tx():
-    """
-    Vote stakes: fixed unlock at round end, no reward claimable now.
-    Early stakes get a higher WEIGHT used for future ad-revenue share if this proposal wins.
-    """
     j = request.get_json(force=True) or {}
     try:
         log.info("VOTE_STAKE_IN %s", {k: j.get(k) for k in ("pub", "amount", "proposal")})
@@ -429,13 +386,11 @@ def build_vote_stake_tx():
     if amt <= 0:
         abort(400, "bad params: amount <= 0")
 
-    # Round end + early boost
     unlock_unix = _vote_round_end_unix()
     days_remaining = _vote_days_remaining()
     if days_remaining < 1:
         abort(400, "vote round ended")
 
-    # Preflight: user has IZZA principal available
     try:
         if not _has_trust_and_bal(user_pub, amt):
             abort(400, "user lacks IZZA balance or trustline")
@@ -460,7 +415,6 @@ def build_vote_stake_tx():
         base_fee=server.fetch_base_fee()
     )
 
-    # principal votes — reward is NOT created now
     txb.append_create_claimable_balance_op(
         asset=_izza_asset(), amount=_q7(amt), claimants=[claimant], source=user_pub
     )
@@ -469,10 +423,8 @@ def build_vote_stake_tx():
     if len(memo_txt.encode("utf-8")) > 28:
         memo_txt = "vote"
 
-    # Build the transaction
     tx = txb.set_timeout(180).add_text_memo(memo_txt).build()
 
-    # persist this vote (amount + computed weight) for pool math
     try:
         weight = _vote_weight_for(amt, days_remaining)
         _vote_add(unlock_unix, proposal, user_pub, _q7(amt), _q7(weight))
@@ -494,8 +446,6 @@ def build_vote_stake_tx():
 # ----------------------------- classify/list claimables -------------------
 
 def _classify_record(r: dict):
-    """Normalize for UI grouping."""
-    # role/principal vs reward is based on sponsor
     role = "reward" if (r.get("sponsor") == DISTR_PUB) else "principal"
     unlock_unix = None
     try:
@@ -508,9 +458,9 @@ def _classify_record(r: dict):
         "id": r.get("id"),
         "amount": r.get("amount"),
         "sponsor": r.get("sponsor"),
-        "role": role,                          # "principal" | "reward"
+        "role": role,
         "last_modified_time": r.get("last_modified_time"),
-        "unlock_ts": unlock_unix or 0,         # unix seconds
+        "unlock_ts": unlock_unix or 0,
     }
 
 @bp_stake.route("/api/vote/preview", methods=["POST"])
@@ -524,7 +474,6 @@ def vote_preview():
     end_unix = _vote_round_end_unix()
     days_rem = _vote_days_remaining()
 
-    # Pool math is in WEIGHTS, not raw amounts
     your_weight = _vote_weight_for(amt, days_rem)
     pool_before_w = _vote_total_weight(end_unix, proposal)
     pool_after_w  = pool_before_w + your_weight
@@ -544,21 +493,6 @@ def vote_preview():
 
 @bp_stake.route("/api/stake/claimables", methods=["GET"])
 def list_claimables():
-    """
-    List claimable balances for this asset and claimant.
-    Returns: {"ok": True, "claimables": [...], "records": [...back-compat...]}
-    Each item also includes:
-      - role: "principal"|"reward"
-      - kind: "regular"|"vote"
-      - unlock_ts (unix seconds)
-      - contract_id:
-          * regular → "<unlock>|regular|<id[:8]>"
-          * vote    → "<unlock>|vote|<id[-16:]>"
-      - For vote principal rows also:
-          * proposal
-          * vote_weight7
-          * vote_est_share_pct
-    """
     pub = _clean(request.args.get("pub", ""))
     if not (pub and pub.startswith("G")):
         abort(400, "bad pub")
@@ -579,7 +513,6 @@ def list_claimables():
 
     norm = [_classify_record(rec) for rec in records]
 
-    # derive vote vs regular: if an unlock bucket has principal but no reward => vote stake
     buckets = {}
     for rec in norm:
         u = rec.get("unlock_ts") or 0
@@ -596,7 +529,6 @@ def list_claimables():
         is_vote = bool(b.get("has_principal") and not b.get("has_reward"))
         kind = "vote" if is_vote else "regular"
 
-        # contract id: DO NOT change regular behavior; make vote unique
         id_suffix = (rec.get('id','')[-16:] if kind == "vote" else rec.get('id','')[:8])
         rec_out = {
             **rec,
@@ -604,12 +536,9 @@ def list_claimables():
             "contract_id": f"{int(u)}|{kind}|{id_suffix}",
         }
 
-        # Attach exact preview % ONLY for vote principal rows
         if kind == "vote" and rec["role"] == "principal":
-            # proposal lookup by (pub, round_end=u, amount7)
             amount7 = str(rec.get("amount", "0"))
             proposal = _lookup_vote_proposal(pub, int(u), amount7) or "arcade"
-            # recompute weight from amount at current days_remaining
             try:
                 days_remaining = _vote_days_remaining()
                 your_w = _vote_weight_for(Decimal(amount7), days_remaining)
@@ -627,13 +556,20 @@ def list_claimables():
 
 # ----------------------------- build claim(s) -----------------------------
 
-def _infer_claimant_from_balance_id(cb_id: str) -> str | None:
-    """Look up a balance and return claimant G... if present."""
+def _fetch_balance_json(cb_id: str) -> dict | None:
     try:
         url = f"{HORIZON_URL}/claimable_balances/{cb_id}"
         r = requests.get(url, timeout=15)
         r.raise_for_status()
-        rec = r.json()
+        return r.json()
+    except Exception as e:
+        log.warning("fetch balance failed for %s: %s", cb_id, e)
+        return None
+
+def _infer_claimant_from_balance_id(cb_id: str) -> str | None:
+    try:
+        rec = _fetch_balance_json(cb_id)
+        if not rec: return None
         cl = (rec.get("claimants") or [])[0]
         dest = (cl.get("destination") or "").strip()
         return dest if dest.startswith("G") else None
@@ -641,20 +577,91 @@ def _infer_claimant_from_balance_id(cb_id: str) -> str | None:
         log.warning("infer claimant failed for %s: %s", cb_id, e)
         return None
 
+def _unlock_unix_from_balance_id(cb_id: str) -> int | None:
+    """Return unlock ts for a claimable balance id (or None if unknown)."""
+    try:
+        rec = _fetch_balance_json(cb_id)
+        if not rec: return None
+        cl = (rec.get("claimants") or [])[0]
+        return _compute_unlock_unix_from_predicate(cl.get("predicate") or {})
+    except Exception:
+        return None
+
+def _now_ts() -> int:
+    return int(time.time())
+
+def _build_claim_tx_batch_internal(pub: str, ids: list[str]):
+    """Shared internal: validates claimant, unlocked status, builds tx."""
+    if not (pub and pub.startswith("G")):
+        abort(400, "bad pub")
+
+    # Validate ids
+    raw_ids = [(_clean(str(x)) or "") for x in ids]
+    valid_ids = [s for s in raw_ids if _valid_balance_id(s)]
+    if not valid_ids:
+        abort(400, "no valid balance_ids")
+
+    # Enforce single claimant and unlocked only
+    base_claimant = _infer_claimant_from_balance_id(valid_ids[0])
+    if not base_claimant:
+        abort(400, "could not infer claimant")
+
+    if pub != base_claimant:
+        # allow alias to supply pub, but it must match what's on-chain
+        abort(400, "pub does not match claimant")
+
+    unlocked_ids = []
+    for cb_id in valid_ids:
+        cl = _infer_claimant_from_balance_id(cb_id)
+        if cl != base_claimant:
+            abort(400, "mixed claimants in batch")
+        unlock_ts = _unlock_unix_from_balance_id(cb_id)
+        if unlock_ts is None:
+            # If we can't determine, be safe: treat as locked
+            continue
+        if unlock_ts <= _now_ts():
+            unlocked_ids.append(cb_id)
+
+    if not unlocked_ids:
+        abort(400, "no unlocked balances to claim")
+
+    # Build TX for unlocked set
+    try:
+        acct = server.load_account(pub)
+    except sx.NotFoundError:
+        abort(400, "user account not found on network")
+    except Exception as e:
+        abort(500, f"horizon error: {e}")
+
+    tb = TransactionBuilder(
+        source_account=acct,
+        network_passphrase=NET_PASSPHRASE,
+        base_fee=server.fetch_base_fee()
+    )
+    for cb_id in unlocked_ids:
+        tb.append_claim_claimable_balance_op(cb_id)
+
+    tx = tb.set_timeout(180).build()
+    return jsonify({"ok": True, "xdr": tx.to_xdr(), "network_passphrase": NET_PASSPHRASE, "claimed_count": len(unlocked_ids)})
+
 @bp_stake.route("/api/stake/build-claim", methods=["POST"])
 def build_claim_tx():
-    """Build a single ClaimClaimableBalance tx."""
     j = request.get_json(force=True) or {}
     pub   = _clean(j.get("pub") or "")
     cb_id = _clean(j.get("balance_id") or "")
     if not _valid_balance_id(cb_id):
         abort(400, "bad balance_id format")
 
+    # If pub not provided, infer from Horizon
     if not (pub and pub.startswith("G")):
-        # try to infer from Horizon
         pub = _infer_claimant_from_balance_id(cb_id)
         if not pub:
             abort(400, "bad pub")
+
+    # Enforce unlocked
+    unlock_ts = _unlock_unix_from_balance_id(cb_id)
+    if unlock_ts is None or unlock_ts > _now_ts():
+        abort(400, "balance is still locked")
 
     try:
         acct = server.load_account(pub)
@@ -677,70 +684,45 @@ def build_claim_tx():
 
 @bp_stake.route("/api/stake/build-claim-batch", methods=["POST"])
 def build_claim_tx_batch():
-    """Build one tx to claim multiple balance IDs, skips invalid, errors if none valid."""
     j = request.get_json(force=True) or {}
     pub = _clean(j.get("pub") or "")
     ids = j.get("balance_ids") or []
     if not isinstance(ids, list) or not ids:
         abort(400, "no balance_ids provided")
-
-    valid_ids = [s for s in ((_clean(str(x)) or "") for x in ids) if _valid_balance_id(s)]
-    if not valid_ids:
-        abort(400, "no valid balance_ids")
-
-    # If pub not provided, infer from first id and ensure all ids share same claimant
-    if not (pub and pub.startswith("G")):
-        pub = _infer_claimant_from_balance_id(valid_ids[0])
+    # If pub is missing, infer from the first id inside the internal helper
+    if not pub:
+        pub = _infer_claimant_from_balance_id((_clean(str(ids[0])) or ""))
         if not pub:
             abort(400, "bad pub")
-        try:
-            for cb in valid_ids[1:]:
-                p2 = _infer_claimant_from_balance_id(cb)
-                if p2 != pub:
-                    abort(400, "mixed claimants in batch")
-        except Exception:
-            abort(400, "claimant check failed")
-
-    try:
-        acct = server.load_account(pub)
-    except sx.NotFoundError:
-        abort(400, "user account not found on network")
-    except Exception as e:
-        abort(500, f"horizon error: {e}")
-
-    tb = TransactionBuilder(
-        source_account=acct,
-        network_passphrase=NET_PASSPHRASE,
-        base_fee=server.fetch_base_fee()
-    )
-    for cb_id in valid_ids:
-        tb.append_claim_claimable_balance_op(cb_id)
-
-    tx = tb.set_timeout(180).build()
-    return jsonify({"ok": True, "xdr": tx.to_xdr(), "network_passphrase": NET_PASSPHRASE})
+    return _build_claim_tx_batch_internal(pub, ids)
 
 # ---- UI-friendly alias for batch claim
 
 @bp_stake.route("/api/stake/claim", methods=["POST"])
 def claim_batch_ui_alias():
     """
-    UI alias for batch claim.
-    Body: { ids: [...], pub?: "G..." }
-    Returns XDR + network_passphrase.
+    UI alias: accepts { ids:[...], pub? } or { balance_ids:[...], pub? }.
+    Returns: { ok, xdr, network_passphrase, claimed_count }
     """
     j = request.get_json(force=True) or {}
     ids = j.get("ids") or j.get("balance_ids") or []
+    if not isinstance(ids, list) or not ids:
+        abort(400, "no ids provided")
     pub = _clean(j.get("pub") or "")
-    # Reuse the batch builder logic
-    return build_claim_tx_batch.__wrapped__({  # type: ignore
-        "get_json": lambda *_, **__: {"balance_ids": ids, "pub": pub}
-    })
+    if not pub:
+        # try infer from first id
+        first = _clean(str(ids[0])) or ""
+        if not _valid_balance_id(first):
+            abort(400, "bad pub and first id invalid")
+        pub = _infer_claimant_from_balance_id(first)
+        if not pub:
+            abort(400, "bad pub")
+    return _build_claim_tx_batch_internal(pub, ids)
 
 # ----------------------------- arcade proposals ---------------------------
 
 @bp_stake.route("/api/arcade/proposals", methods=["GET"])
 def arcade_proposals():
-    """Static list of current arcade game proposals users can stake/vote on."""
     proposals = [
         {
             "id": "rooftop_rumble",
