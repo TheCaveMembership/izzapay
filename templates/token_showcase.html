@@ -1852,38 +1852,24 @@ if (kindStr === 'vote'){
 
 
 // ================================================================
-// 🔸 Vote rules (for Est. APR Boost exactly like preview)
-//     We compute a single % from rules.days_remaining / rules.length_days
-//     and early_bonus_max, same math as preview.
+// 🔸 Fetch current vote-round rules (used to compute per-row boost)
 // ================================================================
-let voteRules = { length_days: 180, days_remaining: 180, early_bonus_max: "30.00" };
+let voteRules = { length_days: 180, early_bonus_max: "30.00" };
 try {
   const r = await fetch('/api/vote/rules', { cache: 'no-store' });
   const j = await r.json();
   if (r.ok && j?.ok) voteRules = j;
-} catch(_) {}
+} catch (_) { /* keep defaults */ }
 
-/** Est. APR Boost % — mirrors preview math */
-function calcVoteBoostFromRules(rules){
-  const len  = Number(rules.length_days || 180);
-  const left = Math.max(0, Number(rules.days_remaining ?? len));
-  const maxB = Number(rules.early_bonus_max || 0) / 100; // "30.00" -> 0.30
-  const mult = 1 + Math.min(1, left / len) * maxB;       // linear across the round
-  return Math.max(0, (mult - 1) * 100);                  // → percentage
+// --- helper: compute Est. APR Boost % for a vote contract using its unlockTs
+function calcVoteBoostPct(unlockTs, rules){
+  const lenDays  = Number(rules.length_days || 180);
+  const earlyMax = Number(rules.early_bonus_max || 0) / 100; // "30.00" -> 0.30
+  const nowSec   = Date.now() / 1000;
+  const daysLeft = Math.ceil(Math.max(0, Number(unlockTs) - nowSec) / 86400);
+  const mult     = 1 + Math.min(1, daysLeft / lenDays) * earlyMax; // linear to round end
+  return Math.max(0, (mult - 1) * 100); // → percent
 }
-const VOTE_BOOST_PCT = calcVoteBoostFromRules(voteRules);
-
-// ================================================================
-// 🔹 Build a map of proposal id -> title so we can show the game name
-//    beside the VOTE pill in the claim list.
-// ================================================================
-let PROPOSAL_TITLES = {};
-try{
-  const r = await fetch('/api/arcade/proposals', { cache:'no-store' });
-  const j = await r.json();
-  const arr = Array.isArray(j?.proposals) ? j.proposals : [];
-  PROPOSAL_TITLES = Object.fromEntries(arr.map(p => [String(p.id || p.slug), String(p.title || '')]));
-}catch(_) { /* noop */ }
 
 // …then your loop…
 for (const [, recs] of ordered) {
@@ -1892,47 +1878,43 @@ for (const [, recs] of ordered) {
   const unlockStr = unlockTs ? new Date(unlockTs*1000).toISOString().slice(0,10) : '—';
   const kind      = any.__kind === 'vote' ? 'vote' : 'regular';
   const pillClass = kind === 'vote' ? 'pill-vote' : 'pill-regular';
-  const labelKind = 'VOTE';
+  const labelKind = kind === 'vote' ? 'VOTE' : 'NORMAL';
   const unlocked  = unlockTs ? (Date.now() >= unlockTs*1000) : true;
 
-  // ----- One group per contract: combine principal + reward
+  // Collect ids and totals per contract
   const ids = [];
   let principal = 0, reward = 0;
   for (const r of recs){
     if (r.id) ids.push(r.id);
     const role = (r.role || r.kind || '').toString().toLowerCase();
-    if (role.includes('reward')) reward   += Number(r.amount||0);
-    else                         principal+= Number(r.amount||0);
+    if (role.includes('reward')) reward   += Number(r.amount || 0);
+    else                         principal+= Number(r.amount || 0);
   }
 
-  // ----- Resolve proposal / game title for vote rows
-  let gameTitle = '';
-  if (kind === 'vote'){
-    const pid = any.__proposal || any.__proposal_id || any.proposal || any.memo_proposal;
-    if (pid) gameTitle = PROPOSAL_TITLES[String(pid)] || '';
-  }
-
-  // ---- Header row (ONE checkbox per contract; add game title for vote)
+  // ---- Header row (ONE checkbox per contract)
   const trHead = document.createElement('tr');
   trHead.className = `group-head is-${kind}` + (unlocked ? '' : ' locked');
   trHead.innerHTML = `
     <td colspan="4">
       <label class="group-toggle" style="display:flex;align-items:center;gap:10px;white-space:nowrap;">
         <input type="checkbox" class="cbPick" value="${ids.join(',')}" ${unlocked ? '' : 'disabled'}>
-        <span class="pill ${pillClass}">${kind === 'vote' ? labelKind : 'NORMAL'}</span>
-        <strong>${kind === 'vote' && gameTitle ? `${gameTitle} • ` : ''}Stake • unlock ${unlockStr}</strong>
+        <span class="pill ${pillClass}">${labelKind}</span>
+        <strong>Stake • unlock ${unlockStr}</strong>
       </label>
     </td>`;
   claimTblBody.appendChild(trHead);
 
-  // ---- Compact block
+  // ---- Compact block (VOTE shows EST. APR BOOST instead of raw reward)
   const trBlock = document.createElement('tr');
   trBlock.className = `group-row is-${kind}` + (unlocked ? '' : ' locked');
+
+  // per-row boost for vote rows (derived from unlockTs vs round end)
+  const votePct = (kind === 'vote') ? calcVoteBoostPct(unlockTs, voteRules) : 0;
 
   const rewardHTML = (kind === 'vote')
     ? `<div class="line" style="display:flex;justify-content:space-between;align-items:center;white-space:nowrap;">
          <span class="pill pill-vote" aria-hidden="true">EST. APR BOOST</span>
-         <span class="num">${(isFinite(VOTE_BOOST_PCT) ? VOTE_BOOST_PCT : 0).toFixed(2)}%</span>
+         <span class="num">${votePct.toFixed(2)}%</span>
        </div>`
     : (reward > 0 ? `<div class="line" style="display:flex;justify-content:space-between;align-items:center;">
          <span class="pill pill-reward" aria-hidden="true">REWARD</span>
