@@ -1012,8 +1012,6 @@
 <script>
 (() => {
   // =================== Config from Jinja / server ===================
-  // Map contract_id -> raw 64-hex claimable balance id (filled by listClaimables)
-  const CB_ID_MAP = new Map();
   const ASSET_CODE  = "{{ ASSET_CODE }}";
   const ISSUER      = "{{ ISSUER }}";
   const DISTRIBUTOR = "{{ DISTRIBUTOR }}";
@@ -1821,7 +1819,7 @@ async function listClaimables(){
       claimMsg.textContent = '';
       return;
     }
-CB_ID_MAP.clear();   // <— reset contract_id -> raw-id map for fresh render
+
     // ---- STRONG GROUPING (don't collapse different contracts)
     // Prefer server contract_id; else derive a unique signature.
     const groups = {};
@@ -1863,39 +1861,16 @@ for (const [, recs] of ordered){
   const pillClass = kind === 'vote' ? 'pill-vote' : 'pill-regular';
   const labelKind = kind === 'vote' ? 'VOTE' : 'NORMAL';
   const unlocked  = unlockTs ? (Date.now() >= unlockTs*1000) : true;
-  // Map each contract_id in this group to its raw 64-hex balance id
-  for (const r of recs){
-    if (r.contract_id && r.id) {
-      CB_ID_MAP.set(String(r.contract_id), String(r.id));
-    }
-  }
+
   // Collect ids and totals per contract
   const ids = [];
   let principal = 0, reward = 0;
   for (const r of recs){
-  // accept several possible id field names from the API
-  const rawId = String(
-    r.id ||
-    r.balance_id ||
-    r.claimable_balance_id ||
-    r.balanceId ||
-    ''
-  ).trim();
-
-  if (rawId) ids.push(rawId);
-
-  // build contract -> [ids...] map so a single checkbox can resolve to all its raw ids
-  if (r.contract_id && rawId) {
-    const key = String(r.contract_id);
-    const arr = CB_ID_MAP.get(key) || [];
-    arr.push(rawId);
-    CB_ID_MAP.set(key, arr);
+    if (r.id) ids.push(r.id);
+    const role = (r.role || r.kind || '').toString().toLowerCase();
+    if (role.includes('reward')) reward += Number(r.amount||0);
+    else                         principal += Number(r.amount||0);
   }
-
-  const role = (r.role || r.kind || '').toString().toLowerCase();
-  if (role.includes('reward')) reward += Number(r.amount||0);
-  else                         principal += Number(r.amount||0);
-}
 
   // ---- Header row (ONE checkbox per contract)
   const trHead = document.createElement('tr');
@@ -1907,18 +1882,13 @@ for (const [, recs] of ordered){
     : (kind === 'vote' ? 'VOTE' : 'NORMAL');
 
   trHead.innerHTML = `
-  <td colspan="4">
-    <label class="group-toggle" style="display:flex;align-items:center;gap:10px;white-space:nowrap;">
-      <input
-        type="checkbox"
-        class="cbPick"
-        value="${ids.join(',')}"                             /* raw horizon ids if present */
-        data-contracts="${recs.map(r=>r.contract_id).filter(Boolean).join(',')}"  /* fallback */
-        ${unlocked ? '' : 'disabled'}>
-      <span class="pill ${pillClass}">${voteLabel}</span>
-      <strong>Stake • unlock ${unlockStr}</strong>
-    </label>
-  </td>`;
+    <td colspan="4">
+      <label class="group-toggle" style="display:flex;align-items:center;gap:10px;white-space:nowrap;">
+        <input type="checkbox" class="cbPick" value="${ids.join(',')}" ${unlocked ? '' : 'disabled'}>
+        <span class="pill ${pillClass}">${voteLabel}</span>
+        <strong>Stake • unlock ${unlockStr}</strong>
+      </label>
+    </td>`;
   claimTblBody.appendChild(trHead);
 
   // ---- Compact block: principal + reward/est share
@@ -1965,55 +1935,41 @@ claimMsg.textContent = '';
 
 claimRefresh?.addEventListener('click', listClaimables);
 
-// ======== CLAIM SELECTED (batch) — accept raw ids OR contract_ids ========
+// ======== CLAIM SELECTED (batch) — robust ids + clear errors + IZZA-first ========
 claimSelected?.addEventListener('click', async ()=>{
   const pub = (claimPub.value||'').trim();
   if (!pub.startsWith('G')) { claimMsg.textContent = 'Enter a valid G… public key.'; return; }
 
-  // Gather selected checkboxes
-  const inputs = Array.from(document.querySelectorAll('.cbPick:checked'));
-  if (!inputs.length){ claimMsg.textContent='Pick at least one balance.'; return; }
+  // Expand group selections like "id1,id2" into individual ids
+  const rawPicks = Array.from(document.querySelectorAll('.cbPick:checked')).map(x=>String(x.value||''));
+  const picks = rawPicks
+    .flatMap(v => v.split(','))
+    .map(s => s.trim())
+    .filter(Boolean);
 
-  // Expand raw ids (value) and fallback contract_ids (data-contracts)
-    const tokens = [];
-  for (const el of inputs){
-    const v  = String(el.value||'');              // "id1,id2,…" (raw ids, if present)
-    const dc = String(el.dataset.contracts||'');  // "contractId1,contractId2,…"
-    if (v)  tokens.push(...v.split(',').map(s=>s.trim()).filter(Boolean));
-    if (dc) tokens.push(...dc.split(',').map(s=>s.trim()).filter(Boolean));
-  }
-  if (!tokens.length){ claimMsg.textContent='Pick at least one balance.'; return; }
+  if (!picks.length){ claimMsg.textContent='Pick at least one balance.'; return; }
 
+  // Client-side 64-hex validation + de-dupe
   const HEX64 = /^[0-9a-fA-F]{64}$/;
-
-  // Resolve:
-  //  - keep any raw 64-hex ids
-  //  - expand any contract_id to ALL its raw ids (array) from CB_ID_MAP
-  const resolved = [];
-  for (const tok of tokens){
-    if (HEX64.test(tok)) { resolved.push(tok); continue; }
-    const mapped = CB_ID_MAP.get(tok);
-    if (Array.isArray(mapped)) resolved.push(...mapped);
-    else if (typeof mapped === 'string' && mapped) resolved.push(mapped);
-  }
-
-  // De-dupe + validate
-  const ids = Array.from(new Set(resolved)).filter(id => HEX64.test(id));
-  if (!ids.length){
+  const valid = Array.from(new Set(picks.filter(id => HEX64.test(id))));
+  if (!valid.length){
     claimMsg.textContent = '❌ No valid claimable balance ids were selected.';
     return;
   }
 
-  claimMsg.textContent = `Building claim for ${ids.length} id${ids.length>1?'s':''}…`;
+  claimMsg.textContent = `Building claim for ${valid.length} id${valid.length>1?'s':''}…`;
 
   try{
+    // Use the UI-friendly alias (same builder, nicer param shape)
     const r = await fetch('/api/stake/claim', {
       method:'POST',
       headers:{'Content-Type':'application/json'},
-      body: JSON.stringify({ pub, ids })
+      body: JSON.stringify({ pub, ids: valid })
     });
+
+    // Try to read the JSON either way so we can show precise error
     let j = {};
-    try { j = await r.json(); } catch {}
+    try { j = await r.json(); } catch { /* ignore parse fail */ }
 
     if (!r.ok || !j?.ok){
       const msg = j?.error || j?.message || `HTTP ${r.status}`;
@@ -2024,7 +1980,7 @@ claimSelected?.addEventListener('click', async ()=>{
     const xdr  = j.xdr;
     const pass = j.network_passphrase || 'Pi Testnet';
 
-    // Prefer local IZZA wallet signing
+    // --- IZZA wallet local-sign (preferred)
     const localSec = getLocalSecret(pub, USER?.username);
     if (localSec){
       const ok = await ensureStellar();
@@ -2037,8 +1993,8 @@ claimSelected?.addEventListener('click', async ()=>{
         const resp = await server.submitTransaction(tx);
         if (resp?.hash){
           claimMsg.innerHTML = `✅ Claimed. Tx: <code>${resp.hash}</code>`;
-          listClaimables(); // refresh UI
-        } else {
+          listClaimables();
+        }else{
           claimMsg.textContent = 'Submitted; awaiting confirmation.';
         }
       }catch(e){
@@ -2048,14 +2004,14 @@ claimSelected?.addEventListener('click', async ()=>{
       return;
     }
 
-    // Fallback wallet deep-link (copyable)
+    // --- No local IZZA secret — show guarded wallet link (copyable)
     const uri = `web+stellar:tx?xdr=${encodeURIComponent(xdr)}&network_passphrase=${encodeURIComponent(pass)}`;
     try{
       window.location.assign(uri);
-      claimMsg.innerHTML = `Opening your wallet to sign…<br><small>If nothing happens, tap this:</small> <a href="${uri}" style="word-break:break-all">Open in wallet</a>`;
+      claimMsg.innerHTML = `Opening your wallet to sign…<br><small>If nothing happens, tap the link:</small> <a href="${uri}" style="word-break:break-all">Open in wallet</a>`;
     }catch{
       claimMsg.innerHTML =
-        `Couldn’t open a wallet from this browser.<br><small>Copy into your wallet:</small><br>` +
+        `Couldn’t open a wallet from this browser.<br><small>Copy this into your wallet:</small><br>` +
         `<code id="claimDeepLink" style="word-break:break-all">${uri}</code><br>` +
         `<button id="copyDeepLinkBtn" class="btn sm">Copy link</button>`;
       document.getElementById('copyDeepLinkBtn')?.addEventListener('click', async ()=>{
