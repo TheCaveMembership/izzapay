@@ -98,27 +98,30 @@ def _vote_total_weight(round_end, proposal) -> Decimal:
         cx.close()
         return Decimal(str(total or 0))
 
-def _vote_lookup(pub: str, round_end: int, amount7: str):
-    """Return {'proposal':..., 'weight7':...} for the latest matching intent, or None."""
+def _lookup_vote_proposal(pub: str, round_end: int, amount7: str) -> str | None:
+    """
+    Find the proposal tied to this user's vote intent by (pub, round_end, amount7),
+    newest first.
+    """
     try:
         with _vote_lock:
             cx = _vote_cx()
             cur = cx.execute(
-                "SELECT proposal, weight7 FROM vote_intents "
+                "SELECT proposal FROM vote_intents "
                 "WHERE pub=? AND round_end=? AND amount7=? "
                 "ORDER BY created_at DESC LIMIT 1",
                 (pub, int(round_end), str(amount7))
             )
             row = cur.fetchone()
             cx.close()
-            if row:
-                return {"proposal": row[0], "weight7": row[1]}
+            return row[0] if row and row[0] else None
     except Exception:
-        pass
-    return None
+        return None
 
-# Exact same pool-share calc used by preview
 def _vote_est_share_pct(round_end: int, proposal: str, your_weight7: str) -> str:
+    """
+    Compute the exact preview %: your_weight / (pool_before + your_weight), 2dp.
+    """
     try:
         your_w = Decimal(str(your_weight7 or "0"))
     except Exception:
@@ -544,18 +547,17 @@ def list_claimables():
     """
     List claimable balances for this asset and claimant.
     Returns: {"ok": True, "claimables": [...], "records": [...back-compat...]}
-
     Each item also includes:
       - role: "principal"|"reward"
       - kind: "regular"|"vote"
       - unlock_ts (unix seconds)
       - contract_id:
-          * regular → "<unlock>|regular|<id[-8:]>"
+          * regular → "<unlock>|regular|<id[:8]>"
           * vote    → "<unlock>|vote|<id[-16:]>"
-      - For vote principal rows, also includes preview-identical fields:
+      - For vote principal rows also:
           * proposal
           * vote_weight7
-          * vote_est_share_pct   (string like "12.34")
+          * vote_est_share_pct
     """
     pub = _clean(request.args.get("pub", ""))
     if not (pub and pub.startswith("G")):
@@ -567,7 +569,7 @@ def list_claimables():
     try:
         r = requests.get(url, params=params, timeout=15)
         r.raise_for_status()
-        raw = (r.json().get("_embedded", {}) or {}).get("records", []) or []
+        records = (r.json().get("_embedded", {}) or {}).get("records", []) or []
     except requests.HTTPError as e:
         log.warning("claimables fetch failed: %s", e)
         return jsonify({"ok": True, "claimables": [], "records": []})
@@ -575,77 +577,49 @@ def list_claimables():
         log.warning("claimables fetch error: %s", e)
         return jsonify({"ok": True, "claimables": [], "records": []})
 
-    # normalize minimal fields
-    def _norm(rec):
-        role = "reward" if (rec.get("sponsor") == DISTR_PUB) else "principal"
-        try:
-            cl = (rec.get("claimants") or [])[0]
-            unlock_unix = _compute_unlock_unix_from_predicate(cl.get("predicate") or {}) or 0
-        except Exception:
-            unlock_unix = 0
-        return {
-            "id": rec.get("id",""),
-            "amount": rec.get("amount","0"),
-            "sponsor": rec.get("sponsor",""),
-            "role": role,
-            "last_modified_time": rec.get("last_modified_time"),
-            "unlock_ts": int(unlock_unix),
-        }
+    norm = [_classify_record(rec) for rec in records]
 
-    norm = [_norm(x) for x in raw]
-
-    # detect vote buckets (principal with no reward at same unlock)
-    has_pr, has_rw = {}, {}
+    # derive vote vs regular: if an unlock bucket has principal but no reward => vote stake
+    buckets = {}
     for rec in norm:
-        u = rec["unlock_ts"]
+        u = rec.get("unlock_ts") or 0
+        b = buckets.setdefault(u, {"has_principal": False, "has_reward": False})
         if rec["role"] == "principal":
-            has_pr[u] = True
+            b["has_principal"] = True
         else:
-            has_rw[u] = True
+            b["has_reward"] = True
 
     out = []
-    round_end = _vote_round_end_unix()
-
     for rec in norm:
-        u = rec["unlock_ts"]
-        is_vote = bool(has_pr.get(u) and not has_rw.get(u))
+        u = rec.get("unlock_ts") or 0
+        b = buckets.get(u, {})
+        is_vote = bool(b.get("has_principal") and not b.get("has_reward"))
         kind = "vote" if is_vote else "regular"
 
-        # contract_id uniqueness rule: votes get a bigger suffix so they never collapse
-        id_suffix = (rec["id"][-16:] if kind == "vote" else rec["id"][-8:])
+        # contract id: DO NOT change regular behavior; make vote unique
+        id_suffix = (rec.get('id','')[-16:] if kind == "vote" else rec.get('id','')[:8])
         rec_out = {
             **rec,
             "kind": kind,
-            "contract_id": f"{u}|{kind}|{id_suffix}",
+            "contract_id": f"{int(u)}|{kind}|{id_suffix}",
         }
 
-        # Attach exact preview number for vote principals
+        # Attach exact preview % ONLY for vote principal rows
         if kind == "vote" and rec["role"] == "principal":
-            # match the persisted intent on (round_end, pub, amount7)
-            look = _vote_lookup(pub, round_end, str(rec["amount"]))
-            if look:
-                proposal = look.get("proposal") or "arcade"
-                weight7  = look.get("weight7") or "0"
-                est_pct  = _vote_est_share_pct(round_end, proposal, weight7)
-                rec_out.update({
-                    "proposal": proposal,
-                    "vote_weight7": str(weight7),
-                    "vote_est_share_pct": est_pct,
-                })
-            else:
-                # fallback: compute from current days_remaining (may differ slightly from original preview)
-                try:
-                    days_remaining = _vote_days_remaining()
-                    w = _vote_weight_for(Decimal(str(rec["amount"])), days_remaining)
-                    proposal = "arcade"
-                    est_pct  = _vote_est_share_pct(round_end, proposal, _q7(w))
-                    rec_out.update({
-                        "proposal": proposal,
-                        "vote_weight7": _q7(w),
-                        "vote_est_share_pct": est_pct,
-                    })
-                except Exception:
-                    pass
+            # proposal lookup by (pub, round_end=u, amount7)
+            amount7 = str(rec.get("amount", "0"))
+            proposal = _lookup_vote_proposal(pub, int(u), amount7) or "arcade"
+            # recompute weight from amount at current days_remaining
+            try:
+                days_remaining = _vote_days_remaining()
+                your_w = _vote_weight_for(Decimal(amount7), days_remaining)
+            except Exception:
+                your_w = Decimal("0")
+            rec_out.update({
+                "proposal": proposal,
+                "vote_weight7": _q7(your_w),
+                "vote_est_share_pct": _vote_est_share_pct(int(u), proposal, _q7(your_w)),
+            })
 
         out.append(rec_out)
 
