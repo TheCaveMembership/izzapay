@@ -1946,7 +1946,8 @@ claimSelected?.addEventListener('click', async ()=>{
   if (!pub.startsWith('G')) { claimMsg.textContent = 'Enter a valid G… public key.'; return; }
 
   // Expand group selections like "id1,id2" into individual ids
-  const rawPicks = Array.from(document.querySelectorAll('.cbPick:checked')).map(x=>String(x.value||''));
+  const rawPicks = Array.from(document.querySelectorAll('.cbPick:checked'))
+  .map(x => (x.dataset.balanceIds || x.value || '').trim());
   const picks = rawPicks
     .flatMap(v => v.split(','))
     .map(s => s.trim())
