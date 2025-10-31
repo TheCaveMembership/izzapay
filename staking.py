@@ -69,7 +69,6 @@ def _vote_cx():
       weight7    TEXT NOT NULL,
       created_at INTEGER NOT NULL
     )""")
-    # Backfill safety: older tables may lack weight7
     try:
         cx.execute("ALTER TABLE vote_intents ADD COLUMN weight7 TEXT")
     except Exception:
@@ -97,22 +96,41 @@ def _vote_total_weight(round_end, proposal) -> Decimal:
         cx.close()
         return Decimal(str(total or 0))
 
-def _lookup_vote_proposal(pub: str, round_end: int, amount7: str) -> str | None:
-    """Best-effort link: find proposal for the same pub, round_end, and amount."""
+def _vote_lookup(round_end: int, pub: str, amount7: str) -> dict | None:
+    """
+    Find the most recent intent row for this user/round/amount.
+    Returns {proposal, weight7} or None.
+    """
     try:
         with _vote_lock:
             cx = _vote_cx()
             cur = cx.execute(
-                "SELECT proposal FROM vote_intents "
-                "WHERE pub=? AND round_end=? AND amount7=? "
+                "SELECT proposal, weight7 FROM vote_intents "
+                "WHERE round_end=? AND pub=? AND amount7=? "
                 "ORDER BY created_at DESC LIMIT 1",
-                (pub, int(round_end), str(amount7))
+                (int(round_end), pub, str(amount7))
             )
             row = cur.fetchone()
             cx.close()
-            return row[0] if row and row[0] else None
-    except Exception:
+            if row:
+                return {"proposal": row[0], "weight7": str(row[1])}
+            return None
+    except Exception as e:
+        log.warning("vote lookup failed: %s", e)
         return None
+
+def _vote_share_pct(round_end: int, proposal: str, your_weight: Decimal) -> Decimal:
+    """
+    Return your_weight / current_pool_total * 100 with 2-decimal precision.
+    """
+    try:
+        total = _vote_total_weight(round_end, proposal)
+        if total <= 0:
+            return Decimal("100.00")
+        pct = (Decimal(your_weight) / total) * Decimal(100)
+        return pct.quantize(Decimal("0.01"), rounding=ROUND_DOWN)
+    except Exception:
+        return Decimal("0.00")
 
 # ---------------------------- helpers ---------------------------------
 
@@ -457,7 +475,6 @@ def build_vote_stake_tx():
 
 def _classify_record(r: dict):
     """Normalize for UI grouping."""
-    # role/principal vs reward is based on sponsor
     role = "reward" if (r.get("sponsor") == DISTR_PUB) else "principal"
     unlock_unix = None
     try:
@@ -465,7 +482,6 @@ def _classify_record(r: dict):
         unlock_unix = _compute_unlock_unix_from_predicate(cl.get("predicate") or {})
     except Exception:
         pass
-
     return {
         "id": r.get("id"),
         "amount": r.get("amount"),
@@ -486,7 +502,6 @@ def vote_preview():
     end_unix = _vote_round_end_unix()
     days_rem = _vote_days_remaining()
 
-    # Pool math is in WEIGHTS, not raw amounts
     your_weight = _vote_weight_for(amt, days_rem)
     pool_before_w = _vote_total_weight(end_unix, proposal)
     pool_after_w  = pool_before_w + your_weight
@@ -508,17 +523,17 @@ def vote_preview():
 def list_claimables():
     """
     Returns normalized claimables with UI hints.
-    - role: "principal" | "reward"
-    - kind: "regular" | "vote"
-    - unlock_ts: unix seconds
-    - contract_id:
-        * regular → "<unlock>|regular|<id[-8:]>"
-        * vote    → "<unlock>|vote|<id[-16:]>"
-    - For vote rows (principal side), also includes:
-        * proposal
-        * vote_weight7
-        * vote_boost_multiplier
-        * vote_est_share_pct
+      - role: "principal" | "reward"
+      - kind: "regular" | "vote"
+      - unlock_ts: unix seconds
+      - contract_id:
+          * regular → "<unlock>|regular|<id[-8:]>"
+          * vote    → "<unlock>|vote|<id[-16:]>"
+      - For vote principal rows, also includes:
+          * proposal
+          * vote_weight7
+          * vote_boost_multiplier
+          * vote_est_share_pct
     """
     pub = _clean(request.args.get("pub", ""))
     if not (pub and pub.startswith("G")):
@@ -538,7 +553,7 @@ def list_claimables():
         log.warning("claimables fetch error: %s", e)
         return jsonify({"ok": True, "claimables": [], "records": []})
 
-    # normalize minimal fields
+    # normalize
     def _norm(rec):
         role = "reward" if (rec.get("sponsor") == DISTR_PUB) else "principal"
         try:
@@ -585,9 +600,8 @@ def list_claimables():
             "contract_id": f"{u}|{kind}|{id_suffix}",
         }
 
-        # For VOTE principal rows, attach preview-identical fields
+        # For vote principal rows, attach preview-identical fields
         if kind == "vote" and rec["role"] == "principal":
-            # match persisted intent row (round_end, pub, amount7)
             look = _vote_lookup(round_end, pub, str(rec["amount"]))
             if look:
                 proposal = look.get("proposal") or "arcade"
@@ -699,10 +713,6 @@ def build_claim_tx_batch():
 
 @bp_stake.route("/api/stake/claim", methods=["POST"])
 def claim_batch_ui_alias():
-    """
-    UI alias for batch claim.
-    Body: { ids: [...], pub?: "G..." }
-    """
     j = request.get_json(force=True) or {}
     ids = j.get("ids") or j.get("balance_ids") or []
     pub = _clean(j.get("pub") or "")
