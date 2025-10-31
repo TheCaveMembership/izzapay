@@ -1879,6 +1879,20 @@ async function listClaimables(){
       // ---- Compact block: principal + reward together (no wrap)
       const trBlock = document.createElement('tr');
       trBlock.className = `group-row is-${kind}` + (unlocked ? '' : ' locked');
+      // Use server-provided % for vote contracts; keep numeric reward for regular
+const estPct = (kind === 'vote')
+  ? Number((any && any.vote_est_share_pct) || 0)
+  : null;
+
+const rewardHTML = (kind === 'vote')
+  ? `<div class="line" style="display:flex;justify-content:space-between;align-items:center;white-space:nowrap;">
+       <span class="pill pill-vote" aria-hidden="true">EST. SHARE</span>
+       <span class="num">${isFinite(estPct) ? estPct.toFixed(2) : '0.00'}%</span>
+     </div>`
+  : (reward > 0 ? `<div class="line" style="display:flex;justify-content:space-between;align-items:center;">
+       <span class="pill pill-reward" aria-hidden="true">REWARD</span>
+       <span class="num">${fmtNum(reward)}</span>
+     </div>` : '');
       trBlock.innerHTML = `
         <td colspan="4">
           <div class="block" style="display:flex;flex-direction:column;gap:8px;">
