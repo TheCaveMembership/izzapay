@@ -1882,14 +1882,19 @@ for (const [, recs] of ordered){
     : (kind === 'vote' ? 'VOTE' : 'NORMAL');
 
   trHead.innerHTML = `
-    <td colspan="4">
-      <label class="group-toggle" style="display:flex;align-items:center;gap:10px;white-space:nowrap;">
-        <input type="checkbox" class="cbPick" value="${ids.join(',')}" ${unlocked ? '' : 'disabled'}>
-        <span class="pill ${pillClass}">${voteLabel}</span>
-        <strong>Stake • unlock ${unlockStr}</strong>
-      </label>
-    </td>`;
-  claimTblBody.appendChild(trHead);
+  <td colspan="4">
+    <label class="group-toggle" style="display:flex;align-items:center;gap:10px;white-space:nowrap;">
+      <input
+        type="checkbox"
+        class="cbPick"
+        value="${ids.join(',')}"
+        data-balance-ids="${ids.join(',')}"
+        ${unlocked ? '' : 'disabled'}>
+      <span class="pill ${pillClass}">${voteLabel}</span>
+      <strong>Stake • unlock ${unlockStr}</strong>
+    </label>
+  </td>`;
+claimTblBody.appendChild(trHead);
 
   // ---- Compact block: principal + reward/est share
   const trBlock = document.createElement('tr');
