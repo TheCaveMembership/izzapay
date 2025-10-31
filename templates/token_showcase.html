@@ -2211,9 +2211,10 @@ claimSelected?.addEventListener('click', async ()=>{
 
   if (!picks.length){ claimMsg.textContent='Pick at least one balance.'; return; }
 
-  // Client-side 64-hex validation + de-dupe
-  const HEX64 = /^[0-9a-fA-F]{64}$/;
-  const valid = Array.from(new Set(picks.filter(id => HEX64.test(id))));
+  // Client-side 64+ hex validation + de-dupe
+  const HEXHEX = /^[0-9a-fA-F]{64,}$/;   // accept 64 or longer hex ids
+  const valid = Array.from(new Set(picks.filter(id => HEXHEX.test(id)))); // ← use HEXHEX here
+
   if (!valid.length){
     claimMsg.textContent = '❌ No valid claimable balance ids were selected.';
     return;
@@ -2222,16 +2223,14 @@ claimSelected?.addEventListener('click', async ()=>{
   claimMsg.textContent = `Building claim for ${valid.length} id${valid.length>1?'s':''}…`;
 
   try{
-    // Use the UI-friendly alias (same builder, nicer param shape)
     const r = await fetch('/api/stake/claim', {
       method:'POST',
       headers:{'Content-Type':'application/json'},
       body: JSON.stringify({ pub, ids: valid })
     });
 
-    // Try to read the JSON either way so we can show precise error
     let j = {};
-    try { j = await r.json(); } catch { /* ignore parse fail */ }
+    try { j = await r.json(); } catch {}
 
     if (!r.ok || !j?.ok){
       const msg = j?.error || j?.message || `HTTP ${r.status}`;
@@ -2242,7 +2241,6 @@ claimSelected?.addEventListener('click', async ()=>{
     const xdr  = j.xdr;
     const pass = j.network_passphrase || 'Pi Testnet';
 
-    // --- IZZA wallet local-sign (preferred)
     const localSec = getLocalSecret(pub, USER?.username);
     if (localSec){
       const ok = await ensureStellar();
@@ -2266,7 +2264,6 @@ claimSelected?.addEventListener('click', async ()=>{
       return;
     }
 
-    // --- No local IZZA secret — show guarded wallet link (copyable)
     const uri = `web+stellar:tx?xdr=${encodeURIComponent(xdr)}&network_passphrase=${encodeURIComponent(pass)}`;
     try{
       window.location.assign(uri);
@@ -2278,7 +2275,7 @@ claimSelected?.addEventListener('click', async ()=>{
         `<button id="copyDeepLinkBtn" class="btn sm">Copy link</button>`;
       document.getElementById('copyDeepLinkBtn')?.addEventListener('click', async ()=>{
         try{ await navigator.clipboard.writeText(uri); claimMsg.innerHTML += '<br>✅ Copied.'; }
-        catch{ claimMsg.innerHTML += '<br>Copy failed — long-press to select.'; }
+        catch{ claimMsg.innerHTML += '<br>Copy failed, long press to select.'; }
       });
     }
   }catch(e){
