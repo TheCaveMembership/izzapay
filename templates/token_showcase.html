@@ -1798,30 +1798,6 @@ voteStartBtn?.addEventListener('click', async ()=>{
     voteMsg.textContent = '❌ ' + String(e);
   }
 });
-// --- compute Est. APR Boost % for a vote contract (same math as preview)
-function calcVoteBoostPct(unlockTs, rules){
-  // tolerate missing/partial rules
-  const lenDays  = Number((rules && rules.length_days) || 180);
-  // early_bonus_max comes from API as percent "30.00"
-  const earlyMax = Number((rules && rules.early_bonus_max) || 0) / 100;
-  const nowSec   = Date.now() / 1000;
-  const daysLeft = Math.ceil(Math.max(0, Number(unlockTs) - nowSec) / 86400);
-  const mult     = 1 + Math.min(1, daysLeft / lenDays) * earlyMax; // linear to round end
-  return Math.max(0, (mult - 1) * 100); // → percent
-}
-
-// cache vote rules for use in the claim list
-let __voteRules = null;
-async function getVoteRules(){
-  if (__voteRules) return __voteRules;
-  try{
-    const r = await fetch('/api/vote/rules', {cache:'no-store'});
-    const j = await r.json();
-    if (r.ok && j && j.ok) __voteRules = j;
-  }catch(_){}
-  // safe defaults if API unreachable
-  return (__voteRules ||= { length_days: 180, early_bonus_max: '30.00' });
-}
 // ======== LIST CLAIMABLES (grouped: one toggle, principal+reward in one box) ========
 async function listClaimables(){
   const pub = (claimPub.value||'').trim();
@@ -1880,15 +1856,12 @@ if (kindStr === 'vote'){
 //     We compute a single % from rules.days_remaining / rules.length_days
 //     and early_bonus_max, same math as preview.
 // ================================================================
-let voteRules = { length_days: 180, early_bonus_max: '30.00' };
-
-async function loadVoteRules(){
-  try{
-    const r = await fetch('/api/vote/rules', { cache:'no-store' });
-    const j = await r.json();
-    if (j?.ok) voteRules = j;
-  }catch(_){}
-}
+let voteRules = { length_days: 180, days_remaining: 180, early_bonus_max: "30.00" };
+try {
+  const r = await fetch('/api/vote/rules', { cache: 'no-store' });
+  const j = await r.json();
+  if (r.ok && j?.ok) voteRules = j;
+} catch(_) {}
 
 /** Est. APR Boost % — mirrors preview math */
 function calcVoteBoostFromRules(rules){
@@ -1952,37 +1925,32 @@ for (const [, recs] of ordered) {
     </td>`;
   claimTblBody.appendChild(trHead);
 
-  // ---- Compact block (VOTE shows EST. APR BOOST; NORMAL shows REWARD)
-const trBlock = document.createElement('tr');
-trBlock.className = `group-row is-${kind}` + (unlocked ? '' : ' locked');
+  // ---- Compact block
+  const trBlock = document.createElement('tr');
+  trBlock.className = `group-row is-${kind}` + (unlocked ? '' : ' locked');
 
-// per-row boost for vote rows (derived from unlockTs vs round end)
-const votePct = (kind === 'vote')
-  ? calcVoteBoostPct(unlockTs, (typeof voteRules !== 'undefined' && voteRules) || await getVoteRules())
-  : 0;
+  const rewardHTML = (kind === 'vote')
+    ? `<div class="line" style="display:flex;justify-content:space-between;align-items:center;white-space:nowrap;">
+         <span class="pill pill-vote" aria-hidden="true">EST. APR BOOST</span>
+         <span class="num">${(isFinite(VOTE_BOOST_PCT) ? VOTE_BOOST_PCT : 0).toFixed(2)}%</span>
+       </div>`
+    : (reward > 0 ? `<div class="line" style="display:flex;justify-content:space-between;align-items:center;">
+         <span class="pill pill-reward" aria-hidden="true">REWARD</span>
+         <span class="num">${fmtNum(reward)}</span>
+       </div>` : '');
 
-const rewardHTML = (kind === 'vote')
-  ? `<div class="line" style="display:flex;justify-content:space-between;align-items:center;white-space:nowrap;">
-       <span class="pill pill-vote" aria-hidden="true">EST. APR BOOST</span>
-       <span class="num">${Number.isFinite(votePct) ? votePct.toFixed(2) : '0.00'}%</span>
-     </div>`
-  : (reward > 0 ? `<div class="line" style="display:flex;justify-content:space-between;align-items:center;">
-       <span class="pill pill-reward" aria-hidden="true">REWARD</span>
-       <span class="num">${fmtNum(reward)}</span>
-     </div>` : '');
-
-trBlock.innerHTML = `
-  <td colspan="4">
-    <div class="block" style="display:flex;flex-direction:column;gap:8px;">
-      <div class="line" style="display:flex;justify-content:space-between;align-items:center;white-space:nowrap;">
-        <span class="pill ${pillClass}" aria-hidden="true">PRINCIPAL</span>
-        <span class="num">${fmtNum(principal)}</span>
+  trBlock.innerHTML = `
+    <td colspan="4">
+      <div class="block" style="display:flex;flex-direction:column;gap:8px;">
+        <div class="line" style="display:flex;justify-content:space-between;align-items:center;white-space:nowrap;">
+          <span class="pill ${pillClass}" aria-hidden="true">PRINCIPAL</span>
+          <span class="num">${fmtNum(principal)}</span>
+        </div>
+        ${rewardHTML}
+        ${unlocked ? '' : `<span class="lockhint">Locked until ${unlockStr}</span>`}
       </div>
-      ${rewardHTML}
-      ${unlocked ? '' : `<span class="lockhint">Locked until ${unlockStr}</span>`}
-    </div>
-  </td>`;
-claimTblBody.appendChild(trBlock);
+    </td>`;
+  claimTblBody.appendChild(trBlock);
 }
 
     claimSelected.disabled = false;
