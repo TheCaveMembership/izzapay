@@ -1935,12 +1935,12 @@ claimMsg.textContent = '';
 
 claimRefresh?.addEventListener('click', listClaimables);
 
-// ======== CLAIM SELECTED (batch) ========
+// ======== CLAIM SELECTED (batch) — IZZA wallet first, safe wallet fallback ========
 claimSelected?.addEventListener('click', async ()=>{
   const pub = (claimPub.value||'').trim();
-  if (!pub.startsWith('G')) return;
+  if (!pub.startsWith('G')) { claimMsg.textContent = 'Enter a valid G… public key.'; return; }
 
-  // Split group selections like "id1,id2" into individual ids
+  // Expand group selections like "id1,id2" into individual ids
   const rawPicks = Array.from(document.querySelectorAll('.cbPick:checked')).map(x=>x.value);
   const picks = rawPicks.flatMap(v => String(v).split(',').map(s=>s.trim()).filter(Boolean));
   if (!picks.length){ claimMsg.textContent='Pick at least one balance.'; return; }
@@ -1958,6 +1958,7 @@ claimSelected?.addEventListener('click', async ()=>{
     const xdr  = j.xdr;
     const pass = j.network_passphrase || 'Pi Testnet';
 
+    // 1) IZZA wallet local-sign path (preferred)
     const localSec = getLocalSecret(pub, USER?.username);
     if (localSec){
       const ok = await ensureStellar();
@@ -1966,17 +1967,46 @@ claimSelected?.addEventListener('click', async ()=>{
       const tx  = SDK.TransactionBuilder.fromXDR(xdr, pass);
       tx.sign(SDK.Keypair.fromSecret(localSec));
       const server = getServer();
-      const resp   = await server.submitTransaction(tx);
-      if (resp?.hash){
-        claimMsg.innerHTML = `✅ Claimed. Tx: <code>${resp.hash}</code>`;
-        listClaimables();
-      } else {
+      try{
+        const resp = await server.submitTransaction(tx);
+        if (resp?.hash){
+          claimMsg.innerHTML = `✅ Claimed. Tx: <code>${resp.hash}</code>`;
+          listClaimables();
+          return;
+        }
         claimMsg.textContent = 'Submitted; awaiting confirmation.';
+        return;
+      }catch(e){
+        const rc = e?.response?.data?.extras?.result_codes;
+        claimMsg.textContent = `❌ Claim failed: ${rc ? JSON.stringify(rc) : String(e)}`;
+        return;
       }
-    } else {
-      const uri = `web+stellar:tx?xdr=${encodeURIComponent(xdr)}&network_passphrase=${encodeURIComponent(pass)}`;
-      window.location.href = uri;
-      claimMsg.innerHTML = `Opening your wallet to sign… If nothing happens, copy this URI:<br><code style="word-break:break-all">${uri}</code>`;
+    }
+
+    // 2) No local IZZA secret — try wallet deep link, with guarded fallback
+    const uri = `web+stellar:tx?xdr=${encodeURIComponent(xdr)}&network_passphrase=${encodeURIComponent(pass)}`;
+
+    // Try to navigate; if the webview rejects custom schemes, catch and show link instead
+    try{
+      // use assign() to avoid history issues in WKWebView
+      window.location.assign(uri);
+      // Also render a helper (in case navigation is blocked silently)
+      claimMsg.innerHTML = `Opening your wallet to sign…<br><small>If nothing happens, tap the link:</small> 
+        <a href="${uri}" style="word-break:break-all">Open in wallet</a>`;
+    }catch(navErr){
+      claimMsg.innerHTML =
+        `Couldn’t open the wallet from this browser.<br>` +
+        `<small>Copy this into your wallet:</small><br>` +
+        `<code id="claimDeepLink" style="word-break:break-all">${uri}</code><br>` +
+        `<button id="copyDeepLinkBtn" class="btn sm">Copy link</button>`;
+      document.getElementById('copyDeepLinkBtn')?.addEventListener('click', async ()=>{
+        try{
+          await navigator.clipboard.writeText(uri);
+          claimMsg.innerHTML += '<br>✅ Copied.';
+        }catch(_){
+          claimMsg.innerHTML += '<br>Copy failed — long-press to select.';
+        }
+      });
     }
   }catch(e){
     claimMsg.textContent = '❌ ' + String(e);
