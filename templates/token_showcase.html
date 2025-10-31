@@ -1838,82 +1838,94 @@ async function listClaimables(){
     }
 
     // ---- Sort contracts by unlock date (ascending; unknowns last)
-    const ordered = Object.entries(groups).sort((a,b)=>{
-      const au = a[1][0].__unlockTs || Number.MAX_SAFE_INTEGER;
-      const bu = b[1][0].__unlockTs || Number.MAX_SAFE_INTEGER;
-      return au - bu;
-    });
+const ordered = Object.entries(groups).sort((a,b)=>{
+  const au = a[1][0].__unlockTs || Number.MAX_SAFE_INTEGER;
+  const bu = b[1][0].__unlockTs || Number.MAX_SAFE_INTEGER;
+  return au - bu;
+});
 
-    for (const [, recs] of ordered){
-      const any       = recs[0];
-      const unlockTs  = any.__unlockTs || 0;
-      const unlockStr = unlockTs ? new Date(unlockTs*1000).toISOString().slice(0,10) : '—';
-      const kind      = any.__kind === 'vote' ? 'vote' : 'regular';
-      const pillClass = kind === 'vote' ? 'pill-vote' : 'pill-regular';
-      const labelKind = kind === 'vote' ? 'VOTE' : 'NORMAL';
-      const unlocked  = unlockTs ? (Date.now() >= unlockTs*1000) : true;
+// Pretty names for proposals (defined once)
+const PROPOSAL_NAMES = {
+  rooftop_rumble: 'Rooftop Rumble',
+  pizza_panic: 'Pizza Panic'
+};
+const prettyProposal = id => PROPOSAL_NAMES[id] || id || 'Vote';
 
-      // Collect ids and totals per contract
-      const ids = [];
-      let principal = 0, reward = 0;
-      for (const r of recs){
-        if (r.id) ids.push(r.id);
-        const role = (r.role || r.kind || '').toString().toLowerCase();
-        if (role.includes('reward')) reward += Number(r.amount||0);
-        else                         principal += Number(r.amount||0);
-      }
+for (const [, recs] of ordered){
+  const any       = recs[0];
+  const unlockTs  = any.__unlockTs || 0;
+  const unlockStr = unlockTs ? new Date(unlockTs*1000).toISOString().slice(0,10) : '—';
+  const kind      = any.__kind === 'vote' ? 'vote' : 'regular';
+  const pillClass = kind === 'vote' ? 'pill-vote' : 'pill-regular';
+  const labelKind = kind === 'vote' ? 'VOTE' : 'NORMAL';
+  const unlocked  = unlockTs ? (Date.now() >= unlockTs*1000) : true;
 
-      // ---- Header row (ONE checkbox per contract)
-      const trHead = document.createElement('tr');
-      trHead.className = `group-head is-${kind}` + (unlocked ? '' : ' locked');
-      trHead.innerHTML = `
-        <td colspan="4">
-          <label class="group-toggle" style="display:flex;align-items:center;gap:10px;white-space:nowrap;">
-            <input type="checkbox" class="cbPick" value="${ids.join(',')}" ${unlocked ? '' : 'disabled'}>
-            <span class="pill ${pillClass}">${labelKind}</span>
-            <strong>Stake • unlock ${unlockStr}</strong>
-          </label>
-        </td>`;
-      claimTblBody.appendChild(trHead);
+  // Collect ids and totals per contract
+  const ids = [];
+  let principal = 0, reward = 0;
+  for (const r of recs){
+    if (r.id) ids.push(r.id);
+    const role = (r.role || r.kind || '').toString().toLowerCase();
+    if (role.includes('reward')) reward += Number(r.amount||0);
+    else                         principal += Number(r.amount||0);
+  }
 
-      // ---- Compact block: principal + reward/est.share together (no wrap)
-      const trBlock = document.createElement('tr');
-      trBlock.className = `group-row is-${kind}` + (unlocked ? '' : ' locked');
+  // ---- Header row (ONE checkbox per contract)
+  const trHead = document.createElement('tr');
+  trHead.className = `group-head is-${kind}` + (unlocked ? '' : ' locked');
 
-      // For vote rows: show EST. SHARE % from backend (exact preview number).
-      // Backend attaches this only to the vote *principal* row; we read it from `any`.
-      const estPct = (kind === 'vote')
-        ? Number(any?.vote_est_share_pct ?? any?.vote_est_share_pct) // keep as Number
-        : null;
+  // If vote, show proposal next to the VOTE pill
+  const voteLabel = (kind === 'vote' && any?.proposal)
+    ? `VOTE • ${prettyProposal(any.proposal)}`
+    : (kind === 'vote' ? 'VOTE' : 'NORMAL');
 
-      const rewardHTML = (kind === 'vote')
-        ? `<div class="line" style="display:flex;justify-content:space-between;align-items:center;white-space:nowrap;">
-             <span class="pill pill-vote" aria-hidden="true">EST. SHARE</span>
-             <span class="num">${isFinite(estPct) ? estPct.toFixed(2) : '0.00'}%</span>
-           </div>`
-        : (reward > 0
-           ? `<div class="line" style="display:flex;justify-content:space-between;align-items:center;">
-                <span class="pill pill-reward" aria-hidden="true">REWARD</span>
-                <span class="num">${fmtNum(reward)}</span>
-              </div>`
-           : '');
+  trHead.innerHTML = `
+    <td colspan="4">
+      <label class="group-toggle" style="display:flex;align-items:center;gap:10px;white-space:nowrap;">
+        <input type="checkbox" class="cbPick" value="${ids.join(',')}" ${unlocked ? '' : 'disabled'}>
+        <span class="pill ${pillClass}">${voteLabel}</span>
+        <strong>Stake • unlock ${unlockStr}</strong>
+      </label>
+    </td>`;
+  claimTblBody.appendChild(trHead);
 
-      trBlock.innerHTML = `
-        <td colspan="4">
-          <div class="block" style="display:flex;flex-direction:column;gap:8px;">
-            <div class="line" style="display:flex;justify-content:space-between;align-items:center;white-space:nowrap;">
-              <span class="pill ${pillClass}" aria-hidden="true">PRINCIPAL</span>
-              <span class="num">${fmtNum(principal)}</span>
-            </div>
-            ${rewardHTML}
-            ${unlocked ? '' : `<span class="lockhint">Locked until ${unlockStr}</span>`}
-          </div>
-        </td>`;
-      claimTblBody.appendChild(trBlock);
-    }
+  // ---- Compact block: principal + reward/est share
+  const trBlock = document.createElement('tr');
+  trBlock.className = `group-row is-${kind}` + (unlocked ? '' : ' locked');
 
-    claimSelected.disabled = false;
-    claimMsg.textContent = '';
+  // Use server-provided % for vote contracts; numeric reward for regular
+  const estPct = (kind === 'vote')
+    ? Number(any?.vote_est_share_pct)   // string -> number; NaN if missing
+    : null;
+
+  const rewardHTML = (kind === 'vote')
+    ? `<div class="line" style="display:flex;justify-content:space-between;align-items:center;white-space:nowrap;">
+         <span class="pill pill-vote" aria-hidden="true">EST. SHARE</span>
+         <span class="num">${isFinite(estPct) ? estPct.toFixed(2) : '0.00'}%</span>
+       </div>`
+    : (reward > 0
+       ? `<div class="line" style="display:flex;justify-content:space-between;align-items:center;">
+            <span class="pill pill-reward" aria-hidden="true">REWARD</span>
+            <span class="num">${fmtNum(reward)}</span>
+          </div>`
+       : '');
+
+  trBlock.innerHTML = `
+    <td colspan="4">
+      <div class="block" style="display:flex;flex-direction:column;gap:8px;">
+        <div class="line" style="display:flex;justify-content:space-between;align-items:center;white-space:nowrap;">
+          <span class="pill ${pillClass}" aria-hidden="true">PRINCIPAL</span>
+          <span class="num">${fmtNum(principal)}</span>
+        </div>
+        ${rewardHTML}
+        ${unlocked ? '' : `<span class="lockhint">Locked until ${unlockStr}</span>`}
+      </div>
+    </td>`;
+  claimTblBody.appendChild(trBlock);
+}
+
+claimSelected.disabled = false;
+claimMsg.textContent = '';
   }catch(e){
     claimMsg.textContent = '❌ ' + String(e);
   }
