@@ -794,301 +794,39 @@
   </div>
 
   <!-- CLAIM MODAL -->
-<div class="modal" id="claimModal" role="dialog" aria-modal="true" aria-labelledby="claimTitle" hidden>
-  <div class="modal-card">
-    <div class="modal-header">
-      <div class="modal-title"><img src="/static/izzapay-mark.svg" alt=""><span id="claimTitle">Claim Rewards and Principal</span></div>
-      <button class="close-btn" id="closeClaimBtn">Close</button>
-    </div>
-    <div class="modal-body">
-      <div class="blox"><div class="small-muted">Public Key</div><input id="claimPub" class="mono" readonly aria-readonly="true"></div>
-      <div style="margin-top:10px;display:flex;gap:8px">
-        <button id="claimRefreshBtn" class="cta">Refresh</button>
-        <button id="claimSelectedBtn" class="cta" disabled>Claim Selected</button>
+  <div class="modal" id="claimModal" role="dialog" aria-modal="true" aria-labelledby="claimTitle" hidden>
+    <div class="modal-card">
+      <div class="modal-header">
+        <div class="modal-title"><img src="/static/izzapay-mark.svg" alt=""><span id="claimTitle">Claim Rewards and Principal</span></div>
+        <button class="close-btn" id="closeClaimBtn">Close</button>
       </div>
-      <div class="blox" style="margin-top:10px">
-        <div class="small-muted">Claimable Balances</div>
-
-        <div id="claimLegend" style="display:flex;align-items:center;gap:12px;margin:6px 0 8px">
-          <span class="pill pill-regular" aria-hidden="true">normal</span>
-          <small class="small-muted">= regular stake</small>
-          <span class="pill pill-vote" aria-hidden="true">vote</span>
-          <small class="small-muted">= vote stake</small>
+      <div class="modal-body">
+        <div class="blox"><div class="small-muted">Public Key</div><input id="claimPub" class="mono" readonly aria-readonly="true"></div>
+        <div style="margin-top:10px;display:flex;gap:8px">
+          <button id="claimRefreshBtn" class="cta">Refresh</button>
+          <button id="claimSelectedBtn" class="cta" disabled>Claim Selected</button>
         </div>
+        <div class="blox" style="margin-top:10px">
+          <div class="small-muted">Claimable Balances</div>
 
-        <table id="claimTbl" style="width:100%;table-layout:fixed;border-collapse:separate;border-spacing:0 10px">
-          <thead style="display:none">
-            <tr><th>Pick</th><th>Kind</th><th>Amount and Share</th><th>Unlock</th></tr>
-          </thead>
-          <tbody id="claimTbody">
-            <tr><td colspan="4" style="padding:12px;color:var(--muted)">Loading…</td></tr>
-          </tbody>
-        </table>
+          <div id="claimLegend" style="display:flex;align-items:center;gap:12px;margin:6px 0 8px">
+            <span class="pill pill-regular" aria-hidden="true">normal</span>
+            <small class="small-muted">= regular stake</small>
+            <span class="pill pill-vote" aria-hidden="true">vote</span>
+            <small class="small-muted">= vote stake</small>
+          </div>
+
+          <table id="claimTbl">
+            <thead>
+              <tr><th>Pick</th><th>Kind</th><th>Amount and Share</th><th>Unlock</th></tr>
+            </thead>
+            <tbody></tbody>
+          </table>
+        </div>
+        <div id="claimMsg" class="help" style="margin-top:8px"></div>
       </div>
-      <div id="claimMsg" class="help" style="margin-top:8px"></div>
     </div>
   </div>
-</div>
-
-<script>
-/* ================= CLAIM UI (self-contained, safe to drop under the modal) ================ */
-(() => {
-  const $  = (q, r=document) => r.querySelector(q);
-  const $$ = (q, r=document) => Array.from(r.querySelectorAll(q));
-
-  const claimPub        = $('#claimPub');
-  const claimRefreshBtn = $('#claimRefreshBtn');
-  const claimSelectedBtn= $('#claimSelectedBtn');
-  const claimMsg        = $('#claimMsg');
-  const claimTbody      = $('#claimTbody');
-
-  // contract_id -> [raw claimable balance ids]
-  const CB_ID_MAP = new Map();
-
-  const HEX64 = /^[0-9a-fA-F]{64}$/;
-
-  const fmtAmt = a => {
-    const n = Number(a); return Number.isFinite(n)
-      ? n.toLocaleString(undefined, { maximumFractionDigits: 7 })
-      : String(a || '');
-  };
-  const fmtUnlock = ts => {
-    const n = parseInt(ts||0,10); if (!n) return '—';
-    return new Date(n*1000).toLocaleString();
-  };
-
-  async function ensureActivePub() {
-    if ((claimPub.value||'').trim().startsWith('G')) return claimPub.value.trim();
-    try{
-      const u = (window.USER && USER.username) ? USER.username : '';
-      const url = u ? `/api/wallet/active?u=${encodeURIComponent(u)}` : '/api/wallet/active';
-      const r = await fetch(url, { cache:'no-store' });
-      if (r.ok){
-        const j = await r.json();
-        if (j?.pub?.startsWith('G')) {
-          claimPub.value = j.pub;
-          return j.pub;
-        }
-      }
-    }catch{}
-    return (claimPub.value||'').trim();
-  }
-
-  async function listClaimables(){
-    CB_ID_MAP.clear();
-    claimSelectedBtn.disabled = true;
-    claimMsg.textContent = '';
-    claimTbody.innerHTML = `<tr><td colspan="4" style="padding:12px;color:var(--muted)">Loading…</td></tr>`;
-
-    const pub = await ensureActivePub();
-    if (!pub || !pub.startsWith('G')){
-      claimTbody.innerHTML = `<tr><td colspan="4" style="padding:12px">Sign in or enter your G… key.</td></tr>`;
-      return;
-    }
-
-    let j = null;
-    try {
-      const r = await fetch(`/api/stake/claimables?pub=${encodeURIComponent(pub)}`, { cache:'no-store' });
-      j = await r.json();
-    } catch {
-      claimTbody.innerHTML = `<tr><td colspan="4" style="padding:12px">Failed to load claimables.</td></tr>`;
-      return;
-    }
-
-    const rows = Array.isArray(j?.claimables) ? j.claimables : [];
-    if (!rows.length){
-      claimTbody.innerHTML = `<tr><td colspan="4" style="padding:12px">No claimable balances for this wallet.</td></tr>`;
-      return;
-    }
-
-    // Group by server-provided contract_id
-    const groups = new Map();
-    for (const r of rows){
-      const cid = r.contract_id || 'unknown';
-      const g = groups.get(cid) || {
-        contract_id: cid,
-        kind: r.kind || 'regular',
-        unlock_ts: parseInt(r.unlock_ts||0,10),
-        ids: [],
-        principal: 0,
-        reward: 0,
-        proposal: r.proposal || null,
-        vote_weight7: r.vote_weight7 || null,
-        vote_est_share_pct: r.vote_est_share_pct || null
-      };
-      g.ids.push(r.id);
-      if (r.role === 'principal') g.principal += Number(r.amount||0);
-      if (r.role === 'reward')    g.reward    += Number(r.amount||0);
-      groups.set(cid, g);
-    }
-
-    const now = Math.floor(Date.now()/1000);
-    let anySelectable = false;
-    const out = [];
-
-    for (const g of groups.values()){
-      const ids = g.ids.filter(Boolean);
-      CB_ID_MAP.set(g.contract_id, ids.slice());
-
-      const unlocked = (g.unlock_ts || 0) <= now;
-      if (unlocked && ids.length) anySelectable = true;
-
-      const labelKind = g.kind === 'vote' ? 'VOTE' : 'REGULAR';
-      const details = g.kind === 'vote'
-        ? (g.proposal ? `Proposal: ${g.proposal}` : 'Vote stake')
-        : 'Principal + Reward';
-
-      const amtStr = [
-        g.principal ? `Principal: ${fmtAmt(g.principal)}` : '',
-        g.reward    ? `Reward: ${fmtAmt(g.reward)}`       : ''
-      ].filter(Boolean).join(' • ');
-
-      out.push(`
-        <tr class="group-head is-${g.kind}${unlocked ? '' : ' locked'}" ${unlocked?'':'style="opacity:.55"'} >
-          <td style="padding:10px 12px;white-space:nowrap">
-            <label style="display:flex;align-items:center;gap:8px">
-              <input type="checkbox"
-                     class="cbPick"
-                     value="${ids.join(',')}"
-                     data-contracts="${g.contract_id}"
-                     ${unlocked ? '' : 'disabled'}>
-              <span class="pill ${g.kind==='vote'?'pill-vote':'pill-regular'}" style="padding:.15rem .5rem;border-radius:999px;font-size:.8rem">${labelKind}</span>
-            </label>
-          </td>
-          <td style="padding:10px 12px">${labelKind}</td>
-          <td style="padding:10px 12px;overflow:hidden;text-overflow:ellipsis">
-            ${details}
-            ${g.kind==='vote' && g.vote_est_share_pct
-              ? `<div style="font-size:.85em;color:var(--muted)">Est. APR Boost / Share: ${g.vote_est_share_pct}%</div>`
-              : ''}
-            <div style="margin-top:4px">${amtStr || fmtAmt(g.principal + g.reward)}</div>
-          </td>
-          <td class="num" style="padding:10px 12px">${unlocked ? 'Unlocked' : fmtUnlock(g.unlock_ts)}</td>
-        </tr>
-      `);
-    }
-
-    claimTbody.innerHTML = out.join('');
-    claimSelectedBtn.disabled = !anySelectable;
-
-    // When user changes selection, enable/disable button live
-    claimTbody.addEventListener('change', () => {
-      const hasPick = !!document.querySelector('.cbPick:checked');
-      claimSelectedBtn.disabled = !hasPick;
-    }, { once:true });
-  }
-
-  async function doClaim(){
-    const pub = (claimPub.value||'').trim();
-    if (!pub.startsWith('G')) { claimMsg.textContent = 'Enter a valid G… public key.'; return; }
-
-    const inputs = $$('.cbPick:checked', claimTbody);
-    if (!inputs.length){ claimMsg.textContent='Pick at least one balance.'; return; }
-
-    // tokens can be raw ids (value) or contract_ids (data-contracts)
-    const tokens = [];
-    for (const el of inputs){
-      const v  = String(el.value||'');             // "id1,id2,…"
-      const dc = String(el.dataset.contracts||''); // "unlock|kind|suffix"
-      if (v)  tokens.push(...v.split(',').map(s=>s.trim()).filter(Boolean));
-      if (dc) tokens.push(dc);
-    }
-
-    // Resolve to raw ids
-    const resolved = [];
-    for (const tok of tokens){
-      if (HEX64.test(tok)) { resolved.push(tok); continue; }
-      const mapped = CB_ID_MAP.get(tok);
-      if (Array.isArray(mapped)) resolved.push(...mapped);
-      else if (typeof mapped === 'string' && mapped) resolved.push(mapped);
-    }
-
-    const ids = Array.from(new Set(resolved)).filter(id => HEX64.test(id));
-    if (!ids.length){ claimMsg.textContent = '❌ No valid claimable balance ids were selected.'; return; }
-
-    claimMsg.textContent = `Building claim for ${ids.length} id${ids.length>1?'s':''}…`;
-
-    try{
-      const r = await fetch('/api/stake/claim', {
-        method:'POST',
-        headers:{'Content-Type':'application/json'},
-        body: JSON.stringify({ pub, ids })
-      });
-      let j = {};
-      try { j = await r.json(); } catch {}
-      if (!r.ok || !j?.ok){
-        const msg = j?.error || j?.message || `HTTP ${r.status}`;
-        claimMsg.textContent = `❌ ${msg}`;
-        return;
-      }
-
-      const xdr  = j.xdr;
-      const pass = j.network_passphrase || 'Pi Testnet';
-
-      // Prefer local IZZA wallet signing if available
-      const localSec = (typeof getLocalSecret === 'function') ? getLocalSecret(pub, window.USER?.username) : null;
-      if (localSec){
-        const ok = (typeof ensureStellar === 'function') ? await ensureStellar() : true;
-        if (!ok || !window.StellarSdk){ claimMsg.textContent='❌ Stellar SDK missing.'; return; }
-        const SDK = window.StellarSdk;
-        const tx  = SDK.TransactionBuilder.fromXDR(xdr, pass);
-        tx.sign(SDK.Keypair.fromSecret(localSec));
-        const server = (typeof getServer === 'function') ? getServer() : new SDK.Server('https://api.testnet.minepi.com');
-        try{
-          const resp = await server.submitTransaction(tx);
-          if (resp?.hash){
-            claimMsg.innerHTML = `✅ Claimed. Tx: <code>${resp.hash}</code>`;
-            await listClaimables(); // refresh
-          } else {
-            claimMsg.textContent = 'Submitted; awaiting confirmation.';
-          }
-        }catch(e){
-          const rc = e?.response?.data?.extras?.result_codes;
-          claimMsg.textContent = `❌ submit failed: ${rc ? JSON.stringify(rc) : String(e)}`;
-        }
-        return;
-      }
-
-      // Fallback: SEP-7 deep link
-      const uri = `web+stellar:tx?xdr=${encodeURIComponent(xdr)}&network_passphrase=${encodeURIComponent(pass)}`;
-      try{
-        window.location.assign(uri);
-        claimMsg.innerHTML = `Opening your wallet to sign…<br><small>If nothing happens, tap this:</small> <a href="${uri}" style="word-break:break-all">Open in wallet</a>`;
-      }catch{
-        claimMsg.innerHTML =
-          `Couldn’t open a wallet from this browser.<br><small>Copy into your wallet:</small><br>` +
-          `<code id="claimDeepLink" style="word-break:break-all">${uri}</code><br>` +
-          `<button id="copyDeepLinkBtn" class="btn sm">Copy link</button>`;
-        $('#copyDeepLinkBtn')?.addEventListener('click', async ()=>{
-          try{ await navigator.clipboard.writeText(uri); claimMsg.innerHTML += '<br>✅ Copied.'; }
-          catch{ claimMsg.innerHTML += '<br>Copy failed — long-press to select.'; }
-        });
-      }
-    }catch(e){
-      claimMsg.textContent = '❌ ' + String(e);
-    }
-  }
-
-  claimRefreshBtn?.addEventListener('click', listClaimables);
-  claimSelectedBtn?.addEventListener('click', doClaim);
-
-  // Auto-hydrate when modal opens (works with your existing open button)
-  const claimModal = document.getElementById('claimModal');
-  const claimQuickBtn = document.getElementById('claimQuickBtn');
-  function openClaimModal(){
-    document.getElementById('modalBackdrop')?.removeAttribute('hidden');
-    claimModal?.removeAttribute('hidden');
-    listClaimables();
-  }
-  claimQuickBtn?.addEventListener('click', openClaimModal);
-
-  // Allow manual refresh on initial page load too (nice on desktop)
-  document.addEventListener('DOMContentLoaded', () => {
-    // If the page already shows the modal open, render it; otherwise no-op
-    if (claimModal && !claimModal.hasAttribute('hidden')) listClaimables();
-  });
-})();
-</script>
 
   <!-- VOTE MODAL -->
   <div class="modal" id="voteModal" role="dialog" aria-modal="true" aria-labelledby="voteTitle" hidden>
