@@ -1935,30 +1935,52 @@ claimMsg.textContent = '';
 
 claimRefresh?.addEventListener('click', listClaimables);
 
-// ======== CLAIM SELECTED (batch) — IZZA wallet first, safe wallet fallback ========
+// ======== CLAIM SELECTED (batch) — robust ids + clear errors + IZZA-first ========
 claimSelected?.addEventListener('click', async ()=>{
   const pub = (claimPub.value||'').trim();
   if (!pub.startsWith('G')) { claimMsg.textContent = 'Enter a valid G… public key.'; return; }
 
   // Expand group selections like "id1,id2" into individual ids
-  const rawPicks = Array.from(document.querySelectorAll('.cbPick:checked')).map(x=>x.value);
-  const picks = rawPicks.flatMap(v => String(v).split(',').map(s=>s.trim()).filter(Boolean));
+  const rawPicks = Array.from(document.querySelectorAll('.cbPick:checked')).map(x=>String(x.value||''));
+  const picks = rawPicks
+    .flatMap(v => v.split(','))
+    .map(s => s.trim())
+    .filter(Boolean);
+
   if (!picks.length){ claimMsg.textContent='Pick at least one balance.'; return; }
 
-  claimMsg.textContent = 'Building claim transaction…';
+  // Client-side 64-hex validation + de-dupe
+  const HEX64 = /^[0-9a-fA-F]{64}$/;
+  const valid = Array.from(new Set(picks.filter(id => HEX64.test(id))));
+  if (!valid.length){
+    claimMsg.textContent = '❌ No valid claimable balance ids were selected.';
+    return;
+  }
+
+  claimMsg.textContent = `Building claim for ${valid.length} id${valid.length>1?'s':''}…`;
 
   try{
-    const r = await fetch('/api/stake/build-claim-batch', {
-      method:'POST', headers:{'Content-Type':'application/json'},
-      body: JSON.stringify({ pub, balance_ids: picks })
+    // Use the UI-friendly alias (same builder, nicer param shape)
+    const r = await fetch('/api/stake/claim', {
+      method:'POST',
+      headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({ pub, ids: valid })
     });
-    const j = await r.json();
-    if (!r.ok || !j?.ok) throw new Error(j?.error || 'build failed');
+
+    // Try to read the JSON either way so we can show precise error
+    let j = {};
+    try { j = await r.json(); } catch { /* ignore parse fail */ }
+
+    if (!r.ok || !j?.ok){
+      const msg = j?.error || j?.message || `HTTP ${r.status}`;
+      claimMsg.textContent = `❌ ${msg}`;
+      return;
+    }
 
     const xdr  = j.xdr;
     const pass = j.network_passphrase || 'Pi Testnet';
 
-    // 1) IZZA wallet local-sign path (preferred)
+    // --- IZZA wallet local-sign (preferred)
     const localSec = getLocalSecret(pub, USER?.username);
     if (localSec){
       const ok = await ensureStellar();
@@ -1972,40 +1994,29 @@ claimSelected?.addEventListener('click', async ()=>{
         if (resp?.hash){
           claimMsg.innerHTML = `✅ Claimed. Tx: <code>${resp.hash}</code>`;
           listClaimables();
-          return;
+        }else{
+          claimMsg.textContent = 'Submitted; awaiting confirmation.';
         }
-        claimMsg.textContent = 'Submitted; awaiting confirmation.';
-        return;
       }catch(e){
         const rc = e?.response?.data?.extras?.result_codes;
-        claimMsg.textContent = `❌ Claim failed: ${rc ? JSON.stringify(rc) : String(e)}`;
-        return;
+        claimMsg.textContent = `❌ submit failed: ${rc ? JSON.stringify(rc) : String(e)}`;
       }
+      return;
     }
 
-    // 2) No local IZZA secret — try wallet deep link, with guarded fallback
+    // --- No local IZZA secret — show guarded wallet link (copyable)
     const uri = `web+stellar:tx?xdr=${encodeURIComponent(xdr)}&network_passphrase=${encodeURIComponent(pass)}`;
-
-    // Try to navigate; if the webview rejects custom schemes, catch and show link instead
     try{
-      // use assign() to avoid history issues in WKWebView
       window.location.assign(uri);
-      // Also render a helper (in case navigation is blocked silently)
-      claimMsg.innerHTML = `Opening your wallet to sign…<br><small>If nothing happens, tap the link:</small> 
-        <a href="${uri}" style="word-break:break-all">Open in wallet</a>`;
-    }catch(navErr){
+      claimMsg.innerHTML = `Opening your wallet to sign…<br><small>If nothing happens, tap the link:</small> <a href="${uri}" style="word-break:break-all">Open in wallet</a>`;
+    }catch{
       claimMsg.innerHTML =
-        `Couldn’t open the wallet from this browser.<br>` +
-        `<small>Copy this into your wallet:</small><br>` +
+        `Couldn’t open a wallet from this browser.<br><small>Copy this into your wallet:</small><br>` +
         `<code id="claimDeepLink" style="word-break:break-all">${uri}</code><br>` +
         `<button id="copyDeepLinkBtn" class="btn sm">Copy link</button>`;
       document.getElementById('copyDeepLinkBtn')?.addEventListener('click', async ()=>{
-        try{
-          await navigator.clipboard.writeText(uri);
-          claimMsg.innerHTML += '<br>✅ Copied.';
-        }catch(_){
-          claimMsg.innerHTML += '<br>Copy failed — long-press to select.';
-        }
+        try{ await navigator.clipboard.writeText(uri); claimMsg.innerHTML += '<br>✅ Copied.'; }
+        catch{ claimMsg.innerHTML += '<br>Copy failed — long-press to select.'; }
       });
     }
   }catch(e){
