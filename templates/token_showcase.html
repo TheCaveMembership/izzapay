@@ -1873,11 +1873,29 @@ for (const [, recs] of ordered){
   const ids = [];
   let principal = 0, reward = 0;
   for (const r of recs){
-    if (r.id) ids.push(r.id);
-    const role = (r.role || r.kind || '').toString().toLowerCase();
-    if (role.includes('reward')) reward += Number(r.amount||0);
-    else                         principal += Number(r.amount||0);
+  // accept several possible id field names from the API
+  const rawId = String(
+    r.id ||
+    r.balance_id ||
+    r.claimable_balance_id ||
+    r.balanceId ||
+    ''
+  ).trim();
+
+  if (rawId) ids.push(rawId);
+
+  // build contract -> [ids...] map so a single checkbox can resolve to all its raw ids
+  if (r.contract_id && rawId) {
+    const key = String(r.contract_id);
+    const arr = CB_ID_MAP.get(key) || [];
+    arr.push(rawId);
+    CB_ID_MAP.set(key, arr);
   }
+
+  const role = (r.role || r.kind || '').toString().toLowerCase();
+  if (role.includes('reward')) reward += Number(r.amount||0);
+  else                         principal += Number(r.amount||0);
+}
 
   // ---- Header row (ONE checkbox per contract)
   const trHead = document.createElement('tr');
@@ -1957,9 +1975,9 @@ claimSelected?.addEventListener('click', async ()=>{
   if (!inputs.length){ claimMsg.textContent='Pick at least one balance.'; return; }
 
   // Expand raw ids (value) and fallback contract_ids (data-contracts)
-  const tokens = [];
+    const tokens = [];
   for (const el of inputs){
-    const v  = String(el.value||'');              // "id1,id2,…" if we had raws
+    const v  = String(el.value||'');              // "id1,id2,…" (raw ids, if present)
     const dc = String(el.dataset.contracts||'');  // "contractId1,contractId2,…"
     if (v)  tokens.push(...v.split(',').map(s=>s.trim()).filter(Boolean));
     if (dc) tokens.push(...dc.split(',').map(s=>s.trim()).filter(Boolean));
@@ -1968,12 +1986,16 @@ claimSelected?.addEventListener('click', async ()=>{
 
   const HEX64 = /^[0-9a-fA-F]{64}$/;
 
-  // Translate any non-hex token via the contract_id -> raw-id map
-  const resolved = tokens.map(tok=>{
-    if (HEX64.test(tok)) return tok;                // already a raw balance_id
-    const mapped = CB_ID_MAP.get(tok);              // contract_id -> 64-hex
-    return mapped || '';
-  }).filter(Boolean);
+  // Resolve:
+  //  - keep any raw 64-hex ids
+  //  - expand any contract_id to ALL its raw ids (array) from CB_ID_MAP
+  const resolved = [];
+  for (const tok of tokens){
+    if (HEX64.test(tok)) { resolved.push(tok); continue; }
+    const mapped = CB_ID_MAP.get(tok);
+    if (Array.isArray(mapped)) resolved.push(...mapped);
+    else if (typeof mapped === 'string' && mapped) resolved.push(mapped);
+  }
 
   // De-dupe + validate
   const ids = Array.from(new Set(resolved)).filter(id => HEX64.test(id));
