@@ -1819,7 +1819,7 @@ async function listClaimables(){
     }
 
     // ---- STRONG GROUPING (don't collapse different contracts)
-    // Prefer a real id from server; else derive a unique signature.
+    // Prefer server contract_id; else derive a unique signature.
     const groups = {};
     for (const r of rows){
       const unlockTs = Number(r.unlock_ts || r.unlock_unix || 0);
@@ -1827,7 +1827,7 @@ async function listClaimables(){
 
       const gid =
         r.contract_id || r.stake_id || r.group_id || r.parent_id || r.batch_id ||
-        // fallback: unlock_ts + kind + trailing hash/source/time to avoid merging:
+        // fallback signature so vote rows at the same unlock don't merge:
         [
           unlockTs || 0,
           kindStr,
@@ -1876,23 +1876,28 @@ async function listClaimables(){
         </td>`;
       claimTblBody.appendChild(trHead);
 
-      // ---- Compact block: principal + reward together (no wrap)
+      // ---- Compact block: principal + reward/est.share together (no wrap)
       const trBlock = document.createElement('tr');
       trBlock.className = `group-row is-${kind}` + (unlocked ? '' : ' locked');
-      // Use server-provided % for vote contracts; keep numeric reward for regular
-const estPct = (kind === 'vote')
-  ? Number((any && any.vote_est_share_pct) || 0)
-  : null;
 
-const rewardHTML = (kind === 'vote')
-  ? `<div class="line" style="display:flex;justify-content:space-between;align-items:center;white-space:nowrap;">
-       <span class="pill pill-vote" aria-hidden="true">EST. SHARE</span>
-       <span class="num">${isFinite(estPct) ? estPct.toFixed(2) : '0.00'}%</span>
-     </div>`
-  : (reward > 0 ? `<div class="line" style="display:flex;justify-content:space-between;align-items:center;">
-       <span class="pill pill-reward" aria-hidden="true">REWARD</span>
-       <span class="num">${fmtNum(reward)}</span>
-     </div>` : '');
+      // For vote rows: show EST. SHARE % from backend (exact preview number).
+      // Backend attaches this only to the vote *principal* row; we read it from `any`.
+      const estPct = (kind === 'vote')
+        ? Number(any?.vote_est_share_pct ?? any?.vote_est_share_pct) // keep as Number
+        : null;
+
+      const rewardHTML = (kind === 'vote')
+        ? `<div class="line" style="display:flex;justify-content:space-between;align-items:center;white-space:nowrap;">
+             <span class="pill pill-vote" aria-hidden="true">EST. SHARE</span>
+             <span class="num">${isFinite(estPct) ? estPct.toFixed(2) : '0.00'}%</span>
+           </div>`
+        : (reward > 0
+           ? `<div class="line" style="display:flex;justify-content:space-between;align-items:center;">
+                <span class="pill pill-reward" aria-hidden="true">REWARD</span>
+                <span class="num">${fmtNum(reward)}</span>
+              </div>`
+           : '');
+
       trBlock.innerHTML = `
         <td colspan="4">
           <div class="block" style="display:flex;flex-direction:column;gap:8px;">
@@ -1900,10 +1905,7 @@ const rewardHTML = (kind === 'vote')
               <span class="pill ${pillClass}" aria-hidden="true">PRINCIPAL</span>
               <span class="num">${fmtNum(principal)}</span>
             </div>
-            <div class="line" style="display:flex;justify-content:space-between;align-items:center;white-space:nowrap;">
-              <span class="pill ${pillClass}" aria-hidden="true">REWARD</span>
-              <span class="num">${fmtNum(reward)}</span>
-            </div>
+            ${rewardHTML}
             ${unlocked ? '' : `<span class="lockhint">Locked until ${unlockStr}</span>`}
           </div>
         </td>`;
