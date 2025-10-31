@@ -1672,6 +1672,8 @@ const votePub   = document.getElementById('votePub');
 const voteDays  = document.getElementById('voteDays');
 const voteGame  = document.getElementById('voteGame');
 const voteAmt   = document.getElementById('voteAmt');
+  // 🔥 Hide "Lock Days" visually in the Vote modal — everything else stays intact
+document.getElementById('voteDays')?.closest('.row, .field')?.remove();
 
 const votePreviewBtn  = document.getElementById('votePreviewBtn');
 const voteStartBtn    = document.getElementById('voteStartBtn');
