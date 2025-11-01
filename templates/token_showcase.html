@@ -1012,66 +1012,66 @@
 <script>
 (() => {
   // =================== Config from Jinja / server ===================
-  const ASSET_CODE  = "{{ ASSET_CODE }}";
-  const ISSUER      = "{{ ISSUER }}";
-  const DISTRIBUTOR = "{{ DISTRIBUTOR }}";
-  const API_BASE = ("{{ API_BASE }}".startsWith("http")
+const ASSET_CODE  = "{{ ASSET_CODE }}";
+const ISSUER      = "{{ ISSUER }}";
+const DISTRIBUTOR = "{{ DISTRIBUTOR }}";
+const API_BASE = ("{{ API_BASE }}".startsWith("http")
   ? "{{ API_BASE }}"
   : "https://api.testnet.minepi.com");
-  const DEEP_LINK   = "{{ DEEP_LINK }}";
-    // ---- compact issuer/distributor labels ----
-  function short(g){
-    return (g && g.length > 14) ? `${g.slice(0,6)}…${g.slice(-6)}` : (g || '—');
-  }
-  const issEl = document.getElementById('issuer-compact');
-  if (issEl){
-    issEl.textContent = short(ISSUER);
-    issEl.title = ISSUER;
-  }
-  const distEl = document.getElementById('d-short');
-  if (distEl){
-    distEl.textContent = short(DISTRIBUTOR);
-    distEl.title = DISTRIBUTOR;
-  }
-    // =================== Pi Auth + Active Wallet (one per user) ===================
-  let USER = null;                // { uid, username }
-  let ACTIVE_PUB = null;          // active wallet public key from server
-    const VAULT_KEY = 'izza_wallets'; // same key
+const DEEP_LINK   = "{{ DEEP_LINK }}";
+// ---- compact issuer/distributor labels ----
+function short(g){
+  return (g && g.length > 14) ? `${g.slice(0,6)}…${g.slice(-6)}` : (g || '—');
+}
+const issEl = document.getElementById('issuer-compact');
+if (issEl){
+  issEl.textContent = short(ISSUER);
+  issEl.title = ISSUER;
+}
+const distEl = document.getElementById('d-short');
+if (distEl){
+  distEl.textContent = short(DISTRIBUTOR);
+  distEl.title = DISTRIBUTOR;
+}
+// =================== Pi Auth + Active Wallet (one per user) ===================
+let USER = null;                // { uid, username }
+let ACTIVE_PUB = null;          // active wallet public key from server
+const VAULT_KEY = 'izza_wallets'; // same key
 
-  function __readVault(){
-    try { return JSON.parse(localStorage.getItem(VAULT_KEY) || '{}'); }
-    catch { return {}; }
-  }
+function __readVault(){
+  try { return JSON.parse(localStorage.getItem(VAULT_KEY) || '{}'); }
+  catch { return {}; }
+}
 
-  // Store secret per user + pub; keep one-time-reveal flag
-  function saveLocalSecret(pub, secret, username){
-    const u = username || (USER && USER.username) || '_anon';
-    const all = __readVault();
+// Store secret per user + pub; keep one-time-reveal flag
+function saveLocalSecret(pub, secret, username){
+  const u = username || (USER && USER.username) || '_anon';
+  const all = __readVault();
 
-    // Migrate legacy { [pub]:{blob} } → { __namespaced:true, [u]:{[pub]:{...}} }
-    if (!all.__namespaced && all && Object.keys(all).some(k => k.startsWith('G') && all[k]?.blob)) {
-      const migrated = { [u]: {}, __namespaced: true };
-      for (const k of Object.keys(all)) {
-        if (k.startsWith('G') && all[k]?.blob) {
-          migrated[u][k] = { ...all[k], viewedOnce:false, createdAt: Date.now() };
-        }
+  // Migrate legacy { [pub]:{blob} } → { __namespaced:true, [u]:{[pub]:{...}} }
+  if (!all.__namespaced && all && Object.keys(all).some(k => k.startsWith('G') && all[k]?.blob)) {
+    const migrated = { [u]: {}, __namespaced: true };
+    for (const k of Object.keys(all)) {
+      if (k.startsWith('G') && all[k]?.blob) {
+        migrated[u][k] = { ...all[k], viewedOnce:false, createdAt: Date.now() };
       }
-      localStorage.setItem(VAULT_KEY, JSON.stringify(migrated));
-      return saveLocalSecret(pub, secret, username);
     }
-
-    all.__namespaced = true;
-    all[u] = all[u] || {};
-    all[u][pub] = { blob: btoa(secret), viewedOnce:false, createdAt: Date.now() };
-    localStorage.setItem(VAULT_KEY, JSON.stringify(all));
+    localStorage.setItem(VAULT_KEY, JSON.stringify(migrated));
+    return saveLocalSecret(pub, secret, username);
   }
 
-  function getLocalSecret(pub, username){
-    const u = username || (USER && USER.username) || '_anon';
-    const all = __readVault();
-    if (all?.__namespaced) return all?.[u]?.[pub]?.blob ? atob(all[u][pub].blob) : null;
-    return all?.[pub]?.blob ? atob(all[pub].blob) : null; // legacy
-  }
+  all.__namespaced = true;
+  all[u] = all[u] || {};
+  all[u][pub] = { blob: btoa(secret), viewedOnce:false, createdAt: Date.now() };
+  localStorage.setItem(VAULT_KEY, JSON.stringify(all));
+}
+
+function getLocalSecret(pub, username){
+  const u = username || (USER && USER.username) || '_anon';
+  const all = __readVault();
+  if (all?.__namespaced) return all?.[u]?.[pub]?.blob ? atob(all[u][pub].blob) : null;
+  return all?.[pub]?.blob ? atob(all[pub].blob) : null; // legacy
+}
 // === Import Secret flow (for existing wallets) ===
 const impPub  = document.getElementById('impPub');
 const impSec  = document.getElementById('impSec');
@@ -1108,93 +1108,93 @@ if (importBtn) {
     }
   });
 }
-  function markSecretViewedOnce(pub, username){
-    const u = username || (USER && USER.username) || '_anon';
-    const all = __readVault();
-    if (all?.__namespaced && all?.[u]?.[pub]) {
-      all[u][pub].viewedOnce = true;
-      localStorage.setItem(VAULT_KEY, JSON.stringify(all));
-    }
+function markSecretViewedOnce(pub, username){
+  const u = username || (USER && USER.username) || '_anon';
+  const all = __readVault();
+  if (all?.__namespaced && all?.[u]?.[pub]) {
+    all[u][pub].viewedOnce = true;
+    localStorage.setItem(VAULT_KEY, JSON.stringify(all));
   }
+}
 
-  function hasViewedOnce(pub, username){
-    const u = username || (USER && USER.username) || '_anon';
-    const all = __readVault();
-    return !!(all?.__namespaced && all?.[u]?.[pub]?.viewedOnce);
-  }
-  
-  // =================== Tiny logger (+ global error taps) ===================
-  function log(evt, extra){
+function hasViewedOnce(pub, username){
+  const u = username || (USER && USER.username) || '_anon';
+  const all = __readVault();
+  return !!(all?.__namespaced && all?.[u]?.[pub]?.viewedOnce);
+}
+
+// =================== Tiny logger (+ global error taps) ===================
+function log(evt, extra){
+  try{
+    const payload = { t:new Date().toISOString(), evt, extra:extra||null,
+                      ua:(navigator&&navigator.userAgent)||'unknown',
+                      href:(location&&location.href)||'' };
+    console.log('[IZZA]', payload);
+    fetch('/_client-log', {
+      method:'POST', headers:{'Content-Type':'application/json'},
+      body: JSON.stringify(payload)
+    }).catch(()=>{});
+  }catch(_){}
+}
+window.addEventListener('error', e=>log('window.error',{msg:String(e.message||e),stack:e.error&&e.error.stack||null}));
+window.addEventListener('unhandledrejection', e=>log('unhandledrejection',{reason:String(e.reason||'unknown')}));
+
+// =================== Safe script loader (for WebViews/iOS) ===================
+function loadScriptOnce(id, src){
+  return new Promise((resolve,reject)=>{
+    if (document.getElementById(id)) return resolve(true);
+    const s = document.createElement('script');
+    s.id = id; s.src = src; s.async = true; s.crossOrigin = 'anonymous';
+    s.onload = ()=>resolve(true);
+    s.onerror = ()=>reject(new Error('load-failed:'+src));
+    document.head.appendChild(s);
+  });
+}
+async function ensureStellar(){
+  if (window.StellarSdk) return true;
+  log('stellar.ensure.start');
+  const sources = [
+    '/static/stellar-sdk.min.js', // self-hosted first
+    'https://cdn.jsdelivr.net/npm/stellar-sdk@10.5.1/dist/stellar-sdk.min.js',
+    'https://unpkg.com/stellar-sdk@10.5.1/dist/stellar-sdk.min.js'
+  ];
+  for (let i=0;i<sources.length;i++){
     try{
-      const payload = { t:new Date().toISOString(), evt, extra:extra||null,
-                        ua:(navigator&&navigator.userAgent)||'unknown',
-                        href:(location&&location.href)||'' };
-      console.log('[IZZA]', payload);
-      fetch('/_client-log', {
-        method:'POST', headers:{'Content-Type':'application/json'},
-        body: JSON.stringify(payload)
-      }).catch(()=>{});
-    }catch(_){}
+      await loadScriptOnce('stellar-sdk-'+i, sources[i]);
+      if (window.StellarSdk){ log('stellar.ensure.ok',{i,src:sources[i]}); return true; }
+    }catch(e){ log('stellar.ensure.fail.try',{i,err:String(e)}); }
   }
-  window.addEventListener('error', e=>log('window.error',{msg:String(e.message||e),stack:e.error&&e.error.stack||null}));
-  window.addEventListener('unhandledrejection', e=>log('unhandledrejection',{reason:String(e.reason||'unknown')}));
-
-  // =================== Safe script loader (for WebViews/iOS) ===================
-  function loadScriptOnce(id, src){
-    return new Promise((resolve,reject)=>{
-      if (document.getElementById(id)) return resolve(true);
-      const s = document.createElement('script');
-      s.id = id; s.src = src; s.async = true; s.crossOrigin = 'anonymous';
-      s.onload = ()=>resolve(true);
-      s.onerror = ()=>reject(new Error('load-failed:'+src));
-      document.head.appendChild(s);
-    });
-  }
-  async function ensureStellar(){
-    if (window.StellarSdk) return true;
-    log('stellar.ensure.start');
-    const sources = [
-      '/static/stellar-sdk.min.js', // self-hosted first
-      'https://cdn.jsdelivr.net/npm/stellar-sdk@10.5.1/dist/stellar-sdk.min.js',
-      'https://unpkg.com/stellar-sdk@10.5.1/dist/stellar-sdk.min.js'
+  log('stellar.ensure.fail.all'); return false;
+}
+async function ensureChart(){
+  if (!window.Chart){
+    log('chart.ensure.chart.start');
+    const urls = [
+      '/static/chart.umd.min.js',
+      'https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js',
+      'https://unpkg.com/chart.js@4.4.1/dist/chart.umd.min.js'
     ];
-    for (let i=0;i<sources.length;i++){
-      try{
-        await loadScriptOnce('stellar-sdk-'+i, sources[i]);
-        if (window.StellarSdk){ log('stellar.ensure.ok',{i,src:sources[i]}); return true; }
-      }catch(e){ log('stellar.ensure.fail.try',{i,err:String(e)}); }
+    for (let i=0;i<urls.length && !window.Chart;i++){
+      try{ await loadScriptOnce('chartjs-'+i, urls[i]); }catch(e){ log('chart.ensure.chart.fail.try',{i,err:String(e)}); }
     }
-    log('stellar.ensure.fail.all'); return false;
+    if (!window.Chart){ log('chart.ensure.chart.fail.all'); return false; }
+    log('chart.ensure.chart.ok');
   }
-  async function ensureChart(){
-    if (!window.Chart){
-      log('chart.ensure.chart.start');
-      const urls = [
-        '/static/chart.umd.min.js',
-        'https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js',
-        'https://unpkg.com/chart.js@4.4.1/dist/chart.umd.min.js'
-      ];
-      for (let i=0;i<urls.length && !window.Chart;i++){
-        try{ await loadScriptOnce('chartjs-'+i, urls[i]); }catch(e){ log('chart.ensure.chart.fail.try',{i,err:String(e)}); }
-      }
-      if (!window.Chart){ log('chart.ensure.chart.fail.all'); return false; }
-      log('chart.ensure.chart.ok');
+  if (!Chart._adapters || !Chart._adapters._date){
+    log('chart.ensure.adapter.start');
+    const urls = [
+      '/static/chartjs-adapter-date-fns.min.js',
+      'https://cdn.jsdelivr.net/npm/chartjs-adapter-date-fns@3',
+      'https://unpkg.com/chartjs-adapter-date-fns@3'
+    ];
+    for (let i=0;i<urls.length && (!Chart._adapters || !Chart._adapters._date); i++){
+      try{ await loadScriptOnce('chartjs-adapter-'+i, urls[i]); }catch(e){ log('chart.ensure.adapter.fail.try',{i,err:String(e)}); }
     }
-    if (!Chart._adapters || !Chart._adapters._date){
-      log('chart.ensure.adapter.start');
-      const urls = [
-        '/static/chartjs-adapter-date-fns.min.js',
-        'https://cdn.jsdelivr.net/npm/chartjs-adapter-date-fns@3',
-        'https://unpkg.com/chartjs-adapter-date-fns@3'
-      ];
-      for (let i=0;i<urls.length && (!Chart._adapters || !Chart._adapters._date); i++){
-        try{ await loadScriptOnce('chartjs-adapter-'+i, urls[i]); }catch(e){ log('chart.ensure.adapter.fail.try',{i,err:String(e)}); }
-      }
-      if (!Chart._adapters || !Chart._adapters._date){ log('chart.ensure.adapter.fail.all'); return false; }
-      log('chart.ensure.adapter.ok');
-    }
-    return true;
+    if (!Chart._adapters || !Chart._adapters._date){ log('chart.ensure.adapter.fail.all'); return false; }
+    log('chart.ensure.adapter.ok');
   }
+  return true;
+}
 // ---- Boot hydration: get USER + ACTIVE_PUB before any UI gates ----
 async function hydrateUserAndWallet() {
   // 1) Try server session
@@ -1229,7 +1229,7 @@ async function hydrateUserAndWallet() {
     const acct = document.getElementById('acctPub');
     if (ACTIVE_PUB && acct && !acct.value) acct.value = ACTIVE_PUB;
     const hasLocal = ACTIVE_PUB && !!getLocalSecret(ACTIVE_PUB);
-setOrderReady(!!ACTIVE_PUB, hasLocal || (ACTIVE_PUB && getLocalSecret(ACTIVE_PUB)));
+    setOrderReady(!!ACTIVE_PUB, hasLocal || (ACTIVE_PUB && getLocalSecret(ACTIVE_PUB)));
   } catch (_) {}
 }
 let __hydrated = false;
@@ -1239,54 +1239,54 @@ let __hydrated = false;
 })();
 // run hydration before gates that might show "create wallet"
 
-  // =================== Pi v2 loader + init (robust, iOS-safe) ===================
-  let __PI_INIT_DONE = false;
+// =================== Pi v2 loader + init (robust, iOS-safe) ===================
+let __PI_INIT_DONE = false;
 
-  async function ensurePiReady({ sandbox=false } = {}){
-    // load helper
-    const load = (id, src) => new Promise((res, rej)=>{
-      if (document.getElementById(id)) return res(true);
-      const s = document.createElement('script');
-      s.id=id; s.src=src; s.defer=true;
-      s.onload=()=>res(true);
-      s.onerror=()=>rej(new Error('load-failed:'+src));
-      document.head.appendChild(s);
-    });
+async function ensurePiReady({ sandbox=false } = {}){
+  // load helper
+  const load = (id, src) => new Promise((res, rej)=>{
+    if (document.getElementById(id)) return res(true);
+    const s = document.createElement('script');
+    s.id=id; s.src=src; s.defer=true;
+    s.onload=()=>res(true);
+    s.onerror=()=>rej(new Error('load-failed:'+src));
+    document.head.appendChild(s);
+  });
 
-    // 1) Ensure script is present
-    if (!window.Pi){
-      const candidates = [
-        'https://sdk.minepi.com/pi-sdk.js',
-        '/static/pi-sdk.js' // optional fallback
-      ];
-      for (let i=0; i<candidates.length && !window.Pi; i++){
-        try { await load('pi-sdk-'+i, candidates[i]); } catch(_) {}
-      }
-      const t0 = Date.now();
-      while (!window.Pi && Date.now()-t0 < 1500){
-        await new Promise(r=>setTimeout(r, 50));
-      }
-      if (!window.Pi) return false;
+  // 1) Ensure script is present
+  if (!window.Pi){
+    const candidates = [
+      'https://sdk.minepi.com/pi-sdk.js',
+      '/static/pi-sdk.js' // optional fallback
+    ];
+    for (let i=0; i<candidates.length && !window.Pi; i++){
+      try { await load('pi-sdk-'+i, candidates[i]); } catch(_) {}
     }
-
-    // 2) Init exactly once
-    if (!__PI_INIT_DONE){
-      try { Pi.init({ version: '2.0', sandbox: !!sandbox }); }
-      catch(_) { /* may throw outside Pi Browser; safe to ignore */ }
-      __PI_INIT_DONE = true;
-    }
-
-    // 3) Wait briefly for methods to attach
-    const t1 = Date.now();
-    while (Date.now()-t1 < 1500){
-      if (typeof Pi.authenticate === 'function') return true;
+    const t0 = Date.now();
+    while (!window.Pi && Date.now()-t0 < 1500){
       await new Promise(r=>setTimeout(r, 50));
     }
-    return typeof Pi.authenticate === 'function';
+    if (!window.Pi) return false;
   }
 
-  // =================== Sign-in using Pi SDK (after ensurePiReady) ===================
-  async function piSignIn(){
+  // 2) Init exactly once
+  if (!__PI_INIT_DONE){
+    try { Pi.init({ version: '2.0', sandbox: !!sandbox }); }
+    catch(_) { /* may throw outside Pi Browser; safe to ignore */ }
+    __PI_INIT_DONE = true;
+  }
+
+  // 3) Wait briefly for methods to attach
+  const t1 = Date.now();
+  while (Date.now()-t1 < 1500){
+    if (typeof Pi.authenticate === 'function') return true;
+    await new Promise(r=>setTimeout(r, 50));
+  }
+  return typeof Pi.authenticate === 'function';
+}
+
+// =================== Sign-in using Pi SDK (after ensurePiReady) ===================
+async function piSignIn(){
   const ok = await ensurePiReady({ sandbox: false });
   if (!ok) {
     const isPiBrowser = /PiBrowser/i.test(navigator.userAgent || '');
@@ -1300,14 +1300,14 @@ let __hydrated = false;
 
     // FIXED verify payload (drop-in)
     const resp = await fetch('/api/auth/pi/verify', {
-  method: 'POST',
-  headers: { 'Content-Type': 'application/json' },
-  credentials: 'include',     // << add this
-  body: JSON.stringify({
-    accessToken: auth.accessToken,
-    user: { id: auth.user.uid, uid: auth.user.uid, username: auth.user.username }
-  })
-});
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      credentials: 'include',     // << add this
+      body: JSON.stringify({
+        accessToken: auth.accessToken,
+        user: { id: auth.user.uid, uid: auth.user.uid, username: auth.user.username }
+      })
+    });
     if (!resp.ok) {
       const errText = await resp.text().catch(() => '');
       throw new Error(`verify_failed:${resp.status}${errText ? ' ' + errText : ''}`);
@@ -1320,7 +1320,7 @@ let __hydrated = false;
     throw e;
   }
 }
-  // =================== Fetch/link active wallet ===================
+// =================== Fetch/link active wallet ===================
 async function fetchActiveWallet(){
   try{
     // Prefer authenticated username; fall back to URL ?u
@@ -1398,7 +1398,7 @@ async function bootstrapAuthUI(){
 const distBalanceEl = document.getElementById('dist-balance');
 const trustCountEl  = document.getElementById('trust-count');
 const recentOpsEl   = document.getElementById('recentOps');
-  // =================== Summary fetch ===================
+// =================== Summary fetch ===================
 async function fetchSummary(){
   try{
     // Build the /assets lookup URL (1 record only)
@@ -1469,10 +1469,10 @@ async function fetchSummary(){
     log('summary.fail',{err:String(e)});
   }
 }
-  fetchSummary();
-  bootstrapAuthUI();
+fetchSummary();
+bootstrapAuthUI();
 
-  // --- Deep link + QR render ---
+// --- Deep link + QR render ---
 (function renderDeepAndQR(){
   const deepPre = document.getElementById('deepPre');
   if (deepPre && DEEP_LINK) deepPre.textContent = DEEP_LINK;
@@ -1500,7 +1500,7 @@ async function fetchSummary(){
   };
 })();
 
-  // =================== Modal wiring (only one open at a time) ===================
+// =================== Modal wiring (only one open at a time) ===================
 const roadmapBtn    = document.getElementById('roadmapBtn');
 const badgeOpen     = document.getElementById('badgeOpen');
 const modal         = document.getElementById('roadmapModal');
@@ -1513,11 +1513,14 @@ const closeMyWalletBtn  = document.getElementById('closeMyWalletBtn');
 const orderBtn          = document.getElementById('orderBtn');
 const closePlaceOrderBtn= document.getElementById('closePlaceOrderBtn');
 const backdrop      = document.getElementById('modalBackdrop');
+
 const closeModalBtn = document.getElementById('closeModalBtn');
 let lastFocus = null;
-  // My Wallet modal (Actions)
+
+// My Wallet modal (Actions)
 const revealOnceBtn = document.getElementById('revealOnceBtn');
 const secretOnce    = document.getElementById('secretOnce');
+
 // ======== STAKING CONSTANTS / REFS ========
 const stakeModal    = document.getElementById('stakeModal');
 const claimModal    = document.getElementById('claimModal');
@@ -1534,7 +1537,7 @@ const stakeDays    = document.getElementById('stakeDays');
 const stakePreview = document.getElementById('stakePreviewBtn');
 const stakeStart   = document.getElementById('stakeStartBtn');
 const stakeMsg     = document.getElementById('stakeMsg');
-  // Cap days at [1..180] and show a hint if we clamp
+// Cap days at [1..180] and show a hint if we clamp
 const stakeDaysMsg = document.getElementById('stakeDaysMsg');
 
 function clampStakeDays(v){
@@ -1569,12 +1572,14 @@ const claimMsg       = document.getElementById('claimMsg');
 
 function fmtNum(n, dp=7){ const x=Number(n); return isFinite(x)?x.toLocaleString(undefined,{minimumFractionDigits:dp,maximumFractionDigits:dp}):'—'; }
 function toUTC(ts){ try{ return new Date(ts*1000).toISOString().replace('T',' ').replace('Z',' UTC'); }catch{ return '—'; } }
-  // ======== OPEN/CLOSE ========
+
+// ======== OPEN/CLOSE ========
 openStakeBtn?.addEventListener('click', ()=>{
   stakePub.value = (ACTIVE_PUB || document.getElementById('acctPub')?.value || '');
   stakeMsg.textContent = '';
   stakePreviewBox.style.display = 'none';
   stakeStart.disabled = true;
+  log('ui.stake.open', { pub: stakePub.value ? 'G…' : 'empty' });
   openModal(stakeModal, closeStakeBtn);
 });
 openClaimBtn?.addEventListener('click', ()=>{
@@ -1582,6 +1587,7 @@ openClaimBtn?.addEventListener('click', ()=>{
   claimMsg.textContent = '';
   claimTblBody.innerHTML = '';
   claimSelected.disabled = true;
+  log('ui.claim.open', { pub: claimPub.value ? 'G…' : 'empty' });
   openModal(claimModal, closeClaimBtn);
   listClaimables();
 });
@@ -1589,8 +1595,8 @@ openClaimBtn?.addEventListener('click', ()=>{
 stakeQuickBtn?.addEventListener('click', ()=> openStakeBtn?.click());
 claimQuickBtn?.addEventListener('click', ()=> openClaimBtn?.click());
 
-closeStakeBtn?.addEventListener('click', ()=> closeModal(stakeModal));
-closeClaimBtn?.addEventListener('click', ()=> closeModal(claimModal));
+closeStakeBtn?.addEventListener('click', ()=> { log('ui.stake.close'); closeModal(stakeModal); });
+closeClaimBtn?.addEventListener('click', ()=> { log('ui.claim.close'); closeModal(claimModal); });
 
 // ======== PREVIEW ========
 stakePreview?.addEventListener('click', async ()=>{
@@ -1614,8 +1620,10 @@ stakePreview?.addEventListener('click', async ()=>{
     stakePreviewBox.style.display = '';
     stakeStart.disabled = false;
     stakeMsg.textContent = '';
+    log('stake.preview.ok', { amt, days, apr: j.apr, reward: j.reward });
   }catch(e){
     stakeMsg.textContent = '❌ ' + String(e);
+    log('stake.preview.fail', { err: String(e) });
   }
 });
 
@@ -1647,32 +1655,43 @@ stakeStart?.addEventListener('click', async ()=>{
       const tx  = SDK.TransactionBuilder.fromXDR(xdr, pass);
       tx.sign(SDK.Keypair.fromSecret(localSec));
       const server = getServer();
-      const resp   = await server.submitTransaction(tx);
-      if (resp?.hash){
-        stakeMsg.innerHTML = `✅ Staked. Tx: <code>${resp.hash}</code>`;
-      } else {
-        stakeMsg.textContent = 'Submitted; awaiting confirmation.';
+      try{
+        const resp = await server.submitTransaction(tx);
+        if (resp?.hash){
+          stakeMsg.innerHTML = `✅ Staked. Tx: <code>${resp.hash}</code>`;
+          log('stake.submit.ok', { hash: resp.hash });
+        } else {
+          stakeMsg.textContent = 'Submitted; awaiting confirmation.';
+          log('stake.submit.queued');
+        }
+      }catch(e){
+        const rc = e?.response?.data?.extras?.result_codes;
+        stakeMsg.textContent = `❌ submit failed: ${rc ? JSON.stringify(rc) : String(e)}`;
+        log('stake.submit.fail', { err: String(e), rc });
       }
     } else {
       // Fallback to SEP-7 (external wallet signs alongside distributor)
       const uri = `web+stellar:tx?xdr=${encodeURIComponent(xdr)}&network_passphrase=${encodeURIComponent(pass)}`;
       window.location.href = uri;
       stakeMsg.innerHTML = `Opening your wallet to sign… If nothing happens, copy this URI:<br><code style="word-break:break-all">${uri}</code>`;
+      log('stake.sep7.opened');
     }
   }catch(e){
     stakeMsg.textContent = '❌ ' + String(e);
+    log('stake.build.fail', { err: String(e) });
   }
 });
+
 // --- Vote modal refs
 const voteModal    = document.getElementById('voteModal');
 const closeVoteBtn = document.getElementById('closeVoteBtn');
 const voteQuickBtn = document.getElementById('voteQuickBtn');
 
 const votePub   = document.getElementById('votePub');
-const voteDays  = document.getElementById('voteDays');
+const voteDays  = document.getElementById('voteDays'); // hidden/removed visually
 const voteGame  = document.getElementById('voteGame');
 const voteAmt   = document.getElementById('voteAmt');
-  // 🔥 Hide "Lock Days" visually in the Vote modal — everything else stays intact
+// 🔥 Hide "Lock Days" visually in the Vote modal — everything else stays intact
 document.getElementById('voteDays')?.closest('.row, .field')?.remove();
 
 const votePreviewBtn  = document.getElementById('votePreviewBtn');
@@ -1691,8 +1710,9 @@ voteQuickBtn?.addEventListener('click', async ()=>{
   voteStartBtn.disabled = true;
   await loadVoteProposals();
   openModal(voteModal, closeVoteBtn);
+  log('ui.vote.open');
 });
-closeVoteBtn?.addEventListener('click', ()=> closeModal(voteModal));
+closeVoteBtn?.addEventListener('click', ()=> { log('ui.vote.close'); closeModal(voteModal); });
 
 // Fetch proposals (title + id/slug) from your API
 async function loadVoteProposals(){
@@ -1703,12 +1723,13 @@ async function loadVoteProposals(){
     voteGame.innerHTML = items.length
       ? items.map(p=>`<option value="${p.id || p.slug}">${p.title}</option>`).join('')
       : `<option disabled selected>No active proposals</option>`;
-  }catch{
+    log('vote.proposals.ok', { count: items.length });
+  }catch(e){
     voteGame.innerHTML = `<option disabled selected>Couldn’t load proposals</option>`;
+    log('vote.proposals.fail', { err: String(e) });
   }
 }
 
-// Preview (vote)
 // Safe label swap
 (() => {
   const lbl = document.querySelector('#voteAPR')
@@ -1717,7 +1738,7 @@ async function loadVoteProposals(){
   if (lbl) lbl.textContent = 'Your share if this game wins';
 })();
 
-// preview handler (replace the block that used /api/stake/preview)
+// Preview (vote)
 votePreviewBtn?.addEventListener('click', async ()=>{
   const pub  = (votePub.value||'').trim();
   const raw  = String(voteAmt.value||'0').trim();
@@ -1740,7 +1761,6 @@ votePreviewBtn?.addEventListener('click', async ()=>{
     voteVotes.textContent  = amt.toLocaleString(undefined,{maximumFractionDigits:7});
     voteUnlock.textContent = new Date(j.round_end_unix*1000).toISOString().replace('T',' ').replace('Z',' UTC');
 
-    // optional helper line
     const helper = document.getElementById('voteShareHelp');
     if (helper) helper.textContent =
       `Assumes current pool ${Number(j.pool_before).toLocaleString()} votes. ` +
@@ -1749,8 +1769,10 @@ votePreviewBtn?.addEventListener('click', async ()=>{
     votePreviewBox.style.display = '';
     voteStartBtn.disabled = false;
     voteMsg.textContent = '';
+    log('vote.preview.ok', { proposal, amt });
   }catch(e){
     voteMsg.textContent = '❌ ' + String(e);
+    log('vote.preview.fail', { err: String(e) });
   }
 });
 
@@ -1785,21 +1807,24 @@ voteStartBtn?.addEventListener('click', async ()=>{
       try{
         const resp = await server.submitTransaction(tx);
         voteMsg.innerHTML = resp?.hash ? `✅ Votes staked. Tx: <code>${resp.hash}</code>` : 'Submitted.';
+        log('vote.submit.ok', { hash: resp?.hash || null });
       }catch(e){
-        // show precise Horizon reason
         const rc = e?.response?.data?.extras?.result_codes;
         voteMsg.textContent = `❌ submit failed: ${JSON.stringify(rc) || String(e)}`;
+        log('vote.submit.fail', { err: String(e), rc });
       }
     } else {
-      // Always deep-link to wallet so the USER signature is added
       const uri = `web+stellar:tx?xdr=${encodeURIComponent(xdr)}&network_passphrase=${encodeURIComponent(pass)}`;
       window.location.href = uri;
       voteMsg.innerHTML = `Opening wallet to sign…<br><small>If nothing opens, copy this into your wallet:</small><br><code style="word-break:break-all">${uri}</code>`;
+      log('vote.sep7.opened');
     }
   }catch(e){
     voteMsg.textContent = '❌ ' + String(e);
+    log('vote.build.fail', { err: String(e) });
   }
 });
+
 // ======== LIST CLAIMABLES (grouped: one toggle, principal+reward in one box) ========
 async function listClaimables(){
   const pub = (claimPub.value||'').trim();
@@ -1817,6 +1842,7 @@ async function listClaimables(){
       claimTblBody.innerHTML = `<tr><td colspan="4" class="help" style="padding:8px">No claimable balances.</td></tr>`;
       claimSelected.disabled = true;
       claimMsg.textContent = '';
+      log('claimables.none');
       return;
     }
 
@@ -1829,7 +1855,6 @@ async function listClaimables(){
 
       const gid =
         r.contract_id || r.stake_id || r.group_id || r.parent_id || r.batch_id ||
-        // fallback signature so vote rows at the same unlock don't merge:
         [
           unlockTs || 0,
           kindStr,
@@ -1840,105 +1865,109 @@ async function listClaimables(){
     }
 
     // ---- Sort contracts by unlock date (ascending; unknowns last)
-const ordered = Object.entries(groups).sort((a,b)=>{
-  const au = a[1][0].__unlockTs || Number.MAX_SAFE_INTEGER;
-  const bu = b[1][0].__unlockTs || Number.MAX_SAFE_INTEGER;
-  return au - bu;
-});
+    const ordered = Object.entries(groups).sort((a,b)=>{
+      const au = a[1][0].__unlockTs || Number.MAX_SAFE_INTEGER;
+      const bu = b[1][0].__unlockTs || Number.MAX_SAFE_INTEGER;
+      return au - bu;
+    });
 
-// Pretty names for proposals (defined once)
-const PROPOSAL_NAMES = {
-  rooftop_rumble: 'Rooftop Rumble',
-  pizza_panic: 'Pizza Panic'
-};
-const prettyProposal = id => PROPOSAL_NAMES[id] || id || 'Vote';
+    // Pretty names for proposals (defined once)
+    const PROPOSAL_NAMES = {
+      rooftop_rumble: 'Rooftop Rumble',
+      pizza_panic: 'Pizza Panic'
+    };
+    const prettyProposal = id => PROPOSAL_NAMES[id] || id || 'Vote';
 
-for (const [, recs] of ordered){
-  const any       = recs[0];
-  const unlockTs  = any.__unlockTs || 0;
-  const unlockStr = unlockTs ? new Date(unlockTs*1000).toISOString().slice(0,10) : '—';
-  const kind      = any.__kind === 'vote' ? 'vote' : 'regular';
-  const pillClass = kind === 'vote' ? 'pill-vote' : 'pill-regular';
-  const labelKind = kind === 'vote' ? 'VOTE' : 'NORMAL';
-  const unlocked  = unlockTs ? (Date.now() >= unlockTs*1000) : true;
+    for (const [, recs] of ordered){
+      const any       = recs[0];
+      const unlockTs  = any.__unlockTs || 0;
+      const unlockStr = unlockTs ? new Date(unlockTs*1000).toISOString().slice(0,10) : '—';
+      const kind      = any.__kind === 'vote' ? 'vote' : 'regular';
+      const pillClass = kind === 'vote' ? 'pill-vote' : 'pill-regular';
+      const unlocked  = unlockTs ? (Date.now() >= unlockTs*1000) : true;
 
-  // Collect ids and totals per contract
-  const ids = [];
-  let principal = 0, reward = 0;
-  for (const r of recs){
-    if (r.id) ids.push(r.id);
-    const role = (r.role || r.kind || '').toString().toLowerCase();
-    if (role.includes('reward')) reward += Number(r.amount||0);
-    else                         principal += Number(r.amount||0);
-  }
+      // Collect ids and totals per contract
+      const ids = [];
+      let principal = 0, reward = 0;
+      for (const r of recs){
+        if (r.id) ids.push(r.id);
+        const role = (r.role || r.kind || '').toString().toLowerCase();
+        if (role.includes('reward')) reward += Number(r.amount||0);
+        else                         principal += Number(r.amount||0);
+      }
 
-  // ---- Header row (ONE checkbox per contract)
-  const trHead = document.createElement('tr');
-  trHead.className = `group-head is-${kind}` + (unlocked ? '' : ' locked');
+      // ---- Header row (ONE checkbox per contract)
+      const trHead = document.createElement('tr');
+      trHead.className = `group-head is-${kind}` + (unlocked ? '' : ' locked');
 
-  // If vote, show proposal next to the VOTE pill
-  const voteLabel = (kind === 'vote' && any?.proposal)
-    ? `VOTE • ${prettyProposal(any.proposal)}`
-    : (kind === 'vote' ? 'VOTE' : 'NORMAL');
+      // If vote, show proposal next to the pill
+      const voteLabel = (kind === 'vote' && any?.proposal)
+        ? `VOTE • ${prettyProposal(any.proposal)}`
+        : (kind === 'vote' ? 'VOTE' : 'NORMAL');
 
-  trHead.innerHTML = `
-  <td colspan="4">
-    <label class="group-toggle" style="display:flex;align-items:center;gap:10px;white-space:nowrap;">
-      <input
-        type="checkbox"
-        class="cbPick"
-        value="${ids.join(',')}"
-        data-balance-ids="${ids.join(',')}"
-        ${unlocked ? '' : 'disabled'}>
-      <span class="pill ${pillClass}">${voteLabel}</span>
-      <strong>Stake • unlock ${unlockStr}</strong>
-    </label>
-  </td>`;
-claimTblBody.appendChild(trHead);
+      trHead.innerHTML = `
+      <td colspan="4">
+        <label class="group-toggle" style="display:flex;align-items:center;gap:10px;white-space:nowrap;">
+          <input
+            type="checkbox"
+            class="cbPick"
+            value="${ids.join(',')}"
+            data-balance-ids="${ids.join(',')}"
+            ${unlocked ? '' : 'disabled'}>
+          <span class="pill ${pillClass}">${voteLabel}</span>
+          <strong>Stake • unlock ${unlockStr}</strong>
+        </label>
+      </td>`;
+      claimTblBody.appendChild(trHead);
 
-  // ---- Compact block: principal + reward/est share
-  const trBlock = document.createElement('tr');
-  trBlock.className = `group-row is-${kind}` + (unlocked ? '' : ' locked');
+      // ---- Compact block: principal + reward/est share
+      const trBlock = document.createElement('tr');
+      trBlock.className = `group-row is-${kind}` + (unlocked ? '' : ' locked');
 
-  // Use server-provided % for vote contracts; numeric reward for regular
-  const estPct = (kind === 'vote')
-    ? Number(any?.vote_est_share_pct)   // string -> number; NaN if missing
-    : null;
+      // Use server-provided % for vote contracts; numeric reward for regular
+      const estPct = (kind === 'vote')
+        ? Number(any?.vote_est_share_pct)
+        : null;
 
-  const rewardHTML = (kind === 'vote')
-    ? `<div class="line" style="display:flex;justify-content:space-between;align-items:center;white-space:nowrap;">
-         <span class="pill pill-vote" aria-hidden="true">EST. SHARE</span>
-         <span class="num">${isFinite(estPct) ? estPct.toFixed(2) : '0.00'}%</span>
-       </div>`
-    : (reward > 0
-       ? `<div class="line" style="display:flex;justify-content:space-between;align-items:center;">
-            <span class="pill pill-reward" aria-hidden="true">REWARD</span>
-            <span class="num">${fmtNum(reward)}</span>
-          </div>`
-       : '');
+      const rewardHTML = (kind === 'vote')
+        ? `<div class="line" style="display:flex;justify-content:space-between;align-items:center;white-space:nowrap;">
+             <span class="pill pill-vote" aria-hidden="true">EST. SHARE</span>
+             <span class="num">${isFinite(estPct) ? estPct.toFixed(2) : '0.00'}%</span>
+           </div>`
+        : (reward > 0
+           ? `<div class="line" style="display:flex;justify-content:space-between;align-items:center;">
+                <span class="pill pill-reward" aria-hidden="true">REWARD</span>
+                <span class="num">${fmtNum(reward)}</span>
+              </div>`
+           : '');
 
-  trBlock.innerHTML = `
-    <td colspan="4">
-      <div class="block" style="display:flex;flex-direction:column;gap:8px;">
-        <div class="line" style="display:flex;justify-content:space-between;align-items:center;white-space:nowrap;">
-          <span class="pill ${pillClass}" aria-hidden="true">PRINCIPAL</span>
-          <span class="num">${fmtNum(principal)}</span>
-        </div>
-        ${rewardHTML}
-        ${unlocked ? '' : `<span class="lockhint">Locked until ${unlockStr}</span>`}
-      </div>
-    </td>`;
-  claimTblBody.appendChild(trBlock);
-}
+      trBlock.innerHTML = `
+        <td colspan="4">
+          <div class="block" style="display:flex;flex-direction:column;gap:8px;">
+            <div class="line" style="display:flex;justify-content:space-between;align-items:center;white-space:nowrap;">
+              <span class="pill ${pillClass}" aria-hidden="true">PRINCIPAL</span>
+              <span class="num">${fmtNum(principal)}</span>
+                        </div>
+            ${rewardHTML}
+            ${unlocked ? '' : `<span class="lockhint">Locked until ${unlockStr}</span>`}
+          </div>
+        </td>`;
+      claimTblBody.appendChild(trBlock);
+    }
 
-claimSelected.disabled = false;
-claimMsg.textContent = '';
+    claimSelected.disabled = false;
+    claimMsg.textContent = '';
+    log('claimables.rendered');
   }catch(e){
     claimMsg.textContent = '❌ ' + String(e);
+    log('claimables.fail', { err: String(e) });
   }
 }
 
-claimRefresh?.addEventListener('click', listClaimables);
+claimRefresh?.addEventListener('click', ()=>{
+  log('claimables.refresh.click');
+  listClaimables();
+});
 
 // ======== CLAIM SELECTED (batch) — robust ids + clear errors + IZZA-first ========
 claimSelected?.addEventListener('click', async ()=>{
@@ -1947,39 +1976,44 @@ claimSelected?.addEventListener('click', async ()=>{
 
   // Expand group selections like "id1,id2" into individual ids
   const rawPicks = Array.from(document.querySelectorAll('.cbPick:checked'))
-  .map(x => (x.dataset.balanceIds || x.value || '').trim());
+    .map(x => (x.dataset.balanceIds || x.value || '').trim());
   const picks = rawPicks
     .flatMap(v => v.split(','))
     .map(s => s.trim())
     .filter(Boolean);
 
-  if (!picks.length){ claimMsg.textContent='Pick at least one balance.'; return; }
+  if (!picks.length){
+    claimMsg.textContent='Pick at least one balance.';
+    log('claim.none');
+    return;
+  }
 
   // Client-side 64-hex validation + de-dupe
-  const HEX64 = /^[0-9a-fA-F]{64}$/;              // CHANGED: exact 64 hex
-  const valid = Array.from(new Set(picks.filter(id => HEX64.test(id)))); // CHANGED: use HEX64
+  const HEX64 = /^[0-9a-fA-F]{64}$/;
+  const valid = Array.from(new Set(picks.filter(id => HEX64.test(id))));
   if (!valid.length){
     claimMsg.textContent = '❌ No valid claimable balance ids were selected.';
+    log('claim.invalid_ids', { picks });
     return;
   }
 
   claimMsg.textContent = `Building claim for ${valid.length} id${valid.length>1?'s':''}…`;
+  log('claim.build.start', { n: valid.length });
 
   try{
-    // Use the UI-friendly alias (same builder, nicer param shape)
     const r = await fetch('/api/stake/claim', {
       method:'POST',
       headers:{'Content-Type':'application/json'},
       body: JSON.stringify({ pub, ids: valid })
     });
 
-    // Try to read the JSON either way so we can show precise error
     let j = {};
     try { j = await r.json(); } catch { /* ignore parse fail */ }
 
     if (!r.ok || !j?.ok){
       const msg = j?.error || j?.message || `HTTP ${r.status}`;
       claimMsg.textContent = `❌ ${msg}`;
+      log('claim.build.fail', { msg, status: r.status });
       return;
     }
 
@@ -1999,13 +2033,16 @@ claimSelected?.addEventListener('click', async ()=>{
         const resp = await server.submitTransaction(tx);
         if (resp?.hash){
           claimMsg.innerHTML = `✅ Claimed. Tx: <code>${resp.hash}</code>`;
+          log('claim.submit.ok', { hash: resp.hash });
           listClaimables();
         }else{
           claimMsg.textContent = 'Submitted; awaiting confirmation.';
+          log('claim.submit.queued');
         }
       }catch(e){
         const rc = e?.response?.data?.extras?.result_codes;
         claimMsg.textContent = `❌ submit failed: ${rc ? JSON.stringify(rc) : String(e)}`;
+        log('claim.submit.fail', { err: String(e), rc });
       }
       return;
     }
@@ -2015,6 +2052,7 @@ claimSelected?.addEventListener('click', async ()=>{
     try{
       window.location.assign(uri);
       claimMsg.innerHTML = `Opening your wallet to sign…<br><small>If nothing happens, tap the link:</small> <a href="${uri}" style="word-break:break-all">Open in wallet</a>`;
+      log('claim.sep7.opened');
     }catch{
       claimMsg.innerHTML =
         `Couldn’t open a wallet from this browser.<br><small>Copy this into your wallet:</small><br>` +
@@ -2024,11 +2062,15 @@ claimSelected?.addEventListener('click', async ()=>{
         try{ await navigator.clipboard.writeText(uri); claimMsg.innerHTML += '<br>✅ Copied.'; }
         catch{ claimMsg.innerHTML += '<br>Copy failed — long-press to select.'; }
       });
+      log('claim.sep7.copy_shown');
     }
   }catch(e){
     claimMsg.textContent = '❌ ' + String(e);
+    log('claim.exception', { err: String(e) });
   }
 });
+
+// =================== Modal helpers ===================
 function openModal(el, focusEl){
   lastFocus = document.activeElement;
   [modal, orderbookModal, placeOrderModal, myWalletModal].forEach(m=>{
@@ -2041,6 +2083,7 @@ function openModal(el, focusEl){
   backdrop.setAttribute('open','');
   document.body.style.overflow = 'hidden';
   (focusEl || el.querySelector('.close-btn'))?.focus?.();
+  log('modal.open', { id: el?.id || 'unknown' });
 }
 
 function closeModal(el){
@@ -2050,403 +2093,407 @@ function closeModal(el){
   backdrop.hidden = true;
   document.body.style.overflow = '';
   lastFocus?.focus?.();
+  log('modal.close', { id: el?.id || 'unknown' });
 }
 
-// Open roadmap (button + badge)
-roadmapBtn.addEventListener('click', ()=>openModal(modal, closeModalBtn));
-badgeOpen.addEventListener('click',  ()=>openModal(modal, closeModalBtn));
+// Open roadmap
+roadmapBtn?.addEventListener('click', ()=>openModal(modal, closeModalBtn));
+badgeOpen?.addEventListener('click',  ()=>openModal(modal, closeModalBtn));
 
 // Close buttons
-closeModalBtn.addEventListener('click',     ()=>closeModal(modal));
-closeMyWalletBtn.addEventListener('click',  ()=>closeModal(myWalletModal));
-closeOrderbookBtn.addEventListener('click', ()=>{ stopObRefresh(); closeModal(orderbookModal); });
-closePlaceOrderBtn.addEventListener('click',()=> closeModal(placeOrderModal));
+closeModalBtn?.addEventListener('click',     ()=>closeModal(modal));
+closeMyWalletBtn?.addEventListener('click',  ()=>closeModal(myWalletModal));
+closeOrderbookBtn?.addEventListener('click', ()=>{ stopObRefresh(); closeModal(orderbookModal); });
+closePlaceOrderBtn?.addEventListener('click',()=> closeModal(placeOrderModal));
 
-// Backdrop click closes whichever is open (and stops OB refresh if needed)
-backdrop.addEventListener('click', ()=>{
+// Backdrop click closes whichever is open
+backdrop?.addEventListener('click', ()=>{
   if (!orderbookModal.hidden){ stopObRefresh(); }
-  [modal, orderbookModal, placeOrderModal, myWalletModal].forEach(m=>{
+  [modal, orderbookModal, placeOrderModal, myWalletModal, stakeModal, claimModal, voteModal].forEach(m=>{
     if (!m.hidden) closeModal(m);
   });
 });
-  // Reveal Secret (one-time local reveal)
+
+// Reveal Secret (one-time local reveal)
 revealOnceBtn?.addEventListener('click', ()=>{
   if (!ACTIVE_PUB) return;
   if (hasViewedOnce(ACTIVE_PUB, USER?.username)) {
     secretOnce.style.display = 'block';
     secretOnce.textContent = 'Secret was already revealed once on this device.';
+    log('secret.reveal.blocked');
     return;
   }
   const sec = getLocalSecret(ACTIVE_PUB, USER?.username);
   secretOnce.style.display = 'block';
   secretOnce.textContent = sec ? sec : 'No secret stored locally for this wallet.';
   if (sec) markSecretViewedOnce(ACTIVE_PUB, USER?.username);
+  log('secret.reveal.once', { ok: !!sec });
 });
 
-// Add the missing Wallet button handler
 // Wallet button — ensure user auth first so mwUser is filled
-walletBtn.addEventListener('click', async ()=>{
-  if (!USER) {                    // <- get username from Pi auth
+walletBtn?.addEventListener('click', async ()=>{
+  if (!USER) {
     try { await piSignIn(); } catch(_) { /* ignore if user cancels */ }
   }
 
-  // get an active pub (server or the fresh local one)
   if (!ACTIVE_PUB){
     await fetchActiveWallet();
     if (!ACTIVE_PUB && NEW_WALLET) ACTIVE_PUB = NEW_WALLET.pub;
   }
 
-  await refreshMyWalletModal();   // this now sees USER.username
+  await refreshMyWalletModal();
   openModal(myWalletModal, closeMyWalletBtn);
 });
 
-// ✅ Call the gate AFTER everything above exists
+// =================== Order book endpoints ===================
+const ORDERBOOK_URL = `${API_BASE}/order_book`
+  + `?selling_asset_type=credit_alphanum4`
+  + `&selling_asset_code=${encodeURIComponent(ASSET_CODE)}`
+  + `&selling_asset_issuer=${encodeURIComponent(ISSUER)}`
+  + `&buying_asset_type=native`;
 
+const TRADES_URL = `${API_BASE}/trades`
+  + `?base_asset_type=credit_alphanum4`
+  + `&base_asset_code=${encodeURIComponent(ASSET_CODE)}`
+  + `&base_asset_issuer=${encodeURIComponent(ISSUER)}`
+  + `&counter_asset_type=native`
+  + `&order=desc&limit=200`;
 
-  // =================== Order book endpoints ===================
-  const ORDERBOOK_URL = `${API_BASE}/order_book`
-    + `?selling_asset_type=credit_alphanum4`
-    + `&selling_asset_code=${encodeURIComponent(ASSET_CODE)}`
-    + `&selling_asset_issuer=${encodeURIComponent(ISSUER)}`
-    + `&buying_asset_type=native`;
+document.getElementById('rawOrderbookLink')?.setAttribute('href', ORDERBOOK_URL);
 
-  const TRADES_URL = `${API_BASE}/trades`
-    + `?base_asset_type=credit_alphanum4`
-    + `&base_asset_code=${encodeURIComponent(ASSET_CODE)}`
-    + `&base_asset_issuer=${encodeURIComponent(ISSUER)}`
-    + `&counter_asset_type=native`
-    + `&order=desc&limit=200`;
+// =================== Order book table UI ===================
+const obBestAsk = document.getElementById('obBestAsk');
+const obBestBid = document.getElementById('obBestBid');
+const obSpread  = document.getElementById('obSpread');
+const obSumAsks = document.getElementById('obSumAsks');
+const obUpdated = document.getElementById('obUpdated');
 
-  document.getElementById('rawOrderbookLink').href = ORDERBOOK_URL;
+function num(x, dp=7){ const n = Number(x); return isFinite(n) ? n.toLocaleString(undefined,{minimumFractionDigits:dp, maximumFractionDigits:dp}) : '–'; }
+function sum(arr, key){ return arr.reduce((a,b)=>a + Number(b[key]||0), 0); }
 
-  // =================== Order book table UI ===================
-  const obBestAsk = document.getElementById('obBestAsk');
-  const obBestBid = document.getElementById('obBestBid');
-  const obSpread  = document.getElementById('obSpread');
-  const obSumAsks = document.getElementById('obSumAsks');
-  const obUpdated = document.getElementById('obUpdated');
+async function loadOrderbook(){
+  try{
+    const res  = await fetch(ORDERBOOK_URL, {cache:'no-store'});
+    const data = await res.json();
 
-  function num(x, dp=7){ const n = Number(x); return isFinite(n) ? n.toLocaleString(undefined,{minimumFractionDigits:dp, maximumFractionDigits:dp}) : '–'; }
-  function sum(arr, key){ return arr.reduce((a,b)=>a + Number(b[key]||0), 0); }
+    const asks = (data.asks || []).map(r => ({ price: Number(r.price), amount: Number(r.amount) }));
+    const bids = (data.bids || []).map(r => ({ price: Number(r.price), amount: Number(r.amount) }));
 
-  async function loadOrderbook(){
-    try{
-      const res  = await fetch(ORDERBOOK_URL, {cache:'no-store'});
-      const data = await res.json();
+    const bestAsk = asks.length ? Math.min(...asks.map(a=>a.price)) : null;
+    const bestBid = bids.length ? Math.max(...bids.map(b=>b.price)) : null;
+    const spread  = (bestAsk!=null && bestBid!=null) ? bestAsk - bestBid : null;
 
-      const asks = (data.asks || []).map(r => ({ price: Number(r.price), amount: Number(r.amount) }));
-      const bids = (data.bids || []).map(r => ({ price: Number(r.price), amount: Number(r.amount) }));
+    obBestAsk.textContent = bestAsk!=null ? num(bestAsk,4) : '–';
+    obBestBid.textContent = bestBid!=null ? num(bestBid,4) : '–';
+    obSpread.textContent  = spread!=null  ? num(spread,4)  : '–';
+    obSumAsks.textContent = asks.length ? num(sum(asks,'amount'),2) : '0';
+    obUpdated.textContent = new Date().toLocaleTimeString();
 
-      const bestAsk = asks.length ? Math.min(...asks.map(a=>a.price)) : null;
-      const bestBid = bids.length ? Math.max(...bids.map(b=>b.price)) : null;
-      const spread  = (bestAsk!=null && bestBid!=null) ? bestAsk - bestBid : null;
+    const asksBody = document.querySelector('#asksTbl tbody');
+    const bidsBody = document.querySelector('#bidsTbl tbody');
+    asksBody.innerHTML = ''; bidsBody.innerHTML = '';
 
-      obBestAsk.textContent = bestAsk!=null ? num(bestAsk,4) : '–';
-      obBestBid.textContent = bestBid!=null ? num(bestBid,4) : '–';
-      obSpread.textContent  = spread!=null  ? num(spread,4)  : '–';
-      obSumAsks.textContent = asks.length ? num(sum(asks,'amount'),2) : '0';
-      obUpdated.textContent = new Date().toLocaleTimeString();
-
-      const asksBody = document.querySelector('#asksTbl tbody');
-      const bidsBody = document.querySelector('#bidsTbl tbody');
-      asksBody.innerHTML = ''; bidsBody.innerHTML = '';
-
-      asks.sort((a,b)=>a.price-b.price).slice(0,50).forEach(a=>{
-        const total = a.price * a.amount;
-        const tr = document.createElement('tr');
-        tr.innerHTML =
-          `<td style="text-align:left;padding:8px">${num(a.price,4)}</td>`+
-          `<td style="text-align:right;padding:8px">${num(a.amount,2)}</td>`+
-          `<td style="text-align:right;padding:8px">${num(total,4)}</td>`;
-        asksBody.appendChild(tr);
-      });
-
-      bids.sort((a,b)=>b.price-a.price).slice(0,50).forEach(b=>{
-        const total = b.price * b.amount;
-        const tr = document.createElement('tr');
-        tr.innerHTML =
-          `<td style="text-align:left;padding:8px">${num(b.price,4)}</td>`+
-          `<td style="text-align:right;padding:8px">${num(b.amount,2)}</td>`+
-          `<td style="text-align:right;padding:8px">${num(total,4)}</td>`;
-        bidsBody.appendChild(tr);
-      });
-    }catch(err){
-      log('ob.fail',{err:String(err)});
-    }
-  }
-
-  // =================== Chart (ensure libs, draw after visible) ===================
-  let izzaChart = null;
-  let allPoints = [];
-  let obTimer = null;
-
-  const chartCanvas = document.getElementById('izzaChart');
-  const ro = new ResizeObserver(()=>{ try{ izzaChart && izzaChart.resize(); }catch(_){ } });
-  if (chartCanvas && chartCanvas.parentElement) ro.observe(chartCanvas.parentElement);
-
-  function startObRefresh(){
-    if(obTimer) clearInterval(obTimer);
-    obTimer = setInterval(()=>{ if(!orderbookModal.hidden){ loadOrderbook(); loadTradesAndDraw(); } }, 10000);
-  }
-  function stopObRefresh(){ if(obTimer) clearInterval(obTimer); obTimer=null; }
-
-  const rangeBtns = Array.from(document.querySelectorAll('.rangeBtn'));
-  let activeRange = '1D';
-  rangeBtns.forEach(b=>{
-    b.addEventListener('click', ()=>{
-      rangeBtns.forEach(x=>x.setAttribute('aria-pressed','false'));
-      b.setAttribute('aria-pressed','true');
-      activeRange = b.dataset.range;
-      drawChart();
+    asks.sort((a,b)=>a.price-b.price).slice(0,50).forEach(a=>{
+      const total = a.price * a.amount;
+      const tr = document.createElement('tr');
+      tr.innerHTML =
+        `<td style="text-align:left;padding:8px">${num(a.price,4)}</td>`+
+        `<td style="text-align:right;padding:8px">${num(a.amount,2)}</td>`+
+        `<td style="text-align:right;padding:8px">${num(total,4)}</td>`;
+      asksBody.appendChild(tr);
     });
+
+    bids.sort((a,b)=>b.price-a.price).slice(0,50).forEach(b=>{
+      const total = b.price * b.amount;
+      const tr = document.createElement('tr');
+      tr.innerHTML =
+        `<td style="text-align:left;padding:8px">${num(b.price,4)}</td>`+
+        `<td style="text-align:right;padding:8px">${num(b.amount,2)}</td>`+
+        `<td style="text-align:right;padding:8px">${num(total,4)}</td>`;
+      bidsBody.appendChild(tr);
+    });
+    log('orderbook.ok', { asks: asks.length, bids: bids.length });
+  }catch(err){
+    log('orderbook.fail',{err:String(err)});
+  }
+}
+
+// =================== Chart (ensure libs, draw after visible) ===================
+let izzaChart = null;
+let allPoints = [];
+let obTimer = null;
+
+const chartCanvas = document.getElementById('izzaChart');
+const ro = new ResizeObserver(()=>{ try{ izzaChart && izzaChart.resize(); }catch(_){ } });
+if (chartCanvas && chartCanvas.parentElement) ro.observe(chartCanvas.parentElement);
+
+function startObRefresh(){
+  if(obTimer) clearInterval(obTimer);
+  obTimer = setInterval(()=>{ if(!orderbookModal.hidden){ loadOrderbook(); loadTradesAndDraw(); } }, 10000);
+}
+function stopObRefresh(){ if(obTimer) clearInterval(obTimer); obTimer=null; }
+
+const rangeBtns = Array.from(document.querySelectorAll('.rangeBtn'));
+let activeRange = '1D';
+rangeBtns.forEach(b=>{
+  b.addEventListener('click', ()=>{
+    rangeBtns.forEach(x=>x.setAttribute('aria-pressed','false'));
+    b.setAttribute('aria-pressed','true');
+    activeRange = b.dataset.range;
+    drawChart();
+    log('chart.range', { range: activeRange });
   });
+});
 
-  function msAgo(n){ return Date.now() - n; }
-  function filteredByRange(){
-    if(!allPoints.length) return [];
-    let cutoff = 0;
-    switch(activeRange){
-      case '1D':  cutoff = msAgo(24*3600*1000); break;
-      case '1W':  cutoff = msAgo(7*24*3600*1000); break;
-      case '1M':  cutoff = msAgo(30*24*3600*1000); break;
-      case '1Y':  cutoff = msAgo(365*24*3600*1000); break;
-      case 'ALL': default: return allPoints;
-    }
-    return allPoints.filter(p => p.t.getTime() >= cutoff);
+function msAgo(n){ return Date.now() - n; }
+function filteredByRange(){
+  if(!allPoints.length) return [];
+  let cutoff = 0;
+  switch(activeRange){
+    case '1D':  cutoff = msAgo(24*3600*1000); break;
+    case '1W':  cutoff = msAgo(7*24*3600*1000); break;
+    case '1M':  cutoff = msAgo(30*24*3600*1000); break;
+    case '1Y':  cutoff = msAgo(365*24*3600*1000); break;
+    case 'ALL': default: return allPoints;
   }
+  return allPoints.filter(p => p.t.getTime() >= cutoff);
+}
 
-  async function loadTradesAndDraw(){
-    const ok = await ensureChart();
-    if(!ok){
-      document.querySelector('.chart-wrap')?.insertAdjacentHTML('beforeend',
-        `<div class="help" style="margin-top:6px;color:#ffb3b3">Chart libraries couldn’t load.</div>`);
-      return;
-    }
-    try{
-      const res = await fetch(TRADES_URL, {cache:'no-store'});
-      const data = await res.json();
-      const recs = (data._embedded && data._embedded.records) ? data._embedded.records : [];
-      allPoints = recs.map(r=>{
-        const izza = Number(r.base_amount);
-        const pi   = Number(r.counter_amount);
-        const fallback = (r.price && r.price.n && r.price.d) ? (r.price.n/r.price.d) : NaN;
-        const price = (izza > 0) ? (pi / izza) : Number(fallback);
-        return { t: new Date(r.ledger_close_time || r.created_at), price, vol: izza };
-      }).reverse();
-      requestAnimationFrame(drawChart);
-    }catch(e){
-      document.querySelector('.chart-wrap')?.insertAdjacentHTML(
-        'beforeend',
-        `<div class="help" style="margin-top:6px;color:#ffb3b3">Couldn’t load trades: ${String(e)}</div>`
-      );
-      log('chart.trades.fail',{err:String(e)});
-    }
+async function loadTradesAndDraw(){
+  const ok = await ensureChart();
+  if(!ok){
+    document.querySelector('.chart-wrap')?.insertAdjacentHTML('beforeend',
+      `<div class="help" style="margin-top:6px;color:#ffb3b3">Chart libraries couldn’t load.</div>`);
+    log('chart.ensure.fail');
+    return;
   }
+  try{
+    const res = await fetch(TRADES_URL, {cache:'no-store'});
+    const data = await res.json();
+    const recs = (data._embedded && data._embedded.records) ? data._embedded.records : [];
+    allPoints = recs.map(r=>{
+      const izza = Number(r.base_amount);
+      const pi   = Number(r.counter_amount);
+      const fallback = (r.price && r.price.n && r.price.d) ? (r.price.n/r.price.d) : NaN;
+      const price = (izza > 0) ? (pi / izza) : Number(fallback);
+      return { t: new Date(r.ledger_close_time || r.created_at), price, vol: izza };
+    }).reverse();
+    requestAnimationFrame(drawChart);
+    log('chart.trades.ok', { n: allPoints.length });
+  }catch(e){
+    document.querySelector('.chart-wrap')?.insertAdjacentHTML(
+      'beforeend',
+      `<div class="help" style="margin-top:6px;color:#ffb3b3">Couldn’t load trades: ${String(e)}</div>`
+    );
+    log('chart.trades.fail',{err:String(e)});
+  }
+}
 
-  function drawChart(){
-    if (!window.Chart){ return; }
-    const canvas = document.getElementById('izzaChart');
-    if (!canvas) return;
-    const ctx = canvas.getContext('2d');
-    const pts = filteredByRange();
-    const labels = pts.map(p=>p.t);
-    const prices = pts.map(p=>p.price);
-    const vols   = pts.map(p=>p.vol);
+function drawChart(){
+  if (!window.Chart){ return; }
+  const canvas = document.getElementById('izzaChart');
+  if (!canvas) return;
+  const ctx = canvas.getContext('2d');
+  const pts = filteredByRange();
+  const labels = pts.map(p=>p.t);
+  const prices = pts.map(p=>p.price);
+  const vols   = pts.map(p=>p.vol);
 
-    if(izzaChart){ try{ izzaChart.destroy(); }catch(_){} }
+  if(izzaChart){ try{ izzaChart.destroy(); }catch(_){} }
 
-    izzaChart = new Chart(ctx, {
-      type: 'bar',
-      data: {
-        labels,
-        datasets: [
-          { type: 'line', label: 'Price (Pi/IZZA)', data: prices, yAxisID: 'y',
-            tension: 0.3, borderColor: '#7a44ff', backgroundColor: 'rgba(122,68,255,0.25)',
-            pointRadius: 0, borderWidth: 2 },
-          { type: 'bar', label: 'Volume (IZZA)', data: vols, yAxisID: 'y1',
-            backgroundColor: '#ffcd60', borderWidth: 0 }
-        ]
+  izzaChart = new Chart(ctx, {
+    type: 'bar',
+    data: {
+      labels,
+      datasets: [
+        { type: 'line', label: 'Price (Pi/IZZA)', data: prices, yAxisID: 'y',
+          tension: 0.3, borderColor: '#7a44ff', backgroundColor: 'rgba(122,68,255,0.25)',
+          pointRadius: 0, borderWidth: 2 },
+        { type: 'bar', label: 'Volume (IZZA)', data: vols, yAxisID: 'y1',
+          backgroundColor: '#ffcd60', borderWidth: 0 }
+      ]
+    },
+    options: {
+      animation: false, maintainAspectRatio: false,
+      scales: {
+        x: { type: 'time', time: { unit: pickTimeUnit() },
+             grid:{ color:'rgba(255,255,255,0.06)' }, ticks:{ color:'#cfe0ff' } },
+        y: { position: 'left', grid:{ color:'rgba(255,255,255,0.06)' }, ticks:{ color:'#cfe0ff' } },
+        y1:{ position: 'right', grid:{ display:false }, ticks:{ color:'#ffcd60' } }
       },
-      options: {
-        animation: false, maintainAspectRatio: false,
-        scales: {
-          x: { type: 'time', time: { unit: pickTimeUnit() },
-               grid:{ color:'rgba(255,255,255,0.06)' }, ticks:{ color:'#cfe0ff' } },
-          y: { position: 'left', grid:{ color:'rgba(255,255,255,0.06)' }, ticks:{ color:'#cfe0ff' } },
-          y1:{ position: 'right', grid:{ display:false }, ticks:{ color:'#ffcd60' } }
-        },
-        plugins: { legend:{ labels:{ color:'#cfe0ff' } },
-          tooltip:{ mode:'index', intersect:false, callbacks:{
-            label:(ctx)=> ctx.dataset.yAxisID==='y'
-              ? ` Price: ${Number(ctx.parsed.y).toFixed(6)} Pi`
-              : ` Volume: ${Number(ctx.parsed.y).toLocaleString()} IZZA`
-          }}}
-      }
-    });
-  }
-  function pickTimeUnit(){
-    switch(activeRange){
-      case '1D': return 'hour';
-      case '1W': return 'day';
-      case '1M': return 'day';
-      case '1Y': return 'month';
-      default:   return 'day';
+      plugins: { legend:{ labels:{ color:'#cfe0ff' } },
+        tooltip:{ mode:'index', intersect:false, callbacks:{
+          label:(ctx)=> ctx.dataset.yAxisID==='y'
+            ? ` Price: ${Number(ctx.parsed.y).toFixed(6)} Pi`
+            : ` Volume: ${Number(ctx.parsed.y).toLocaleString()} IZZA`
+        }}}
     }
+  });
+}
+
+function pickTimeUnit(){
+  switch(activeRange){
+    case '1D': return 'hour';
+    case '1W': return 'day';
+    case '1M': return 'day';
+    case '1Y': return 'month';
+    default:   return 'day';
   }
+}
 
-  // Open Orderbook
-  orderbookBtn.addEventListener('click', async ()=>{
-    openModal(orderbookModal, closeOrderbookBtn);
-    await ensureChart();
-    loadOrderbook();
-    loadTradesAndDraw();
-    startObRefresh();
-    requestAnimationFrame(()=>{ try{ izzaChart && izzaChart.resize(); }catch(_){} });
+// Open Orderbook
+orderbookBtn?.addEventListener('click', async ()=>{
+  openModal(orderbookModal, closeOrderbookBtn);
+  await ensureChart();
+  loadOrderbook();
+  loadTradesAndDraw();
+  startObRefresh();
+  requestAnimationFrame(()=>{ try{ izzaChart && izzaChart.resize(); }catch(_){} });
+});
+
+// =================== Orders / Wallet (with Stellar ensure) ===================
+const sideBtns  = Array.from(document.querySelectorAll('.sideBtn'));
+const typeBtns  = Array.from(document.querySelectorAll('.typeBtn'));
+let side  = 'BUY';
+let otype = 'LIMIT';
+
+sideBtns.forEach(b=>{
+  b.addEventListener('click', ()=>{
+    sideBtns.forEach(x=>x.setAttribute('aria-pressed','false'));
+    b.setAttribute('aria-pressed','true');
+    side = b.dataset.side;
   });
-  
+});
 
-  // =================== Orders / Wallet (with Stellar ensure) ===================
-  const sideBtns  = Array.from(document.querySelectorAll('.sideBtn'));
-  const typeBtns  = Array.from(document.querySelectorAll('.typeBtn'));
-  let side  = 'BUY';
-  let otype = 'LIMIT';
+const orderHelp   = document.getElementById('orderHelp');
+const slipRow     = document.getElementById('slipRow');
+const slippagePct = document.getElementById('slippagePct');
+const agreeSlip   = document.getElementById('agreeSlippage');
+const slipEcho    = document.getElementById('slipEcho');
+const autoNote    = document.getElementById('autoPriceNote');
+const autoPreview = document.getElementById('autoPricePreview');
+slippagePct?.addEventListener('input', ()=>{ slipEcho.textContent = slippagePct.value || '0'; });
 
-  sideBtns.forEach(b=>{
-    b.addEventListener('click', ()=>{
-      sideBtns.forEach(x=>x.setAttribute('aria-pressed','false'));
-      b.setAttribute('aria-pressed','true');
-      side = b.dataset.side;
-    });
+const orderForm = document.getElementById('orderForm');
+const acctPub   = document.getElementById('acctPub');
+const priceEl   = document.getElementById('price');
+const amtEl     = document.getElementById('amount');
+const orderMsg  = document.getElementById('orderMsg');
+
+typeBtns.forEach(b=>{
+  b.addEventListener('click', ()=>{
+    typeBtns.forEach(x=>x.setAttribute('aria-pressed','false'));
+    b.setAttribute('aria-pressed','true');
+    otype = b.dataset.type;
+
+    const isMarket = (otype === 'MARKET');
+    priceEl.disabled    = isMarket;
+    priceEl.required    = !isMarket;
+    priceEl.placeholder = isMarket ? 'auto (best price ± slippage)' : 'e.g. 0.005';
+
+    slipRow.style.display  = isMarket ? '' : 'none';
+    autoNote.style.display = isMarket ? '' : 'none';
+    if (!isMarket) agreeSlip.checked = false;
+
+    orderHelp.textContent = isMarket
+      ? 'Market: we auto-use the best available price with your slippage cap. Any remainder may rest as an offer.'
+      : 'Limit: you set the price, it fills if it crosses the book, otherwise rests until matched.';
   });
+});
 
-  const orderHelp   = document.getElementById('orderHelp');
-  const slipRow     = document.getElementById('slipRow');
-  const slippagePct = document.getElementById('slippagePct');
-  const agreeSlip   = document.getElementById('agreeSlippage');
-  const slipEcho    = document.getElementById('slipEcho');
-  const autoNote    = document.getElementById('autoPriceNote');
-  const autoPreview = document.getElementById('autoPricePreview');
-  slippagePct?.addEventListener('input', ()=>{ slipEcho.textContent = slippagePct.value || '0'; });
-
-  const orderForm = document.getElementById('orderForm');
-  const acctPub   = document.getElementById('acctPub');
-  const priceEl   = document.getElementById('price');
-  const amtEl     = document.getElementById('amount');
-  const orderMsg  = document.getElementById('orderMsg');
-
-  typeBtns.forEach(b=>{
-    b.addEventListener('click', ()=>{
-      typeBtns.forEach(x=>x.setAttribute('aria-pressed','false'));
-      b.setAttribute('aria-pressed','true');
-      otype = b.dataset.type;
-
-      const isMarket = (otype === 'MARKET');
-      priceEl.disabled    = isMarket;
-      priceEl.required    = !isMarket;
-      priceEl.placeholder = isMarket ? 'auto (best price ± slippage)' : 'e.g. 0.005';
-
-      slipRow.style.display  = isMarket ? '' : 'none';
-      autoNote.style.display = isMarket ? '' : 'none';
-      if (!isMarket) agreeSlip.checked = false;
-
-      orderHelp.textContent = isMarket
-        ? 'Market: we auto-use the best available price with your slippage cap. Any remainder may rest as an offer.'
-        : 'Limit: you set the price; it fills if it crosses the book, otherwise rests until matched.';
-    });
-  });
-
-  const buildBtn = document.getElementById('buildSep7');
-  function setOrderReady(ready, direct=false){
+const buildBtn = document.getElementById('buildSep7');
+function setOrderReady(ready, direct=false){
   const pub = document.getElementById('acctPub')?.value || ACTIVE_PUB;
   const localSec = pub && getLocalSecret(pub);
   const isIzzaWallet = pub && pub.startsWith('G') && localSec;
 
   buildBtn.disabled = !ready;
-  if (!ready) buildBtn.textContent = 'Waiting for funding & trustline…';
+  if (!ready) buildBtn.textContent = 'Waiting for funding, trustline…';
   else if (isIzzaWallet) buildBtn.textContent = 'Submit Order';
   else buildBtn.textContent = direct ? 'Submit Order' : 'Open in Wallet (SEP-7)';
 }
-  setOrderReady(false);
+setOrderReady(false);
 
-  // Horizon + network
-  const NETWORK_PASSPHRASE = 'Pi Testnet';
-  const SEP7_PREFIX = `web+stellar:tx?`;
+// Horizon + network
+const NETWORK_PASSPHRASE = 'Pi Testnet';
+const SEP7_PREFIX = `web+stellar:tx?`;
 
-  function getServer(){
-    const SDK = window.StellarSdk;
-    const ServerCtor = SDK?.Server || SDK?.Horizon?.Server;
-    if (!ServerCtor) throw new Error('Stellar SDK loaded, but Server class is unavailable');
-    return new ServerCtor(String(API_BASE).replace(/\/+$/,''));
+function getServer(){
+  const SDK = window.StellarSdk;
+  const ServerCtor = SDK?.Server || SDK?.Horizon?.Server;
+  if (!ServerCtor) throw new Error('Stellar SDK loaded, but Server class is unavailable');
+  return new ServerCtor(String(API_BASE).replace(/\/+$/,''));
+}
+
+function explainHorizonError(e){
+  try{
+    const d   = e?.response?.data || e?.data || null;
+    const ex  = d?.extras || null;
+    const txc = ex?.result_codes?.transaction || null;
+    const opc = Array.isArray(ex?.result_codes?.operations)
+      ? ex.result_codes.operations[0]
+      : null;
+
+    const friendly = {
+      op_underfunded:       'Not enough Pi to cover price×amount plus fees/reserves.',
+      op_low_reserve:       'Account would drop below the minimum reserve.',
+      op_no_trust:          'Missing trustline for the asset on this side.',
+      op_buy_no_trust:      'Missing trustline for the asset you are buying.',
+      op_sell_no_trust:     'Missing trustline for the asset you are selling.',
+      op_line_full:         'Trustline limit or balance can’t accept this much.',
+      tx_bad_auth:          'Bad signature or wrong network passphrase.',
+      tx_insufficient_balance: 'Insufficient balance to pay the fee.'
+    };
+
+    const title = d?.title || 'Bad request';
+    const detail = d?.detail || title;
+    const msg = friendly[opc] || friendly[txc] || detail;
+    return { msg, txc, opc, raw: d };
+  }catch{
+    return { msg: String(e) };
   }
+}
 
-  function explainHorizonError(e){
-    try{
-      const d   = e?.response?.data || e?.data || null;
-      const ex  = d?.extras || null;
-      const txc = ex?.result_codes?.transaction || null;
-      const opc = Array.isArray(ex?.result_codes?.operations)
-        ? ex.result_codes.operations[0]
-        : null;
+async function getAutoPrice(side, slippage = 0.03){
+  try{
+    const res = await fetch(
+      `${API_BASE}/order_book?selling_asset_type=credit_alphanum4`+
+      `&selling_asset_code=${encodeURIComponent(ASSET_CODE)}`+
+      `&selling_asset_issuer=${encodeURIComponent(ISSUER)}`+
+      `&buying_asset_type=native`,
+      { cache:'no-store' }
+    );
+    const ob = await res.json();
+    const asks = (ob.asks||[]).map(r=>Number(r.price));
+    const bids = (ob.bids||[]).map(r=>Number(r.price));
+    const bestAsk = asks.length ? Math.min(...asks) : null;
+    const bestBid = bids.length ? Math.max(...bids) : null;
+    if(side === 'BUY'  && bestAsk!=null) return bestAsk * (1 + slippage);
+    if(side === 'SELL' && bestBid!=null) return bestBid * (1 - slippage);
+    return null;
+  }catch(_){ return null; }
+}
 
-      const friendly = {
-        op_underfunded:       'Not enough Pi to cover price×amount plus fees/reserves.',
-        op_low_reserve:       'Account would drop below the minimum reserve.',
-        op_no_trust:          'Missing trustline for the asset on this side.',
-        op_buy_no_trust:      'Missing trustline for the asset you are buying.',
-        op_sell_no_trust:     'Missing trustline for the asset you are selling.',
-        op_line_full:         'Trustline limit/balance can’t accept this much.',
-        tx_bad_auth:          'Bad signature or wrong network passphrase.',
-        tx_insufficient_balance: 'Insufficient balance to pay the fee.'
-      };
+// ==== Account state helpers ====
+async function loadAccount(pub){
+  try{ const r = await fetch(`${API_BASE}/accounts/${pub}`, {cache:'no-store'}); return r.ok ? r.json() : null; }
+  catch(_){ return null; }
+}
+function hasIzzaTrust(balances){
+  if (!Array.isArray(balances)) return false;
+  return balances.some(b => b.asset_code === ASSET_CODE && b.asset_issuer === ISSUER);
+}
+async function getAccountState(pub){
+  const json = await loadAccount(pub);
+  if (!json) return { funded:false, hasTrust:false };
+  return { funded:true, hasTrust: hasIzzaTrust(json.balances||[]) };
+}
 
-      const title = d?.title || 'Bad request';
-      const detail = d?.detail || title;
-      const msg = friendly[opc] || friendly[txc] || detail;
-      return { msg, txc, opc, raw: d };
-    }catch{
-      return { msg: String(e) };
-    }
-  }
-
-  async function getAutoPrice(side, slippage = 0.03){
-    try{
-      const res = await fetch(
-        `${API_BASE}/order_book?selling_asset_type=credit_alphanum4`+
-        `&selling_asset_code=${encodeURIComponent(ASSET_CODE)}`+
-        `&selling_asset_issuer=${encodeURIComponent(ISSUER)}`+
-        `&buying_asset_type=native`,
-        { cache:'no-store' }
-      );
-      const ob = await res.json();
-      const asks = (ob.asks||[]).map(r=>Number(r.price));
-      const bids = (ob.bids||[]).map(r=>Number(r.price));
-      const bestAsk = asks.length ? Math.min(...asks) : null;
-      const bestBid = bids.length ? Math.max(...bids) : null;
-      if(side === 'BUY'  && bestAsk!=null) return bestAsk * (1 + slippage);
-      if(side === 'SELL' && bestBid!=null) return bestBid * (1 - slippage);
-      return null;
-    }catch(_){ return null; }
-  }
-
-  // ==== Account state helpers ====
-  async function loadAccount(pub){
-    try{ const r = await fetch(`${API_BASE}/accounts/${pub}`, {cache:'no-store'}); return r.ok ? r.json() : null; }
-    catch(_){ return null; }
-  }
-  function hasIzzaTrust(balances){
-    if (!Array.isArray(balances)) return false;
-    return balances.some(b => b.asset_code === ASSET_CODE && b.asset_issuer === ISSUER);
-  }
-  async function getAccountState(pub){
-    const json = await loadAccount(pub);
-    if (!json) return { funded:false, hasTrust:false };
-    return { funded:true, hasTrust: hasIzzaTrust(json.balances||[]) };
-  }
-  // --- short, self-contained funding watcher (beats Horizon lag) ---
+// --- short, self-contained funding watcher ---
 let __izzaFundingPoll = null;
 function startFundingWatcher(pub){
   if (__izzaFundingPoll) clearInterval(__izzaFundingPoll);
-  const stopAt = Date.now() + 20000; // ~20s max
+  const stopAt = Date.now() + 20000;
   __izzaFundingPoll = setInterval(async ()=>{
     try{
       const { funded, hasTrust } = await getAccountState(pub);
@@ -2466,32 +2513,32 @@ function startFundingWatcher(pub){
   }, 2500);
 }
 
-  // --- Fill "My Wallet" modal ---
-  async function refreshMyWalletModal(){
-    document.getElementById('mwUser').textContent = USER?.username || '—';
-    document.getElementById('mwPub').textContent  = ACTIVE_PUB || '—';
-    document.getElementById('secretOnce').style.display = 'none';
+// --- Fill "My Wallet" modal ---
+async function refreshMyWalletModal(){
+  document.getElementById('mwUser').textContent = USER?.username || '—';
+  document.getElementById('mwPub').textContent  = ACTIVE_PUB || '—';
+  document.getElementById('secretOnce').style.display = 'none';
 
-    if (!ACTIVE_PUB) return;
-    try{
-      const j = await loadAccount(ACTIVE_PUB);
-      const piBal   = (j?.balances||[]).find(b=>b.asset_type==='native')?.balance || '0';
-      const izzaBal = (j?.balances||[]).find(b=>b.asset_code===ASSET_CODE && b.asset_issuer===ISSUER)?.balance || '0';
-      document.getElementById('mwPi').textContent   = piBal;
-      document.getElementById('mwIzza').textContent = izzaBal;
-    }catch(_){}
-  }
+  if (!ACTIVE_PUB) return;
+  try{
+    const j = await loadAccount(ACTIVE_PUB);
+    const piBal   = (j?.balances||[]).find(b=>b.asset_type==='native')?.balance || '0';
+    const izzaBal = (j?.balances||[]).find(b=>b.asset_code===ASSET_CODE && b.asset_issuer===ISSUER)?.balance || '0';
+    document.getElementById('mwPi').textContent   = piBal;
+    document.getElementById('mwIzza').textContent = izzaBal;
+  }catch(_){}
+}
 
-  // ==== UI gate & trustline flow ====
+// ==== UI gate & trustline flow ====
 const statusEl        = document.getElementById('walletStatus');
 const checkFundingBtn = document.getElementById('checkFundingBtn');
 const addTrustlineBtn = document.getElementById('addTrustlineBtn');
 
-// 👇 ADD THESE HERE
+// extra refs
 const acctPubInput    = document.getElementById('acctPub');
 const autoFundHelp    = document.getElementById('autoFundHelp') || document.querySelector('#newWalletBox .help');
 
-/* 👇 ADD: Secret-row visibility wiring */
+// Secret-row visibility wiring
 const secRow = document.getElementById('secRow');
 const acctSec = document.getElementById('acctSec');
 const rememberSec = document.getElementById('rememberSec');
@@ -2501,142 +2548,145 @@ function updateSecretRowVisibility(pub){
   if (secRow) secRow.style.display = (pub && !hasLocal) ? '' : 'none';
 }
 
-  let NEW_WALLET = null; // { pub, sec } only when generated here
-  function isLocalWallet(pub){ return NEW_WALLET && NEW_WALLET.pub === pub; }
+let NEW_WALLET = null; // { pub, sec } only when generated here
+function isLocalWallet(pub){ return NEW_WALLET && NEW_WALLET.pub === pub; }
 
-  async function refreshAccountGate(pubMaybe){
-    const pub = (pubMaybe || acctPubInput.value || '').trim();
-    if (!pub){ addTrustlineBtn.disabled = true; setOrderReady(false); return; }
+async function refreshAccountGate(pubMaybe){
+  const pub = (pubMaybe || acctPubInput.value || '').trim();
+  if (!pub){ addTrustlineBtn.disabled = true; setOrderReady(false); return; }
 
-    statusEl.textContent = 'Checking account on Pi Testnet…';
-    const { funded, hasTrust } = await getAccountState(pub);
+  statusEl.textContent = 'Checking account on Pi Testnet…';
+  const { funded, hasTrust } = await getAccountState(pub);
 
-    if (funded && autoFundHelp) autoFundHelp.style.display = 'none';
+  if (funded && autoFundHelp) autoFundHelp.style.display = 'none';
+  updateSecretRowVisibility(pub);
 
-    if (!funded){
-      statusEl.textContent = 'Account is not funded yet. Fund with Test-Pi first.';
-      addTrustlineBtn.disabled = true;
-      setOrderReady(false);
-      return;
-    }
-
-    if (hasTrust){
-      statusEl.textContent = 'Trustline present. You can place orders.';
-      addTrustlineBtn.disabled = true;
-      const isDirect = (ACTIVE_PUB && pub === ACTIVE_PUB && !!getLocalSecret(pub)) || isLocalWallet(pub);
-      setOrderReady(true, isDirect);
-    } else {
-      statusEl.textContent = 'Account funded. Add the IZZA trustline.';
-      addTrustlineBtn.disabled = false;
-      setOrderReady(false);
-    }
-
-    addTrustlineBtn.onclick = async ()=>{
-      const target = (acctPubInput.value||'').trim();
-      if (!target) return;
-      if (isLocalWallet(target)) {
-        await addTrustlineDirect();
-      } else {
-        const uri = await buildChangeTrustSEP7(target);
-        if (uri){
-          window.location.href = uri;
-          orderMsg.innerHTML = `We opened your wallet to add the trustline. If nothing happens, copy this URI into a SEP-7 wallet:<br><code style="word-break:break-all">${uri}</code>`;
-        } else {
-          orderMsg.innerHTML = `<span style="color:#ffb3b3">Couldn’t prepare trustline request for this account.</span>`;
-        }
-      }
-    };
+  if (!funded){
+    statusEl.textContent = 'Account is not funded yet. Fund with Test-Pi first.';
+    addTrustlineBtn.disabled = true;
+    setOrderReady(false);
+    return;
   }
 
-  checkFundingBtn?.addEventListener('click', ()=> refreshAccountGate());
-  acctPubInput?.addEventListener('input', () => {
+  if (hasTrust){
+    statusEl.textContent = 'Trustline present. You can place orders.';
+    addTrustlineBtn.disabled = true;
+    const isDirect = (ACTIVE_PUB && pub === ACTIVE_PUB && !!getLocalSecret(pub)) || isLocalWallet(pub);
+    setOrderReady(true, isDirect);
+  } else {
+    statusEl.textContent = 'Account funded. Add the IZZA trustline.';
+    addTrustlineBtn.disabled = false;
+    setOrderReady(false);
+  }
+
+  addTrustlineBtn.onclick = async ()=>{
+    const target = (acctPubInput.value||'').trim();
+    if (!target) return;
+    if (isLocalWallet(target)) {
+      await addTrustlineDirect();
+    } else {
+      const uri = await buildChangeTrustSEP7(target);
+      if (uri){
+        window.location.href = uri;
+        orderMsg.innerHTML = `We opened your wallet to add the trustline. If nothing happens, copy this URI into a SEP-7 wallet:<br><code style="word-break:break-all">${uri}</code>`;
+      } else {
+        orderMsg.innerHTML = `<span style="color:#ffb3b3">Couldn’t prepare trustline request for this account.</span>`;
+      }
+    }
+  };
+}
+
+checkFundingBtn?.addEventListener('click', ()=> refreshAccountGate());
+acctPubInput?.addEventListener('input', () => {
   const pub = (acctPubInput.value || '').trim();
   const direct = !!pub && ((pub === ACTIVE_PUB && !!getLocalSecret(pub)) || isLocalWallet(pub));
-  // We don’t know trustline status here, so just enable the label state;
-  // refreshAccountGate() will still manage the real enabled/disabled bit.
   buildBtn.textContent = direct ? 'Submit Order' : 'Open in Wallet (SEP-7)';
 });
 
-  // ==== Order submit handler ====
-  orderForm.addEventListener('submit', async (e)=>{
-    e.preventDefault();
+// ==== Order submit handler ====
+orderForm?.addEventListener('submit', async (e)=>{
+  e.preventDefault();
 
-    const pub = (acctPub.value||'').trim();
-    const amount = Number(amtEl.value);
-    if(!pub || !isFinite(amount) || amount<=0){
-      orderMsg.textContent = 'Please provide a valid account and amount.'; return;
+  const pub = (acctPub.value||'').trim();
+  const amount = Number(amtEl.value);
+  if(!pub || !isFinite(amount) || amount<=0){
+    orderMsg.textContent = 'Please provide a valid account and amount.'; return;
+  }
+
+  const { funded, hasTrust } = await getAccountState(pub);
+  if (!funded){ orderMsg.textContent = 'Account not funded yet.'; return; }
+  if (!hasTrust){ orderMsg.textContent = 'Add the IZZA trustline first.'; return; }
+
+  const stellarOK = await ensureStellar();
+  if (!stellarOK || !window.StellarSdk){
+    orderMsg.innerHTML = `<span style="color:#ffb3b3">Couldn’t load Stellar SDK in this WebView.</span>`;
+    return;
+  }
+
+  let price = Number(priceEl.value);
+  if(otype === 'LIMIT'){
+    if(!isFinite(price) || price<=0){
+      orderMsg.textContent = 'Please provide a valid limit price.'; return;
     }
-
-    const { funded, hasTrust } = await getAccountState(pub);
-    if (!funded){ orderMsg.textContent = 'Account not funded yet.'; return; }
-    if (!hasTrust){ orderMsg.textContent = 'Add the IZZA trustline first.'; return; }
-
-    const stellarOK = await ensureStellar();
-    if (!stellarOK || !window.StellarSdk){
-      orderMsg.innerHTML = `<span style="color:#ffb3b3">Couldn’t load Stellar SDK in this WebView.</span>`;
-      return;
+  } else {
+    const slip = Math.max(0, Math.min(50, Number(slippagePct.value||0))) / 100;
+    if (!agreeSlip.checked){
+      orderMsg.textContent = 'Please accept the slippage consent to place a market order.'; return;
     }
+    orderMsg.textContent = 'Finding best price…';
+    const auto = await getAutoPrice(side, slip);
+    price = (auto && isFinite(auto)) ? auto :  (side === 'BUY' ?  1e9 : 1e-9);
+    autoPreview.textContent = (auto && isFinite(auto)) ? Number(auto).toFixed(7) : '—';
+  }
 
-    let price = Number(priceEl.value);
-    if(otype === 'LIMIT'){
-      if(!isFinite(price) || price<=0){
-        orderMsg.textContent = 'Please provide a valid limit price.'; return;
+  const localSec = (ACTIVE_PUB && pub === ACTIVE_PUB) ? getLocalSecret(pub) : null;
+  orderMsg.textContent = (localSec || isLocalWallet(pub)) ? 'Submitting order…' : 'Preparing wallet request…';
+
+  try{
+    const SDK    = window.StellarSdk;
+    const server = getServer();
+    const acct   = await server.loadAccount(pub);
+    const izza   = new SDK.Asset(ASSET_CODE, ISSUER);
+    const native = SDK.Asset.native();
+
+    const op = (side === 'SELL')
+      ? SDK.Operation.manageSellOffer({ selling: izza, buying: native, amount: amount.toString(), price: price.toString() })
+      : SDK.Operation.manageBuyOffer({  buying: izza, selling: native, buyAmount: amount.toString(), price: price.toString() });
+
+    const tx = new SDK.TransactionBuilder(
+      acct,
+      { fee: (await server.fetchBaseFee()).toString(), networkPassphrase: NETWORK_PASSPHRASE }
+    ).addOperation(op).setTimeout(180).build();
+
+    if (localSec || isLocalWallet(pub)) {
+      const sec = localSec || NEW_WALLET.sec;
+      const key = SDK.Keypair.fromSecret(sec);
+      tx.sign(key);
+      const res = await server.submitTransaction(tx);
+      if (res && res.hash) {
+        orderMsg.innerHTML = `✅ Order submitted. Tx hash: <code>${res.hash}</code>`;
+        log('order.submit.ok', { hash: res.hash });
+      } else {
+        orderMsg.textContent = 'Order submitted, awaiting confirmation.';
+        log('order.submit.queued');
       }
     } else {
-      const slip = Math.max(0, Math.min(50, Number(slippagePct.value||0))) / 100;
-      if (!agreeSlip.checked){
-        orderMsg.textContent = 'Please accept the slippage consent to place a market order.'; return;
-      }
-      orderMsg.textContent = 'Finding best price…';
-      const auto = await getAutoPrice(side, slip);
-      price = (auto && isFinite(auto)) ? auto :  (side === 'BUY' ?  1e9 : 1e-9);
-      autoPreview.textContent = (auto && isFinite(auto)) ? Number(auto).toFixed(7) : '—';
+      const xdr = tx.toXDR();
+      const uri = `${SEP7_PREFIX}xdr=${encodeURIComponent(xdr)}&network_passphrase=${encodeURIComponent(NETWORK_PASSPHRASE)}`;
+      window.location.href = uri;
+      orderMsg.innerHTML = `Opening your wallet… If nothing happens, copy this URI into a SEP-7 wallet:<br><code style="word-break:break-all">${uri}</code>`;
+      log('order.sep7.opened');
     }
+  } catch(err){
+    const info = explainHorizonError(err);
+    log('order.tx.fail', { err:String(err), txc:info.txc, opc:info.opc });
+    const codeLine = [info.opc, info.txc].filter(Boolean).join(' • ');
+    orderMsg.innerHTML =
+      `❌ ${info.msg}` +
+      (codeLine ? `<br><span class="small-muted">${codeLine}</span>` : '');
+  }
+});
 
-    const localSec = (ACTIVE_PUB && pub === ACTIVE_PUB) ? getLocalSecret(pub) : null;
-    orderMsg.textContent = (localSec || isLocalWallet(pub)) ? 'Submitting order…' : 'Preparing wallet request…';
-
-    try{
-      const SDK    = window.StellarSdk;
-      const server = getServer();
-      const acct   = await server.loadAccount(pub);
-      const izza   = new SDK.Asset(ASSET_CODE, ISSUER);
-      const native = SDK.Asset.native();
-
-      const op = (side === 'SELL')
-        ? SDK.Operation.manageSellOffer({ selling: izza, buying: native, amount: amount.toString(), price: price.toString() })
-        : SDK.Operation.manageBuyOffer({  buying: izza, selling: native, buyAmount: amount.toString(), price: price.toString() });
-
-      const tx = new SDK.TransactionBuilder(
-        acct,
-        { fee: (await server.fetchBaseFee()).toString(), networkPassphrase: NETWORK_PASSPHRASE }
-      ).addOperation(op).setTimeout(180).build();
-
-      if (localSec || isLocalWallet(pub)) {
-        const sec = localSec || NEW_WALLET.sec;
-        const key = SDK.Keypair.fromSecret(sec);
-        tx.sign(key);
-        const res = await server.submitTransaction(tx);
-        if (res && res.hash) {
-          orderMsg.innerHTML = `✅ Order submitted. Tx hash: <code>${res.hash}</code>`;
-        } else {
-          orderMsg.textContent = 'Order submitted, awaiting confirmation.';
-        }
-      } else {
-        const xdr = tx.toXDR();
-        const uri = `${SEP7_PREFIX}xdr=${encodeURIComponent(xdr)}&network_passphrase=${encodeURIComponent(NETWORK_PASSPHRASE)}`;
-        window.location.href = uri;
-        orderMsg.innerHTML = `Opening your wallet… If nothing happens, copy this URI into a SEP-7 wallet:<br><code style="word-break:break-all">${uri}</code>`;
-      }
-    } catch(err){
-      const info = explainHorizonError(err);
-      log('order.tx.fail', { err:String(err), txc:info.txc, opc:info.opc });
-      const codeLine = [info.opc, info.txc].filter(Boolean).join(' • ');
-      orderMsg.innerHTML =
-        `❌ ${info.msg}` +
-        (codeLine ? `<br><span class="small-muted">${codeLine}</span>` : '');
-    }
-  });
 // === Cancel ALL my open IZZA orders ===
 const cancelBtn = document.getElementById('cancelOrdersBtn');
 const cancelMsg = document.getElementById('cancelMsg');
@@ -2648,7 +2698,6 @@ cancelBtn?.addEventListener('click', async ()=>{
   const pub = ACTIVE_PUB || (document.getElementById('acctPub')?.value||'').trim();
   if (!pub){ cancelMsg.textContent = 'No active wallet.'; cancelBtn.disabled = false; return; }
 
-  // try local secret (incl. newly created wallet)
   const sec = getLocalSecret(pub, USER?.username) || (NEW_WALLET?.pub === pub ? NEW_WALLET.sec : null);
   if (!sec){ cancelMsg.textContent = 'Secret missing. Import or create wallet first.'; cancelBtn.disabled = false; return; }
 
@@ -2656,13 +2705,11 @@ cancelBtn?.addEventListener('click', async ()=>{
   if (!ok || !window.StellarSdk){ cancelMsg.textContent = 'Stellar SDK missing.'; cancelBtn.disabled = false; return; }
 
   try{
-    // 1) fetch open offers from Horizon
     const res = await fetch(`${API_BASE}/accounts/${pub}/offers?limit=200&order=asc`, { cache:'no-store' });
     const json = res.ok ? await res.json() : null;
     const offers = json?._embedded?.records ?? [];
     if (!offers.length){ cancelMsg.textContent = 'No active orders to cancel.'; cancelBtn.disabled = false; return; }
 
-    // 2) build ONE tx with N cancel ops (amount=0)
     const SDK = window.StellarSdk;
     const server = getServer();
     const acct = await server.loadAccount(pub);
@@ -2674,7 +2721,6 @@ cancelBtn?.addEventListener('click', async ()=>{
 
     let n = 0;
     for (const offer of offers){
-      // only touch IZZA/PI pair
       const sellsIzza = offer.selling?.asset_code === ASSET_CODE && offer.selling?.asset_issuer === ISSUER;
       const buysIzza  = offer.buying?.asset_code  === ASSET_CODE && offer.buying?.asset_issuer  === ISSUER;
       if (!(sellsIzza || buysIzza)) continue;
@@ -2701,66 +2747,60 @@ cancelBtn?.addEventListener('click', async ()=>{
 
     const resp = await server.submitTransaction(tx);
     cancelMsg.textContent = `✅ Cancelled ${n} open order(s). Tx: ${resp.hash}`;
+    log('orders.cancel.ok', { n, hash: resp.hash });
   } catch(e){
     const info = explainHorizonError(e);
     cancelMsg.textContent = `❌ ${info.msg}`;
+    log('orders.cancel.fail', { err: String(e) });
   } finally {
     cancelBtn.disabled = false;
   }
 });
-  // =================== Create Test Wallet ===================
-  const createBtn    = document.getElementById('createWalletBtn');
-  const box          = document.getElementById('newWalletBox');
-  const newPubEl     = document.getElementById('newPub');
-  const newQRCanvas  = document.getElementById('newWalletQR');
 
-  function drawQR(canvas, text){
-    try{
-      const ctx = canvas.getContext('2d');
-      ctx.fillStyle = '#fff'; ctx.fillRect(0,0,canvas.width,canvas.height);
-      ctx.fillStyle = '#000';
-      ctx.font = '10px monospace';
-      const lines = text.match(/.{1,16}/g) || [text];
-      lines.slice(0,7).forEach((ln,i)=>ctx.fillText(ln, 6, 16 + i*16));
-    }catch(e){ log('wallet.qr.fail',{err:String(e)}); }
-  }
+// =================== Create Test Wallet ===================
+const createBtn    = document.getElementById('createWalletBtn');
+const box          = document.getElementById('newWalletBox');
+const newPubEl     = document.getElementById('newPub');
+const newQRCanvas  = document.getElementById('newWalletQR');
 
-  createBtn.addEventListener('click', async ()=>{
-  // 🛑 Stop if the user already has a wallet (server or local)
-  
+function drawQR(canvas, text){
+  try{
+    const ctx = canvas.getContext('2d');
+    ctx.fillStyle = '#fff'; ctx.fillRect(0,0,canvas.width,canvas.height);
+    ctx.fillStyle = '#000';
+    ctx.font = '10px monospace';
+    const lines = text.match(/.{1,16}/g) || [text];
+    lines.slice(0,7).forEach((ln,i)=>ctx.fillText(ln, 6, 16 + i*16));
+  }catch(e){ log('wallet.qr.fail',{err:String(e)}); }
+}
 
-  // ✅ continue with your existing code below
+createBtn?.addEventListener('click', async ()=>{
+  // continue with existing logic
   const ok = await ensureStellar();
   if (!ok || !window.StellarSdk){
-    statusEl.innerHTML = `<span style="color:#ffb3b3">Couldn’t load Stellar SDK (blocked by CSP/CDN/SRI). Try a modern browser, or host /static/stellar-sdk.min.js.</span>`;
+    statusEl.innerHTML = `<span style="color:#ffb3b3">Couldn’t load Stellar SDK. Try a modern browser, or host /static/stellar-sdk.min.js.</span>`;
     return;
   }
   if (!window.crypto || !window.crypto.getRandomValues){
-    statusEl.innerHTML = `<span style="color:#ffb3b3">This browser/WebView lacks secure randomness (WebCrypto). Can’t generate keys here.</span>`;
+    statusEl.innerHTML = `<span style="color:#ffb3b3">This browser/WebView lacks secure randomness. Can’t generate keys here.</span>`;
     return;
   }
 
   try{
     const kp = StellarSdk.Keypair.random();
     NEW_WALLET = { pub: kp.publicKey(), sec: kp.secret() };
-    // After: NEW_WALLET = { pub: kp.publicKey(), sec: kp.secret() };
-try {
-  // Save locally so future submits work on this device
-  saveLocalSecret(NEW_WALLET.pub, NEW_WALLET.sec, USER?.username);
-} catch(_) {}
+    try { saveLocalSecret(NEW_WALLET.pub, NEW_WALLET.sec, USER?.username); } catch(_) {}
 
-const secretBox = document.getElementById('secretOnce');
-if (secretBox) {
-  secretBox.style.display = 'block';
-  secretBox.textContent =
-    `YOUR SECRET (copy & store safely):\n${NEW_WALLET.sec}\n\n` +
-    `This is a non-custodial wallet. We never send your secret to our server. ` +
-    `You will need this secret on new devices or if your browser storage is cleared.`;
-}
-// reset the one-time flag so Reveal works once in this session
-try { markSecretViewedOnce(NEW_WALLET.pub, USER?.username); } catch(_){}
+    const secretBox = document.getElementById('secretOnce');
+    if (secretBox) {
+      secretBox.style.display = 'block';
+      secretBox.textContent =
+        `YOUR SECRET (copy & store safely):\n${NEW_WALLET.sec}\n\n` +
+        `This is a non-custodial wallet. We never send your secret to our server. ` +
+        `You will need this secret on new devices or if your browser storage is cleared.`;
+    }
+    try { markSecretViewedOnce(NEW_WALLET.pub, USER?.username); } catch(_){}
 
-    // --- immediately make this the active wallet everywhere ---
     try { await linkActiveWallet(NEW_WALLET.pub); } catch(_) {}
     ACTIVE_PUB = NEW_WALLET.pub;
     try { saveLocalSecret(NEW_WALLET.pub, NEW_WALLET.sec); } catch(_){}
@@ -2784,20 +2824,19 @@ try { markSecretViewedOnce(NEW_WALLET.pub, USER?.username); } catch(_){}
       const json = await res.json();
       funded = !!(res.ok && json && (json.ok || json.already));
       if (!funded) statusEl.innerHTML = `<span style="color:#ffb3b3">Faucet failed: ${json && json.err ? json.err : 'unknown'}</span>`;
+      log('wallet.faucet.done', { ok: funded });
     }catch(e){
       statusEl.innerHTML = `<span style="color:#ffb3b3">Faucet error: ${String(e)}</span>`;
+      log('wallet.faucet.fail', { err: String(e) });
     }
 
     if (funded){
-      statusEl.textContent = 'Funded with 2.0 Test-Pi! You can now add the IZZA trustline.';
+      statusEl.textContent = 'Funded with 2.0 Test-Pi. You can now add the IZZA trustline.';
       if (autoFundHelp) autoFundHelp.style.display = 'none';
 
-      // make the button usable immediately (handler lives in refreshAccountGate)
       addTrustlineBtn.disabled = false;
       setOrderReady(false);
 
-      // re-run the gate so the onclick is attached,
-      // and briefly poll Horizon to smooth out ledger lag
       await refreshAccountGate(NEW_WALLET.pub);
       startFundingWatcher(NEW_WALLET.pub);
     }else{
@@ -2809,115 +2848,122 @@ try { markSecretViewedOnce(NEW_WALLET.pub, USER?.username); } catch(_){}
   }
 });
 
-  // ==== Add trustline (direct for local wallet) ====
-  async function addTrustlineDirect(){
-    const ok = await ensureStellar();
-    if (!ok || !window.StellarSdk){ statusEl.textContent = 'Stellar SDK missing.'; return; }
-    if(!NEW_WALLET){ statusEl.textContent = 'No wallet in memory.'; return; }
+// ==== Add trustline (direct for local wallet) ====
+async function addTrustlineDirect(){
+  const ok = await ensureStellar();
+  if (!ok || !window.StellarSdk){ statusEl.textContent = 'Stellar SDK missing.'; return; }
+  if(!NEW_WALLET){ statusEl.textContent = 'No wallet in memory.'; return; }
 
-    addTrustlineBtn.disabled = true;
-    statusEl.textContent = 'Adding IZZA trustline…';
-    try{
-      const SDK    = window.StellarSdk;
-      const server = getServer();
-      const user   = SDK.Keypair.fromSecret(NEW_WALLET.sec);
-      const acct   = await server.loadAccount(user.publicKey());
-      const izza   = new SDK.Asset(ASSET_CODE, ISSUER);
+  addTrustlineBtn.disabled = true;
+  statusEl.textContent = 'Adding IZZA trustline…';
+  try{
+    const SDK    = window.StellarSdk;
+    const server = getServer();
+    const user   = SDK.Keypair.fromSecret(NEW_WALLET.sec);
+    const acct   = await server.loadAccount(user.publicKey());
+    const izza   = new SDK.Asset(ASSET_CODE, ISSUER);
 
-      const tx = new SDK.TransactionBuilder(acct, {
-        fee: (await server.fetchBaseFee()).toString(),
-        networkPassphrase: NETWORK_PASSPHRASE
-      })
-      .addOperation(SDK.Operation.changeTrust({ asset: izza }))
-      .setTimeout(180)
-      .build();
+    const tx = new SDK.TransactionBuilder(acct, {
+      fee: (await server.fetchBaseFee()).toString(),
+      networkPassphrase: NETWORK_PASSPHRASE
+    })
+    .addOperation(SDK.Operation.changeTrust({ asset: izza }))
+    .setTimeout(180)
+    .build();
 
-      tx.sign(user);
-      const res = await server.submitTransaction(tx);
-      const okRes = !!res && (res.successful || res.result_xdr);
-      statusEl.textContent = okRes ? 'Trustline added. You can place orders now.' : 'Trustline failed.';
-      addTrustlineBtn.disabled = okRes ? true : false;
-      if (okRes){
-        setOrderReady(true, true);
-        checkFundingBtn && (checkFundingBtn.style.display = 'none');
-      }
-    }catch(e){
-      statusEl.innerHTML = `<span style="color:#ffb3b3">Trustline failed: ${String(e)}</span>`;
-      addTrustlineBtn.disabled = false;
-      log('wallet.trustline.fail',{err:String(e)});
+    tx.sign(user);
+    const res = await server.submitTransaction(tx);
+    const okRes = !!res && (res.successful || res.result_xdr);
+    statusEl.textContent = okRes ? 'Trustline added. You can place orders now.' : 'Trustline failed.';
+    addTrustlineBtn.disabled = okRes ? true : false;
+    if (okRes){
+      setOrderReady(true, true);
+      checkFundingBtn && (checkFundingBtn.style.display = 'none');
+      log('trustline.add.ok');
+    } else {
+      log('trustline.add.fail', { res });
     }
+  }catch(e){
+    statusEl.innerHTML = `<span style="color:#ffb3b3">Trustline failed: ${String(e)}</span>`;
+    addTrustlineBtn.disabled = false;
+    log('wallet.trustline.fail',{err:String(e)});
   }
+}
 
-  // ==== Build changeTrust SEP-7 for external wallets ====
-  async function buildChangeTrustSEP7(pub){
-    const ok = await ensureStellar();
-    if (!ok || !window.StellarSdk) { statusEl.textContent = 'Stellar SDK missing.'; return null; }
-    try{
-      const SDK    = window.StellarSdk;
-      const server = getServer();
-      const acct   = await server.loadAccount(pub);
-      const izza   = new SDK.Asset(ASSET_CODE, ISSUER);
+// ==== Build changeTrust SEP-7 for external wallets ====
+async function buildChangeTrustSEP7(pub){
+  const ok = await ensureStellar();
+  if (!ok || !window.StellarSdk) { statusEl.textContent = 'Stellar SDK missing.'; return null; }
+  try{
+    const SDK    = window.StellarSdk;
+    const server = getServer();
+    const acct   = await server.loadAccount(pub);
+    const izza   = new SDK.Asset(ASSET_CODE, ISSUER);
 
-      const tx = new SDK.TransactionBuilder(acct, {
-        fee: (await server.fetchBaseFee()).toString(),
-        networkPassphrase: NETWORK_PASSPHRASE
-      })
-      .addOperation(SDK.Operation.changeTrust({ asset: izza }))
-      .setTimeout(180)
-      .build();
+    const tx = new SDK.TransactionBuilder(acct, {
+      fee: (await server.fetchBaseFee()).toString(),
+      networkPassphrase: NETWORK_PASSPHRASE
+    })
+    .addOperation(SDK.Operation.changeTrust({ asset: izza }))
+    .setTimeout(180)
+    .build();
 
-      const xdr = tx.toXDR();
-      return `${SEP7_PREFIX}xdr=${encodeURIComponent(xdr)}&network_passphrase=${encodeURIComponent(NETWORK_PASSPHRASE)}`;
-    }catch(e){
-      log('trust.sep7.fail',{err:String(e)});
-      return null;
-    }
+    const xdr = tx.toXDR();
+    log('trust.sep7.built');
+    return `${SEP7_PREFIX}xdr=${encodeURIComponent(xdr)}&network_passphrase=${encodeURIComponent(NETWORK_PASSPHRASE)}`;
+  }catch(e){
+    log('trust.sep7.fail',{err:String(e)});
+    return null;
   }
+}
 
-  // Initial gate & UI
-  setTimeout(()=>{ if (ACTIVE_PUB) refreshAccountGate(ACTIVE_PUB); }, 0);
+// Initial gate & UI
+setTimeout(()=>{ if (ACTIVE_PUB) refreshAccountGate(ACTIVE_PUB); }, 0);
 
-  // =================== Open the Place Order modal ===================
-  orderBtn.addEventListener('click', async ()=>{
-    if (!USER){
-      try { await piSignIn(); } catch(_) { /* user canceled; continue read-only */ }
-    }
-    await bootstrapAuthUI();
-    openModal(placeOrderModal, closePlaceOrderBtn);
-    refreshAccountGate(acctPub.value);
+// =================== Open the Place Order modal ===================
+orderBtn?.addEventListener('click', async ()=>{
+  if (!USER){
+    try { await piSignIn(); } catch(_) { /* user canceled, continue read-only */ }
+  }
+  await bootstrapAuthUI();
+  openModal(placeOrderModal, closePlaceOrderBtn);
+  refreshAccountGate(acctPub.value);
+});
+
+// =================== Coin spin to refresh ===================
+const wrap = document.getElementById('coinWrap');
+let startX=0, startT=0;
+function start(e){ const p = e.touches ? e.touches[0] : e; startX=p.clientX; startT=performance.now(); }
+function end(e){
+  const p = (e.changedTouches && e.changedTouches[0]) ? e.changedTouches[0] : e;
+  const dx = (p.clientX - startX);
+  const dt = Math.max(1, performance.now() - startT);
+  const speed = Math.abs(dx) / dt;
+  if (speed > 0.4) {
+    wrap.classList.remove('spin-anim'); void wrap.offsetWidth; wrap.classList.add('spin-anim');
+    setTimeout(fetchSummary, 1100);
+    log('coin.spin.refresh');
+  }
+}
+wrap?.addEventListener('pointerdown', start, {passive:true});
+wrap?.addEventListener('pointerup',   end,   {passive:true});
+wrap?.addEventListener('touchstart',  start, {passive:true});
+wrap?.addEventListener('touchend',    end,   {passive:true});
+
+// =================== Focus trap in modals ===================
+function trapFocus(container){
+  container.addEventListener('keydown', (e)=>{
+    if(e.key !== 'Tab') return;
+    const f = container.querySelectorAll('button, [href], input, select, textarea, [tabindex]:not([tabindex="-1"])');
+    if(!f.length) return;
+    const first = f[0], last = f[f.length - 1];
+    if(e.shiftKey && document.activeElement === first){ last.focus(); e.preventDefault(); }
+    else if(!e.shiftKey && document.activeElement === last){ first.focus(); e.preventDefault(); }
   });
+}
+[modal, orderbookModal, placeOrderModal, myWalletModal, stakeModal, claimModal, voteModal].forEach(m=> m && trapFocus(m));
 
-  // =================== Coin spin to refresh ===================
-  const wrap = document.getElementById('coinWrap');
-  let startX=0, startT=0;
-  function start(e){ const p = e.touches ? e.touches[0] : e; startX=p.clientX; startT=performance.now(); }
-  function end(e){
-    const p = (e.changedTouches && e.changedTouches[0]) ? e.changedTouches[0] : e;
-    const dx = (p.clientX - startX);
-    const dt = Math.max(1, performance.now() - startT);
-    const speed = Math.abs(dx) / dt;
-    if (speed > 0.4) {
-      wrap.classList.remove('spin-anim'); void wrap.offsetWidth; wrap.classList.add('spin-anim');
-      setTimeout(fetchSummary, 1100);
-    }
-  }
-  wrap.addEventListener('pointerdown', start, {passive:true});
-  wrap.addEventListener('pointerup',   end,   {passive:true});
-  wrap.addEventListener('touchstart',  start, {passive:true});
-  wrap.addEventListener('touchend',    end,   {passive:true});
-
-  // =================== Focus trap in modals ===================
-  function trapFocus(container){
-    container.addEventListener('keydown', (e)=>{
-      if(e.key !== 'Tab') return;
-      const f = container.querySelectorAll('button, [href], input, select, textarea, [tabindex]:not([tabindex="-1"])');
-      if(!f.length) return;
-      const first = f[0], last = f[f.length - 1];
-      if(e.shiftKey && document.activeElement === first){ last.focus(); e.preventDefault(); }
-      else if(!e.shiftKey && document.activeElement === last){ first.focus(); e.preventDefault(); }
-    });
-  }
-  [modal, orderbookModal, placeOrderModal, myWalletModal].forEach(trapFocus);
+// end of file
 })();
 </script>
 </body>
