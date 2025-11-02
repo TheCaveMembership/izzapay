@@ -1984,48 +1984,51 @@ claimRefresh?.addEventListener('click', ()=>{
   listClaimables();
 });
 
-// ======== CLAIM SELECTED (batch) — modal-scoped, robust ids, mobile debug ========
+// ======== CLAIM SELECTED (batch) — accept 64 or 72 hex, normalize to Horizon (72) ========
 claimSelected?.addEventListener('click', async ()=>{
   const pub = (claimPub.value||'').trim();
   if (!pub.startsWith('G')) { claimMsg.textContent = 'Enter a valid G… public key.'; return; }
 
-  // scope to the claim modal so nothing else interferes
-  const modalRoot = document.getElementById('claimModal') || document;
-  const rawPicks = Array.from(modalRoot.querySelectorAll('.cbPick:checked'))
+  // Expand group selections like "id1,id2" into individual ids
+  const rawPicks = Array.from(document.querySelectorAll('.cbPick:checked'))
     .map(x => (x.dataset.balanceIds || x.value || '').trim());
 
-  const picks = rawPicks
-    .flatMap(v => v.split(','))
-    .map(s => s.trim())
-    .filter(Boolean);
-
+  const picks = rawPicks.flatMap(v => v.split(',')).map(s => s.trim()).filter(Boolean);
   if (!picks.length){
     claimMsg.textContent='Pick at least one balance.';
     log('claim.none');
     return;
   }
 
-  // 64-hex validation + de-dupe
+  // Accept 72-hex with discriminant or 64-hex, normalize to 72-hex (Horizon format)
   const HEX64 = /^[0-9a-fA-F]{64}$/;
-  const valid = Array.from(new Set(picks.filter(id => HEX64.test(id))));
+  const HEX72 = /^0{8}[0-9a-fA-F]{64}$/;
 
-  // tiny mobile-friendly debug echo of what we’re sending
-  claimMsg.textContent = `picked=${rawPicks.length} tokens=${picks.length} valid=${valid.length} first=${valid[0]?valid[0].slice(0,8)+'…':'—'}`;
+  function normalizeBalanceId(id){
+    const s = id.replace(/^0x/i,'').trim();
+    if (HEX72.test(s)) return s.toLowerCase();          // already Horizon format
+    if (HEX64.test(s)) return ('00000000' + s).toLowerCase(); // add discriminant
+    return null;
+  }
 
-  if (!valid.length){
+  const normalized = Array.from(new Set(
+    picks.map(normalizeBalanceId).filter(Boolean)
+  ));
+
+  if (!normalized.length){
     claimMsg.textContent = '❌ No valid claimable balance ids were selected.';
     log('claim.invalid_ids', { picks });
     return;
   }
 
-  claimMsg.textContent = `Building claim for ${valid.length} id${valid.length>1?'s':''}…`;
-  log('claim.build.start', { n: valid.length });
+  claimMsg.textContent = `Building claim for ${normalized.length} id${normalized.length>1?'s':''}…`;
+  log('claim.build.start', { n: normalized.length });
 
   try{
     const r = await fetch('/api/stake/claim', {
       method:'POST',
       headers:{'Content-Type':'application/json'},
-      body: JSON.stringify({ pub, ids: valid })
+      body: JSON.stringify({ pub, ids: normalized })
     });
 
     let j = {};
@@ -2041,7 +2044,7 @@ claimSelected?.addEventListener('click', async ()=>{
     const xdr  = j.xdr;
     const pass = j.network_passphrase || 'Pi Testnet';
 
-    // --- IZZA wallet local-sign (preferred)
+    // Prefer local-sign if we have the secret
     const localSec = getLocalSecret(pub, USER?.username);
     if (localSec){
       const ok = await ensureStellar();
@@ -2068,7 +2071,7 @@ claimSelected?.addEventListener('click', async ()=>{
       return;
     }
 
-    // --- Otherwise, guarded wallet link (SEP-7)
+    // Fallback: open in wallet (SEP-7)
     const uri = `web+stellar:tx?xdr=${encodeURIComponent(xdr)}&network_passphrase=${encodeURIComponent(pass)}`;
     try{
       window.location.assign(uri);
