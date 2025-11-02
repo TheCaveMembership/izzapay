@@ -1886,11 +1886,23 @@ async function listClaimables(){
       const pillClass = kind === 'vote' ? 'pill-vote' : 'pill-regular';
       const unlocked  = unlockTs ? (Date.now() >= unlockTs*1000) : true;
 
-      // Collect ids and totals per contract
+      // Collect ids and totals per contract (robust)
       const ids = [];
       let principal = 0, reward = 0;
       for (const r of recs){
-        if (r.id) ids.push(r.id);
+        if (Array.isArray(r.ids) && r.ids.length){
+          ids.push(...r.ids.map(x => String(x).trim()));
+        } else {
+          const id =
+            r.id ||
+            r.claimable_balance_id ||
+            r.balance_id ||
+            r.cb_id ||
+            (r.balance && r.balance.id) ||
+            null;
+          if (id) ids.push(String(id).trim());
+        }
+
         const role = (r.role || r.kind || '').toString().toLowerCase();
         if (role.includes('reward')) reward += Number(r.amount||0);
         else                         principal += Number(r.amount||0);
@@ -1905,14 +1917,17 @@ async function listClaimables(){
         ? `VOTE • ${prettyProposal(any.proposal)}`
         : (kind === 'vote' ? 'VOTE' : 'NORMAL');
 
+      // ensure both value and data-attr carry the same CSV
+      const csv = ids.map(x => x.trim()).filter(Boolean).join(',');
+
       trHead.innerHTML = `
       <td colspan="4">
         <label class="group-toggle" style="display:flex;align-items:center;gap:10px;white-space:nowrap;">
           <input
             type="checkbox"
             class="cbPick"
-            value="${ids.join(',')}"
-            data-balance-ids="${ids.join(',')}"
+            value="${csv}"
+            data-balance-ids="${csv}"
             ${unlocked ? '' : 'disabled'}>
           <span class="pill ${pillClass}">${voteLabel}</span>
           <strong>Stake • unlock ${unlockStr}</strong>
@@ -1947,7 +1962,7 @@ async function listClaimables(){
             <div class="line" style="display:flex;justify-content:space-between;align-items:center;white-space:nowrap;">
               <span class="pill ${pillClass}" aria-hidden="true">PRINCIPAL</span>
               <span class="num">${fmtNum(principal)}</span>
-                        </div>
+            </div>
             ${rewardHTML}
             ${unlocked ? '' : `<span class="lockhint">Locked until ${unlockStr}</span>`}
           </div>
@@ -1969,14 +1984,16 @@ claimRefresh?.addEventListener('click', ()=>{
   listClaimables();
 });
 
-// ======== CLAIM SELECTED (batch) — robust ids + clear errors + IZZA-first ========
+// ======== CLAIM SELECTED (batch) — modal-scoped, robust ids, mobile debug ========
 claimSelected?.addEventListener('click', async ()=>{
   const pub = (claimPub.value||'').trim();
   if (!pub.startsWith('G')) { claimMsg.textContent = 'Enter a valid G… public key.'; return; }
 
-  // Expand group selections like "id1,id2" into individual ids
-  const rawPicks = Array.from(document.querySelectorAll('.cbPick:checked'))
+  // scope to the claim modal so nothing else interferes
+  const modalRoot = document.getElementById('claimModal') || document;
+  const rawPicks = Array.from(modalRoot.querySelectorAll('.cbPick:checked'))
     .map(x => (x.dataset.balanceIds || x.value || '').trim());
+
   const picks = rawPicks
     .flatMap(v => v.split(','))
     .map(s => s.trim())
@@ -1988,9 +2005,13 @@ claimSelected?.addEventListener('click', async ()=>{
     return;
   }
 
-  // Client-side 64-hex validation + de-dupe
+  // 64-hex validation + de-dupe
   const HEX64 = /^[0-9a-fA-F]{64}$/;
   const valid = Array.from(new Set(picks.filter(id => HEX64.test(id))));
+
+  // tiny mobile-friendly debug echo of what we’re sending
+  claimMsg.textContent = `picked=${rawPicks.length} tokens=${picks.length} valid=${valid.length} first=${valid[0]?valid[0].slice(0,8)+'…':'—'}`;
+
   if (!valid.length){
     claimMsg.textContent = '❌ No valid claimable balance ids were selected.';
     log('claim.invalid_ids', { picks });
@@ -2008,7 +2029,7 @@ claimSelected?.addEventListener('click', async ()=>{
     });
 
     let j = {};
-    try { j = await r.json(); } catch { /* ignore parse fail */ }
+    try { j = await r.json(); } catch {}
 
     if (!r.ok || !j?.ok){
       const msg = j?.error || j?.message || `HTTP ${r.status}`;
@@ -2047,7 +2068,7 @@ claimSelected?.addEventListener('click', async ()=>{
       return;
     }
 
-    // --- No local IZZA secret — show guarded wallet link (copyable)
+    // --- Otherwise, guarded wallet link (SEP-7)
     const uri = `web+stellar:tx?xdr=${encodeURIComponent(xdr)}&network_passphrase=${encodeURIComponent(pass)}`;
     try{
       window.location.assign(uri);
