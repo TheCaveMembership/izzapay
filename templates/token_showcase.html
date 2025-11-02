@@ -1984,7 +1984,7 @@ claimRefresh?.addEventListener('click', ()=>{
   listClaimables();
 });
 
-// ======== CLAIM SELECTED (batch) — accept 64 or 72 hex, normalize to Horizon (72) ========
+// ======== CLAIM SELECTED (batch) — accept 64 or 72 hex; normalize to 64 for server ========
 claimSelected?.addEventListener('click', async ()=>{
   const pub = (claimPub.value||'').trim();
   if (!pub.startsWith('G')) { claimMsg.textContent = 'Enter a valid G… public key.'; return; }
@@ -2000,23 +2000,19 @@ claimSelected?.addEventListener('click', async ()=>{
     return;
   }
 
-  // Accept 72-hex with discriminant or 64-hex, normalize to 72-hex (Horizon format)
   const HEX64 = /^[0-9a-fA-F]{64}$/;
-  const HEX72 = /^0{8}[0-9a-fA-F]{64}$/;
+  const HEX72 = /^[0-9a-fA-F]{72}$/;       // some sources prepend 8-hex discriminant
 
   function normalizeBalanceId(id){
-    const s = id.replace(/^0x/i,'').trim();
-    if (HEX72.test(s)) return s.toLowerCase();          // already Horizon format
-    if (HEX64.test(s)) return ('00000000' + s).toLowerCase(); // add discriminant
+    const s = String(id||'').replace(/^0x/i,'').trim();
+    if (HEX64.test(s)) return s.toLowerCase();           // already 64
+    if (HEX72.test(s)) return s.slice(8).toLowerCase();  // drop first 8 hex → 64
     return null;
   }
 
-  const normalized = Array.from(new Set(
-    picks.map(normalizeBalanceId).filter(Boolean)
-  ));
-
+  const normalized = Array.from(new Set(picks.map(normalizeBalanceId).filter(Boolean)));
   if (!normalized.length){
-    claimMsg.textContent = '❌ No valid claimable balance ids were selected.';
+    claimMsg.textContent = '❌ No valid claimable balance ids were selected. Expect 64-hex, or 72-hex with an 8-hex prefix.';
     log('claim.invalid_ids', { picks });
     return;
   }
@@ -2025,6 +2021,7 @@ claimSelected?.addEventListener('click', async ()=>{
   log('claim.build.start', { n: normalized.length });
 
   try{
+    // Keep your existing server contract: { pub, ids } and expect { ok, xdr, network_passphrase }
     const r = await fetch('/api/stake/claim', {
       method:'POST',
       headers:{'Content-Type':'application/json'},
@@ -2033,7 +2030,6 @@ claimSelected?.addEventListener('click', async ()=>{
 
     let j = {};
     try { j = await r.json(); } catch {}
-
     if (!r.ok || !j?.ok){
       const msg = j?.error || j?.message || `HTTP ${r.status}`;
       claimMsg.textContent = `❌ ${msg}`;
