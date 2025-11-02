@@ -35,10 +35,10 @@ DISTR_SECRET = _getenv("DISTR_SECRET", required=True)
 VOTE_ROUND_LENGTH_DAYS = int(_getenv("VOTE_ROUND_LENGTH_DAYS", "180") or "180")
 VOTE_ROUND_END_ENV     = _getenv("VOTE_ROUND_END", None)
 
-# % of ad revenue allocated to voters of the winning game (for display/preview)
+# % of ad revenue allocated to voters of the winning game, for display, preview
 AD_REVENUE_POOL_PCT = Decimal(_getenv("AD_REVENUE_POOL_PCT", "0.25") or "0.25")
 
-# Early voter max bonus (linear → 0 at deadline). 0.30 = up to +30% weight.
+# Early voter max bonus, linear → 0 at deadline. 0.30 = up to +30 percent weight.
 EARLY_BONUS_MAX = Decimal(_getenv("EARLY_BONUS_MAX", "0.30") or "0.30")
 
 # Validate keys early
@@ -67,11 +67,11 @@ def _vote_cx():
       weight7    TEXT NOT NULL,
       created_at INTEGER NOT NULL
     )""")
-    # Backfill safety: older tables may lack weight7
+    # Backfill safety, older tables may lack weight7
     try:
         cx.execute("ALTER TABLE vote_intents ADD COLUMN weight7 TEXT")
     except Exception:
-        pass  # already exists or SQLite variant without IF NOT EXISTS
+        pass
     return cx
 
 def _vote_add(round_end, proposal, pub, amount7, weight7):
@@ -84,7 +84,6 @@ def _vote_add(round_end, proposal, pub, amount7, weight7):
         cx.commit(); cx.close()
 
 def _vote_total_weight(round_end, proposal) -> Decimal:
-    # Sum weight7, fallback to amount7 if weight7 is NULL (legacy rows)
     with _vote_lock:
         cx = _vote_cx()
         cur = cx.execute(
@@ -118,7 +117,7 @@ def _lookup_vote_proposal(pub: str, round_end: int, amount7: str) -> str | None:
 
 def _vote_est_share_pct(round_end: int, proposal: str, your_weight7: str) -> str:
     """
-    Compute the exact preview %: your_weight / (pool_before + your_weight), 2dp.
+    Compute the exact preview percent: your_weight / (pool_before + your_weight), 2 dp.
     """
     try:
         your_w = Decimal(str(your_weight7 or "0"))
@@ -144,7 +143,7 @@ def _clamp_days(days: int) -> int:
 def _apr_for_lock(days: int) -> Decimal:
     """
     Linear until 180d, then flat.
-    30d ≈ 5% APR, 180d ≈ 15% APR.
+    30d ≈ 5 percent APR, 180d ≈ 15 percent APR.
     """
     d = _clamp_days(days)
     base  = Decimal("0.05")
@@ -161,9 +160,26 @@ def _reward_for(amt: Decimal, days: int) -> Decimal:
         Decimal("0.0000001"), rounding=ROUND_DOWN
     )
 
+# Accept 64 or 72 hex, normalize later for SDK
 _hex64 = re.compile(r"^[0-9a-fA-F]{64}$")
+_hex72 = re.compile(r"^[0-9a-fA-F]{72}$")
+
 def _valid_balance_id(s: str | None) -> bool:
-    return bool(s) and bool(_hex64.match(s))
+    return bool(s) and (bool(_hex64.match(s)) or bool(_hex72.match(s)))
+
+def _normalize_cb_for_sdk(s: str | None) -> str | None:
+    """
+    Stellar SDK's ClaimClaimableBalance expects discriminant + hash (72 hex).
+    If 64 provided, prefix 8 zeros. Return lowercase or None if invalid.
+    """
+    if not s:
+        return None
+    v = s.strip()
+    if _hex72.match(v):
+        return v.lower()
+    if _hex64.match(v):
+        return ("00000000" + v).lower()
+    return None
 
 def _account_balances(pub: str):
     return server.accounts().account_id(pub).call().get("balances", [])
@@ -177,7 +193,7 @@ def _has_trust_and_bal(pub: str, need: Decimal) -> bool:
                 return False
     return False
 
-# ---------- robust unlock-time parsing (ISO8601 or epoch, nested predicates)
+# ---------- robust unlock-time parsing, ISO8601 or epoch, nested predicates
 
 def _extract_abs_before(obj):
     """Recursively find an 'abs_before' value anywhere in a predicate structure."""
@@ -186,7 +202,7 @@ def _extract_abs_before(obj):
     if isinstance(obj, dict):
         if "abs_before" in obj:
             return obj["abs_before"]
-        for v in obj.values():  # handles {"not":{...}}, {"and":[...]}, {"or":[...]} etc.
+        for v in obj.values():
             found = _extract_abs_before(v)
             if found is not None:
                 return found
@@ -198,15 +214,14 @@ def _extract_abs_before(obj):
     return None
 
 def _to_unix(ts_val) -> int | None:
-    """Convert abs_before value (epoch number or ISO8601 string) to unix seconds."""
+    """Convert abs_before value, epoch number or ISO8601 string, to unix seconds."""
     if ts_val is None:
         return None
     if isinstance(ts_val, (int, float)):
         return int(ts_val)
     s = str(ts_val).strip()
-    if s.isdigit():  # numeric string epoch
+    if s.isdigit():
         return int(s)
-    # ISO8601 formats like 'YYYY-MM-DDTHH:MM:SSZ' or with '+00:00'
     try:
         if s.endswith("Z"):
             dt = datetime.strptime(s, "%Y-%m-%dT%H:%M:%SZ").replace(tzinfo=timezone.utc)
@@ -239,7 +254,7 @@ def _sanitize_amount(j) -> Decimal:
     safe = raw.replace(",", "").replace(" ", "")
     return Decimal(safe)
 
-# --------------------- vote-round helpers: decreasing max days ------------
+# --------------------- vote-round helpers, decreasing max days ------------
 
 def _start_of_today_utc() -> int:
     now = int(time.time())
@@ -262,7 +277,7 @@ def _vote_days_remaining(now_ts: int | None = None) -> int:
     now_ts = int(now_ts or time.time())
     end = _vote_round_end_unix()
     secs = max(0, end - now_ts)
-    days = (secs + 86400 - 1) // 86400  # ceil
+    days = (secs + 86400 - 1) // 86400
     return max(1, int(days))
 
 def _vote_boost_multiplier(days_remaining: int) -> Decimal:
@@ -301,11 +316,11 @@ def vote_rules():
         "round_end_unix": end_unix,
         "days_remaining": _vote_days_remaining(),
         "length_days": VOTE_ROUND_LENGTH_DAYS,
-        "early_bonus_max": str((EARLY_BONUS_MAX * Decimal(100)).quantize(Decimal("0.01"))),  # percent
+        "early_bonus_max": str((EARLY_BONUS_MAX * Decimal(100)).quantize(Decimal("0.01"))),
         "note": "Vote stakes unlock at round end. Early stakes get higher weight."
     })
 
-# ----------------------------- preview/build stake -----------------------
+# ----------------------------- preview, build stake -----------------------
 
 @bp_stake.route("/api/stake/preview", methods=["POST"])
 def preview():
@@ -329,7 +344,7 @@ def preview():
 @bp_stake.route("/api/stake/build", methods=["POST"])
 def build_stake_tx():
     """
-    Regular APR staking: principal + reward claimables in one tx.
+    Regular APR staking, principal + reward claimables in one tx.
     """
     j = request.get_json(force=True) or {}
     user_pub = _clean(j.get("pub") or "")
@@ -406,8 +421,8 @@ def build_stake_tx():
 @bp_stake.route("/api/vote/stake", methods=["POST"])
 def build_vote_stake_tx():
     """
-    Vote stakes: fixed unlock at round end, no reward claimable now.
-    Early stakes get a higher WEIGHT used for future ad-revenue share if this proposal wins.
+    Vote stakes, fixed unlock at round end, no reward claimable now.
+    Early stakes get a higher WEIGHT used for future ad revenue share if this proposal wins.
     """
     j = request.get_json(force=True) or {}
     try:
@@ -458,7 +473,7 @@ def build_vote_stake_tx():
         base_fee=server.fetch_base_fee()
     )
 
-    # principal votes — reward is NOT created now
+    # principal votes, reward is not created now
     txb.append_create_claimable_balance_op(
         asset=_izza_asset(), amount=_q7(amt), claimants=[claimant], source=user_pub
     )
@@ -470,7 +485,7 @@ def build_vote_stake_tx():
     # Build the transaction
     tx = txb.set_timeout(180).add_text_memo(memo_txt).build()
 
-    # persist this vote (amount + computed weight) for pool math
+    # persist this vote, amount + computed weight, for pool math
     try:
         weight = _vote_weight_for(amt, days_remaining)
         _vote_add(unlock_unix, proposal, user_pub, _q7(amt), _q7(weight))
@@ -489,11 +504,11 @@ def build_vote_stake_tx():
         "note": "Vote stake locks principal until the vote round end. Weight includes early bonus."
     })
 
-# ----------------------------- classify/list claimables -------------------
+# ----------------------------- classify, list claimables ------------------
 
 def _classify_record(r: dict):
     """Normalize for UI grouping."""
-    # role/principal vs reward is based on sponsor
+    # role, principal vs reward is based on sponsor
     role = "reward" if (r.get("sponsor") == DISTR_PUB) else "principal"
     unlock_unix = None
     try:
@@ -506,9 +521,9 @@ def _classify_record(r: dict):
         "id": r.get("id"),
         "amount": r.get("amount"),
         "sponsor": r.get("sponsor"),
-        "role": role,                          # "principal" | "reward"
+        "role": role,
         "last_modified_time": r.get("last_modified_time"),
-        "unlock_ts": unlock_unix or 0,         # unix seconds
+        "unlock_ts": unlock_unix or 0,
     }
 
 def _fetch_claimables_raw(pub: str) -> list[dict]:
@@ -525,13 +540,12 @@ def _fetch_claimables_raw(pub: str) -> list[dict]:
 
 def _compute_claimables_out(pub: str) -> list[dict]:
     """
-    Build the same 'out' rows that /api/stake/claimables returns,
-    including the generated contract_id and vote extras.
+    Build the same rows that /api/stake/claimables returns, including the generated contract_id and vote extras.
     """
     records = _fetch_claimables_raw(pub)
     norm = [_classify_record(rec) for rec in records]
 
-    # derive vote vs regular: if an unlock bucket has principal but no reward => vote stake
+    # derive vote vs regular, if an unlock bucket has principal but no reward → vote stake
     buckets = {}
     for rec in norm:
         u = rec.get("unlock_ts") or 0
@@ -548,7 +562,7 @@ def _compute_claimables_out(pub: str) -> list[dict]:
         is_vote = bool(b.get("has_principal") and not b.get("has_reward"))
         kind = "vote" if is_vote else "regular"
 
-        # contract id: DO NOT change regular behavior; make vote unique
+        # contract id, do not change regular behavior, make vote unique
         id_suffix = (rec.get('id','')[-16:] if kind == "vote" else rec.get('id','')[:8])
         rec_out = {
             **rec,
@@ -556,7 +570,7 @@ def _compute_claimables_out(pub: str) -> list[dict]:
             "contract_id": f"{int(u)}|{kind}|{id_suffix}",
         }
 
-        # Attach exact preview % ONLY for vote principal rows
+        # Attach exact preview percent only for vote principal rows
         if kind == "vote" and rec["role"] == "principal":
             amount7 = str(rec.get("amount", "0"))
             proposal = _lookup_vote_proposal(pub, int(u), amount7) or "arcade"
@@ -578,7 +592,7 @@ def _compute_claimables_out(pub: str) -> list[dict]:
 def list_claimables():
     """
     List claimable balances for this asset and claimant.
-    Returns: {"ok": True, "claimables": [...], "records": [...back-compat...]}
+    Returns: {"ok": True, "claimables": out, "records": out}
     """
     pub = _clean(request.args.get("pub", ""))
     if not (pub and pub.startswith("G")):
@@ -606,10 +620,10 @@ def _infer_claimant_from_balance_id(cb_id: str) -> str | None:
 def _resolve_ids(pub: str, incoming: list[str]) -> list[str]:
     """
     Accepts:
-      - true 64-hex Horizon ids,
-      - comma-joined 64-hex strings,
-      - or group contract ids like "<unlock>|vote|<suffix>" / "<unlock>|regular|<prefix>"
-    Returns unique list of 64-hex ids, **unlocked only**.
+      - true Horizon ids, 64 or 72 hex,
+      - comma joined strings,
+      - or group contract ids like "<unlock>|vote|<suffix>" or "<unlock>|regular|<prefix>"
+    Returns unique list of concrete ids that are unlocked.
     """
     # Flatten commas + trim
     raw = []
@@ -621,11 +635,11 @@ def _resolve_ids(pub: str, incoming: list[str]) -> list[str]:
     if not raw:
         return []
 
-    # Quick path: collect direct 64-hex ids
+    # Quick path: collect direct 64 or 72 hex ids
     direct = [s for s in raw if _valid_balance_id(s)]
     wants_groups = [s for s in raw if not _valid_balance_id(s) and "|" in s]
 
-    # If there are group ids, compute map from contract_id -> real ids (unlocked)
+    # If there are group ids, compute map from contract_id → real ids, unlocked
     resolved = set(direct)
     if wants_groups:
         all_rows = _compute_claimables_out(pub)
@@ -635,7 +649,7 @@ def _resolve_ids(pub: str, incoming: list[str]) -> list[str]:
         for r in all_rows:
             try:
                 if int(r.get("unlock_ts") or 0) > now:
-                    continue  # locked → not claimable yet
+                    continue
             except Exception:
                 continue
             cid = str(r.get("contract_id") or "")
@@ -652,7 +666,7 @@ def _resolve_ids(pub: str, incoming: list[str]) -> list[str]:
     return sorted(resolved)
 
 def _build_claim_tx_batch(pub: str, balance_ids: list[str]):
-    """Helper to build a multi-claim XDR once ids are resolved."""
+    """Helper to build a multi claim XDR once ids are resolved."""
     try:
         acct = server.load_account(pub)
     except sx.NotFoundError:
@@ -665,7 +679,10 @@ def _build_claim_tx_batch(pub: str, balance_ids: list[str]):
         network_passphrase=NET_PASSPHRASE,
         base_fee=server.fetch_base_fee()
     )
-    for cb_id in balance_ids:
+    for raw in balance_ids:
+        cb_id = _normalize_cb_for_sdk(raw)
+        if not cb_id:
+            abort(400, f"bad balance_id format: {raw!s}")
         tb.append_claim_claimable_balance_op(cb_id)
 
     tx = tb.set_timeout(180).build()
@@ -673,7 +690,7 @@ def _build_claim_tx_batch(pub: str, balance_ids: list[str]):
 
 @bp_stake.route("/api/stake/build-claim", methods=["POST"])
 def build_claim_tx():
-    """Build a single ClaimClaimableBalance tx (legacy single-id)."""
+    """Build a single ClaimClaimableBalance tx, legacy single id."""
     j = request.get_json(force=True) or {}
     pub   = _clean(j.get("pub") or "")
     cb_id = _clean(j.get("balance_id") or "")
@@ -692,7 +709,7 @@ def build_claim_tx():
 def build_claim_tx_batch():
     """
     Build one tx to claim multiple balance IDs.
-    Now accepts either real 64-hex IDs, comma-joined values, or group contract_ids.
+    Accepts 64 or 72 hex ids, comma joined values, or group contract_ids.
     """
     j = request.get_json(force=True) or {}
     pub = _clean(j.get("pub") or "")
@@ -701,15 +718,14 @@ def build_claim_tx_batch():
         abort(400, "no balance_ids provided")
 
     if not (pub and pub.startswith("G")):
-        # If pub missing, try resolve from first concrete id if any.
-        # (Won’t work for group ids without a pub; UI already sends pub.)
+        # If pub missing, try resolve from first concrete id if any, UI already sends pub.
         flat = []
         for x in ids:
             if x is None: continue
             flat.extend([p.strip() for p in str(x).split(",") if p and p.strip()])
-        first64 = next((p for p in flat if _valid_balance_id(p)), None)
-        if first64:
-            pub = _infer_claimant_from_balance_id(first64)
+        first_concrete = next((p for p in flat if _valid_balance_id(p)), None)
+        if first_concrete:
+            pub = _infer_claimant_from_balance_id(first_concrete)
     if not (pub and pub.startswith("G")):
         abort(400, "bad pub")
 
@@ -719,14 +735,14 @@ def build_claim_tx_batch():
 
     return _build_claim_tx_batch(pub, resolved)
 
-# ---- UI-friendly alias for batch claim
+# ---- UI friendly alias for batch claim
 
 @bp_stake.route("/api/stake/claim", methods=["POST"])
 def claim_batch_ui_alias():
     """
     UI alias for batch claim.
-    Body: { ids: [...], pub?: "G..." } or { balance_ids: [...] }
-    Accepts 64-hex, comma-joined, or group contract_ids.
+    Body: { ids: [...] , pub: "G..." } or { balance_ids: [...] }
+    Accepts 64 hex, 72 hex, comma joined, or group contract_ids.
     """
     j = request.get_json(force=True) or {}
     ids = j.get("ids") or j.get("balance_ids") or []
@@ -744,12 +760,12 @@ def claim_batch_ui_alias():
 
 @bp_stake.route("/api/arcade/proposals", methods=["GET"])
 def arcade_proposals():
-    """Static list of current arcade game proposals users can stake/vote on."""
+    """Static list of current arcade game proposals users can stake or vote on."""
     proposals = [
         {
             "id": "rooftop_rumble",
             "title": "Rooftop Rumble",
-            "desc": "Leap across skyscrapers, dodge drones, and collect IZZA Coins in this high-speed rooftop race. Each vote powers its development.",
+            "desc": "Leap across skyscrapers, dodge drones, and collect IZZA Coins in this high speed rooftop race. Each vote powers its development.",
             "img": "/static/assets/arcade_rooftop_rumble.jpg"
         },
         {
