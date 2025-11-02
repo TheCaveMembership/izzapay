@@ -320,6 +320,45 @@ def vote_rules():
         "note": "Vote stakes unlock at round end. Early stakes get higher weight."
     })
 
+# ---------- NEW: vote preview --------------------------------------------
+
+@bp_stake.route("/api/vote/preview", methods=["POST"])
+def vote_preview():
+    """
+    Preview a vote stake. Returns unlock time, days remaining, boost multiplier,
+    weighted amount, and estimated share percent if added now.
+    Body: { amount: "...", proposal?: "..." }
+    """
+    j = request.get_json(force=True) or {}
+    proposal = _clean(j.get("proposal") or "") or "arcade"
+
+    # amount required for preview
+    try:
+        amt = _sanitize_amount(j)
+    except (InvalidOperation, ValueError, TypeError):
+        abort(400, "bad amount")
+    if amt <= 0:
+        abort(400, "bad amount <= 0")
+
+    unlock_unix    = _vote_round_end_unix()
+    days_remaining = _vote_days_remaining()
+    if days_remaining < 1:
+        abort(400, "vote round ended")
+
+    boost         = _vote_boost_multiplier(days_remaining)
+    weight        = _vote_weight_for(amt, days_remaining)  # amount * boost
+    est_share_pct = _vote_est_share_pct(unlock_unix, proposal, _q7(weight))
+
+    return jsonify({
+        "ok": True,
+        "unlock_unix": unlock_unix,
+        "days_remaining": int(days_remaining),
+        "boost_multiplier": str(boost),
+        "weight_amount": _q7(weight),
+        "proposal": proposal,
+        "est_share_pct": est_share_pct
+    })
+
 # ----------------------------- preview, build stake -----------------------
 
 @bp_stake.route("/api/stake/preview", methods=["POST"])
