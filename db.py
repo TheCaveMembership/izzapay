@@ -9,7 +9,6 @@ BUSY_TIMEOUT_MS = int(os.getenv("SQLITE_BUSY_TIMEOUT_MS", "3000"))  # 3s default
 _lock = threading.Lock()
 
 def _ensure_dirs():
-    # Make sure /var/data/izzapay exists (or whatever you set)
     try:
         os.makedirs(os.path.dirname(DB_PATH), exist_ok=True)
     except Exception:
@@ -17,10 +16,8 @@ def _ensure_dirs():
 
 def conn():
     _ensure_dirs()
-    # Allow use across threads if needed; each request should still open/close its own conn.
     cx = sqlite3.connect(DB_PATH, check_same_thread=False, detect_types=sqlite3.PARSE_DECLTYPES)
     cx.row_factory = sqlite3.Row
-    # Sensible defaults for a web app on SQLite
     cx.execute("PRAGMA foreign_keys=ON;")
     cx.execute("PRAGMA journal_mode=WAL;")
     cx.execute("PRAGMA synchronous=NORMAL;")
@@ -31,7 +28,7 @@ def init_db():
     _ensure_dirs()
     with _lock, conn() as cx:
         cx.executescript("""
-        -- Core tables
+        -- Core tables (existing)
         CREATE TABLE IF NOT EXISTS users(
           id INTEGER PRIMARY KEY,
           pi_uid TEXT UNIQUE,
@@ -49,8 +46,7 @@ def init_db():
           theme_mode TEXT DEFAULT 'dark',
           reply_to_email TEXT,
           pi_wallet TEXT NOT NULL,
-          -- Newer columns are added by ensure_schema() in app.py if missing:
-          -- pi_wallet_address TEXT, pi_handle TEXT, colorway TEXT
+          -- newer cols: pi_wallet_address, pi_handle, colorway (added later)
           FOREIGN KEY(owner_user_id) REFERENCES users(id)
         );
 
@@ -77,8 +73,7 @@ def init_db():
           state TEXT,
           created_at INTEGER,
           pi_tx_hash TEXT,
-          -- Newer columns are added by ensure_schema() in app.py if missing:
-          -- pi_payment_id TEXT, cart_id TEXT, line_items_json TEXT, user_id INTEGER
+          -- newer cols: pi_payment_id, cart_id, line_items_json, user_id
           FOREIGN KEY(merchant_id) REFERENCES merchants(id)
         );
 
@@ -100,8 +95,7 @@ def init_db():
           tracking_number TEXT,
           tracking_url TEXT,
           buyer_token TEXT
-          -- Newer columns are added by ensure_schema() in app.py if missing:
-          -- buyer_user_id INTEGER, created_at INTEGER
+          -- newer cols: buyer_user_id, created_at
         );
 
         CREATE TABLE IF NOT EXISTS fee_ledger(
@@ -111,7 +105,8 @@ def init_db():
           tx_hash TEXT,
           created_at INTEGER
         );
-                CREATE TABLE IF NOT EXISTS collectible_claims(
+
+        CREATE TABLE IF NOT EXISTS collectible_claims(
           id INTEGER PRIMARY KEY AUTOINCREMENT,
           order_id INTEGER NOT NULL UNIQUE,
           user_id  INTEGER NOT NULL,
@@ -120,27 +115,210 @@ def init_db():
         );
 
         -- Wallet map (one active wallet per user)
-CREATE TABLE IF NOT EXISTS user_wallets (
-  id INTEGER PRIMARY KEY,
-  username TEXT NOT NULL UNIQUE,
-  pub TEXT NOT NULL,
-  created_at INTEGER,
-  updated_at INTEGER
-);
-CREATE UNIQUE INDEX IF NOT EXISTS idx_user_wallets_username ON user_wallets(username);
+        CREATE TABLE IF NOT EXISTS user_wallets (
+          id INTEGER PRIMARY KEY,
+          username TEXT NOT NULL UNIQUE,
+          pub TEXT NOT NULL,
+          created_at INTEGER,
+          updated_at INTEGER
+        );
+        CREATE UNIQUE INDEX IF NOT EXISTS idx_user_wallets_username ON user_wallets(username);
+
+        ----------------------------------------------------------------------
+        -- NEW: NFT / Collections (on-chain asset, off-chain serials)
+        ----------------------------------------------------------------------
+
+        -- Each "collection" corresponds to ONE on-chain asset: code<=12, issuer=your issuer,
+        -- display_decimals=0 for NFT semantics. Supply can be >1 if you want 500 editions.
+        CREATE TABLE IF NOT EXISTS nft_collections(
+          id INTEGER PRIMARY KEY,
+          merchant_id INTEGER,               -- who owns/controls the collection
+          creator_user_id INTEGER,           -- original creator (for royalties, attribution)
+          code TEXT NOT NULL,                -- asset code (<=12)
+          issuer TEXT NOT NULL,              -- issuer account (usually your IZZA issuer)
+          dist_account TEXT,                 -- optional: distribution account that holds supply
+          name TEXT,
+          description TEXT,
+          image_url TEXT,                    -- primary card art
+          metadata_json TEXT,                -- arbitrary JSON for traits
+          total_supply INTEGER NOT NULL,     -- # of editions minted on-chain
+          decimals INTEGER NOT NULL DEFAULT 0, -- keep 0 for NFTs
+          status TEXT DEFAULT 'draft',       -- draft | published | archived
+          locked_issuer INTEGER DEFAULT 0,   -- 1 if issuer locked after policy
+          created_at INTEGER,
+          updated_at INTEGER,
+          UNIQUE(code, issuer),
+          FOREIGN KEY(merchant_id) REFERENCES merchants(id),
+          FOREIGN KEY(creator_user_id) REFERENCES users(id)
+        );
+        CREATE INDEX IF NOT EXISTS idx_nft_collections_merchant ON nft_collections(merchant_id);
+        CREATE INDEX IF NOT EXISTS idx_nft_collections_status ON nft_collections(status);
+
+        -- Per-edition serials tracked off-chain (1..total_supply).
+        -- Ownership is wallet-level; if null, it’s held by distribution.
+        CREATE TABLE IF NOT EXISTS nft_tokens(
+          id INTEGER PRIMARY KEY,
+          collection_id INTEGER NOT NULL,
+          serial INTEGER NOT NULL,                 -- 1..N
+          owner_user_id INTEGER,                   -- null if held by dist account
+          owner_wallet_pub TEXT,                   -- convenience cache
+          minted_at INTEGER,
+          metadata_json TEXT,                      -- per-serial overrides (optional)
+          UNIQUE(collection_id, serial),
+          FOREIGN KEY(collection_id) REFERENCES nft_collections(id) ON DELETE CASCADE,
+          FOREIGN KEY(owner_user_id) REFERENCES users(id)
+        );
+        CREATE INDEX IF NOT EXISTS idx_nft_tokens_owner ON nft_tokens(owner_user_id);
+
+        -- On-chain mint record for auditability.
+        CREATE TABLE IF NOT EXISTS nft_mint_events(
+          id INTEGER PRIMARY KEY,
+          collection_id INTEGER NOT NULL,
+          minted_count INTEGER NOT NULL,          -- how many units minted in this op
+          tx_hash TEXT,                           -- Horizon tx hash (Pi testnet)
+          created_at INTEGER,
+          FOREIGN KEY(collection_id) REFERENCES nft_collections(id) ON DELETE CASCADE
+        );
+
+        -- Listings: fixed-price sell offers in Pi for single-edition NFTs.
+        -- For collection-level primary sales, we list "next available serial" implicitly.
+        CREATE TABLE IF NOT EXISTS nft_listings(
+          id INTEGER PRIMARY KEY,
+          collection_id INTEGER NOT NULL,
+          serial INTEGER,                         -- null => primary sale, allocate next
+          seller_user_id INTEGER NOT NULL,        -- marketplace/dist for primary, user for resale
+          price_pi REAL NOT NULL,
+          status TEXT NOT NULL DEFAULT 'active',  -- active | sold | canceled
+          created_at INTEGER,
+          sold_at INTEGER,
+          buyer_user_id INTEGER,
+          order_id INTEGER,                       -- link to orders row if routed through checkout
+          UNIQUE(collection_id, serial, status) FILTER (WHERE status='active'),
+          FOREIGN KEY(collection_id) REFERENCES nft_collections(id) ON DELETE CASCADE,
+          FOREIGN KEY(seller_user_id) REFERENCES users(id),
+          FOREIGN KEY(buyer_user_id) REFERENCES users(id),
+          FOREIGN KEY(order_id) REFERENCES orders(id)
+        );
+        CREATE INDEX IF NOT EXISTS idx_nft_listings_active ON nft_listings(collection_id, status);
+
+        -- Optional: royalty schedule per collection (flat percent in basis points).
+        CREATE TABLE IF NOT EXISTS nft_royalties(
+          id INTEGER PRIMARY KEY,
+          collection_id INTEGER NOT NULL,
+          bps INTEGER NOT NULL DEFAULT 0,        -- 250 = 2.5%
+          payout_user_id INTEGER,                 -- who receives royalties
+          created_at INTEGER,
+          FOREIGN KEY(collection_id) REFERENCES nft_collections(id) ON DELETE CASCADE,
+          FOREIGN KEY(payout_user_id) REFERENCES users(id)
+        );
         """)
 
 def ensure_schema():
-    """Add missing columns without dropping existing data."""
+    """Add missing columns without dropping existing data; create new NFT tables if absent."""
     with _lock, conn() as cx:
         # sessions.pi_username
-        try:
-            cx.execute("ALTER TABLE sessions ADD COLUMN pi_username TEXT")
-        except Exception:
-            pass  # already exists
+        try: cx.execute("ALTER TABLE sessions ADD COLUMN pi_username TEXT")
+        except Exception: pass
 
         # sessions.checkout_path
-        try:
-            cx.execute("ALTER TABLE sessions ADD COLUMN checkout_path TEXT")
-        except Exception:
-            pass  # already exists
+        try: cx.execute("ALTER TABLE sessions ADD COLUMN checkout_path TEXT")
+        except Exception: pass
+
+        # orders.buyer_user_id
+        try: cx.execute("ALTER TABLE orders ADD COLUMN buyer_user_id INTEGER")
+        except Exception: pass
+
+        # orders.created_at
+        try: cx.execute("ALTER TABLE orders ADD COLUMN created_at INTEGER")
+        except Exception: pass
+
+        # merchants.pi_wallet_address
+        try: cx.execute("ALTER TABLE merchants ADD COLUMN pi_wallet_address TEXT")
+        except Exception: pass
+
+        # merchants.pi_handle
+        try: cx.execute("ALTER TABLE merchants ADD COLUMN pi_handle TEXT")
+        except Exception: pass
+
+        # merchants.colorway
+        try: cx.execute("ALTER TABLE merchants ADD COLUMN colorway TEXT")
+        except Exception: pass
+
+        # Create NFT tables if missing (safe to re-run)
+        cx.executescript("""
+        CREATE TABLE IF NOT EXISTS nft_collections(
+          id INTEGER PRIMARY KEY,
+          merchant_id INTEGER,
+          creator_user_id INTEGER,
+          code TEXT NOT NULL,
+          issuer TEXT NOT NULL,
+          dist_account TEXT,
+          name TEXT,
+          description TEXT,
+          image_url TEXT,
+          metadata_json TEXT,
+          total_supply INTEGER NOT NULL,
+          decimals INTEGER NOT NULL DEFAULT 0,
+          status TEXT DEFAULT 'draft',
+          locked_issuer INTEGER DEFAULT 0,
+          created_at INTEGER,
+          updated_at INTEGER,
+          UNIQUE(code, issuer),
+          FOREIGN KEY(merchant_id) REFERENCES merchants(id),
+          FOREIGN KEY(creator_user_id) REFERENCES users(id)
+        );
+        CREATE INDEX IF NOT EXISTS idx_nft_collections_merchant ON nft_collections(merchant_id);
+        CREATE INDEX IF NOT EXISTS idx_nft_collections_status ON nft_collections(status);
+
+        CREATE TABLE IF NOT EXISTS nft_tokens(
+          id INTEGER PRIMARY KEY,
+          collection_id INTEGER NOT NULL,
+          serial INTEGER NOT NULL,
+          owner_user_id INTEGER,
+          owner_wallet_pub TEXT,
+          minted_at INTEGER,
+          metadata_json TEXT,
+          UNIQUE(collection_id, serial),
+          FOREIGN KEY(collection_id) REFERENCES nft_collections(id) ON DELETE CASCADE,
+          FOREIGN KEY(owner_user_id) REFERENCES users(id)
+        );
+        CREATE INDEX IF NOT EXISTS idx_nft_tokens_owner ON nft_tokens(owner_user_id);
+
+        CREATE TABLE IF NOT EXISTS nft_mint_events(
+          id INTEGER PRIMARY KEY,
+          collection_id INTEGER NOT NULL,
+          minted_count INTEGER NOT NULL,
+          tx_hash TEXT,
+          created_at INTEGER,
+          FOREIGN KEY(collection_id) REFERENCES nft_collections(id) ON DELETE CASCADE
+        );
+
+        CREATE TABLE IF NOT EXISTS nft_listings(
+          id INTEGER PRIMARY KEY,
+          collection_id INTEGER NOT NULL,
+          serial INTEGER,
+          seller_user_id INTEGER NOT NULL,
+          price_pi REAL NOT NULL,
+          status TEXT NOT NULL DEFAULT 'active',
+          created_at INTEGER,
+          sold_at INTEGER,
+          buyer_user_id INTEGER,
+          order_id INTEGER,
+          UNIQUE(collection_id, serial, status) FILTER (WHERE status='active'),
+          FOREIGN KEY(collection_id) REFERENCES nft_collections(id) ON DELETE CASCADE,
+          FOREIGN KEY(seller_user_id) REFERENCES users(id),
+          FOREIGN KEY(buyer_user_id) REFERENCES users(id),
+          FOREIGN KEY(order_id) REFERENCES orders(id)
+        );
+        CREATE INDEX IF NOT EXISTS idx_nft_listings_active ON nft_listings(collection_id, status);
+
+        CREATE TABLE IF NOT EXISTS nft_royalties(
+          id INTEGER PRIMARY KEY,
+          collection_id INTEGER NOT NULL,
+          bps INTEGER NOT NULL DEFAULT 0,
+          payout_user_id INTEGER,
+          created_at INTEGER,
+          FOREIGN KEY(collection_id) REFERENCES nft_collections(id) ON DELETE CASCADE,
+          FOREIGN KEY(payout_user_id) REFERENCES users(id)
+        );
+        """)
