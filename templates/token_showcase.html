@@ -1738,7 +1738,18 @@ async function loadVoteProposals(){
   if (lbl) lbl.textContent = 'Your share if this game wins';
 })();
 
-// Preview (vote)
+async function getVoteRules(){
+  const r = await fetch('/api/vote/rules', { cache:'no-store' });
+  const j = await r.json();
+  // Expect shape: { round_end_unix: <number seconds>, pool_before?, ad_pool_pct? }
+  // If your backend returns ISO, normalize here:
+  if (!j.round_end_unix && j.round_end_iso){
+    j.round_end_unix = Math.floor(new Date(j.round_end_iso).getTime() / 1000);
+  }
+  return j;
+}
+
+  // Preview (vote) — 404-safe + Safari-safe time handling
 votePreviewBtn?.addEventListener('click', async ()=>{
   const pub  = (votePub.value||'').trim();
   const raw  = String(voteAmt.value||'0').trim();
@@ -1750,26 +1761,55 @@ votePreviewBtn?.addEventListener('click', async ()=>{
 
   voteMsg.textContent = 'Calculating…';
   try{
-    const r = await fetch('/api/vote/preview', {
-      method:'POST', headers:{'Content-Type':'application/json'},
-      body: JSON.stringify({ proposal, amount: String(Math.floor(amt*1e7)/1e7) })
-    });
-    const j = await r.json();
-    if (!r.ok || !j?.ok) throw new Error(j?.error || 'preview failed');
+    // Try server preview first
+    let j = null, ok = false;
+    try{
+      const r = await fetch('/api/vote/preview', {
+        method:'POST', headers:{'Content-Type':'application/json'},
+        body: JSON.stringify({ proposal, amount: String(Math.floor(amt*1e7)/1e7) })
+      });
+      ok = r.ok;
+      if (ok) j = await r.json();
+      if (r.status === 404) ok = false; // allow fallback
+    }catch(_){ ok = false; }
 
-    voteAPR.textContent    = `${Number(j.your_share_pct_if_wins).toFixed(2)}%`;
+    // Fallback to rules if preview route is missing on this deploy
+    if (!ok){
+      const rules = await getVoteRules();           // <= helper below
+      j = j || {};
+      j.ok = true;
+      j.round_end_unix = Number(rules.round_end_unix);    // seconds
+      j.pool_before    = Number(rules.pool_before || 0);  // optional
+      j.ad_pool_pct    = Number(rules.ad_pool_pct || 0);  // optional
+      j.your_share_pct_if_wins = 0; // we can’t know without server math; keep UI consistent
+    }
+
+    // Normalize timestamps (seconds → ms) for iOS/Safari
+    const endSec = Number(j.round_end_unix || 0);
+    const endMs  = endSec * 1000;
+    const endIso = isFinite(endMs) && endMs > 0
+      ? new Date(endMs).toISOString().replace('T',' ').replace('Z',' UTC')
+      : '—';
+
+    // Render
+    const pct = Number(j.your_share_pct_if_wins);
+    voteAPR.textContent    = isFinite(pct) ? `${pct.toFixed(2)}%` : '—';
     voteVotes.textContent  = amt.toLocaleString(undefined,{maximumFractionDigits:7});
-    voteUnlock.textContent = new Date(j.round_end_unix*1000).toISOString().replace('T',' ').replace('Z',' UTC');
+    voteUnlock.textContent = endIso;
 
     const helper = document.getElementById('voteShareHelp');
-    if (helper) helper.textContent =
-      `Assumes current pool ${Number(j.pool_before).toLocaleString()} votes. ` +
-      `${Number(j.ad_pool_pct).toFixed(0)}% of ad revenue goes to voters of the winning game.`;
+    if (helper){
+      const pool = Number(j.pool_before);
+      const adP  = Number(j.ad_pool_pct);
+      helper.textContent =
+        `Assumes current pool ${isFinite(pool)?pool.toLocaleString():'—'} votes. ` +
+        `${isFinite(adP)?adP.toFixed(0):'—'}% of ad revenue goes to voters of the winning game.`;
+    }
 
     votePreviewBox.style.display = '';
     voteStartBtn.disabled = false;
     voteMsg.textContent = '';
-    log('vote.preview.ok', { proposal, amt });
+    log('vote.preview.ok', { proposal, amt, fallback: !ok });
   }catch(e){
     voteMsg.textContent = '❌ ' + String(e);
     log('vote.preview.fail', { err: String(e) });
