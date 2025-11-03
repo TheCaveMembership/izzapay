@@ -553,7 +553,24 @@
 
     <footer>IZZA PAY — Testnet showcase · Built for demo and diagnostics</footer>
   </div>
+<!-- Overlay container (drop near end of body) -->
+<div id="craftOverlay" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.6);backdrop-filter:blur(6px);z-index:9999">
+  <div style="max-width:1000px;width:96%;height:86%;margin:3% auto;background:var(--card);border:1px solid var(--line);border-radius:14px;overflow:hidden;position:relative">
+    <button id="craftClose" class="ip-btn ghost tiny" style="position:absolute;top:8px;right:8px">Close</button>
+    <iframe id="craftFrame" src="about:blank" style="width:100%;height:100%;border:0"></iframe>
+  </div>
+</div>
 
+<!-- The banner that appears AFTER crafting from token showcase -->
+<div id="mintHint" class="card" style="display:none;margin-top:12px">
+  <div class="row" style="justify-content:space-between;align-items:center">
+    <div class="note">
+      Your item is crafted. To mint it as an NFT collection, open your <strong>IZZA Pay merchant dashboard</strong> and use
+      <em>Make NFT from this crafted item</em> under the product.
+    </div>
+    <a class="ip-btn tiny" href="/merchant">Open Dashboard</a>
+  </div>
+</div>
   <!-- Modal Backdrop -->
   <div class="modal-backdrop" id="modalBackdrop" hidden></div>
 
@@ -3022,8 +3039,48 @@ function trapFocus(container){
   });
 }
 [modal, orderbookModal, placeOrderModal, myWalletModal, stakeModal, claimModal, voteModal].forEach(m=> m && trapFocus(m));
+  
+(function(){
+  const OVERLAY = document.getElementById('craftOverlay');
+  const FRAME   = document.getElementById('craftFrame');
+  const CLOSE   = document.getElementById('craftClose');
+  const MINT_HINT = document.getElementById('mintHint');
 
-// end of file
+  // helper to discover username (same pattern you already use)
+  function who(){
+    try{
+      const q=(new URLSearchParams(location.search).get('u')||'').trim(); if(q) return q.replace(/^@+/,'').toLowerCase();
+      const p=window.__IZZA_PROFILE__||{}; if(p.username) return String(p.username).toLowerCase();
+      const ls=(localStorage.getItem('izzaUserU')||'').trim(); if(ls) return ls.replace(/^@+/,'').toLowerCase();
+    }catch{}
+    return '';
+  }
+
+  // Open Crafting Land from token showcase
+  window.openCraftingFromShowcase = function openCraftingFromShowcase(){
+    const u = who();
+    const url = `https://izzagame.onrender.com/crafting?source=token_showcase${u ? `&u=${encodeURIComponent(u)}`:''}`;
+    FRAME.src = url;
+    OVERLAY.style.display = 'block';
+  };
+
+  CLOSE.addEventListener('click', ()=>{
+    OVERLAY.style.display='none';
+    FRAME.src='about:blank';
+  });
+
+  // Listen for completion from Crafting Land UI
+  window.addEventListener('message', (ev)=>{
+    try{
+      const d = ev.data || {};
+      if(d && d.type === 'craft:done' && d.source === 'token_showcase'){
+        // Only close the overlay and show the mint hint banner
+        OVERLAY.style.display='none';
+        FRAME.src='about:blank';
+        if(MINT_HINT) MINT_HINT.style.display = '';
+      }
+    }catch{}
+  }, false);
 })();
 </script>
 </body>
