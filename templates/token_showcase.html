@@ -460,15 +460,6 @@
           <button id="claimQuickBtn" class="cta" type="button" aria-haspopup="dialog" aria-controls="claimModal">💰 Claim</button>
           <button id="voteQuickBtn"  class="cta" type="button" aria-haspopup="dialog" aria-controls="voteModal">🗳️ Vote (Stake)</button>
         </div>
-
-        <!-- New: Crafting entry (opens overlay) -->
-        <div class="top-cta" style="margin-top:8px; display:flex; gap:8px; justify-content:center; flex-wrap:wrap">
-          <button id="craftOpenBtn" class="cta" type="button">🧪 Open IZZA Crafting Land</button>
-        </div>
-        <div class="help" style="text-align:center; margin-top:6px">
-          Craft an in-game item with AI-SVG, then mint it as a testnet NFT from your
-          <strong>IZZA Pay merchant dashboard</strong>. After you finish crafting from here, a mint-hint banner will appear with a quick link.
-        </div>
       </div>
 
       <!-- RIGHT: quick details + QR + activity dropdown -->
@@ -561,24 +552,6 @@
     </section>
 
     <footer>IZZA PAY — Testnet showcase · Built for demo and diagnostics</footer>
-  </div>
-
-  <!-- Crafting overlay + post-craft hint (HTML) -->
-  <div id="craftOverlay" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.6);backdrop-filter:blur(6px);z-index:9999">
-    <div style="max-width:1000px;width:96%;height:86%;margin:3% auto;background:var(--card);border:1px solid var(--line);border-radius:14px;overflow:hidden;position:relative">
-      <button id="craftClose" class="ip-btn ghost tiny" style="position:absolute;top:8px;right:8px">Close</button>
-      <iframe id="craftFrame" src="about:blank" style="width:100%;height:100%;border:0"></iframe>
-    </div>
-  </div>
-
-  <div id="mintHint" class="card" style="display:none;margin-top:12px">
-    <div class="row" style="justify-content:space-between;align-items:center">
-      <div class="note">
-        Your item is crafted. To mint it as an NFT collection, open your <strong>IZZA Pay merchant dashboard</strong> and use
-        <em>Make NFT from this crafted item</em> under the product.
-      </div>
-      <a class="ip-btn tiny" href="/merchant">Open Dashboard</a>
-    </div>
   </div>
 
   <!-- Modal Backdrop -->
@@ -678,6 +651,7 @@
       </div>
     </div>
   </div>
+
   <!-- MY WALLET MODAL -->
   <div class="modal" id="myWalletModal" role="dialog" aria-modal="true" aria-labelledby="myWalletTitle" hidden>
     <div class="modal-card">
@@ -1623,8 +1597,7 @@ claimQuickBtn?.addEventListener('click', ()=> openClaimBtn?.click());
 
 closeStakeBtn?.addEventListener('click', ()=> { log('ui.stake.close'); closeModal(stakeModal); });
 closeClaimBtn?.addEventListener('click', ()=> { log('ui.claim.close'); closeModal(claimModal); });
-  
-  
+
 // ======== PREVIEW ========
 stakePreview?.addEventListener('click', async ()=>{
   const pub = (stakePub.value||'').trim();
@@ -3027,7 +3000,7 @@ function end(e){
   const dt = Math.max(1, performance.now() - startT);
   const speed = Math.abs(dx) / dt;
   if (speed > 0.4) {
-    wrap?.classList.remove('spin-anim'); void wrap?.offsetWidth; wrap?.classList.add('spin-anim');
+    wrap.classList.remove('spin-anim'); void wrap.offsetWidth; wrap.classList.add('spin-anim');
     setTimeout(fetchSummary, 1100);
     log('coin.spin.refresh');
   }
@@ -3050,76 +3023,7 @@ function trapFocus(container){
 }
 [modal, orderbookModal, placeOrderModal, myWalletModal, stakeModal, claimModal, voteModal].forEach(m=> m && trapFocus(m));
 
-// =================== Step 3: wire the "Open IZZA Crafting Land" button ===================
-const craftBtn = document.getElementById('craftOpenBtn');
-if (craftBtn) {
-  craftBtn.addEventListener('click', () => {
-    // Prefer the helper (defined below)
-    if (typeof window.openCraftingFromShowcase === 'function') {
-      window.openCraftingFromShowcase();
-      return;
-    }
-    // Fallback (shouldn't be needed if the helper loads)
-    try {
-      const OVERLAY = document.getElementById('craftOverlay');
-      const FRAME   = document.getElementById('craftFrame');
-      const who = () => {
-        try{
-          const q=(new URLSearchParams(location.search).get('u')||'').trim(); if(q) return q.replace(/^@+/,'').toLowerCase();
-          const p=window.__IZZA_PROFILE__||{}; if(p.username) return String(p.username).toLowerCase();
-          const ls=(localStorage.getItem('izzaUserU')||'').trim(); if(ls) return ls.replace(/^@+/,'').toLowerCase();
-        }catch{} return '';
-      };
-      const u = who();
-      const url = `https://izzagame.onrender.com/crafting?source=token_showcase${u ? `&u=${encodeURIComponent(u)}` : ''}`;
-      FRAME.src = url;
-      OVERLAY.style.display = 'block';
-    } catch(_){}
-  });
-}
-
-// =================== Crafting overlay helper (exactly one copy) ===================
-(function(){
-  const OVERLAY   = document.getElementById('craftOverlay');
-  const FRAME     = document.getElementById('craftFrame');
-  const CLOSE     = document.getElementById('craftClose');
-  const MINT_HINT = document.getElementById('mintHint');
-
-  // Discover username (same pattern you already use)
-  function who(){
-    try{
-      const q=(new URLSearchParams(location.search).get('u')||'').trim(); if(q) return q.replace(/^@+/,'').toLowerCase();
-      const p=window.__IZZA_PROFILE__||{}; if(p.username) return String(p.username).toLowerCase();
-      const ls=(localStorage.getItem('izzaUserU')||'').trim(); if(ls) return ls.replace(/^@+/,'').toLowerCase();
-    }catch{}
-    return '';
-  }
-
-  // Public helper used by the button wiring above
-  window.openCraftingFromShowcase = function(){
-    const u = who();
-    const url = `https://izzagame.onrender.com/crafting?source=token_showcase${u ? `&u=${encodeURIComponent(u)}`:''}`;
-    if (!OVERLAY || !FRAME) return;
-    FRAME.src = url;
-    OVERLAY.style.display = 'block';
-  };
-
-  CLOSE?.addEventListener('click', ()=>{
-    if (!OVERLAY || !FRAME) return;
-    OVERLAY.style.display='none';
-    FRAME.src='about:blank';
-  });
-
-  // Close overlay and show mint hint when Crafting Land reports done
-  window.addEventListener('message', (ev)=>{
-    try{
-      const d = ev.data || {};
-      if(d && d.type === 'craft:done' && d.source === 'token_showcase'){
-        if (OVERLAY && FRAME){ OVERLAY.style.display='none'; FRAME.src='about:blank'; }
-        if (MINT_HINT) MINT_HINT.style.display = '';
-      }
-    }catch{}
-  }, false);
+// end of file
 })();
 </script>
 </body>
