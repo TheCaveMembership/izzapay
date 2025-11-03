@@ -3062,7 +3062,86 @@ function trapFocus(container){
   });
 }
 [modal, orderbookModal, placeOrderModal, myWalletModal, stakeModal, claimModal, voteModal].forEach(m=> m && trapFocus(m));
+// ====== STEP C — IZZA Crafting Land wiring (button + helper + postMessage) ======
 
+// Cache DOM refs (safe even if elements are missing on some pages)
+const __CRAFT_OVERLAY = document.getElementById('craftOverlay');
+const __CRAFT_FRAME   = document.getElementById('craftFrame');
+const __CRAFT_CLOSE   = document.getElementById('craftClose');
+const __MINT_HINT     = document.getElementById('mintHint');
+const __CRAFT_BTN     = document.getElementById('craftOpenBtn');
+
+// Discover username (same pattern you already use)
+function __izzaWho(){
+  try{
+    const q = (new URLSearchParams(location.search).get('u') || '').trim();
+    if (q) return q.replace(/^@+/, '').toLowerCase();
+    const p = window.__IZZA_PROFILE__ || {};
+    if (p.username) return String(p.username).toLowerCase();
+    const ls = (localStorage.getItem('izzaUserU') || '').trim();
+    if (ls) return ls.replace(/^@+/, '').toLowerCase();
+  }catch(_){}
+  return '';
+}
+
+// Public helper (define it only once)
+if (typeof window.openCraftingFromShowcase !== 'function') {
+  window.openCraftingFromShowcase = function openCraftingFromShowcase(){
+    if (!__CRAFT_OVERLAY || !__CRAFT_FRAME) return;
+    const u   = __izzaWho();
+    const url = `https://izzagame.onrender.com/crafting?source=token_showcase${u ? `&u=${encodeURIComponent(u)}` : ''}`;
+    __CRAFT_FRAME.src = url;
+    __CRAFT_OVERLAY.style.display = 'block';
+  };
+}
+
+// Wire the button once
+if (__CRAFT_BTN && !__CRAFT_BTN.dataset.wired) {
+  __CRAFT_BTN.dataset.wired = '1';
+  __CRAFT_BTN.addEventListener('click', ()=>{
+    if (typeof window.openCraftingFromShowcase === 'function') {
+      window.openCraftingFromShowcase();
+      return;
+    }
+    // Fallback (shouldn’t be needed if helper exists)
+    if (!__CRAFT_OVERLAY || !__CRAFT_FRAME) return;
+    const u   = __izzaWho();
+    const url = `https://izzagame.onrender.com/crafting?source=token_showcase${u ? `&u=${encodeURIComponent(u)}` : ''}`;
+    __CRAFT_FRAME.src = url;
+    __CRAFT_OVERLAY.style.display = 'block';
+  });
+}
+
+// Close button
+if (__CRAFT_CLOSE && !__CRAFT_CLOSE.dataset.wired) {
+  __CRAFT_CLOSE.dataset.wired = '1';
+  __CRAFT_CLOSE.addEventListener('click', ()=>{
+    if (!__CRAFT_OVERLAY || !__CRAFT_FRAME) return;
+    __CRAFT_OVERLAY.style.display = 'none';
+    __CRAFT_FRAME.src = 'about:blank';
+  });
+}
+
+// Listen for completion from Crafting Land UI
+(function(){
+  if (window.__izzaCraftMsgWired) return;
+  window.__izzaCraftMsgWired = true;
+
+  window.addEventListener('message', (ev)=>{
+    try{
+      const d = ev.data || {};
+      if (d && d.type === 'craft:done' && d.source === 'token_showcase') {
+        if (__CRAFT_OVERLAY && __CRAFT_FRAME) {
+          __CRAFT_OVERLAY.style.display = 'none';
+          __CRAFT_FRAME.src = 'about:blank';
+        }
+        if (__MINT_HINT) __MINT_HINT.style.display = '';
+      }
+    }catch(_){}
+  }, false);
+})();
+
+// ====== END STEP C — Crafting Land wiring ======
 // end of file
 })();
 </script>
