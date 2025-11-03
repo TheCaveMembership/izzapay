@@ -462,14 +462,13 @@
   <button id="voteQuickBtn" class="cta" type="button" aria-haspopup="dialog" aria-controls="voteModal">🗳️ Vote (Stake)</button>
 </div>
 
-<!-- NEW: Crafting Land entry -->
+<!-- Craft in IZZA City -->
 <div class="top-cta" style="margin-top:8px; display:flex; gap:8px; justify-content:center; flex-wrap:wrap">
-  <button id="craftOpenBtn" class="cta" type="button">🧪 Open IZZA Crafting Land</button>
+  <a id="craftLink" class="cta" href="/izza-game/auth?dest=city" aria-label="Open IZZA City to Craft">🧪 Craft in IZZA City</a>
 </div>
-<div class="help" style="text-align:center; margin-top:6px">
-  Craft an in-game item with AI-SVG, then mint it as a testnet NFT from your
-  <strong>IZZA Pay merchant dashboard</strong>. After you finish crafting, a mint-hint banner will appear here with a quick link.
-</div>
+<p class="help" style="text-align:center; margin-top:6px">
+  Step 1, sign in to IZZA City, Step 2, click Craft inside the game, Step 3, your crafted item is saved to your game inventory and mirrored to your IZZA Pay merchant dashboard, where you can mint it to a testnet NFT.
+</p>
 
       <!-- RIGHT: quick details + QR + activity dropdown -->
       <aside class="panel">
@@ -562,38 +561,7 @@
 
     <footer>IZZA PAY — Testnet showcase · Built for demo and diagnostics</footer>
   </div>
-<!-- === IZZA CRAFTING OVERLAY + MINT HINT (STEP B) === -->
-<div id="craftOverlay"
-     style="display:none;position:fixed;inset:0;
-            background:rgba(0,0,0,.6);backdrop-filter:blur(6px);
-            z-index:9999;">
-  <div style="max-width:1000px;width:96%;height:86%;
-              margin:3% auto;background:var(--card);
-              border:1px solid var(--line);border-radius:14px;
-              overflow:hidden;position:relative;">
-    <button id="craftClose"
-            class="ip-btn ghost tiny"
-            style="position:absolute;top:8px;right:8px;">Close</button>
-    <iframe id="craftFrame"
-            src="about:blank"
-            style="width:100%;height:100%;border:0;"></iframe>
-  </div>
-</div>
 
-<!-- This banner appears AFTER crafting from the token showcase -->
-<div id="mintHint"
-     class="card"
-     style="display:none;margin-top:12px;">
-  <div class="row" style="justify-content:space-between;align-items:center;">
-    <div class="note">
-      Your item is crafted. To mint it as an NFT collection,
-      open your <strong>IZZA Pay merchant dashboard</strong>
-      and use <em>Make NFT from this crafted item</em> under the product.
-    </div>
-    <a class="ip-btn tiny" href="/merchant">Open Dashboard</a>
-  </div>
-</div>
-<!-- === END IZZA CRAFTING OVERLAY + MINT HINT (STEP B) === -->
   <!-- Modal Backdrop -->
   <div class="modal-backdrop" id="modalBackdrop" hidden></div>
 
@@ -3062,86 +3030,7 @@ function trapFocus(container){
   });
 }
 [modal, orderbookModal, placeOrderModal, myWalletModal, stakeModal, claimModal, voteModal].forEach(m=> m && trapFocus(m));
-// ====== STEP C — IZZA Crafting Land wiring (button + helper + postMessage) ======
 
-// Cache DOM refs (safe even if elements are missing on some pages)
-const __CRAFT_OVERLAY = document.getElementById('craftOverlay');
-const __CRAFT_FRAME   = document.getElementById('craftFrame');
-const __CRAFT_CLOSE   = document.getElementById('craftClose');
-const __MINT_HINT     = document.getElementById('mintHint');
-const __CRAFT_BTN     = document.getElementById('craftOpenBtn');
-
-// Discover username (same pattern you already use)
-function __izzaWho(){
-  try{
-    const q = (new URLSearchParams(location.search).get('u') || '').trim();
-    if (q) return q.replace(/^@+/, '').toLowerCase();
-    const p = window.__IZZA_PROFILE__ || {};
-    if (p.username) return String(p.username).toLowerCase();
-    const ls = (localStorage.getItem('izzaUserU') || '').trim();
-    if (ls) return ls.replace(/^@+/, '').toLowerCase();
-  }catch(_){}
-  return '';
-}
-
-// Public helper (define it only once)
-if (typeof window.openCraftingFromShowcase !== 'function') {
-  window.openCraftingFromShowcase = function openCraftingFromShowcase(){
-    if (!__CRAFT_OVERLAY || !__CRAFT_FRAME) return;
-    const u   = __izzaWho();
-    const url = `https://izzagame.onrender.com/crafting?source=token_showcase${u ? `&u=${encodeURIComponent(u)}` : ''}`;
-    __CRAFT_FRAME.src = url;
-    __CRAFT_OVERLAY.style.display = 'block';
-  };
-}
-
-// Wire the button once
-if (__CRAFT_BTN && !__CRAFT_BTN.dataset.wired) {
-  __CRAFT_BTN.dataset.wired = '1';
-  __CRAFT_BTN.addEventListener('click', ()=>{
-    if (typeof window.openCraftingFromShowcase === 'function') {
-      window.openCraftingFromShowcase();
-      return;
-    }
-    // Fallback (shouldn’t be needed if helper exists)
-    if (!__CRAFT_OVERLAY || !__CRAFT_FRAME) return;
-    const u   = __izzaWho();
-    const url = `https://izzagame.onrender.com/crafting?source=token_showcase${u ? `&u=${encodeURIComponent(u)}` : ''}`;
-    __CRAFT_FRAME.src = url;
-    __CRAFT_OVERLAY.style.display = 'block';
-  });
-}
-
-// Close button
-if (__CRAFT_CLOSE && !__CRAFT_CLOSE.dataset.wired) {
-  __CRAFT_CLOSE.dataset.wired = '1';
-  __CRAFT_CLOSE.addEventListener('click', ()=>{
-    if (!__CRAFT_OVERLAY || !__CRAFT_FRAME) return;
-    __CRAFT_OVERLAY.style.display = 'none';
-    __CRAFT_FRAME.src = 'about:blank';
-  });
-}
-
-// Listen for completion from Crafting Land UI
-(function(){
-  if (window.__izzaCraftMsgWired) return;
-  window.__izzaCraftMsgWired = true;
-
-  window.addEventListener('message', (ev)=>{
-    try{
-      const d = ev.data || {};
-      if (d && d.type === 'craft:done' && d.source === 'token_showcase') {
-        if (__CRAFT_OVERLAY && __CRAFT_FRAME) {
-          __CRAFT_OVERLAY.style.display = 'none';
-          __CRAFT_FRAME.src = 'about:blank';
-        }
-        if (__MINT_HINT) __MINT_HINT.style.display = '';
-      }
-    }catch(_){}
-  }, false);
-})();
-
-// ====== END STEP C — Crafting Land wiring ======
 // end of file
 })();
 </script>
