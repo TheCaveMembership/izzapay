@@ -35,9 +35,6 @@ DISTR_SECRET = _getenv("DISTR_SECRET", required=True)
 VOTE_ROUND_LENGTH_DAYS = int(_getenv("VOTE_ROUND_LENGTH_DAYS", "180") or "180")
 VOTE_ROUND_END_ENV     = _getenv("VOTE_ROUND_END", None)
 
-# Hard default: vote staking round ends and unlocks on this date if env not set
-VOTE_ROUND_END_DEFAULT = "2026-04-28T00:00:00Z"
-
 # % of ad revenue allocated to voters of the winning game (for display/preview)
 AD_REVENUE_POOL_PCT = Decimal(_getenv("AD_REVENUE_POOL_PCT", "0.25") or "0.25")
 
@@ -74,7 +71,7 @@ def _vote_cx():
     try:
         cx.execute("ALTER TABLE vote_intents ADD COLUMN weight7 TEXT")
     except Exception:
-        pass
+        pass  # already exists or SQLite variant without IF NOT EXISTS
     return cx
 
 def _vote_add(round_end, proposal, pub, amount7, weight7):
@@ -164,26 +161,9 @@ def _reward_for(amt: Decimal, days: int) -> Decimal:
         Decimal("0.0000001"), rounding=ROUND_DOWN
     )
 
-# Accept 64 or 72 hex, normalize later for SDK
 _hex64 = re.compile(r"^[0-9a-fA-F]{64}$")
-_hex72 = re.compile(r"^[0-9a-fA-F]{72}$")
-
 def _valid_balance_id(s: str | None) -> bool:
-    return bool(s) and (bool(_hex64.match(s)) or bool(_hex72.match(s)))
-
-def _normalize_cb_for_sdk(s: str | None) -> str | None:
-    """
-    Stellar SDK's ClaimClaimableBalance expects discriminant + hash (72 hex).
-    If 64 provided, prefix 8 zeros. Return lowercase or None if invalid.
-    """
-    if not s:
-        return None
-    v = s.strip()
-    if _hex72.match(v):
-        return v.lower()
-    if _hex64.match(v):
-        return ("00000000" + v).lower()
-    return None
+    return bool(s) and bool(_hex64.match(s))
 
 def _account_balances(pub: str):
     return server.accounts().account_id(pub).call().get("balances", [])
@@ -259,7 +239,7 @@ def _sanitize_amount(j) -> Decimal:
     safe = raw.replace(",", "").replace(" ", "")
     return Decimal(safe)
 
-# --------------------- vote-round helpers: fixed end ----------------------
+# --------------------- vote-round helpers: decreasing max days ------------
 
 def _start_of_today_utc() -> int:
     now = int(time.time())
@@ -267,30 +247,23 @@ def _start_of_today_utc() -> int:
 
 def _vote_round_end_unix() -> int:
     """
-    Always use a fixed round end for vote staking:
-      - If env VOTE_ROUND_END provided, use it
-      - Else fall back to VOTE_ROUND_END_DEFAULT ("2026-04-28T00:00:00Z")
+    If VOTE_ROUND_END is provided, use it.
+    Otherwise, end = start_of_today_utc + VOTE_ROUND_LENGTH_DAYS * 86400.
     """
-    if VOTE_ROUND_END_ENV:
-        env_end = _to_unix(VOTE_ROUND_END_ENV)
-        if env_end:
-            return env_end
-    # default hard date
-    default_end = _to_unix(VOTE_ROUND_END_DEFAULT)
-    if not default_end:
-        # extremely defensive: if parsing failed, keep prior behavior as a last resort
-        return _start_of_today_utc() + VOTE_ROUND_LENGTH_DAYS * 86400
-    return default_end
+    env_end = _to_unix(VOTE_ROUND_END_ENV) if VOTE_ROUND_END_ENV else None
+    if env_end:
+        return env_end
+    return _start_of_today_utc() + VOTE_ROUND_LENGTH_DAYS * 86400
 
 def _vote_days_remaining(now_ts: int | None = None) -> int:
     """
-    Ceiling days remaining until round end. Returns 0 when ended.
+    Ceiling days remaining until round end, minimum 1.
     """
     now_ts = int(now_ts or time.time())
     end = _vote_round_end_unix()
     secs = max(0, end - now_ts)
     days = (secs + 86400 - 1) // 86400  # ceil
-    return int(days)  # allow 0 after deadline
+    return max(1, int(days))
 
 def _vote_boost_multiplier(days_remaining: int) -> Decimal:
     """
@@ -326,11 +299,10 @@ def vote_rules():
     return jsonify({
         "ok": True,
         "round_end_unix": end_unix,
-        "round_end_iso": datetime.utcfromtimestamp(end_unix).strftime("%Y-%m-%dT%H:%M:%SZ"),
         "days_remaining": _vote_days_remaining(),
         "length_days": VOTE_ROUND_LENGTH_DAYS,
-        "early_bonus_max": str((EARLY_BONUS_MAX * Decimal(100)).quantize(Decimal("0.01"))),
-        "note": "Vote stakes unlock at the fixed round end. Early stakes get higher weight."
+        "early_bonus_max": str((EARLY_BONUS_MAX * Decimal(100)).quantize(Decimal("0.01"))),  # percent
+        "note": "Vote stakes unlock at round end. Early stakes get higher weight."
     })
 
 # ----------------------------- preview/build stake -----------------------
@@ -426,45 +398,10 @@ def build_stake_tx():
         "network_passphrase": NET_PASSPHRASE,
         "unlock_unix": unlock_unix,
         "reward": _q7(reward),
-        "days": _clamp_days(days)
+        "days": days
     })
 
 # ----------------------------- vote staking ------------------------------
-
-@bp_stake.route("/api/vote/preview", methods=["POST"])
-def vote_preview():
-    """
-    Preview a vote stake. Returns unlock time (fixed), boost, weighted amount, and share estimate.
-    Body: { amount: "...", proposal?: "..." }
-    """
-    j = request.get_json(force=True) or {}
-    proposal = _clean(j.get("proposal") or "") or "arcade"
-    try:
-        amt = _sanitize_amount(j)
-    except (InvalidOperation, ValueError, TypeError):
-        abort(400, "bad amount")
-    if amt <= 0:
-        abort(400, "bad amount <= 0")
-
-    unlock_unix    = _vote_round_end_unix()
-    days_remaining = _vote_days_remaining()
-    if days_remaining < 1 and int(time.time()) >= unlock_unix:
-        abort(400, "vote round ended")
-
-    boost         = _vote_boost_multiplier(days_remaining)
-    weight        = _vote_weight_for(amt, days_remaining)
-    est_share_pct = _vote_est_share_pct(unlock_unix, proposal, _q7(weight))
-
-    return jsonify({
-        "ok": True,
-        "unlock_unix": unlock_unix,
-        "round_end_iso": datetime.utcfromtimestamp(unlock_unix).strftime("%Y-%m-%dT%H:%M:%SZ"),
-        "days_remaining": int(days_remaining),
-        "boost_multiplier": str(boost),
-        "weight_amount": _q7(weight),
-        "proposal": proposal,
-        "est_share_pct": est_share_pct
-    })
 
 @bp_stake.route("/api/vote/stake", methods=["POST"])
 def build_vote_stake_tx():
@@ -490,10 +427,10 @@ def build_vote_stake_tx():
     if amt <= 0:
         abort(400, "bad params: amount <= 0")
 
-    # Fixed round end + early boost
+    # Round end + early boost
     unlock_unix = _vote_round_end_unix()
     days_remaining = _vote_days_remaining()
-    if days_remaining < 1 and int(time.time()) >= unlock_unix:
+    if days_remaining < 1:
         abort(400, "vote round ended")
 
     # Preflight: user has IZZA principal available
@@ -545,11 +482,11 @@ def build_vote_stake_tx():
         "xdr": tx.to_xdr(),
         "network_passphrase": NET_PASSPHRASE,
         "unlock_unix": unlock_unix,
-        "proposal": proposal,
         "days": int(days_remaining),
+        "proposal": proposal,
         "boost_multiplier": str(_vote_boost_multiplier(days_remaining)),
         "weight_amount": _q7(_vote_weight_for(amt, days_remaining)),
-        "note": "Vote stake locks principal until the fixed round end. Weight includes early bonus."
+        "note": "Vote stake locks principal until the vote round end. Weight includes early bonus."
     })
 
 # ----------------------------- classify/list claimables -------------------
@@ -669,10 +606,10 @@ def _infer_claimant_from_balance_id(cb_id: str) -> str | None:
 def _resolve_ids(pub: str, incoming: list[str]) -> list[str]:
     """
     Accepts:
-      - true 64-hex or 72-hex Horizon ids,
-      - comma-joined 64/72-hex strings,
+      - true 64-hex Horizon ids,
+      - comma-joined 64-hex strings,
       - or group contract ids like "<unlock>|vote|<suffix>" / "<unlock>|regular|<prefix>"
-    Returns unique list of 64/72-hex ids, **unlocked only**.
+    Returns unique list of 64-hex ids, **unlocked only**.
     """
     # Flatten commas + trim
     raw = []
@@ -684,7 +621,7 @@ def _resolve_ids(pub: str, incoming: list[str]) -> list[str]:
     if not raw:
         return []
 
-    # Quick path: collect direct hex ids
+    # Quick path: collect direct 64-hex ids
     direct = [s for s in raw if _valid_balance_id(s)]
     wants_groups = [s for s in raw if not _valid_balance_id(s) and "|" in s]
 
@@ -728,10 +665,7 @@ def _build_claim_tx_batch(pub: str, balance_ids: list[str]):
         network_passphrase=NET_PASSPHRASE,
         base_fee=server.fetch_base_fee()
     )
-    for raw in balance_ids:
-        cb_id = _normalize_cb_for_sdk(raw)
-        if not cb_id:
-            abort(400, f"bad balance_id format: {raw!s}")
+    for cb_id in balance_ids:
         tb.append_claim_claimable_balance_op(cb_id)
 
     tx = tb.set_timeout(180).build()
@@ -758,7 +692,7 @@ def build_claim_tx():
 def build_claim_tx_batch():
     """
     Build one tx to claim multiple balance IDs.
-    Now accepts either real 64/72-hex IDs, comma-joined values, or group contract_ids.
+    Now accepts either real 64-hex IDs, comma-joined values, or group contract_ids.
     """
     j = request.get_json(force=True) or {}
     pub = _clean(j.get("pub") or "")
@@ -773,9 +707,9 @@ def build_claim_tx_batch():
         for x in ids:
             if x is None: continue
             flat.extend([p.strip() for p in str(x).split(",") if p and p.strip()])
-        first_concrete = next((p for p in flat if _valid_balance_id(p)), None)
-        if first_concrete:
-            pub = _infer_claimant_from_balance_id(first_concrete)
+        first64 = next((p for p in flat if _valid_balance_id(p)), None)
+        if first64:
+            pub = _infer_claimant_from_balance_id(first64)
     if not (pub and pub.startswith("G")):
         abort(400, "bad pub")
 
@@ -792,7 +726,7 @@ def claim_batch_ui_alias():
     """
     UI alias for batch claim.
     Body: { ids: [...], pub?: "G..." } or { balance_ids: [...] }
-    Accepts 64/72-hex, comma-joined, or group contract_ids.
+    Accepts 64-hex, comma-joined, or group contract_ids.
     """
     j = request.get_json(force=True) or {}
     ids = j.get("ids") or j.get("balance_ids") or []
