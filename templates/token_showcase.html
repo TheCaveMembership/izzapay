@@ -562,7 +562,38 @@
 
     <footer>IZZA PAY — Testnet showcase · Built for demo and diagnostics</footer>
   </div>
+<!-- === IZZA CRAFTING OVERLAY + MINT HINT (STEP B) === -->
+<div id="craftOverlay"
+     style="display:none;position:fixed;inset:0;
+            background:rgba(0,0,0,.6);backdrop-filter:blur(6px);
+            z-index:9999;">
+  <div style="max-width:1000px;width:96%;height:86%;
+              margin:3% auto;background:var(--card);
+              border:1px solid var(--line);border-radius:14px;
+              overflow:hidden;position:relative;">
+    <button id="craftClose"
+            class="ip-btn ghost tiny"
+            style="position:absolute;top:8px;right:8px;">Close</button>
+    <iframe id="craftFrame"
+            src="about:blank"
+            style="width:100%;height:100%;border:0;"></iframe>
+  </div>
+</div>
 
+<!-- This banner appears AFTER crafting from the token showcase -->
+<div id="mintHint"
+     class="card"
+     style="display:none;margin-top:12px;">
+  <div class="row" style="justify-content:space-between;align-items:center;">
+    <div class="note">
+      Your item is crafted. To mint it as an NFT collection,
+      open your <strong>IZZA Pay merchant dashboard</strong>
+      and use <em>Make NFT from this crafted item</em> under the product.
+    </div>
+    <a class="ip-btn tiny" href="/merchant">Open Dashboard</a>
+  </div>
+</div>
+<!-- === END IZZA CRAFTING OVERLAY + MINT HINT (STEP B) === -->
   <!-- Modal Backdrop -->
   <div class="modal-backdrop" id="modalBackdrop" hidden></div>
 
