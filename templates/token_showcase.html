@@ -1624,43 +1624,7 @@ claimQuickBtn?.addEventListener('click', ()=> openClaimBtn?.click());
 closeStakeBtn?.addEventListener('click', ()=> { log('ui.stake.close'); closeModal(stakeModal); });
 closeClaimBtn?.addEventListener('click', ()=> { log('ui.claim.close'); closeModal(claimModal); });
   
-  // …existing wiring above…
-
-  // Step 3: Open Crafting Land from the token showcase
-  const craftBtn = document.getElementById('craftOpenBtn');
-  if (craftBtn) {
-    craftBtn.addEventListener('click', () => {
-      // Prefer the helper from Step 1 if present:
-      if (typeof window.openCraftingFromShowcase === 'function') {
-        window.openCraftingFromShowcase();
-        return;
-      }
-      // Fallback (in case helper wasn’t loaded for some reason)
-      try {
-        const OVERLAY = document.getElementById('craftOverlay');
-        const FRAME   = document.getElementById('craftFrame');
-
-        // Same user-discovery pattern you already use
-        const who = () => {
-          try{
-            const q=(new URLSearchParams(location.search).get('u')||'').trim(); if(q) return q.replace(/^@+/,'').toLowerCase();
-            const p=window.__IZZA_PROFILE__||{}; if(p.username) return String(p.username).toLowerCase();
-            const ls=(localStorage.getItem('izzaUserU')||'').trim(); if(ls) return ls.replace(/^@+/,'').toLowerCase();
-          }catch{}
-          return '';
-        };
-
-        const u = who();
-        const url = `https://izzagame.onrender.com/crafting?source=token_showcase${u ? `&u=${encodeURIComponent(u)}` : ''}`;
-        FRAME.src = url;
-        OVERLAY.style.display = 'block';
-      } catch(_){}
-    });
-  }
-
-  // The message listener you added in Step 1 will auto-close the overlay
-  // and reveal the #mintHint banner when crafting sends {type:'craft:done', source:'token_showcase'}.
-
+  
 // ======== PREVIEW ========
 stakePreview?.addEventListener('click', async ()=>{
   const pub = (stakePub.value||'').trim();
