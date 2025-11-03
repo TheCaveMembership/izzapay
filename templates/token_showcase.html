@@ -3063,7 +3063,7 @@ function end(e){
   const dt = Math.max(1, performance.now() - startT);
   const speed = Math.abs(dx) / dt;
   if (speed > 0.4) {
-    wrap.classList.remove('spin-anim'); void wrap.offsetWidth; wrap.classList.add('spin-anim');
+    wrap?.classList.remove('spin-anim'); void wrap?.offsetWidth; wrap?.classList.add('spin-anim');
     setTimeout(fetchSummary, 1100);
     log('coin.spin.refresh');
   }
@@ -3085,14 +3085,43 @@ function trapFocus(container){
   });
 }
 [modal, orderbookModal, placeOrderModal, myWalletModal, stakeModal, claimModal, voteModal].forEach(m=> m && trapFocus(m));
-  
+
+// =================== Step 3: wire the "Open IZZA Crafting Land" button ===================
+const craftBtn = document.getElementById('craftOpenBtn');
+if (craftBtn) {
+  craftBtn.addEventListener('click', () => {
+    // Prefer the helper (defined below)
+    if (typeof window.openCraftingFromShowcase === 'function') {
+      window.openCraftingFromShowcase();
+      return;
+    }
+    // Fallback (shouldn't be needed if the helper loads)
+    try {
+      const OVERLAY = document.getElementById('craftOverlay');
+      const FRAME   = document.getElementById('craftFrame');
+      const who = () => {
+        try{
+          const q=(new URLSearchParams(location.search).get('u')||'').trim(); if(q) return q.replace(/^@+/,'').toLowerCase();
+          const p=window.__IZZA_PROFILE__||{}; if(p.username) return String(p.username).toLowerCase();
+          const ls=(localStorage.getItem('izzaUserU')||'').trim(); if(ls) return ls.replace(/^@+/,'').toLowerCase();
+        }catch{} return '';
+      };
+      const u = who();
+      const url = `https://izzagame.onrender.com/crafting?source=token_showcase${u ? `&u=${encodeURIComponent(u)}` : ''}`;
+      FRAME.src = url;
+      OVERLAY.style.display = 'block';
+    } catch(_){}
+  });
+}
+
+// =================== Crafting overlay helper (exactly one copy) ===================
 (function(){
-  const OVERLAY = document.getElementById('craftOverlay');
-  const FRAME   = document.getElementById('craftFrame');
-  const CLOSE   = document.getElementById('craftClose');
+  const OVERLAY   = document.getElementById('craftOverlay');
+  const FRAME     = document.getElementById('craftFrame');
+  const CLOSE     = document.getElementById('craftClose');
   const MINT_HINT = document.getElementById('mintHint');
 
-  // helper to discover username (same pattern you already use)
+  // Discover username (same pattern you already use)
   function who(){
     try{
       const q=(new URLSearchParams(location.search).get('u')||'').trim(); if(q) return q.replace(/^@+/,'').toLowerCase();
@@ -3102,28 +3131,28 @@ function trapFocus(container){
     return '';
   }
 
-  // Open Crafting Land from token showcase
-  window.openCraftingFromShowcase = function openCraftingFromShowcase(){
+  // Public helper used by the button wiring above
+  window.openCraftingFromShowcase = function(){
     const u = who();
     const url = `https://izzagame.onrender.com/crafting?source=token_showcase${u ? `&u=${encodeURIComponent(u)}`:''}`;
+    if (!OVERLAY || !FRAME) return;
     FRAME.src = url;
     OVERLAY.style.display = 'block';
   };
 
-  CLOSE.addEventListener('click', ()=>{
+  CLOSE?.addEventListener('click', ()=>{
+    if (!OVERLAY || !FRAME) return;
     OVERLAY.style.display='none';
     FRAME.src='about:blank';
   });
 
-  // Listen for completion from Crafting Land UI
+  // Close overlay and show mint hint when Crafting Land reports done
   window.addEventListener('message', (ev)=>{
     try{
       const d = ev.data || {};
       if(d && d.type === 'craft:done' && d.source === 'token_showcase'){
-        // Only close the overlay and show the mint hint banner
-        OVERLAY.style.display='none';
-        FRAME.src='about:blank';
-        if(MINT_HINT) MINT_HINT.style.display = '';
+        if (OVERLAY && FRAME){ OVERLAY.style.display='none'; FRAME.src='about:blank'; }
+        if (MINT_HINT) MINT_HINT.style.display = '';
       }
     }catch{}
   }, false);
