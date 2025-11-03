@@ -417,7 +417,58 @@ def build_stake_tx():
     })
 
 # ----------------------------- vote staking ------------------------------
+# ----------------------------- vote staking ------------------------------
 
+@bp_stake.route("/api/vote/preview", methods=["POST"])
+def vote_preview():
+    """
+    Preview the user's estimated share % if their chosen proposal wins.
+    - Lock date is the fixed vote round end (no user input).
+    - Weight = amount × early-bonus(multiplier based on days remaining).
+    - your_share_pct_if_wins = your_weight / (pool_before + your_weight).
+    """
+    j = request.get_json(force=True) or {}
+    proposal = _clean(j.get("proposal") or "") or "arcade"
+
+    # amount comes as string/number; sanitize to Decimal
+    try:
+        amt = _sanitize_amount(j)
+    except (InvalidOperation, ValueError, TypeError):
+        abort(400, "bad amount")
+    if amt <= 0:
+        abort(400, "bad amount <= 0")
+
+    # Round end is fixed from env; days remaining is derived from now
+    end_unix       = _vote_round_end_unix()
+    days_remaining = _vote_days_remaining()
+    if days_remaining < 1:
+        abort(400, "vote round ended")
+
+    # Compute weight with early-bonus multiplier
+    your_weight = _vote_weight_for(amt, days_remaining)
+
+    # Pool BEFORE adding this previewed vote (sum of prior weights for this proposal)
+    pool_before = _vote_total_weight(end_unix, proposal)
+
+    # Estimated share if this proposal wins
+    pool_after = pool_before + your_weight
+    share_pct = (your_weight / pool_after * Decimal(100)) if pool_after > 0 else Decimal(100)
+    share_pct = share_pct.quantize(Decimal("0.01"))  # 2 dp for UI
+
+    # For the UI helper line
+    ad_pool_pct = (AD_REVENUE_POOL_PCT * Decimal(100)).quantize(Decimal("0.01"))
+
+    return jsonify({
+        "ok": True,
+        "proposal": proposal,
+        "round_end_unix": int(end_unix),
+        "days_remaining": int(days_remaining),
+        "your_votes": _q7(amt),                 # raw votes (amount)
+        "your_weight7": _q7(your_weight),       # weighted votes after early bonus
+        "pool_before": float(pool_before),      # existing weighted pool
+        "your_share_pct_if_wins": float(share_pct),
+        "ad_pool_pct": float(ad_pool_pct)       # for the “ad revenue to voters” blurb
+    })
 @bp_stake.route("/api/vote/stake", methods=["POST"])
 def build_vote_stake_tx():
     """
