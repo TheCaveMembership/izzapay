@@ -2747,7 +2747,16 @@ if (host){
   bindFeatureMeters(STATE.root);
   _syncVisualsTabStyle();
 }
-
+// notify host (token showcase listens for this)
+try{
+  const msg = {
+    type: 'craft:done',
+    source: getQueryParam('source') || 'crafting_land'
+  };
+  if (window.parent && window.parent !== window) {
+    window.parent.postMessage(msg, '*');
+  }
+}catch(_){}
 // Optional IZZA Pay merchant handoff
 if (sellInPi && craftedId) {
   const BUS = (window.parent && window.parent.IZZA) ? window.parent.IZZA : window.IZZA;
@@ -2784,7 +2793,10 @@ if (sellInPi && craftedId) {
 
   _syncVisualsTabStyle();
 } // <-- closes bindInside()
-
+// utils: read ?source=...
+function getQueryParam(name){
+  try{ return new URLSearchParams(location.search).get(name) || ''; }catch{ return ''; }
+}
 /* ---------- Public API ---------- */
 window.CraftingUI = { mount, unmount };
 })(); // <-- closes IIFE
