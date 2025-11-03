@@ -460,15 +460,15 @@
           <button id="claimQuickBtn" class="cta" type="button" aria-haspopup="dialog" aria-controls="claimModal">💰 Claim</button>
           <button id="voteQuickBtn"  class="cta" type="button" aria-haspopup="dialog" aria-controls="voteModal">🗳️ Vote (Stake)</button>
         </div>
-        <!-- Step 3: Crafting entry (opens overlay) -->
-<div class="top-cta" style="margin-top:8px; display:flex; gap:8px; justify-content:center; flex-wrap:wrap">
-  <button id="craftOpenBtn" class="cta" type="button">🧪 Open IZZA Crafting Land</button>
-</div>
-<div class="help" style="text-align:center; margin-top:6px">
-  Craft an in-game item with AI-SVG, then mint it as a testnet NFT from your
-  <strong>IZZA Pay merchant dashboard</strong>. After you finish crafting, you’ll see a
-  mint hint banner here with a quick link to your dashboard.
-</div>
+
+        <!-- New: Crafting entry (opens overlay) -->
+        <div class="top-cta" style="margin-top:8px; display:flex; gap:8px; justify-content:center; flex-wrap:wrap">
+          <button id="craftOpenBtn" class="cta" type="button">🧪 Open IZZA Crafting Land</button>
+        </div>
+        <div class="help" style="text-align:center; margin-top:6px">
+          Craft an in-game item with AI-SVG, then mint it as a testnet NFT from your
+          <strong>IZZA Pay merchant dashboard</strong>. After you finish crafting from here, a mint-hint banner will appear with a quick link.
+        </div>
       </div>
 
       <!-- RIGHT: quick details + QR + activity dropdown -->
@@ -562,24 +562,25 @@
 
     <footer>IZZA PAY — Testnet showcase · Built for demo and diagnostics</footer>
   </div>
-<!-- Overlay container (drop near end of body) -->
-<div id="craftOverlay" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.6);backdrop-filter:blur(6px);z-index:9999">
-  <div style="max-width:1000px;width:96%;height:86%;margin:3% auto;background:var(--card);border:1px solid var(--line);border-radius:14px;overflow:hidden;position:relative">
-    <button id="craftClose" class="ip-btn ghost tiny" style="position:absolute;top:8px;right:8px">Close</button>
-    <iframe id="craftFrame" src="about:blank" style="width:100%;height:100%;border:0"></iframe>
-  </div>
-</div>
 
-<!-- The banner that appears AFTER crafting from token showcase -->
-<div id="mintHint" class="card" style="display:none;margin-top:12px">
-  <div class="row" style="justify-content:space-between;align-items:center">
-    <div class="note">
-      Your item is crafted. To mint it as an NFT collection, open your <strong>IZZA Pay merchant dashboard</strong> and use
-      <em>Make NFT from this crafted item</em> under the product.
+  <!-- Crafting overlay + post-craft hint (HTML) -->
+  <div id="craftOverlay" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.6);backdrop-filter:blur(6px);z-index:9999">
+    <div style="max-width:1000px;width:96%;height:86%;margin:3% auto;background:var(--card);border:1px solid var(--line);border-radius:14px;overflow:hidden;position:relative">
+      <button id="craftClose" class="ip-btn ghost tiny" style="position:absolute;top:8px;right:8px">Close</button>
+      <iframe id="craftFrame" src="about:blank" style="width:100%;height:100%;border:0"></iframe>
     </div>
-    <a class="ip-btn tiny" href="/merchant">Open Dashboard</a>
   </div>
-</div>
+
+  <div id="mintHint" class="card" style="display:none;margin-top:12px">
+    <div class="row" style="justify-content:space-between;align-items:center">
+      <div class="note">
+        Your item is crafted. To mint it as an NFT collection, open your <strong>IZZA Pay merchant dashboard</strong> and use
+        <em>Make NFT from this crafted item</em> under the product.
+      </div>
+      <a class="ip-btn tiny" href="/merchant">Open Dashboard</a>
+    </div>
+  </div>
+
   <!-- Modal Backdrop -->
   <div class="modal-backdrop" id="modalBackdrop" hidden></div>
 
@@ -677,7 +678,6 @@
       </div>
     </div>
   </div>
-
   <!-- MY WALLET MODAL -->
   <div class="modal" id="myWalletModal" role="dialog" aria-modal="true" aria-labelledby="myWalletTitle" hidden>
     <div class="modal-card">
