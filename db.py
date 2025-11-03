@@ -128,8 +128,6 @@ def init_db():
         -- NEW: NFT / Collections (on-chain asset, off-chain serials)
         ----------------------------------------------------------------------
 
-        -- Each "collection" corresponds to ONE on-chain asset: code<=12, issuer=your issuer,
-        -- display_decimals=0 for NFT semantics. Supply can be >1 if you want 500 editions.
         CREATE TABLE IF NOT EXISTS nft_collections(
           id INTEGER PRIMARY KEY,
           merchant_id INTEGER,               -- who owns/controls the collection
@@ -154,8 +152,6 @@ def init_db():
         CREATE INDEX IF NOT EXISTS idx_nft_collections_merchant ON nft_collections(merchant_id);
         CREATE INDEX IF NOT EXISTS idx_nft_collections_status ON nft_collections(status);
 
-        -- Per-edition serials tracked off-chain (1..total_supply).
-        -- Ownership is wallet-level; if null, it’s held by distribution.
         CREATE TABLE IF NOT EXISTS nft_tokens(
           id INTEGER PRIMARY KEY,
           collection_id INTEGER NOT NULL,
@@ -170,7 +166,6 @@ def init_db():
         );
         CREATE INDEX IF NOT EXISTS idx_nft_tokens_owner ON nft_tokens(owner_user_id);
 
-        -- On-chain mint record for auditability.
         CREATE TABLE IF NOT EXISTS nft_mint_events(
           id INTEGER PRIMARY KEY,
           collection_id INTEGER NOT NULL,
@@ -180,8 +175,6 @@ def init_db():
           FOREIGN KEY(collection_id) REFERENCES nft_collections(id) ON DELETE CASCADE
         );
 
-        -- Listings: fixed-price sell offers in Pi for single-edition NFTs.
-        -- For collection-level primary sales, we list "next available serial" implicitly.
         CREATE TABLE IF NOT EXISTS nft_listings(
           id INTEGER PRIMARY KEY,
           collection_id INTEGER NOT NULL,
@@ -193,24 +186,26 @@ def init_db():
           sold_at INTEGER,
           buyer_user_id INTEGER,
           order_id INTEGER,                       -- link to orders row if routed through checkout
-          UNIQUE(collection_id, serial, status) FILTER (WHERE status='active'),
           FOREIGN KEY(collection_id) REFERENCES nft_collections(id) ON DELETE CASCADE,
           FOREIGN KEY(seller_user_id) REFERENCES users(id),
           FOREIGN KEY(buyer_user_id) REFERENCES users(id),
           FOREIGN KEY(order_id) REFERENCES orders(id)
         );
         CREATE INDEX IF NOT EXISTS idx_nft_listings_active ON nft_listings(collection_id, status);
+        """)
 
-        -- Optional: royalty schedule per collection (flat percent in basis points).
-        CREATE TABLE IF NOT EXISTS nft_royalties(
-          id INTEGER PRIMARY KEY,
-          collection_id INTEGER NOT NULL,
-          bps INTEGER NOT NULL DEFAULT 0,        -- 250 = 2.5%
-          payout_user_id INTEGER,                 -- who receives royalties
-          created_at INTEGER,
-          FOREIGN KEY(collection_id) REFERENCES nft_collections(id) ON DELETE CASCADE,
-          FOREIGN KEY(payout_user_id) REFERENCES users(id)
-        );
+        # Partial UNIQUE indexes to replace the old FILTER syntax
+        # One active listing per (collection_id, serial) for resale items
+        cx.execute("""
+          CREATE UNIQUE INDEX IF NOT EXISTS uniq_nft_listings_active_serial
+          ON nft_listings(collection_id, serial)
+          WHERE status='active' AND serial IS NOT NULL;
+        """)
+        # At most one active PRIMARY listing (serial is NULL) per collection
+        cx.execute("""
+          CREATE UNIQUE INDEX IF NOT EXISTS uniq_nft_listings_active_primary
+          ON nft_listings(collection_id)
+          WHERE status='active' AND serial IS NULL;
         """)
 
 def ensure_schema():
@@ -304,21 +299,22 @@ def ensure_schema():
           sold_at INTEGER,
           buyer_user_id INTEGER,
           order_id INTEGER,
-          UNIQUE(collection_id, serial, status) FILTER (WHERE status='active'),
           FOREIGN KEY(collection_id) REFERENCES nft_collections(id) ON DELETE CASCADE,
           FOREIGN KEY(seller_user_id) REFERENCES users(id),
           FOREIGN KEY(buyer_user_id) REFERENCES users(id),
           FOREIGN KEY(order_id) REFERENCES orders(id)
         );
         CREATE INDEX IF NOT EXISTS idx_nft_listings_active ON nft_listings(collection_id, status);
+        """)
 
-        CREATE TABLE IF NOT EXISTS nft_royalties(
-          id INTEGER PRIMARY KEY,
-          collection_id INTEGER NOT NULL,
-          bps INTEGER NOT NULL DEFAULT 0,
-          payout_user_id INTEGER,
-          created_at INTEGER,
-          FOREIGN KEY(collection_id) REFERENCES nft_collections(id) ON DELETE CASCADE,
-          FOREIGN KEY(payout_user_id) REFERENCES users(id)
-        );
+        # Recreate the partial UNIQUE indexes if needed
+        cx.execute("""
+          CREATE UNIQUE INDEX IF NOT EXISTS uniq_nft_listings_active_serial
+          ON nft_listings(collection_id, serial)
+          WHERE status='active' AND serial IS NOT NULL;
+        """)
+        cx.execute("""
+          CREATE UNIQUE INDEX IF NOT EXISTS uniq_nft_listings_active_primary
+          ON nft_listings(collection_id)
+          WHERE status='active' AND serial IS NULL;
         """)
