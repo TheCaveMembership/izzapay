@@ -530,19 +530,20 @@
   const proxy = u => { const v=(u||'').trim(); if(!v) return ''; if(v.startsWith('/uimg?src=')||v.startsWith('data:')||v.startsWith('blob:')||v.startsWith('/')) return v; try{const x=new URL(v,location.origin); if(/^https?:/.test(x.protocol)) return '/uimg?src='+encodeURIComponent(x.href);}catch{} return v; };
   const copyFrom = sel => { const el=$(sel); if(!el) return; const t=el.textContent.trim(); if(!navigator.clipboard){ const ta=document.createElement('textarea'); ta.value=t; document.body.appendChild(ta); ta.select(); try{document.execCommand('copy')}catch{} document.body.removeChild(ta); return; } navigator.clipboard.writeText(t); };
 
-  // ---------- username ----------
+  // ---------- username: keep CANON for wallet endpoints; LOWER for game ----------
   const SRV_USER = {{ (username or '') | tojson }};
-  function normU(u){ return (u||'').toString().trim().replace(/^@+/, '').toLowerCase(); }
-  function currentUser(){
-    const q = new URLSearchParams(location.search).get('u');
-    if(q) return normU(q);
-    if(SRV_USER) return normU(SRV_USER);
-    try{ const raw=localStorage.getItem('piAuthUser'); if(raw){ const j=JSON.parse(raw); if(j && j.username) return normU(j.username); } }catch{}
-    try{ const u=localStorage.getItem('izzaUserU'); if(u) return normU(u); }catch{}
+  function stripAt(s){ return (s||'').toString().trim().replace(/^@+/, ''); }
+  const USER_CANON = stripAt(SRV_USER);                 // e.g., "CamMac"
+  const USER_LOWER = USER_CANON ? USER_CANON.toLowerCase() : (()=>{
+    // very last resort fallbacks if no server username
+    try{ const raw=localStorage.getItem('piAuthUser'); if(raw){ const j=JSON.parse(raw); if(j && j.username) return stripAt(j.username).toLowerCase(); } }catch{}
+    try{ const u=localStorage.getItem('izzaUserU'); if(u) return stripAt(u).toLowerCase(); }catch{}
     return '';
-  }
-  const USERNAME = currentUser();
-  try{ if(USERNAME) localStorage.setItem('izzaUserU', USERNAME); }catch{}
+  })();
+
+  // persist both, but do NOT overwrite canonical with lower
+  try{ if(USER_LOWER) localStorage.setItem('izzaUserU', USER_LOWER); }catch{}
+  try{ if(USER_CANON) localStorage.setItem('izzaUserCanon', USER_CANON); }catch{}
 
   // ---------- uploads (unchanged) ----------
   const token = ()=> (document.querySelector('input[name="t"]')?.value || new URLSearchParams(location.search).get('t') || '');
@@ -724,7 +725,8 @@
     const GAME_BASE='https://izzagame.onrender.com';
     const IC_PER_PI = 2000;
 
-    const who=()=> USERNAME;
+    // Use LOWER username for game state (your game endpoints expect lowercase handles)
+    const who=()=> USER_LOWER;
 
     async function fetchState(user){
       if(!user) return null;
@@ -953,7 +955,7 @@
         });
 
         (async()=>{ try{
-          const user=USERNAME;
+          const user=USER_LOWER;
           const state=await fetchState(user);
           const items=itemsFromState(state);
           fillSelect(sel, items, cur, true);
@@ -1002,14 +1004,18 @@
   function getLocalSecret(pub){
     try{ const v=__readVault(); if(!v) return ''; if(pub && v.pub!==pub) return ''; return v.sec||''; }catch{ return ''; }
   }
+
+  // Use CANON username for wallet endpoints (server compares exact case)
   async function fetchActiveWallet(u){
-    const qs = u ? ('?u='+encodeURIComponent(u)) : '';
+    const who = u || USER_CANON;
+    const qs = who ? ('?u='+encodeURIComponent(who)) : '';
     const r = await fetch('/api/wallet/active'+qs, {credentials:'include'});
     if(!r.ok) return null;
     return r.json().catch(()=>null);
   }
   async function linkActiveWallet(u, sec){
-    const qs = u ? ('?u='+encodeURIComponent(u)) : '';
+    const who = u || USER_CANON;
+    const qs = who ? ('?u='+encodeURIComponent(who)) : '';
     const r = await fetch('/api/wallet/link'+qs, {method:'POST', headers:{'content-type':'application/json'}, body:JSON.stringify({ sec }), credentials:'include'});
     if(!r.ok) return null;
     return r.json().catch(()=>null);
@@ -1019,27 +1025,24 @@
   }
 
   async function ensureUserAndWalletGate(){
-    const u = USERNAME;
-    if(!u){ alert('Please sign in with Pi first.'); return null; }
-    const active = await fetchActiveWallet(u);
+    const active = await fetchActiveWallet(USER_CANON);
     const pub = active && active.pub || '';
+    if(!USER_CANON){ alert('Please sign in with Pi first.'); return null; }
     if(!pub){ alert('Open your IZZA wallet and set an active wallet first.'); return null; }
     if(!isLocalWallet(pub)){
-      // open modal to let them paste the S key
       openMyWallet();
       alert('Open your IZZA wallet and save your S key locally first.');
       return null;
     }
-    return { user:u, pub, sec:getLocalSecret(pub) };
+    return { user:USER_CANON, pub, sec:getLocalSecret(pub) };
   }
 
   // Minimal wallet modal wiring
   function openMyWallet(){ $('#myWalletModal')?.removeAttribute('hidden'); refreshMyWalletModal(); }
   function closeMyWallet(){ $('#myWalletModal')?.setAttribute('hidden',''); }
   async function refreshMyWalletModal(){
-    const u = USERNAME;
-    $('#mwUser').textContent = u ? '@'+u : '—';
-    const active = await fetchActiveWallet(u);
+    $('#mwUser').textContent = USER_CANON ? '@'+USER_CANON : '—';
+    const active = await fetchActiveWallet(USER_CANON);
     const pub = active && active.pub || '';
     $('#mwPub').textContent = pub || '—';
     const has = pub && isLocalWallet(pub);
@@ -1047,31 +1050,22 @@
   }
   $('#openWalletBtn')?.addEventListener('click', openMyWallet);
   $('#closeMyWalletBtn')?.addEventListener('click', closeMyWallet);
-
-  // >>>>>>>>>>>>>>>>>>>> MINIMAL, TARGETED CHANGES START <<<<<<<<<<<<<<<<<<<<
   $('#mwSaveBtn')?.addEventListener('click', async ()=>{
-    const u=USERNAME;
-    const active = await fetchActiveWallet(u);
+    const active = await fetchActiveWallet(USER_CANON);
     const pub = active && active.pub || '';
     if(!pub){ alert('No active wallet found. Open the IZZA wallet from the token page to set one, or import here.'); return; }
-
-    // normalize secret: strip whitespace, uppercase, strict base32 check
-    const raw = ($('#mwSInput')?.value||'');
-    const sec = raw.toUpperCase().replace(/[\s\r\n\t]+/g,'').trim();
-    if(!/^S[2-7A-Z]{55}$/.test(sec)){ alert('Enter a valid S key'); return; }
-
+    const sec = ($('#mwSInput')?.value||'').trim();
+    if(!/^S[A-Z0-9]{55}$/.test(sec)){ alert('Enter a valid S key'); return; }
     const v=__readVault()||{};
     v.pub = pub; v.sec = sec; __writeVault(v);
-    // also link to server vault for signing endpoints that require it
-    await linkActiveWallet(USERNAME, sec);
+    // also link to server vault for signing endpoints that require it (case-sensitive username)
+    await linkActiveWallet(USER_CANON, sec);
     $('#mwSInput').value='';
     refreshMyWalletModal();
     alert('S key saved locally for this wallet.');
   });
-  // >>>>>>>>>>>>>>>>>>>> MINIMAL, TARGETED CHANGES END <<<<<<<<<<<<<<<<<<<<<<
-
   $('#mwForgetBtn')?.addEventListener('click', async ()=>{
-    const active = await fetchActiveWallet(USERNAME);
+    const active = await fetchActiveWallet(USER_CANON);
     const pub = active && active.pub || '';
     if(pub) __forgetSecret(pub);
     refreshMyWalletModal();
