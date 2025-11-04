@@ -21,7 +21,7 @@ from dotenv import load_dotenv
 from emailer import send_email
 from payments import split_amounts
 from staking import bp_stake
-
+from nft_api import bp_nft
 
 # 🟢 Wallet API blueprint import (needs to be at top-level)
 from wallet_api import bp as wallet_api_bp
@@ -151,6 +151,8 @@ app = Flask(__name__)
 app.register_blueprint(bp_faucet)
 app.register_blueprint(wallet_api_bp)
 app.register_blueprint(bp_stake)
+app.register_blueprint(bp_nft)
+
 app.config.update(
     SESSION_COOKIE_SAMESITE="None",
     SESSION_COOKIE_SECURE=True
