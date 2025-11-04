@@ -282,7 +282,7 @@ def mint():
 
         iss_acc = _load(iss_kp.public_key)
         tx = (TransactionBuilder(iss_acc, PP, base_fee=_base_fee())
-              .append_payment_op(DISTR_G, "1", asset)
+              .append_payment_op(DISTR_G, asset, "1")  # <-- swapped order: (destination, asset, amount)
               .set_timeout(180).build())
         tx.sign(iss_kp)
         try:
