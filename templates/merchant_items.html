@@ -1047,13 +1047,19 @@
   }
   $('#openWalletBtn')?.addEventListener('click', openMyWallet);
   $('#closeMyWalletBtn')?.addEventListener('click', closeMyWallet);
+
+  // >>>>>>>>>>>>>>>>>>>> MINIMAL, TARGETED CHANGES START <<<<<<<<<<<<<<<<<<<<
   $('#mwSaveBtn')?.addEventListener('click', async ()=>{
     const u=USERNAME;
     const active = await fetchActiveWallet(u);
     const pub = active && active.pub || '';
     if(!pub){ alert('No active wallet found. Open the IZZA wallet from the token page to set one, or import here.'); return; }
-    const sec = ($('#mwSInput')?.value||'').trim();
-    if(!/^S[A-Z0-9]{55}$/.test(sec)){ alert('Enter a valid S key'); return; }
+
+    // normalize secret: strip whitespace, uppercase, strict base32 check
+    const raw = ($('#mwSInput')?.value||'');
+    const sec = raw.toUpperCase().replace(/[\s\r\n\t]+/g,'').trim();
+    if(!/^S[2-7A-Z]{55}$/.test(sec)){ alert('Enter a valid S key'); return; }
+
     const v=__readVault()||{};
     v.pub = pub; v.sec = sec; __writeVault(v);
     // also link to server vault for signing endpoints that require it
@@ -1062,6 +1068,8 @@
     refreshMyWalletModal();
     alert('S key saved locally for this wallet.');
   });
+  // >>>>>>>>>>>>>>>>>>>> MINIMAL, TARGETED CHANGES END <<<<<<<<<<<<<<<<<<<<<<
+
   $('#mwForgetBtn')?.addEventListener('click', async ()=>{
     const active = await fetchActiveWallet(USERNAME);
     const pub = active && active.pub || '';
