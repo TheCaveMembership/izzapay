@@ -1143,10 +1143,10 @@
       if(on){
         if(!stockEl.dataset.prev) stockEl.dataset.prev = stockEl.value || '';
         stockEl.value = '1';
-        stockEl.setAttribute('disabled','');
+        stockEl.setAttribute('readonly','');
         if(stockNote) stockNote.style.display='';
       }else{
-        stockEl.removeAttribute('disabled');
+        stockEl.removeAttribute('readonly');
         if(stockNote) stockNote.style.display='none';
         if(stockEl.dataset.prev!==undefined){ stockEl.value = stockEl.dataset.prev; }
       }
