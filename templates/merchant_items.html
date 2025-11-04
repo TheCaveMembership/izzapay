@@ -1013,13 +1013,21 @@
     if(!r.ok) return null;
     return r.json().catch(()=>null);
   }
-  async function linkActiveWallet(u, sec){
-    const who = u || USER_CANON;
-    const qs = who ? ('?u='+encodeURIComponent(who)) : '';
-    const r = await fetch('/api/wallet/link'+qs, {method:'POST', headers:{'content-type':'application/json'}, body:JSON.stringify({ sec }), credentials:'include'});
-    if(!r.ok) return null;
-    return r.json().catch(()=>null);
-  }
+  async function linkActiveWallet(u, pub, secret){
+  const who = u || USER_CANON;
+  const qs = who ? ('?u='+encodeURIComponent(who)) : '';
+  const body = { pub: String(pub || '').trim().toUpperCase() };
+  if (secret && /^S[A-Z0-9]{55}$/.test(secret)) body.secret = secret.trim();
+
+  const r = await fetch('/api/wallet/link'+qs, {
+    method: 'POST',
+    headers: {'content-type':'application/json'},
+    body: JSON.stringify(body),
+    credentials: 'include'
+  });
+  const j = await r.json().catch(()=>null);
+  return { ok: r.ok, status: r.status, json: j };
+}
   function isLocalWallet(pub){
     const v=__readVault(); return !!(v && v.pub===pub && v.sec && v.sec.startsWith('S'));
   }
@@ -1051,19 +1059,35 @@
   $('#openWalletBtn')?.addEventListener('click', openMyWallet);
   $('#closeMyWalletBtn')?.addEventListener('click', closeMyWallet);
   $('#mwSaveBtn')?.addEventListener('click', async ()=>{
-    const active = await fetchActiveWallet(USER_CANON);
-    const pub = active && active.pub || '';
-    if(!pub){ alert('No active wallet found. Open the IZZA wallet from the token page to set one, or import here.'); return; }
-    const sec = ($('#mwSInput')?.value||'').trim();
-    if(!/^S[A-Z0-9]{55}$/.test(sec)){ alert('Enter a valid S key'); return; }
-    const v=__readVault()||{};
-    v.pub = pub; v.sec = sec; __writeVault(v);
-    // also link to server vault for signing endpoints that require it (case-sensitive username)
-    await linkActiveWallet(USER_CANON, sec);
-    $('#mwSInput').value='';
-    refreshMyWalletModal();
-    alert('S key saved locally for this wallet.');
-  });
+  // Get the server-known active pub first (required by API)
+  const active = await fetchActiveWallet(USER_CANON);
+  const pub = active && active.pub || '';
+  if (!/^G[A-Z0-9]{55}$/.test(pub)) {
+    alert('No active wallet is set. Open your IZZA wallet and set an active wallet first.');
+    return;
+  }
+
+  const secret = ($('#mwSInput')?.value||'').trim();
+  if (!/^S[A-Z0-9]{55}$/.test(secret)) {
+    alert('Enter a valid S key');
+    return;
+  }
+
+  // Save locally
+  const v = __readVault() || {};
+  v.pub = pub; v.sec = secret; __writeVault(v);
+
+  // Link on server — IMPORTANT: send { pub, secret }
+  const res = await linkActiveWallet(USER_CANON, pub, secret);
+  if (!res.ok) {
+    const err = res.json && res.json.error;
+    alert('Server link failed: ' + (err || res.status));
+  } else {
+    $('#mwSInput').value = '';
+    await refreshMyWalletModal();
+    alert('S key saved locally and linked on server.');
+  }
+});
   $('#mwForgetBtn')?.addEventListener('click', async ()=>{
     const active = await fetchActiveWallet(USER_CANON);
     const pub = active && active.pub || '';
