@@ -1,12 +1,34 @@
 # nft_api.py
-import os, json, re, math, requests
+import os, json, re, math, requests, logging
 from decimal import Decimal, ROUND_DOWN
 from flask import Blueprint, request, jsonify, abort
 from stellar_sdk import (
-    Server, Keypair, Asset, TransactionBuilder, exceptions as sx
+    Server, Keypair, Asset, TransactionBuilder, exceptions as sx, StrKey
 )
 
 bp_nft = Blueprint("nft_api", __name__)
+log = logging.getLogger(__name__)
+
+# ---------- small log helpers (mask secrets safely) ----------
+def _mask(k: str | None) -> str:
+    if not k:
+        return ""
+    k = k.strip()
+    if len(k) <= 8:
+        return k[:1] + "…" if k else ""
+    return f"{k[:4]}…{k[-4:]}"
+
+def _isG(v: str | None) -> bool:
+    try:
+        return bool(v and StrKey.is_valid_ed25519_public_key(v.strip()))
+    except Exception:
+        return False
+
+def _isS(v: str | None) -> bool:
+    try:
+        return bool(v and StrKey.is_valid_ed25519_secret_seed(v.strip()))
+    except Exception:
+        return False
 
 # ---------- env ----------
 HORIZON_URL = os.getenv("NFT_HORIZON_URL", "https://api.testnet.minepi.com").strip()
@@ -27,6 +49,28 @@ if not (ISSUER_S and ISSUER_G and DISTR_S and DISTR_G):
 if not IZZA_ISS:
     raise RuntimeError("Missing IZZA_TOKEN_ISSUER env var")
 
+def _log_env_summary():
+    try:
+        log.info("NFT_ENV_SUMMARY %s", json.dumps({
+            "HORIZON_URL": HORIZON_URL,
+            "PASSPHRASE_mode": "auto" if PASSPHRASE.lower() == "auto" else "explicit",
+            "ISSUER_G_masked": _mask(ISSUER_G),
+            "ISSUER_S_masked": _mask(ISSUER_S),
+            "DISTR_G_masked":  _mask(DISTR_G),
+            "DISTR_S_masked":  _mask(DISTR_S),
+            "IZZA_CODE": IZZA_CODE,
+            "IZZA_ISS_masked": _mask(IZZA_ISS),
+            "valid": {
+                "ISSUER_G_isG": _isG(ISSUER_G),
+                "ISSUER_S_isS": _isS(ISSUER_S),
+                "DISTR_G_isG":  _isG(DISTR_G),
+                "DISTR_S_isS":  _isS(DISTR_S),
+                "IZZA_ISS_isG": _isG(IZZA_ISS),
+            }
+        }))
+    except Exception as e:
+        log.warning("NFT_ENV_SUMMARY_LOG_FAIL %s: %s", type(e).__name__, e)
+
 def _network_passphrase():
     if PASSPHRASE.lower() != "auto":
         return PASSPHRASE
@@ -35,9 +79,15 @@ def _network_passphrase():
         r = requests.get(HORIZON_URL, timeout=6)
         r.raise_for_status()
         j = r.json()
-        return j.get("network_passphrase") or "Test SDF Network ; September 2015"
-    except Exception:
+        pp = j.get("network_passphrase") or "Test SDF Network ; September 2015"
+        log.info("NFT_PP_DETECTED %s", pp)
+        return pp
+    except Exception as e:
+        log.warning("NFT_PP_DETECT_FAIL %s: %s; fallback=SDFTestnet", type(e).__name__, e)
         return "Test SDF Network ; September 2015"
+
+# log env once on import
+_log_env_summary()
 
 PP = _network_passphrase()
 server = Server(HORIZON_URL)
@@ -74,12 +124,21 @@ def _change_trust(secret: str, asset: Asset, limit="1"):
           .set_timeout(180).build())
     tx.sign(kp)
     try:
-        return server.submit_transaction(tx)
+        log.debug("NFT_TRUST_CHANGE start acct=%s asset=%s:%s limit=%s",
+                  _mask(kp.public_key), asset.code, _mask(asset.issuer), limit)
+        res = server.submit_transaction(tx)
+        log.debug("NFT_TRUST_CHANGE ok hash=%s", (res.get("hash") if isinstance(res, dict) else ""))
+        return res
     except sx.BadResponseError as e:
         # Already trusted or benign – we just proceed
-        if "op_low_reserve" in str(e).lower():
+        msg = str(e)
+        log.warning("NFT_TRUST_CHANGE horizon_error %s", msg)
+        if "op_low_reserve" in msg.lower():
             raise
         return {"ok": True}
+    except Exception as e:
+        log.warning("NFT_TRUST_CHANGE error %s: %s", type(e).__name__, e)
+        raise
 
 def _pay_asset(secret_from: str, to_g: str, amount: str, asset: Asset, memo=None):
     kp = Keypair.from_secret(secret_from)
@@ -91,7 +150,11 @@ def _pay_asset(secret_from: str, to_g: str, amount: str, asset: Asset, memo=None
         tb = tb.add_text_memo(memo[:28])
     tx = tb.set_timeout(180).build()
     tx.sign(kp)
-    return server.submit_transaction(tx)
+    log.debug("NFT_PAY start from=%s to=%s amt=%s asset=%s:%s memo=%s",
+              _mask(kp.public_key), _mask(to_g), amount, asset.code, _mask(asset.issuer), memo or "")
+    res = server.submit_transaction(tx)
+    log.debug("NFT_PAY ok hash=%s", (res.get("hash") if isinstance(res, dict) else ""))
+    return res
 
 def _require(b, msg="bad_request"):
     if not b: abort(400, msg)
@@ -131,7 +194,30 @@ def mint():
     prefix = (j.get("prefix") or "NFT").strip()
     tag = (j.get("collection_tag") or "").strip()
 
+    log.info("NFT_MINT_REQ kind=%s size=%s prefix=%s tag=%s creator_pub=%s "
+             "env_IZZA=%s:%s env_ISSUER_G=%s env_DISTR_G=%s",
+             kind, size, prefix, tag, _mask(creator_pub),
+             IZZA_CODE, _mask(IZZA_ISS), _mask(ISSUER_G), _mask(DISTR_G))
+
     _require(creator_pub and creator_sec, "creator_wallet_required")
+
+    # explicit creator key validation for crisp errors
+    if not _isG(creator_pub):
+        abort(400, "creator_pub_invalid")
+    if not _isS(creator_sec):
+        abort(400, "creator_sec_invalid")
+
+    # Validate env public keys once more in the hot path (log only)
+    if not _isG(IZZA_ISS):
+        log.error("NFT_ENV_BAD IZZA_TOKEN_ISSUER invalid G… value: %s", _mask(IZZA_ISS))
+    if not _isG(ISSUER_G):
+        log.error("NFT_ENV_BAD NFT_ISSUER_PUBLIC invalid G… value: %s", _mask(ISSUER_G))
+    if not _isG(DISTR_G):
+        log.error("NFT_ENV_BAD NFT_DISTR_PUBLIC invalid G… value: %s", _mask(DISTR_G))
+    if not _isS(ISSUER_S):
+        log.error("NFT_ENV_BAD NFT_ISSUER_SECRET invalid S… value: %s", _mask(ISSUER_S))
+    if not _isS(DISTR_S):
+        log.error("NFT_ENV_BAD NFT_DISTR_SECRET invalid S… value: %s", _mask(DISTR_S))
 
     unit = PRICE_SINGLE if kind == "single" else per_unit(size)
     total = (unit * size).quantize(Decimal("0.000001"), rounding=ROUND_DOWN)
@@ -140,8 +226,12 @@ def mint():
 
     # 1) fee charge: creator -> distributor in IZZA
     try:
+        log.info("NFT_FEE_CHARGE start total=%s asset=%s:%s to=%s",
+                 str(total), IZZA_CODE, _mask(IZZA_ISS), _mask(DISTR_G))
         _pay_asset(creator_sec, DISTR_G, str(total), izza, memo="IZZA NFT FEE")
+        log.info("NFT_FEE_CHARGE ok total=%s", str(total))
     except Exception as e:
+        log.error("NFT_FEE_CHARGE fail %s: %s", type(e).__name__, e)
         abort(400, f"fee_payment_failed: {e}")
 
     # 2) mint NFT assets to distributor (1 unit each)
@@ -150,20 +240,29 @@ def mint():
     for i in range(size):
         code = _mint_code(prefix, f"{tag}{i+1:03d}" if kind == "collection" else f"{tag}")
         asset = Asset(code, iss_kp.public_key)
-        # distributor trustline
-        _change_trust(DISTR_S, asset, limit="1")
-        # issue 1 unit to distributor
+        try:
+            log.debug("NFT_TRUST_DISTR start asset=%s:%s", code, _mask(iss_kp.public_key))
+            _change_trust(DISTR_S, asset, limit="1")
+            log.debug("NFT_TRUST_DISTR ok asset=%s", code)
+        except Exception as e:
+            log.error("NFT_TRUST_DISTR fail asset=%s %s: %s", code, type(e).__name__, e)
+            abort(400, f"mint_trust_failed: {code}: {e}")
+
         iss_acc = _load(iss_kp.public_key)
         tx = (TransactionBuilder(iss_acc, PP, base_fee=100)
               .append_payment_op(DISTR_G, "1", asset)
               .set_timeout(180).build())
         tx.sign(iss_kp)
         try:
+            log.debug("NFT_ISSUE start asset=%s to=%s", code, _mask(DISTR_G))
             server.submit_transaction(tx)
+            log.debug("NFT_ISSUE ok asset=%s", code)
         except Exception as e:
+            log.error("NFT_ISSUE fail asset=%s %s: %s", code, type(e).__name__, e)
             abort(400, f"mint_issue_failed: {code}: {e}")
         minted.append(code)
 
+    log.info("NFT_MINT_OK size=%s total_fee=%s first_asset=%s", size, str(total), minted[0] if minted else "")
     return jsonify({"ok": True, "assets": minted, "size": size, "total_fee": str(total)})
 
 @bp_nft.route("/api/nft/claim", methods=["POST"])
@@ -182,15 +281,22 @@ def claim():
     issuer_g = (j.get("issuer") or ISSUER_G).strip()
     _require(buyer and assets, "buyer_and_assets_required")
 
+    log.info("NFT_CLAIM_REQ buyer=%s count=%s issuer=%s", _mask(buyer), len(assets), _mask(issuer_g))
+
     for code in assets:
         asset = Asset(code, issuer_g)
         # ensure buyer trustline (via distributor op)
-        _change_trust(DISTR_S, asset, limit="1")  # distributor trusts already, but harmless
+        try:
+            _change_trust(DISTR_S, asset, limit="1")  # distributor trusts already, but harmless
+        except Exception as e:
+            log.error("NFT_CLAIM_TRUST_FAIL asset=%s %s: %s", code, type(e).__name__, e)
+            abort(400, f"deliver_trust_failed: {code}: {e}")
         # send to buyer
-        # buyer must also trust the asset; we let Horizon auto fail if not.
         try:
             _pay_asset(DISTR_S, buyer, "1", asset, memo="IZZA NFT")
         except Exception as e:
+            log.error("NFT_CLAIM_DELIVER_FAIL asset=%s %s: %s", code, type(e).__name__, e)
             abort(400, f"deliver_failed: {code}: {e}")
 
+    log.info("NFT_CLAIM_OK buyer=%s delivered=%s", _mask(buyer), len(assets))
     return jsonify({"ok": True, "delivered": len(assets)})
