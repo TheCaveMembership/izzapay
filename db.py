@@ -33,7 +33,7 @@ def init_db():
           id INTEGER PRIMARY KEY,
           pi_uid TEXT UNIQUE,
           pi_username TEXT,
-          -- NEW: keep app code happy that reads users.username
+          -- NEW: app code reads users.username
           username TEXT,
           role TEXT DEFAULT 'buyer',
           created_at INTEGER
@@ -132,19 +132,19 @@ def init_db():
 
         CREATE TABLE IF NOT EXISTS nft_collections(
           id INTEGER PRIMARY KEY,
-          merchant_id INTEGER,               -- who owns/controls the collection
-          creator_user_id INTEGER,           -- original creator (for royalties, attribution)
-          code TEXT NOT NULL,                -- asset code (<=12)
-          issuer TEXT NOT NULL,              -- issuer account (usually your IZZA issuer)
-          dist_account TEXT,                 -- optional: distribution account that holds supply
+          merchant_id INTEGER,
+          creator_user_id INTEGER,
+          code TEXT NOT NULL,
+          issuer TEXT NOT NULL,
+          dist_account TEXT,
           name TEXT,
           description TEXT,
-          image_url TEXT,                    -- primary card art
-          metadata_json TEXT,                -- arbitrary JSON for traits
-          total_supply INTEGER NOT NULL,     -- # of editions minted on-chain
-          decimals INTEGER NOT NULL DEFAULT 0, -- keep 0 for NFTs
-          status TEXT DEFAULT 'draft',       -- draft | published | archived
-          locked_issuer INTEGER DEFAULT 0,   -- 1 if issuer locked after policy
+          image_url TEXT,
+          metadata_json TEXT,
+          total_supply INTEGER NOT NULL,
+          decimals INTEGER NOT NULL DEFAULT 0,
+          status TEXT DEFAULT 'draft',
+          locked_issuer INTEGER DEFAULT 0,
           created_at INTEGER,
           updated_at INTEGER,
           UNIQUE(code, issuer),
@@ -157,11 +157,11 @@ def init_db():
         CREATE TABLE IF NOT EXISTS nft_tokens(
           id INTEGER PRIMARY KEY,
           collection_id INTEGER NOT NULL,
-          serial INTEGER NOT NULL,                 -- 1..N
-          owner_user_id INTEGER,                   -- null if held by dist account
-          owner_wallet_pub TEXT,                   -- convenience cache
+          serial INTEGER NOT NULL,
+          owner_user_id INTEGER,
+          owner_wallet_pub TEXT,
           minted_at INTEGER,
-          metadata_json TEXT,                      -- per-serial overrides (optional)
+          metadata_json TEXT,
           UNIQUE(collection_id, serial),
           FOREIGN KEY(collection_id) REFERENCES nft_collections(id) ON DELETE CASCADE,
           FOREIGN KEY(owner_user_id) REFERENCES users(id)
@@ -171,8 +171,8 @@ def init_db():
         CREATE TABLE IF NOT EXISTS nft_mint_events(
           id INTEGER PRIMARY KEY,
           collection_id INTEGER NOT NULL,
-          minted_count INTEGER NOT NULL,          -- how many units minted in this op
-          tx_hash TEXT,                           -- Horizon tx hash (Pi testnet)
+          minted_count INTEGER NOT NULL,
+          tx_hash TEXT,
           created_at INTEGER,
           FOREIGN KEY(collection_id) REFERENCES nft_collections(id) ON DELETE CASCADE
         );
@@ -180,17 +180,16 @@ def init_db():
         CREATE TABLE IF NOT EXISTS nft_listings(
           id INTEGER PRIMARY KEY,
           collection_id INTEGER NOT NULL,
-          serial INTEGER,                         -- null => primary sale, allocate next
-          seller_user_id INTEGER NOT NULL,        -- marketplace/dist for primary, user for resale
+          serial INTEGER,
+          seller_user_id INTEGER NOT NULL,
           price_pi REAL NOT NULL,
-          status TEXT NOT NULL DEFAULT 'active',  -- active | sold | canceled
+          status TEXT NOT NULL DEFAULT 'active',
           created_at INTEGER,
           sold_at INTEGER,
           buyer_user_id INTEGER,
-          order_id INTEGER,                       -- link to orders row if routed through checkout
-          -- NEW: link listing to the product being sold (for your SELECT by item_id)
+          order_id INTEGER,
+          -- NEW: columns we need for SOLD + auditing
           item_id INTEGER,
-          -- NEW: denormalized buyer username (your code updates this)
           buyer_username TEXT,
           FOREIGN KEY(collection_id) REFERENCES nft_collections(id) ON DELETE CASCADE,
           FOREIGN KEY(seller_user_id) REFERENCES users(id),
@@ -199,19 +198,17 @@ def init_db():
           FOREIGN KEY(item_id) REFERENCES items(id)
         );
         CREATE INDEX IF NOT EXISTS idx_nft_listings_active ON nft_listings(collection_id, status);
-        -- NEW: accelerate WHERE item_id=? AND status IN(...)
-        CREATE INDEX IF NOT EXISTS idx_nft_listings_item_active ON nft_listings(item_id, status);
 
-        -- Pending NFT claims queue (for "claim like stake")
+        -- Pending NFT claims queue
         CREATE TABLE IF NOT EXISTS nft_pending_claims(
           id INTEGER PRIMARY KEY,
-          order_id INTEGER,              -- optional link to orders.id
-          buyer_user_id INTEGER,         -- optional link to users.id
+          order_id INTEGER,
+          buyer_user_id INTEGER,
           buyer_username TEXT,
           buyer_pub TEXT NOT NULL,
           issuer TEXT NOT NULL,
-          assets_json TEXT NOT NULL,     -- ["NFTABC001", "NFTABC002", ...]
-          status TEXT NOT NULL DEFAULT 'pending',  -- pending | claimed | canceled
+          assets_json TEXT NOT NULL,
+          status TEXT NOT NULL DEFAULT 'pending',
           created_at INTEGER NOT NULL,
           claimed_at INTEGER,
           UNIQUE(order_id)
@@ -232,7 +229,7 @@ def init_db():
           WHERE status='active' AND serial IS NULL;
         """)
 
-        # --- Triggers to keep users.username in sync with pi_username when not explicitly set ---
+        # Keep users.username in sync with pi_username if username not provided
         cx.executescript("""
         CREATE TRIGGER IF NOT EXISTS trg_users_username_default_ins
         AFTER INSERT ON users
@@ -268,19 +265,15 @@ def ensure_schema():
         try: cx.execute("ALTER TABLE orders ADD COLUMN created_at INTEGER")
         except Exception: pass
 
-        # merchants.pi_wallet_address
+        # merchants extras
         try: cx.execute("ALTER TABLE merchants ADD COLUMN pi_wallet_address TEXT")
         except Exception: pass
-
-        # merchants.pi_handle
         try: cx.execute("ALTER TABLE merchants ADD COLUMN pi_handle TEXT")
         except Exception: pass
-
-        # merchants.colorway
         try: cx.execute("ALTER TABLE merchants ADD COLUMN colorway TEXT")
         except Exception: pass
 
-        # Create NFT tables if missing (safe to re-run)
+        # NFT tables (safe to re-run)
         cx.executescript("""
         CREATE TABLE IF NOT EXISTS nft_collections(
           id INTEGER PRIMARY KEY,
@@ -349,7 +342,6 @@ def ensure_schema():
           FOREIGN KEY(item_id) REFERENCES items(id)
         );
         CREATE INDEX IF NOT EXISTS idx_nft_listings_active ON nft_listings(collection_id, status);
-        CREATE INDEX IF NOT EXISTS idx_nft_listings_item_active ON nft_listings(item_id, status);
 
         CREATE TABLE IF NOT EXISTS nft_pending_claims(
           id INTEGER PRIMARY KEY,
@@ -368,7 +360,7 @@ def ensure_schema():
         CREATE INDEX IF NOT EXISTS idx_nft_pending_user ON nft_pending_claims(buyer_username, status);
         """)
 
-        # Recreate the partial UNIQUE indexes if needed
+        # Partial UNIQUE indexes (recreate if needed)
         cx.execute("""
           CREATE UNIQUE INDEX IF NOT EXISTS uniq_nft_listings_active_serial
           ON nft_listings(collection_id, serial)
@@ -380,21 +372,22 @@ def ensure_schema():
           WHERE status='active' AND serial IS NULL;
         """)
 
-        # Additive column migrations for existing DBs (idempotent):
+        # Additive column migrations for existing DBs
         try: cx.execute("ALTER TABLE users ADD COLUMN username TEXT")
         except Exception: pass
-
         try: cx.execute("ALTER TABLE nft_listings ADD COLUMN item_id INTEGER")
         except Exception: pass
-
         try: cx.execute("ALTER TABLE nft_listings ADD COLUMN buyer_username TEXT")
         except Exception: pass
 
-        # Ensure the lookup index exists on upgraded DBs
-        cx.execute("""
-          CREATE INDEX IF NOT EXISTS idx_nft_listings_item_active
-          ON nft_listings(item_id, status);
-        """)
+        # Now that item_id exists, create the lookup index safely
+        try:
+            cx.execute("""
+              CREATE INDEX IF NOT EXISTS idx_nft_listings_item_active
+              ON nft_listings(item_id, status);
+            """)
+        except Exception:
+            pass
 
         # Triggers to mirror pi_username -> username if username not set
         cx.executescript("""
