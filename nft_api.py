@@ -92,6 +92,32 @@ _log_env_summary()
 PP = _network_passphrase()
 server = Server(HORIZON_URL)
 
+# ---------- dynamic fee + balance helpers ----------
+def _base_fee() -> int:
+    """
+    Use Horizon's suggested base fee with a cushion to avoid tx_insufficient_fee
+    during surge pricing. Falls back safely if fetch fails.
+    """
+    try:
+        bf = int(server.fetch_base_fee())  # stroops
+        fee = max(100, bf * 5)            # 5x cushion
+        log.debug("NFT_FEE_EST base=%s cushioned=%s", bf, fee)
+        return fee
+    except Exception as e:
+        log.warning("NFT_FEE_FETCH_FAIL %s: %s; fallback=500", type(e).__name__, e)
+        return 500
+
+def _native_balance(g: str) -> str:
+    """Return native balance (as string) for quick preflight logging."""
+    try:
+        acc = server.load_account(g)
+        for b in acc.balances:
+            if b.get("asset_type") == "native":
+                return b.get("balance", "0")
+    except Exception as e:
+        log.debug("NFT_BAL_READ_FAIL %s: %s", type(e).__name__, e)
+    return "0"
+
 # ---------- pricing ----------
 PRICE_SINGLE = Decimal("0.1")   # 0.1 IZZA testnet token per single NFT
 # Simple bulk tiers: size >= threshold → per-unit
@@ -119,7 +145,7 @@ def _mint_code(prefix="NFT", suffix=""):
 def _change_trust(secret: str, asset: Asset, limit="1"):
     kp = Keypair.from_secret(secret)
     acc = _load(kp.public_key)
-    tx = (TransactionBuilder(acc, PP, base_fee=100)
+    tx = (TransactionBuilder(acc, PP, base_fee=_base_fee())
           .append_change_trust_op(asset, limit=limit)
           .set_timeout(180).build())
     tx.sign(kp)
@@ -143,7 +169,13 @@ def _change_trust(secret: str, asset: Asset, limit="1"):
 def _pay_asset(secret_from: str, to_g: str, amount: str, asset: Asset, memo=None):
     kp = Keypair.from_secret(secret_from)
     acc = _load(kp.public_key)
-    tb = TransactionBuilder(acc, PP, base_fee=100).append_payment_op(
+    fee_bid = _base_fee()
+    log.debug(
+        "NFT_PAY precheck from=%s from_native=%s fee_bid=%s to=%s amt=%s asset=%s:%s memo=%s",
+        _mask(kp.public_key), _native_balance(kp.public_key), fee_bid, _mask(to_g),
+        amount, asset.code, _mask(asset.issuer), memo or ""
+    )
+    tb = TransactionBuilder(acc, PP, base_fee=fee_bid).append_payment_op(
         destination=to_g, amount=str(amount), asset=asset
     )
     if memo:
@@ -249,7 +281,7 @@ def mint():
             abort(400, f"mint_trust_failed: {code}: {e}")
 
         iss_acc = _load(iss_kp.public_key)
-        tx = (TransactionBuilder(iss_acc, PP, base_fee=100)
+        tx = (TransactionBuilder(iss_acc, PP, base_fee=_base_fee())
               .append_payment_op(DISTR_G, "1", asset)
               .set_timeout(180).build())
         tx.sign(iss_kp)
