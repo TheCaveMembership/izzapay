@@ -147,11 +147,27 @@
 
       {# ===== Crafted item notice (only for single crafted-item checkout) ===== #}
       {% if i and (i.fulfillment_kind == 'crafting') and not cart_mode %}
+      {# robust detection in case product marks NFT in different fields #}
+      {% set is_nft = (
+           (i.is_nft is defined and i.is_nft) or
+           (i.nft is defined and i.nft) or
+           (i.nft_kind is defined and i.nft_kind) or
+           (i.mint_kind is defined and (i.mint_kind == 'single' or i.mint_kind == 'collection')) or
+           (i.fulfillment_tags is defined and ('nft' in i.fulfillment_tags))
+         ) %}
       <p class="muted" style="margin:10px 0 0">
         This is a crafted item. After payment you’ll receive a <strong>single-use voucher</strong>
         worth the IC needed to mint it (~ {{ '%.0f'|format(expected_pi * 2000) }} IC).
         Redeem the voucher in Crafting Land, then return to copy the SVG from your voucher page.
       </p>
+      {% if is_nft %}
+      <p class="muted" style="margin:8px 0 0">
+        This crafted item <strong>mints as an NFT</strong>. After your purchase is confirmed,
+        the NFT will be added to <strong>your</strong> claim list on the
+        <em>IZZA Testnet Token Showcase → Claim</em> page. Open that page to
+        claim the NFT into your IZZA wallet. If a trustline is needed, you’ll be prompted to add it first.
+      </p>
+      {% endif %}
       {% endif %}
     </div>
 
