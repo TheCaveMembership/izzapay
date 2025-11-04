@@ -3471,9 +3471,9 @@ def _issue_nft_claimables_for_order(order_id: int, buyer_user_id: int):
         with conn() as cx:
             # Get buyer wallet pub
             w = cx.execute(
-                "SELECT pub FROM user_wallets u "
-                "JOIN users ON users.username = u.username "
-                "WHERE users.id=? LIMIT 1",
+                "SELECT u.pub FROM user_wallets u "
+"JOIN users ON users.pi_username = u.username "
+"WHERE users.id=? LIMIT 1",
                 (buyer_user_id,)
             ).fetchone()
             if not w or not (w["pub"] or "").startswith("G"):
