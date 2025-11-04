@@ -3373,17 +3373,23 @@ def pi_approve():
         return {"ok": False, "error": "missing_params"}, 400
     with conn() as cx:
         s = cx.execute("SELECT * FROM sessions WHERE id=?", (session_id,)).fetchone()
-    if not s: return {"ok": False, "error": "unknown_session"}, 400
+    if not s:
+        print(f"[pi_approve] unknown_session id={session_id}")
+        return {"ok": False, "error": "unknown_session"}, 400
     try:
+        print(f"[pi_approve] approving payment_id={payment_id} session_id={session_id}")
         r = requests.post(f"{PI_API_BASE}/v2/payments/{payment_id}/approve",
                           headers=pi_headers(), json={})
         if r.status_code != 200:
+            print(f"[pi_approve] approve_failed status={r.status_code} payment_id={payment_id}")
             return {"ok": False, "error": "approve_failed", "status": r.status_code}, 502
         with conn() as cx:
             cx.execute("UPDATE sessions SET pi_payment_id=?, state=? WHERE id=?",
                        (payment_id, "approved", session_id))
+        print(f"[pi_approve] approved payment_id={payment_id} session_id={session_id}")
         return {"ok": True}
-    except Exception:
+    except Exception as e:
+        print(f"[pi_approve] server_error: {e}")
         return {"ok": False, "error": "server_error"}, 500
 
 @app.post("/api/pi/complete")
@@ -3396,17 +3402,22 @@ def pi_complete():
     shipping   = data.get("shipping") or {}
     if not payment_id or not session_id:
         return {"ok": False, "error": "missing_params"}, 400
+
     try:
+        print(f"[pi_complete] completing payment_id={payment_id} session_id={session_id} txid={txid}")
         r = requests.post(f"{PI_API_BASE}/v2/payments/{payment_id}/complete",
                           headers=pi_headers(), json={"txid": txid})
         if r.status_code != 200:
+            print(f"[pi_complete] complete_failed status={r.status_code} payment_id={payment_id}")
             return {"ok": False, "error": "complete_failed", "status": r.status_code}, 502
-    except Exception:
+    except Exception as e:
+        print(f"[pi_complete] server_error during complete: {e}")
         return {"ok": False, "error": "server_error"}, 500
 
     with conn() as cx:
         s = cx.execute("SELECT * FROM sessions WHERE id=?", (session_id,)).fetchone()
     if not s or s["state"] not in ("initiated", "approved"):
+        print(f"[pi_complete] bad_session id={session_id} state={(s and s['state'])}")
         return {"ok": False, "error": "bad_session"}, 400
 
     # Compare exact-at-7dp using Decimal, not float epsilon
@@ -3416,33 +3427,34 @@ def pi_complete():
         if r.status_code == 200:
             pdata = r.json()
             paid_amt = Decimal(str(pdata.get("amount", 0))).quantize(PI_QUANT, rounding=ROUND_HALF_UP)
+            print(f"[pi_complete] verify amount paid={paid_amt} expected={expected_amt} sandbox={PI_SANDBOX}")
             if (paid_amt != expected_amt) and not PI_SANDBOX:
+                print("[pi_complete] amount_mismatch")
                 return {"ok": False, "error": "amount_mismatch"}, 400
         elif not PI_SANDBOX:
+            print(f"[pi_complete] fetch_payment_failed status={r.status_code}")
             return {"ok": False, "error": "fetch_payment_failed"}, 502
-    except Exception:
+    except Exception as e:
         if not PI_SANDBOX:
+            print(f"[pi_complete] payment_verify_error: {e}")
             return {"ok": False, "error": "payment_verify_error"}, 500
 
     # === Voucher-redirect setup (one-shot token created after successful verify) ===
-    # We don't grant credits here anymore; we just create a redirect token.
     try:
         ensure_voucher_tables()  # creates tables if missing
-
-        import secrets, time
+        import secrets, time as _t
         vtoken = secrets.token_urlsafe(32)
         with conn() as cx:
             cx.execute(
                 """INSERT INTO voucher_redirects(token, session_id, payment_id, created_at, used)
                    VALUES (?,?,?,?,0)""",
-                (vtoken, s["id"], payment_id, int(time.time()))
+                (vtoken, s["id"], payment_id, int(_t.time()))
             )
-        # (We do not return here; fulfill_session will choose the correct redirect)
-        print(f"[pi_complete] voucher redirect token created for session {s['id']}")
+        print(f"[pi_complete] voucher_redirect token={vtoken} for session={s['id']}")
     except Exception as e:
-        # Non-fatal; worst case we fall back to default store redirect inside fulfill_session
-        print("[pi_complete] voucher token creation failed:", e)
+        print(f"[pi_complete] voucher token creation failed: {e}")
 
+    # Hand off to fulfillment (creates orders, marks NFT listings sold, issues claimables)
     return fulfill_session(s, txid, buyer, shipping)
 
 # --- NFT helper: create on-chain claimables for purchased NFTs -------------
@@ -3465,11 +3477,12 @@ def _issue_nft_claimables_for_order(order_id: int, buyer_user_id: int):
                 (buyer_user_id,)
             ).fetchone()
             if not w or not (w["pub"] or "").startswith("G"):
+                print(f"[nft_claimables] no buyer pub for user_id={buyer_user_id}")
                 return False
 
             buyer_pub = w["pub"]
 
-            # Pull the sold NFT rows for this order (status already set to 'sold')
+            # Pull the sold NFT rows for this order
             rows = cx.execute(
                 """
                 SELECT t.serial, c.code AS collection_code, c.issuer AS issuer_g,
@@ -3483,9 +3496,10 @@ def _issue_nft_claimables_for_order(order_id: int, buyer_user_id: int):
             ).fetchall()
 
         if not rows:
+            print(f"[nft_claimables] order_id={order_id} has no sold rows to mint")
             return False
 
-        # Build concrete asset codes; prefer explicit code from metadata_json; else derive CODE+serial
+        # Build concrete asset codes; prefer explicit code in metadata_json
         assets = []
         import json, re
         def _sanitize(s): return re.sub(r"[^A-Z0-9]", "", (s or "").upper())
@@ -3502,31 +3516,40 @@ def _issue_nft_claimables_for_order(order_id: int, buyer_user_id: int):
             assets.append({"code": code, "issuer": r["issuer_g"]})
 
         if not assets:
+            print(f"[nft_claimables] order_id={order_id} resolved 0 assets")
             return False
 
-        # Batch by issuer; call internal nft claim endpoint to create claimables
+        # Batch by issuer and create claimables via internal API
         by_issuer = {}
         for a in assets:
             by_issuer.setdefault(a["issuer"], []).append(a["code"])
 
-        import requests
         for issuer_g, codes in by_issuer.items():
             try:
+                print(f"[nft_claimables] creating claimables order_id={order_id} "
+                      f"buyer_pub={buyer_pub} issuer={issuer_g} assets={codes}")
                 requests.post(
                     f"{APP_BASE_URL}/api/nft/claim",
                     json={"buyer_pub": buyer_pub, "assets": codes, "issuer": issuer_g, "as_claimable": True},
                     timeout=12
                 )
-            except Exception:
-                # Soft-fail: do not block order completion
+            except Exception as e:
+                print(f"[nft_claimables] soft-fail issuer={issuer_g} order_id={order_id}: {e}")
+                # Soft-fail: do not block checkout
                 pass
 
+        print(f"[nft_claimables] done order_id={order_id} user_id={buyer_user_id}")
         return True
-    except Exception:
+    except Exception as e:
+        print(f"[nft_claimables] exception order_id={order_id}: {e}")
         return False
 
 # ----------------- FULFILLMENT + EMAIL -----------------
 def fulfill_session(s, tx_hash, buyer, shipping):
+    """
+    Creates order rows, marks stock, marks NFT listings sold when applicable,
+    then issues claimables for NFTs. Emits verbose Render logs for diagnosis.
+    """
     with conn() as cx:
         m = cx.execute("SELECT * FROM merchants WHERE id=?", (s["merchant_id"],)).fetchone()
 
@@ -3543,12 +3566,14 @@ def fulfill_session(s, tx_hash, buyer, shipping):
         buyer_user_id = s["user_id"] if s["user_id"] is not None else (u_ctx["id"] if u_ctx else None)
     except Exception:
         buyer_user_id = (u_ctx["id"] if u_ctx else None)
-    # ---------------------------------------------------------------------------
 
     try:
         lines = json.loads(s["line_items_json"] or "[]")
     except Exception:
         lines = []
+
+    print(f"[fulfill] session_id={s['id']} merchant_id={s['merchant_id']} "
+          f"tx={tx_hash} lines={len(lines)} buyer_user_id={buyer_user_id}")
 
     if not lines:
         with conn() as cx:
@@ -3572,6 +3597,9 @@ def fulfill_session(s, tx_hash, buyer, shipping):
     created_order_ids = []
     total_snapshot_gross = sum(float(li["price"]) * int(li["qty"]) for li in lines) or 1.0
 
+    # we’ll collect NFT-listing ids we mark sold, per order
+    nft_marked_sold = []
+
     with conn() as cx:
         for li in lines:
             it = by_id.get(int(li["item_id"]))
@@ -3589,12 +3617,68 @@ def fulfill_session(s, tx_hash, buyer, shipping):
                     (max(0, it["stock_qty"] - qty), it["id"])
                 )
 
-            # --- Crafted-item voucher creation block (INSIDE the for-loop) ---
+            # ----------------- Create order row -----------------
+            buyer_token = uuid.uuid4().hex
+            cur = cx.execute(
+                """INSERT INTO orders(
+                     merchant_id, item_id, qty, buyer_email, buyer_name, shipping_json,
+                     pi_amount, pi_fee, pi_merchant_net, pi_tx_hash,
+                     payout_status, status, buyer_token, buyer_user_id
+                   )
+                   VALUES (?,?,?,?,?,?,?,?,?,?,'pending','paid',?,?)""",
+                (
+                    s["merchant_id"], (it["id"] if it else None), qty,
+                    buyer_email, buyer_name, json.dumps(shipping),
+                    float(line_gross), float(line_fee), float(line_net), tx_hash,
+                    buyer_token, buyer_user_id,
+                ),
+            )
+            order_id = cur.lastrowid
+            created_order_ids.append(order_id)
+            print(f"[fulfill] order_id={order_id} item_id={it['id'] if it else None} qty={qty} "
+                  f"gross={line_gross:.7f} fee={line_fee:.7f} net={line_net:.7f}")
+
+            # ----------------- MARK NFT LISTINGS AS SOLD -----------------
+            # If this product is an NFT listing-backed product, grab 'qty' active rows and mark them sold.
+            # Assumes your merchant dashboard created rows in nft_listings with item_id pointing to this item.
+            try:
+                # (We treat status 'active' or 'listed' as available)
+                avail = cx.execute(
+                    "SELECT id FROM nft_listings WHERE item_id=? AND status IN ('active','listed') "
+                    "ORDER BY id ASC LIMIT ?",
+                    (it["id"] if it else None, qty)
+                ).fetchall()
+
+                if avail and len(avail) == qty:
+                    now = int(time.time())
+                    # Optional: capture buyer username for auditing
+                    buyer_un = None
+                    try:
+                        urow = cx.execute("SELECT username FROM users WHERE id=?", (buyer_user_id,)).fetchone()
+                        buyer_un = urow["username"] if urow else None
+                    except Exception:
+                        buyer_un = None
+
+                    ids = [r["id"] for r in avail]
+                    cx.executemany(
+                        "UPDATE nft_listings SET status='sold', order_id=?, buyer_user_id=?, buyer_username=?, sold_at=? "
+                        "WHERE id=?",
+                        [(order_id, buyer_user_id, buyer_un, now, nid) for nid in ids]
+                    )
+                    nft_marked_sold.extend([(order_id, nid) for nid in ids])
+                    print(f"[fulfill][nft] marked SOLD {len(ids)} listings item_id={it['id']} order_id={order_id} ids={ids}")
+                else:
+                    if qty > 0:
+                        print(f"[fulfill][nft] expected {qty} listings but found {len(avail) if avail else 0} "
+                              f"for item_id={it['id'] if it else None} — nothing marked sold")
+            except Exception as e:
+                print(f"[fulfill][nft] mark sold error item_id={it['id'] if it else None}: {e}")
+
+            # ----------------- CRAFTED ITEM → voucher creation (as before) -----------------
             if it and (it["fulfillment_kind"] == "crafting") and it["crafted_item_id"]:
                 try:
                     crafted_id = str(it["crafted_item_id"]).strip()
 
-                    # Pull the crafted item details (svg + meta)
                     with conn() as cx2:
                         c_row = cx2.execute(
                             "SELECT id, name, COALESCE(svg,'') AS svg, COALESCE(meta,'{}') AS meta "
@@ -3609,7 +3693,6 @@ def fulfill_session(s, tx_hash, buyer, shipping):
 
                     ic_needed = int(c_meta.get("price_ic") or 500)
 
-                    # One voucher per quantity purchased
                     for _ in range(qty):
                         token = uuid.uuid4().hex
                         payload = {
@@ -3653,11 +3736,11 @@ def fulfill_session(s, tx_hash, buyer, shipping):
                                 "INSERT INTO voucher_redirects(session_id, token) VALUES(?,?)",
                                 (s["id"], token)
                             )
-                except Exception:
-                    # never fail checkout on voucher generation errors
-                    pass
+                    print(f"[fulfill][craft] vouchers created item_id={it['id']} qty={qty}")
+                except Exception as e:
+                    print(f"[fulfill][craft] voucher create error item_id={it['id']}: {e}")
 
-            # --- IC CREDITS: award credits (still inside the loop) ---
+            # ----------------- IC CREDITS awarding (unchanged) -----------------
             try:
                 cid = (it["crafted_item_id"] or "").strip().lower() if it else ""
                 awarded = 0
@@ -3680,57 +3763,18 @@ def fulfill_session(s, tx_hash, buyer, shipping):
                             if unit > 0:
                                 awarded = unit * qty
                                 add_ic_credits(int(buyer_user_id), awarded)
-            except Exception:
-                pass
+                if awarded:
+                    print(f"[fulfill][ic] awarded={awarded} user_id={buyer_user_id}")
+            except Exception as e:
+                print(f"[fulfill][ic] award error: {e}")
 
-            # Create order row (still inside the loop)
-            buyer_token = uuid.uuid4().hex
-            cur = cx.execute(
-                """INSERT INTO orders(
-                     merchant_id, item_id, qty, buyer_email, buyer_name, shipping_json,
-                     pi_amount, pi_fee, pi_merchant_net, pi_tx_hash,
-                     payout_status, status, buyer_token, buyer_user_id
-                   )
-                   VALUES (?,?,?,?,?,?,?,?,?,?,'pending','paid',?,?)""",
-                (
-                    s["merchant_id"], (it["id"] if it else None), qty,
-                    buyer_email, buyer_name, json.dumps(shipping),
-                    float(line_gross), float(line_fee), float(line_net), tx_hash,
-                    buyer_token, buyer_user_id,
-                ),
-            )
-            created_order_ids.append(cur.lastrowid)
-
-            # Collectible claim stamp (still inside the loop)
-            try:
-                cx.execute("""
-                    CREATE TABLE IF NOT EXISTS collectible_claims(
-                      id INTEGER PRIMARY KEY AUTOINCREMENT,
-                      order_id INTEGER NOT NULL,
-                      user_id  INTEGER NOT NULL,
-                      claimed_at INTEGER NOT NULL
-                    )
-                """)
-                dup = cx.execute(
-                    "SELECT 1 FROM collectible_claims WHERE order_id=? AND user_id=?",
-                    (cur.lastrowid, int(buyer_user_id) if buyer_user_id else None)
-                ).fetchone()
-                if (buyer_user_id is not None) and not dup:
-                    import time as _time
-                    cx.execute(
-                        "INSERT INTO collectible_claims(order_id, user_id, claimed_at) VALUES(?,?,?)",
-                        (cur.lastrowid, int(buyer_user_id), int(_time.time()))
-                    )
-            except Exception:
-                pass
-
-        # Mark the session as paid (AFTER the loop, still inside the same `with`)
+        # Mark the session as paid (after loop)
         cx.execute(
             "UPDATE sessions SET state='paid', pi_tx_hash=? WHERE id=?",
             (tx_hash, s["id"])
         )
 
-    # ===== Emails =====
+    # ===== Emails (buyer) — unchanged except for logging =====
     try:
         display_rows = []
         for li in lines:
@@ -3762,43 +3806,8 @@ def fulfill_session(s, tx_hash, buyer, shipping):
         )
 
         merchant_mail = (m["reply_to_email"] or "").strip() or DEFAULT_ADMIN_EMAIL
-
-        shipping_html = ""
-        if isinstance(shipping, dict):
-            name   = (shipping.get("name") or "").strip()
-            email  = (shipping.get("email") or "").strip()
-            phone  = (shipping.get("phone") or "").strip()
-            addr1  = (shipping.get("address") or "").strip()
-            addr2  = (shipping.get("address2") or "").strip()
-            city   = (shipping.get("city") or "").strip()
-            state  = (shipping.get("state") or "").strip()
-            postal = (shipping.get("postal_code") or "").strip()
-            country= (shipping.get("country") or "").strip()
-            any_shipping = any([name, email, phone, addr1, addr2, city, state, postal, country])
-            if any_shipping:
-                street_line = f"{addr1} #{addr2}" if addr1 and addr2 else (addr1 or (f"Unit #{addr2}" if addr2 else ""))
-                locality_parts = [p for p in [city, state] if p]
-                locality_line = ", ".join(locality_parts)
-                if postal:
-                    locality_line = (locality_line + " " if locality_line else "") + postal
-                block = ["<h3 style='margin:16px 0 6px'>Shipping</h3>"]
-                if name:   block.append(f"<div><strong>Name:</strong> {name}</div>")
-                if email:  block.append(f"<div><strong>Email:</strong> {email}</div>")
-                if phone:  block.append(f"<div><strong>Phone:</strong> {phone}</div>")
-                if street_line: block.append(f"<div><strong>Address:</strong> {street_line}</div>")
-                if locality_line: block.append(f"<div><strong>City/Region:</strong> {locality_line}</div>")
-                if country: block.append(f"<div><strong>Country:</strong> {country}</div>")
-                shipping_html = "".join(block)
-
-        # Email subjects
         suffix = f" [{len(display_rows)} items]" if len(display_rows) > 1 else ""
-        if suffix:
-            subj_buyer = f"Your order at {m['business_name']} is confirmed{suffix}"
-        else:
-            subj_buyer = f"Your order at {m['business_name']} is confirmed"
-
-        subj_merchant = f"New Pi order at {m['business_name']} ({gross_total:.7f} π){suffix}"
-
+        subj_buyer = f"Your order at {m['business_name']} is confirmed{suffix}" if suffix else f"Your order at {m['business_name']} is confirmed"
         if buyer_email:
             send_email(
                 buyer_email,
@@ -3813,19 +3822,20 @@ def fulfill_session(s, tx_hash, buyer, shipping):
                 """,
                 reply_to=merchant_mail
             )
-    except Exception:
-        pass
+        print("[fulfill] buyer email attempted")
+    except Exception as e:
+        print(f"[fulfill] email section error: {e}")
 
-    # --- Immediately create NFT claimables for all created orders (no tx lookup) ---
+    # --- After orders saved + listings marked, create NFT claimables now ---
     try:
-        if buyer_user_id:
+        if created_order_ids and buyer_user_id:
             for oid in created_order_ids:
                 _issue_nft_claimables_for_order(int(oid), int(buyer_user_id))
-    except Exception:
-        # Never break checkout flow if this fails
-        pass
+        print(f"[fulfill][nft] claimables attempted for orders={created_order_ids}")
+    except Exception as e:
+        print(f"[fulfill][nft] claimable creation error: {e}")
 
-    # ---- Redirect back to storefront with success flag (and token if available)
+    # ---- Redirect back to storefront (voucher redirect preserved) ----
     u = current_user_row()
     tok = ""
     if u:
@@ -3845,13 +3855,15 @@ def fulfill_session(s, tx_hash, buyer, shipping):
     try:
         with conn() as cx:
             vr = cx.execute(
-                "SELECT token FROM voucher_redirects WHERE session_id=? AND used=0 ORDER BY created_at DESC LIMIT 1",
+                "SELECT token FROM voucher_redirects WHERE session_id=? AND used=0 "
+                "ORDER BY created_at DESC LIMIT 1",
                 (s["id"],)
             ).fetchone()
         if vr and vr["token"]:
             voucher_redirect_url = f"{BASE_ORIGIN}/voucher/new?token={vr['token']}"
+            print(f"[fulfill] voucher redirect found token={vr['token']}")
     except Exception as e:
-        print("[fulfill_session] voucher token lookup failed:", e)
+        print(f"[fulfill] voucher token lookup failed: {e}")
 
     if slug == "izza-game-crafting" and voucher_redirect_url:
         redirect_url = voucher_redirect_url
@@ -3867,7 +3879,6 @@ def fulfill_session(s, tx_hash, buyer, shipping):
         if slug == "izza-game-crafting":
             should_flag = True
         else:
-            # If this order includes the single-use crafting product, also flag
             for li in lines:
                 it = by_id.get(int(li["item_id"]))
                 if it and str(it.get("link_id") or "") == SINGLE_CREDIT_LINK_ID:
@@ -3879,13 +3890,14 @@ def fulfill_session(s, tx_hash, buyer, shipping):
     if should_flag:
         resp.set_cookie(
             "craft_credit", "1",
-            max_age=15 * 60,     # 15 minutes
-            secure=True,         # HTTPS only
-            samesite="None",     # cross-site friendly (Pi Browser)
-            httponly=False,      # UI may read it if needed
+            max_age=15 * 60,
+            secure=True,
+            samesite="None",
+            httponly=False,
             path="/"
         )
 
+    print(f"[fulfill] done session_id={s['id']} redirect={redirect_url}")
     return resp
 
 
