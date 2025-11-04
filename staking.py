@@ -1,4 +1,5 @@
-import os, re, time, logging, sqlite3, threading
+# staking.py
+import os, re, time, logging, sqlite3, threading, json
 from datetime import datetime, timezone
 from decimal import Decimal, ROUND_DOWN, InvalidOperation
 from flask import Blueprint, request, jsonify, abort
@@ -469,6 +470,7 @@ def vote_preview():
         "your_share_pct_if_wins": float(share_pct),
         "ad_pool_pct": float(ad_pool_pct)       # for the “ad revenue to voters” blurb
     })
+
 @bp_stake.route("/api/vote/stake", methods=["POST"])
 def build_vote_stake_tx():
     """
@@ -651,6 +653,77 @@ def list_claimables():
 
     out = _compute_claimables_out(pub)
     return jsonify({"ok": True, "claimables": out, "records": out})
+
+# --------- NEW: include pending NFT claims in the same list for the UI ----
+
+def _pending_nft_for(pub: str = "", username: str = "") -> list[dict]:
+    """
+    Read pending NFT claims from nft_pending_claims and normalize into the same-ish
+    shape used by the stake claim list, so the UI can render them together.
+    """
+    if not pub and not username:
+        return []
+    rows = []
+    try:
+        cx = sqlite3.connect(_SQLITE_PATH, check_same_thread=False)
+        cx.row_factory = sqlite3.Row
+        if pub:
+            cur = cx.execute("""
+              SELECT * FROM nft_pending_claims
+              WHERE buyer_pub=? AND status='pending'
+              ORDER BY created_at ASC
+            """, (pub,))
+        else:
+            cur = cx.execute("""
+              SELECT * FROM nft_pending_claims
+              WHERE lower(buyer_username)=lower(?) AND status='pending'
+              ORDER BY created_at ASC
+            """, (username,))
+        rows = [dict(r) for r in cur.fetchall()]
+        cx.close()
+    except Exception as e:
+        log.warning("pending_nft_fetch_fail: %s", e)
+        return []
+
+    out = []
+    for r in rows:
+        try:
+            assets = json.loads(r.get("assets_json") or "[]")
+        except Exception:
+            assets = []
+        # Map to a pseudo-claim row:
+        out.append({
+            "kind": "nft",
+            "role": "nft",
+            "amount": "1",                       # each NFT is 1 unit; multiple assets in list
+            "unlock_ts": 0,                      # NFTs are ready now
+            "id": f"nft-{r['id']}",
+            "contract_id": f"nft|{r['id']}",     # unique handle for UI selection
+            "assets": assets,                    # list of asset codes to deliver
+            "issuer": r.get("issuer"),
+            "buyer_pub": r.get("buyer_pub"),
+            "order_id": r.get("order_id"),
+            "created_at": r.get("created_at"),
+            "pending_id": r.get("id"),
+        })
+    return out
+
+@bp_stake.route("/api/stake/claimables_plus", methods=["GET"])
+def list_claimables_plus():
+    """
+    Unified “Claims” list for the UI:
+    - All staking claimable balances (regular + vote)
+    - Pending NFT claims (ready to deliver)
+    Query: ?pub=G... or ?u=username  (pub preferred)
+    """
+    pub = _clean(request.args.get("pub", "") or "")
+    u   = _clean(request.args.get("u", "") or "")
+    if not pub and not u:
+        abort(400, "provide pub or u")
+
+    stake_rows = _compute_claimables_out(pub) if pub else []
+    nft_rows   = _pending_nft_for(pub=pub, username=u)
+    return jsonify({"ok": True, "claimables": stake_rows, "pending_nfts": nft_rows})
 
 # -------------------------- build claim(s) + resolver ---------------------
 
