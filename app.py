@@ -3470,9 +3470,6 @@ def _issue_nft_claimables_for_order(order_id: int, buyer_user_id: int):
             buyer_pub = w["pub"]
 
             # Pull the sold NFT rows for this order (status already set to 'sold')
-            # and obtain concrete asset codes for each purchased serial.
-            # Expected: you saved the concrete asset code per token in nft_tokens.metadata_json
-            # or joined info that gives code directly.
             rows = cx.execute(
                 """
                 SELECT t.serial, c.code AS collection_code, c.issuer AS issuer_g,
@@ -3488,33 +3485,26 @@ def _issue_nft_claimables_for_order(order_id: int, buyer_user_id: int):
         if not rows:
             return False
 
-        # Build concrete asset codes; we prefer an explicit code inside metadata_json if present,
-        # otherwise derive "collection_code + serial padded" (must match your minting scheme).
+        # Build concrete asset codes; prefer explicit code from metadata_json; else derive CODE+serial
         assets = []
         import json, re
         def _sanitize(s): return re.sub(r"[^A-Z0-9]", "", (s or "").upper())
         for r in rows:
-            meta = {}
             try:
                 meta = json.loads(r["meta"] or "{}")
             except Exception:
                 meta = {}
-
             explicit_code = (meta.get("asset_code") or "").strip()
             if explicit_code:
                 code = _sanitize(explicit_code)[:12]
             else:
-                # Derive like your _mint_code_collection(prefix, tag, idx)
-                # i.e., "<collection_code><idx:03d>" truncated to 12
                 code = (_sanitize(r["collection_code"]) + f"{int(r['serial']):03d}")[:12]
             assets.append({"code": code, "issuer": r["issuer_g"]})
 
         if not assets:
             return False
 
-        # Call your own nft_api to create claimables (not direct payment).
-        # This expects you've implemented claim() to create claimables, not transfers.
-        # One call per issuer batch.
+        # Batch by issuer; call internal nft claim endpoint to create claimables
         by_issuer = {}
         for a in assets:
             by_issuer.setdefault(a["issuer"], []).append(a["code"])
@@ -3528,12 +3518,13 @@ def _issue_nft_claimables_for_order(order_id: int, buyer_user_id: int):
                     timeout=12
                 )
             except Exception:
-                # Soft-fail: we don't block the order flow
+                # Soft-fail: do not block order completion
                 pass
 
         return True
     except Exception:
         return False
+
 # ----------------- FULFILLMENT + EMAIL -----------------
 def fulfill_session(s, tx_hash, buyer, shipping):
     with conn() as cx:
@@ -3710,34 +3701,6 @@ def fulfill_session(s, tx_hash, buyer, shipping):
             )
             created_order_ids.append(cur.lastrowid)
 
-            # --- NEW: allocate NFT units for this order line (if NFT-enabled) ---
-            try:
-                is_nft = bool(it and (it.get("is_nft") or it.get("nft_enabled") or it.get("fulfillment_kind") == "nft"))
-                if is_nft and qty > 0:
-                    with conn() as cx2:
-                        rows_alloc = cx2.execute("""
-                            SELECT l.id
-                            FROM nft_listings l
-                            WHERE l.item_id=? AND l.status='listed'
-                            ORDER BY l.serial ASC
-                            LIMIT ?
-                        """, (int(it["id"]), qty)).fetchall()
-
-                        if rows_alloc and len(rows_alloc) == qty:
-                            ids = [int(r["id"]) for r in rows_alloc]
-                            ph  = ",".join("?" for _ in ids)
-                            cx2.execute(f"""
-                                UPDATE nft_listings
-                                SET status='sold',
-                                    order_id=?,
-                                    buyer_user_id=?,
-                                    sold_at=strftime('%s','now')
-                                WHERE id IN ({ph})
-                            """, (int(cur.lastrowid), int(buyer_user_id) if buyer_user_id else None, *ids))
-            except Exception:
-                # Never fail checkout on allocation issues
-                pass
-
             # Collectible claim stamp (still inside the loop)
             try:
                 cx.execute("""
@@ -3853,16 +3816,14 @@ def fulfill_session(s, tx_hash, buyer, shipping):
     except Exception:
         pass
 
-    # --- Create NFT claimables for any NFT lines we just sold ---
+    # --- Immediately create NFT claimables for all created orders (no tx lookup) ---
     try:
-        if created_order_ids and buyer_user_id:
+        if buyer_user_id:
             for oid in created_order_ids:
                 _issue_nft_claimables_for_order(int(oid), int(buyer_user_id))
     except Exception:
-        # Never break checkout flow if this fails; claims UI can be retried manually
+        # Never break checkout flow if this fails
         pass
-
-    # ---- Redirect back to storefront with success flag (and token if available)
 
     # ---- Redirect back to storefront with success flag (and token if available)
     u = current_user_row()
