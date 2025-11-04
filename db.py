@@ -192,6 +192,23 @@ def init_db():
           FOREIGN KEY(order_id) REFERENCES orders(id)
         );
         CREATE INDEX IF NOT EXISTS idx_nft_listings_active ON nft_listings(collection_id, status);
+
+        -- Pending NFT claims queue (for "claim like stake")
+        CREATE TABLE IF NOT EXISTS nft_pending_claims(
+          id INTEGER PRIMARY KEY,
+          order_id INTEGER,              -- optional link to orders.id
+          buyer_user_id INTEGER,         -- optional link to users.id
+          buyer_username TEXT,
+          buyer_pub TEXT NOT NULL,
+          issuer TEXT NOT NULL,
+          assets_json TEXT NOT NULL,     -- ["NFTABC001", "NFTABC002", ...]
+          status TEXT NOT NULL DEFAULT 'pending',  -- pending | claimed | canceled
+          created_at INTEGER NOT NULL,
+          claimed_at INTEGER,
+          UNIQUE(order_id)
+        );
+        CREATE INDEX IF NOT EXISTS idx_nft_pending_pub ON nft_pending_claims(buyer_pub, status);
+        CREATE INDEX IF NOT EXISTS idx_nft_pending_user ON nft_pending_claims(buyer_username, status);
         """)
 
         # Partial UNIQUE indexes to replace the old FILTER syntax
@@ -305,6 +322,22 @@ def ensure_schema():
           FOREIGN KEY(order_id) REFERENCES orders(id)
         );
         CREATE INDEX IF NOT EXISTS idx_nft_listings_active ON nft_listings(collection_id, status);
+
+        CREATE TABLE IF NOT EXISTS nft_pending_claims(
+          id INTEGER PRIMARY KEY,
+          order_id INTEGER,
+          buyer_user_id INTEGER,
+          buyer_username TEXT,
+          buyer_pub TEXT NOT NULL,
+          issuer TEXT NOT NULL,
+          assets_json TEXT NOT NULL,
+          status TEXT NOT NULL DEFAULT 'pending',
+          created_at INTEGER NOT NULL,
+          claimed_at INTEGER,
+          UNIQUE(order_id)
+        );
+        CREATE INDEX IF NOT EXISTS idx_nft_pending_pub ON nft_pending_claims(buyer_pub, status);
+        CREATE INDEX IF NOT EXISTS idx_nft_pending_user ON nft_pending_claims(buyer_username, status);
         """)
 
         # Recreate the partial UNIQUE indexes if needed
