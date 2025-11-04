@@ -57,6 +57,8 @@
     .hint,.note{font-size:12px;color:var(--muted)}
     .warn{color:#ffb86b}
     .success{color:#5ad49e}
+    /* NEW: nft chip style reused in list */
+    .chip{display:inline-flex;align-items:center;font-size:11px;padding:2px 6px;border:1px solid var(--line);border-radius:6px;margin-left:6px}
   </style>
 </head>
 {% set cw = colorway or (m.colorway if m) or 'cw-blue' %}
@@ -221,6 +223,13 @@
           <input type="hidden" name="craft_ic_cost" id="craft_ic_cost" value="">
           <input type="hidden" name="craft_dyn_mode" id="craft_dyn_mode" value="fixed_ic">
           <input type="hidden" name="craft_dyn_ic"   id="craft_dyn_ic"   value="">
+
+          <!-- NEW: hidden fields persisted for NFT listings -->
+          <input type="hidden" name="nft_enabled" id="nft_enabled" value="">
+          <input type="hidden" name="nft_kind" id="nft_kind" value="">
+          <input type="hidden" name="nft_assets_json" id="nft_assets_json" value="">
+          <input type="hidden" name="nft_fee_total" id="nft_fee_total" value="">
+
           <div class="field-inline">
             <div class="field"><label class="ip-label">Title</label><input class="ip-input" name="title" required></div>
             <div class="field"><label class="ip-label">SKU</label><input class="ip-input" name="sku"></div>
@@ -270,6 +279,45 @@
           </div>
           <!-- END: Voucher explainer -->
 
+          <!-- NEW: NFT minting option (only used if crafted item is attached) -->
+          <div class="card" id="nftBlock" style="display:none;margin-top:6px">
+            <div class="h2" style="font-size:16px;margin:0 0 8px">Mint as <span class="mono">IZZA NFT • PI TESTNET</span></div>
+            <label class="ip-label" style="display:flex;align-items:center;gap:8px;margin:4px 0 8px">
+              <input type="checkbox" id="nftToggle"> Enable NFT listing
+            </label>
+
+            <div id="nftOptions" style="display:none">
+              <div class="field-inline">
+                <div class="field">
+                  <label class="ip-label">Type</label>
+                  <div class="row" style="gap:12px">
+                    <label class="ip-label" style="display:flex;align-items:center;gap:6px"><input type="radio" name="nft_kind_choice" value="single" id="nftKindSingle" checked> Single</label>
+                    <label class="ip-label" style="display:flex;align-items:center;gap:6px"><input type="radio" name="nft_kind_choice" value="collection" id="nftKindColl"> Collection</label>
+                  </div>
+                </div>
+                <div class="field" id="nftQtyWrap" style="display:none">
+                  <label class="ip-label">Collection Size</label>
+                  <input class="ip-input" id="nftQty" inputmode="numeric" value="10" min="1">
+                </div>
+              </div>
+
+              <div class="note" id="nftQuoteNote" style="margin-top:4px"></div>
+
+              <div class="btn-row" style="margin-top:6px">
+                <button type="button" class="ip-btn tiny" id="nftGetQuoteBtn">Get Quote</button>
+                <button type="button" class="ip-btn tiny" id="nftMintBtn" disabled>Mint Now</button>
+                <span class="note" id="nftMintStatus"></span>
+              </div>
+
+              <div id="nftMintedWrap" style="display:none;margin-top:6px">
+                <div class="success">NFT assets minted and reserved in distributor.</div>
+                <small class="note">These asset codes will be delivered to buyers upon purchase.</small>
+                <pre class="mono" id="nftMintedCodes" style="white-space:pre-wrap;max-height:160px;overflow:auto;margin:6px 0 0 0"></pre>
+              </div>
+            </div>
+          </div>
+          <!-- END NFT block -->
+
           <label class="ip-label" style="display:flex;gap:6px;align-items:center"><input type="checkbox" name="allow_backorder" value="1"> Allow backorder</label>
 
           <div class="row" style="justify-content:flex-end"><button class="ip-btn" type="submit" id="addItemBtn">Add Item</button></div>
@@ -310,7 +358,15 @@
   {% endif %}
 </div>
 </td>
-                <td>{{ it.title }}{% if it.fulfillment_kind == 'crafting' %} <span class="mono" style="font-size:11px;padding:2px 6px;border:1px solid var(--line);border-radius:6px;margin-left:6px;">Game</span>{% endif %}</td>
+                <td>
+                  {{ it.title }}
+                  {% if it.fulfillment_kind == 'crafting' %}
+                    <span class="chip mono">Game</span>
+                  {% endif %}
+                  {% if it.nft_enabled %}
+                    <span class="chip mono">IZZA NFT — PI TESTNET</span>
+                  {% endif %}
+                </td>
                 <td>{{ '%.7f'|format(it.pi_price) }}</td>
                 <td>{{ it.stock_qty }}</td>
                 <td>
@@ -488,14 +544,11 @@
       if(w && h) x=x.replace('<svg','<svg viewBox="0 0 '+Number(w)+' '+Number(h)+'"');
       else x=x.replace('<svg','<svg viewBox="0 0 512 512"');
     }
-    // explicit size to avoid 0×0 natural size in <img> or when rasterizing
     if(/width="/i.test(x)) x=x.replace(/width="[^"]*"/i, 'width="'+px+'"'); else x=x.replace('<svg','<svg width="'+px+'"');
     if(/height="/i.test(x)) x=x.replace(/height="[^"]*"/i, 'height="'+px+'"'); else x=x.replace('<svg','<svg height="'+px+'"');
     if(!/preserveAspectRatio=/i.test(x)) x=x.replace('<svg','<svg preserveAspectRatio="xMidYMid slice"');
     return x;
   }
-
-  // Inline an SVG string into a container
   function injectSvg(container, svgString, px=80){
     const el = (typeof container==='string') ? $(container) : container;
     const s = svgNormalize(svgString, px);
@@ -504,8 +557,6 @@
     el.style.background='transparent';
     return true;
   }
-
-  // Fetch an SVG by URL and inject it
   async function injectSvgFromUrl(container, url, px=80){
     try{
       const r = await fetch(url, {credentials:'omit', cache:'force-cache'});
@@ -518,7 +569,6 @@
   }
 
   // ---------- Image URL verifier ----------
-  // Usage in console: window.testImageUrl('https://…')
   window.testImageUrl = async function testImageUrl(url){
     try{
       const r = await fetch(url, {method:'GET', credentials:'omit', cache:'no-cache'});
@@ -533,8 +583,6 @@
       return {ok:false, error:String(e)};
     }
   };
-
-  // Long-press any thumbnail .itimg to verify its actual URL
   (function(){
     let pressTimer=null;
     document.addEventListener('touchstart', e=>{
@@ -560,17 +608,17 @@
     }
   });
 
-  // ---------- logo upload (setup + edit) with auto-upload on select ----------
+  // ---------- logo upload (setup + edit) ----------
   (function(){
     async function handleFileChange(fileEl, btnEl, inpEl, thumbId){
       const f = fileEl?.files?.[0];
       if(!f) return;
-      setThumb(thumbId, URL.createObjectURL(f));            // local preview
+      setThumb(thumbId, URL.createObjectURL(f));
       if(btnEl) { btnEl.disabled=true; btnEl.textContent='Uploading…'; }
       try{
-        const url = await uploadTo('/upload', f);           // upload immediately
+        const url = await uploadTo('/upload', f);
         if(inpEl){ inpEl.value = ABS(url); }
-        setThumb(thumbId, proxy(url));                      // show server URL
+        setThumb(thumbId, proxy(url));
       }catch{
         alert('Upload failed. You can paste a URL instead.');
       }finally{
@@ -580,18 +628,12 @@
     function bind(fileSel, btnSel, inputSel, thumbId){
       const file=$(fileSel), btn=$(btnSel), inp=$(inputSel);
       if(!file||!inp) return;
-      // auto-upload when a file is chosen
       file.addEventListener('change',()=>handleFileChange(file, btn, inp, thumbId));
-      // manual upload button still works
       if(btn){ btn.addEventListener('click', async ()=>{ if(!file.files?.[0]){ inp.focus(); return; } await handleFileChange(file, btn, inp, thumbId); }); }
-      // typing/pasting a URL shows preview
       inp.addEventListener('input',()=>{ const v=proxy(inp.value); if(v) setThumb(thumbId, v); });
-      // show existing value on load
       if(inp.value){ const v=proxy(inp.value); if(v) setThumb(thumbId, v); }
     }
-    // setup page picker
     bind('#logoFile', '#logoUploadBtn', '#logoUrl', 'logoThumb');
-    // edit page picker
     bind('#editLogoFile', '#editLogoUploadBtn', '#editLogoUrl', 'editLogoThumb');
   })();
 
@@ -602,7 +644,6 @@
     file.addEventListener('change',async ()=>{
       const f=file.files?.[0];
       if(f){
-        // auto-upload for item image as well
         btn.disabled=true; btn.textContent='Uploading…';
         try{
           const url=await uploadTo('/upload', f);
@@ -631,8 +672,15 @@
       const price=Number((priceEl?.value||'').trim());
       if(!title?.value.trim()){ e.preventDefault(); alert('Please add a product title.'); title?.focus(); return false; }
       if(!price || isNaN(price) || price<=0){ e.preventDefault(); alert('Enter a valid Pi price (e.g., 0.1)'); priceEl?.focus(); return false; }
-      // No forced PNG conversion anymore. We keep svg_code (hidden) for rendering later.
-      // If user pasted an image URL, it will still be used by server.
+
+      // NEW: block submission if NFT toggle is ON but nothing minted yet
+      const nftOn = !!($('#nft_enabled')?.value);
+      const nftAssets = ($('#nft_assets_json')?.value||'').trim();
+      if(nftOn && !nftAssets){
+        e.preventDefault();
+        alert('Please mint the NFT assets first, or disable the NFT option.');
+        return false;
+      }
     });
   })();
 
@@ -680,7 +728,6 @@
       if(!r.ok) throw new Error('state_fetch_failed'); return r.json();
     }
 
-    // Fetch crafted item details from your backend (expects price_ic, svg, meta)
     async function fetchCraftedDetails(craftedId){
       if(!craftedId) return null;
       const r = await fetch(`/api/crafted/${encodeURIComponent(craftedId)}`, { credentials: 'include' });
@@ -689,11 +736,10 @@
       return j && j.ok ? j : null;
     }
 
-    // --- helpers used by itemsFromState
     function normalizeCategory(rawType, rawCategory){
       const t = String(rawType || '').toLowerCase();
       let c = String(rawCategory || '').toLowerCase();
-      if (!c) c = t;           // fall back to type if category not set
+      if (!c) c = t;
       if (c === 'armor') c = 'armour';
       return c || 'armour';
     }
@@ -704,7 +750,7 @@
         arm:'arms', arms:'arms',
         leg:'legs', legs:'legs',
         hand:'hands', hands:'hands',
-        weapon:'hands', // generic weapon → hands slot
+        weapon:'hands',
         gun:'gun',
         melee:'melee', blade:'melee', sword:'melee'
       };
@@ -783,168 +829,291 @@
       if(mt)  mt.value  = has ? 'crafted_item' : '';
     }
 
-    // --- Create form wiring
-    (function(){
-      const sel=$('#craftedSelect'); if(!sel) return;
-      const hid='crafted_item_id';
-      const fk='fulfillment_kind';
-      const cat='category';
-      const partId='crafted_part';   // hidden input in your form
-      const metaTypeId='meta_type';  // hidden input in your form
+    // -------- NEW: IZZA wallet discovery (kept flexible to match your existing keys) --------
+    function getIzzaWallet(){
+      try{
+        // Preferred: single JSON blob
+        const blob = localStorage.getItem('izzaWallet');
+        if(blob){
+          const j=JSON.parse(blob);
+          if(j && j.pub && j.sec) return {pub:j.pub, sec:j.sec};
+          if(j && j.public && j.secret) return {pub:j.public, sec:j.secret};
+        }
+      }catch{}
+      try{
+        // Fallback: separate keys
+        const pub = localStorage.getItem('izzaWalletPub') || localStorage.getItem('walletPub') || '';
+        const sec = localStorage.getItem('izzaWalletSec') || localStorage.getItem('walletSec') || localStorage.getItem('sKey') || '';
+        if(pub && sec) return {pub, sec};
+      }catch{}
+      return {pub:'', sec:''};
+    }
 
-      const imgIn=$('#itUrl');
-      const svgHidden=$('#svgCode');
-      const titleEl=$('#create-product form input[name="title"]');
-      const skuEl=$('#create-product form input[name="sku"]');
+    // -------- NEW: NFT UI wiring (quote + mint) --------
+    (function wireNFT(){
+      const block = $('#nftBlock'); if(!block) return;
+      const craftedIdEl = $('#crafted_item_id');
+      const voucherInfo = $('#voucherInfo');
 
-      // Voucher info UI
-      const priceInput = $('#create-product input[name="pi_price"]');
-      const craftedIdInput = $('#crafted_item_id');
-      const infoWrap = $('#voucherInfo');
-      const voucherCalc = $('#voucherCalc');
-      const mintCostNote = $('#mintCostNote');
+      const nftToggle = $('#nftToggle');
+      const nftOptions = $('#nftOptions');
+      const kindSingle = $('#nftKindSingle');
+      const kindColl = $('#nftKindColl');
+      const qtyWrap = $('#nftQtyWrap');
+      const qtyEl = $('#nftQty');
+      const quoteBtn = $('#nftGetQuoteBtn');
+      const mintBtn = $('#nftMintBtn');
+      const quoteNote = $('#nftQuoteNote');
+      const mintStatus = $('#nftMintStatus');
+      const mintedWrap = $('#nftMintedWrap');
+      const mintedCodes = $('#nftMintedCodes');
 
-      function fmt(n){ try{ return Number(n).toLocaleString(); }catch{ return String(n); } }
+      const hidEnabled = $('#nft_enabled');
+      const hidKind = $('#nft_kind');
+      const hidAssets = $('#nft_assets_json');
+      const hidFee = $('#nft_fee_total');
 
-      function updateVoucherPreview(){
-        const hasCraft = !!(craftedIdInput?.value || '').trim();
-        const pi = parseFloat((priceInput?.value || '').trim());
-        if(!infoWrap) return;
-        if(!hasCraft){
-          infoWrap.style.display='none';
-          voucherCalc.textContent='';
-          mintCostNote.textContent='';
+      function hasCraft(){ return !!(craftedIdEl?.value||'').trim(); }
+
+      function refreshVisibility(){
+        const show = hasCraft();
+        block.style.display = show ? '' : 'none';
+        // If no crafted item, clear NFT selections but don't touch already-minted data
+        if(!show){
+          nftToggle.checked = false;
+          nftOptions.style.display='none';
+        }
+      }
+
+      function currentKind(){
+        return kindColl.checked ? 'collection' : 'single';
+      }
+
+      function ensureQtyVisible(){
+        qtyWrap.style.display = kindColl.checked ? '' : 'none';
+      }
+
+      function setQuote(msg){ quoteNote.textContent = msg || ''; }
+      function setMintStatus(msg, ok=false){
+        mintStatus.textContent = msg || '';
+        mintStatus.classList.toggle('success', !!ok);
+      }
+
+      // toggle wiring
+      nftToggle.addEventListener('change', ()=>{
+        nftOptions.style.display = nftToggle.checked ? '' : 'none';
+        // If turning off, clear hidden "enabled" but keep minted list so you can re-toggle without losing it
+        if(!nftToggle.checked){ hidEnabled.value=''; }
+        else { hidEnabled.value='1'; hidKind.value = currentKind(); }
+      });
+      kindSingle.addEventListener('change', ()=>{ ensureQtyVisible(); hidKind.value = currentKind(); setQuote(''); mintedWrap.style.display='none'; });
+      kindColl.addEventListener('change', ()=>{ ensureQtyVisible(); hidKind.value = currentKind(); setQuote(''); mintedWrap.style.display='none'; });
+
+      quoteBtn.addEventListener('click', async ()=>{
+        if(!nftToggle.checked){ alert('Enable NFT listing first.'); return; }
+        const kind = currentKind();
+        const size = kind==='collection' ? Math.max(1, parseInt(qtyEl.value||'10',10)) : 1;
+
+        setQuote('Quoting…'); setMintStatus(''); mintBtn.disabled=true;
+        try{
+          const r=await fetch('/api/nft/quote', {
+            method:'POST',
+            headers:{'Content-Type':'application/json'},
+            body:JSON.stringify({kind, size})
+          });
+          if(!r.ok) throw new Error('quote_failed');
+          const j=await r.json();
+          if(!j.ok) throw new Error('quote_bad');
+          setQuote(`Cost: ${j.total} IZZA testnet token (${j.kind}${j.kind==='collection' ? ' × '+j.size : ''}).`);
+          hidKind.value = j.kind;
+          hidFee.value = String(j.total);
+          mintBtn.disabled=false;
+        }catch(e){
+          setQuote('Failed to get quote. Try again.');
+        }
+      });
+
+      mintBtn.addEventListener('click', async ()=>{
+        if(!nftToggle.checked){ alert('Enable NFT listing first.'); return; }
+        const {pub,sec}=getIzzaWallet();
+        if(!pub || !sec){
+          alert('Open your IZZA wallet and save your S key locally first.');
           return;
         }
-        infoWrap.style.display='';
-        if(pi && !isNaN(pi) && pi>0){
-          const ic = Math.round(pi * IC_PER_PI);
-          voucherCalc.textContent = `Buyers will receive a single-use voucher worth approximately ${fmt(ic)} IC (based on ${IC_PER_PI} IC per 1 π).`;
-        }else{
-          voucherCalc.textContent = '';
+        const title = document.querySelector('#create-product input[name="title"]')?.value || '';
+        const sku   = document.querySelector('#create-product input[name="sku"]')?.value || '';
+        const tagBase = (sku||title||'SET').toString().trim().slice(0,8).toUpperCase().replace(/[^A-Z0-9]/g,'') || 'SET';
+
+        const kind = currentKind();
+        const size = kind==='collection' ? Math.max(1, parseInt(qtyEl.value||'10',10)) : 1;
+
+        setMintStatus('Minting…'); mintBtn.disabled=true; quoteBtn.disabled=true;
+        try{
+          const r=await fetch('/api/nft/mint', {
+            method:'POST',
+            headers:{'Content-Type':'application/json'},
+            body:JSON.stringify({
+              creator_pub: pub,
+              creator_sec: sec,        // you already do this locally for buy/stake; same pattern
+              kind,
+              size,
+              prefix: 'IZZA',          // 12-char limit is enforced server-side; safe default
+              collection_tag: tagBase  // makes codes like IZZA<tag>001
+            })
+          });
+          if(!r.ok) throw new Error('mint_failed');
+          const j=await r.json();
+          if(!j.ok || !Array.isArray(j.assets) || !j.assets.length) throw new Error('mint_empty');
+
+          // persist into hidden inputs
+          hidEnabled.value = '1';
+          hidKind.value = kind;
+          hidAssets.value = JSON.stringify(j.assets);
+          hidFee.value = String(j.total_fee || '');
+
+          // show minted list
+          mintedCodes.textContent = j.assets.join(' ');
+          mintedWrap.style.display='';
+          setMintStatus('Mint complete. These assets will be delivered to buyers on purchase.', true);
+        }catch(e){
+          setMintStatus('Mint failed. Check wallet balance and try again.');
+        }finally{
+          mintBtn.disabled=false; quoteBtn.disabled=false;
         }
-        const icCost = parseInt(($('#craft_ic_cost')?.value || '').trim() || '0', 10);
-        mintCostNote.textContent = icCost>0 ? `Average mint cost for this item: ~ ${fmt(icCost)} IC.` : '';
-      }
+      });
 
-      function setFromSvg(svg, id){
-        svgHidden.value = svg || '';
-        if(svg){
-          injectSvg('#itThumb', svg, 80);
-          (async()=>{
-            try{
-              const blob=new Blob([svgNormalize(svg,512)],{type:'image/svg+xml'});
-              const file=new File([blob], `${id||'crafted'}.svg`, {type:'image/svg+xml'});
-              const url=await uploadTo('/upload', file);
-              if(imgIn) imgIn.value=ABS(url);
-            }catch{}
-          })();
-        }
-      }
+      // tie visibility of NFT block to crafted attach
+      const craftedSelect = $('#craftedSelect');
+      function onCraftChange(){ refreshVisibility(); }
+      craftedSelect?.addEventListener('change', onCraftChange);
 
-      async function onChange(){
-        const id = sel.value || '';
-        markAsCrafting(hid,fk,cat,partId,metaTypeId,id);
-        if(!id){ updateVoucherPreview(); return; }
-
-        const it = CRAFT_ITEMS[id] || {};
-        if(titleEl) titleEl.value = it.title || titleEl.value;
-        if(skuEl)   skuEl.value   = it.sku || '';
-
-        // 1) Ask server for true mint cost + canonical svg/meta
-        const det = await fetchCraftedDetails(id);
-        const meta = (det && det.meta) || {};
-        const priceIC = Number(meta.price_ic || 0);
-
-        // 2) Fill the hidden IC fields so the server can persist them on create
-        const icEl  = document.getElementById('craft_ic_cost');
-        const modeEl= document.getElementById('craft_dyn_mode');
-        const icDyn = document.getElementById('craft_dyn_ic');
-        if(icEl)  icEl.value   = priceIC > 0 ? String(priceIC) : '';
-        if(modeEl) modeEl.value= 'fixed_ic';
-        if(icDyn) icDyn.value  = priceIC > 0 ? String(priceIC) : '';
-
-        // 3) Prefer the canonical SVG from server; fallback to what came from state
-        const svgFromServer = det && det.svg || '';
-        if(svgFromServer){
-          setFromSvg(svgFromServer, id);
-        }else if(it.svg){
-          setFromSvg(it.svg, id);
-        }else if(it.img){
-          const u=ABS(ipfsToHttp(it.img)).trim();
-          if(/\.svg(\?|$)/i.test(u)){
-            await injectSvgFromUrl('#itThumb', u, 80);
-            svgHidden.value = await (async()=>{ try{ const r=await fetch(u); return await r.text(); }catch{return ''} })();
-          }else{
-            if(imgIn) imgIn.value=u;
-            setThumb('itThumb', proxy(u));
-            svgHidden.value='';
-          }
-        }
-
-        updateVoucherPreview();
-      }
-
-      sel.addEventListener('change', onChange);
-      priceInput?.addEventListener('input', updateVoucherPreview);
-
-      const btn=$('#refreshCrafted');
-      if(btn){
-        btn.addEventListener('click', async ()=>{
-          btn.disabled=true; btn.textContent='Refreshing…';
-          try{
-            const user=who();
-            const state=await fetchState(user);
-            fillSelect(sel, itemsFromState(state), document.getElementById(hid)?.value, false);
-          }finally{
-            btn.disabled=false; btn.textContent='Refresh';
-          }
-        });
-      }
-
-      (async()=>{ try{
-        const user=who();
-        const state=await fetchState(user);
-        fillSelect(sel, itemsFromState(state), document.getElementById(hid)?.value, false);
-        // Initial voucher preview state
-        updateVoucherPreview();
-      }catch{} })();
+      // initial state
+      refreshVisibility();
+      ensureQtyVisible();
     })();
 
-    // --- Edit rows wiring
-    (function wireEdit(){
-      $all('.craftedEditSelect').forEach(sel=>{
-        const row=sel.closest('tr');
-        const id=sel.getAttribute('data-item-id');
+    // --- Create form wiring (existing, plus voucher preview) ---
+    const sel=$('#craftedSelect'); if(!sel) return;
+    const hid='crafted_item_id';
+    const fk='fulfillment_kind';
+    const cat='category';
+    const partId='crafted_part';
+    const metaTypeId='meta_type';
 
-        const hidId='crafted_item_id_'+id;
-        const fkId='fulfillment_kind_'+id;
-        const catId='category_'+id;
-        const partId='crafted_part_'+id;   // hidden input in edit form
-        const metaTypeId='meta_type_'+id;  // hidden input in edit form
+    const imgIn=$('#itUrl');
+    const svgHidden=$('#svgCode');
+    const titleEl=$('#create-product form input[name="title"]');
+    const skuEl=$('#create-product form input[name="sku"]');
 
-        const cur=document.getElementById(hidId)?.value || '';
+    const priceInput = $('#create-product input[name="pi_price"]');
+    const craftedIdInput = $('#crafted_item_id');
+    const infoWrap = $('#voucherInfo');
+    const voucherCalc = $('#voucherCalc');
+    const mintCostNote = $('#mintCostNote');
 
-        sel.addEventListener('change', ()=>{
-          const v=sel.value||'';
-          markAsCrafting(hidId,fkId,catId,partId,metaTypeId,v);
-          if(!v) return;
+    function fmt(n){ try{ return Number(n).toLocaleString(); }catch{ return String(n); } }
 
-          const it=CRAFT_ITEMS[v]||{};
-          const tEl=row.querySelector('input[name="title"]');
-          const iEl=row.querySelector('input[name="image_url"]');
-          if(tEl) tEl.value = it.title || tEl.value;
-          if(iEl && it.img) iEl.value = ABS(ipfsToHttp(it.img)).trim();
-        });
+    function updateVoucherPreview(){
+      const hasCraft = !!(craftedIdInput?.value || '').trim();
+      const pi = parseFloat((priceInput?.value || '').trim());
+      if(!infoWrap) return;
+      if(!hasCraft){
+        infoWrap.style.display='none';
+        voucherCalc.textContent='';
+        mintCostNote.textContent='';
+        return;
+      }
+      infoWrap.style.display='';
+      if(pi && !isNaN(pi) && pi>0){
+        const ic = Math.round(pi * IC_PER_PI);
+        voucherCalc.textContent = `Buyers will receive a single-use voucher worth approximately ${fmt(ic)} IC (based on ${IC_PER_PI} IC per 1 π).`;
+      }else{
+        voucherCalc.textContent = '';
+      }
+      const icCost = parseInt(($('#craft_ic_cost')?.value || '').trim() || '0', 10);
+      mintCostNote.textContent = icCost>0 ? `Average mint cost for this item: ~ ${fmt(icCost)} IC.` : '';
+    }
 
-        (async()=>{ try{
+    function setFromSvg(svg, id){
+      svgHidden.value = svg || '';
+      if(svg){
+        injectSvg('#itThumb', svg, 80);
+        (async()=>{
+          try{
+            const blob=new Blob([svgNormalize(svg,512)],{type:'image/svg+xml'});
+            const file=new File([blob], `${id||'crafted'}.svg`, {type:'image/svg+xml'});
+            const url=await uploadTo('/upload', file);
+            if(imgIn) imgIn.value=ABS(url);
+          }catch{}
+        })();
+      }
+    }
+
+    async function onChange(){
+      const id = sel.value || '';
+      markAsCrafting(hid,fk,cat,partId,metaTypeId,id);
+      if(!id){ updateVoucherPreview(); return; }
+
+      const it = CRAFT_ITEMS[id] || {};
+      if(titleEl) titleEl.value = it.title || titleEl.value;
+      if(skuEl)   skuEl.value   = it.sku || '';
+
+      const det = await fetchCraftedDetails(id);
+      const meta = (det && det.meta) || {};
+      const priceIC = Number(meta.price_ic || 0);
+
+      const icEl  = document.getElementById('craft_ic_cost');
+      const modeEl= document.getElementById('craft_dyn_mode');
+      const icDyn = document.getElementById('craft_dyn_ic');
+      if(icEl)  icEl.value   = priceIC > 0 ? String(priceIC) : '';
+      if(modeEl) modeEl.value= 'fixed_ic';
+      if(icDyn) icDyn.value  = priceIC > 0 ? String(priceIC) : '';
+
+      const svgFromServer = det && det.svg || '';
+      if(svgFromServer){
+        setFromSvg(svgFromServer, id);
+      }else if(it.svg){
+        setFromSvg(it.svg, id);
+      }else if(it.img){
+        const u=ABS(ipfsToHttp(it.img)).trim();
+        if(/\.svg(\?|$)/i.test(u)){
+          await injectSvgFromUrl('#itThumb', u, 80);
+          svgHidden.value = await (async()=>{ try{ const r=await fetch(u); return await r.text(); }catch{return ''} })();
+        }else{
+          if(imgIn) imgIn.value=u;
+          setThumb('itThumb', proxy(u));
+          svgHidden.value='';
+        }
+      }
+
+      updateVoucherPreview();
+      // also refresh NFT block visibility after a crafted item is chosen
+      const evt=new Event('change'); document.getElementById('crafted_item_id')?.dispatchEvent(evt);
+    }
+
+    sel.addEventListener('change', onChange);
+    priceInput?.addEventListener('input', updateVoucherPreview);
+
+    const btn=$('#refreshCrafted');
+    if(btn){
+      btn.addEventListener('click', async ()=>{
+        btn.disabled=true; btn.textContent='Refreshing…';
+        try{
           const user=who();
           const state=await fetchState(user);
-          const items=itemsFromState(state);
-          fillSelect(sel, items, cur, true);
-        }catch{} })();
+          fillSelect(sel, itemsFromState(state), document.getElementById(hid)?.value, false);
+        }finally{
+          btn.disabled=false; btn.textContent='Refresh';
+        }
       });
-    })();
+    }
+
+    (async()=>{ try{
+      const user=who();
+      const state=await fetchState(user);
+      fillSelect(sel, itemsFromState(state), document.getElementById(hid)?.value, false);
+      updateVoucherPreview();
+    }catch{} })();
   })();
 
   // ---------- After content: render SVGs inline for thumbnails in the table ----------
@@ -953,7 +1122,6 @@
     await Promise.all(boxes.map(async box=>{
       const img = box.querySelector('img');
       if(!img) return;
-      // the src is /uimg?src=<encoded real url>
       let u;
       try{
         const p = new URL(img.src, location.href);
@@ -961,7 +1129,6 @@
       }catch{ u = img.src; }
       const real = decodeURIComponent(u||'');
       if(/\.svg(\?|$)/i.test(real)){
-        // Replace <img> with inline SVG (same look as preview)
         const ok = await injectSvgFromUrl(box, real, 80);
         if(!ok){ /* leave the <img> if we failed */ }
       }
