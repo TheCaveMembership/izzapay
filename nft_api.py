@@ -138,9 +138,23 @@ def per_unit(n:int)->Decimal:
 def _dec(n): return Decimal(str(n))
 def _load(g): return server.load_account(g)
 
-def _mint_code(prefix="NFT", suffix=""):
-    base = f"{prefix}{suffix}".upper()
-    return re.sub(r"[^A-Z0-9]", "", base)[:12] or "NFTX"
+def _sanitize(s: str) -> str:
+    return re.sub(r"[^A-Z0-9]", "", (s or "").upper())
+
+def _mint_code_single(prefix="NFT", suffix=""):
+    base = f"{_sanitize(prefix)}{_sanitize(suffix)}"
+    return (base[:12] or "NFTX")
+
+def _mint_code_collection(prefix="NFT", tag="", idx=1):
+    """
+    Ensure uniqueness under 12 chars by reserving 3 for the index.
+    """
+    p = _sanitize(prefix)
+    t = _sanitize(tag)
+    # reserve 3 for idx
+    room = max(0, 12 - len(p) - 3)
+    t_cut = t[:room] if room > 0 else ""
+    return f"{p}{t_cut}{idx:03d}"[:12]
 
 def _change_trust(secret: str, asset: Asset, limit="1"):
     kp = Keypair.from_secret(secret)
@@ -270,7 +284,10 @@ def mint():
     iss_kp = Keypair.from_secret(ISSUER_S)
     minted = []
     for i in range(size):
-        code = _mint_code(prefix, f"{tag}{i+1:03d}" if kind == "collection" else f"{tag}")
+        if kind == "collection":
+            code = _mint_code_collection(prefix, tag, i + 1)
+        else:
+            code = _mint_code_single(prefix, tag)
         asset = Asset(code, iss_kp.public_key)
         try:
             log.debug("NFT_TRUST_DISTR start asset=%s:%s", code, _mask(iss_kp.public_key))
@@ -282,7 +299,7 @@ def mint():
 
         iss_acc = _load(iss_kp.public_key)
         tx = (TransactionBuilder(iss_acc, PP, base_fee=_base_fee())
-              .append_payment_op(DISTR_G, asset, "1")  # <-- swapped order: (destination, asset, amount)
+              .append_payment_op(DISTR_G, asset, "1")  # (destination, asset, amount)
               .set_timeout(180).build())
         tx.sign(iss_kp)
         try:
