@@ -576,7 +576,7 @@ def _classify_record(r: dict):
         "sponsor": r.get("sponsor"),
         "role": role,
         "last_modified_time": r.get("last_modified_time"),
-        "unlock_ts": unlock_unix or 0,
+        "unlock_ts": r.get("unlock_ts") or (unlock_unix or 0),
     }
 
 def _fetch_claimables_raw(pub: str) -> list[dict]:
@@ -710,53 +710,70 @@ def _username_for_pub(pub: str) -> str | None:
     except Exception:
         return None
 
+def _pub_for_username(username: str) -> str | None:
+    """Resolve a wallet G... from app username (preferred when available)."""
+    if not username: return None
+    try:
+        cx = sqlite3.connect(_SQLITE_PATH, check_same_thread=False)
+        cx.row_factory = sqlite3.Row
+        row = cx.execute(
+            "SELECT pub FROM user_wallets WHERE lower(username)=lower(?)",
+            (username,)
+        ).fetchone()
+        cx.close()
+        pub = (row["pub"] if row else None)
+        return pub if pub and pub.startswith("G") else None
+    except Exception:
+        return None
+
 @bp_stake.route("/api/stake/claimables", methods=["GET"])
 def list_claimables():
     """
-    List claimable balances for this asset and claimant (by pub) and
-    also append pending crafted-NFT claims that belong to the same user
-    (by pub or by resolved/provided username).
-    Query: ?pub=G...  and optionally ?u=<username>
-    Returns: {"ok": True, "claimables": merged, "records": stake_only}
+    List claimable balances (staking) and pending crafted-NFT claims for a user.
+    Prefers resolving by username (?u=) → pub; falls back to explicit ?pub=.
+      Query: ?u=<username> [preferred] OR ?pub=G...
+      Returns: {"ok": True, "claimables": merged, "records": stake_only}
     """
-    pub = _clean(request.args.get("pub", ""))
-    if not (pub and pub.startswith("G")):
-        abort(400, "bad pub")
+    # Inputs
+    u_param = _clean(request.args.get("u", "") or "")
+    pub_param = _clean(request.args.get("pub", "") or "")
 
-    # Optional explicit username from the client (fallback for pre-link purchases)
-    u_param = _clean(request.args.get("u", "")) or ""
-    # Username known from wallet mapping (if any)
+    # Resolve pub by username first (preferred), else accept provided pub
+    pub_from_u = _pub_for_username(u_param) if u_param else None
+    pub = pub_from_u or pub_param
+
+    if not (pub and pub.startswith("G")):
+        # As a last resort, if only pub was omitted but username maps to nothing
+        abort(400, "bad pub or unknown username")
+
+    # Username known from wallet mapping (if any), or use provided u
     uname_from_pub = _username_for_pub(pub) or ""
+    uname = u_param or uname_from_pub
 
     # 1) existing staking claimables (Horizon)
     stake_rows = _compute_claimables_out(pub)
 
-    # 2) crafted-NFT pending claims by pub
-    nft_by_pub = _pending_nft_for(pub=pub, username="")
-
-    # 3) also pick up any rows saved only by username (common at checkout time)
-    #    Prefer explicit ?u=... if provided; else use uname_from_pub (if mapped)
-    uname = (u_param or uname_from_pub)
+    # 2) crafted-NFT pending claims — prioritize username first then pub
     nft_by_user = _pending_nft_for(pub="", username=uname) if uname else []
+    nft_by_pub  = _pending_nft_for(pub=pub, username="")
 
-    # Best-effort backfill: now that we know (pub, username), set buyer_pub=''
-    # rows to the real pub so future reads can find them by pub alone.
+    # Best-effort backfill: fill missing buyer_pub when we now know it from username
     try:
-        if uname:
+        if uname and pub:
             with sqlite3.connect(_SQLITE_PATH, check_same_thread=False) as bcx:
                 bcx.execute(
                     "UPDATE nft_pending_claims "
                     "SET buyer_pub=? "
-                    "WHERE status='pending' AND buyer_pub='' AND lower(buyer_username)=lower(?)",
+                    "WHERE status='pending' AND (buyer_pub='' OR buyer_pub IS NULL) AND lower(buyer_username)=lower(?)",
                     (pub, uname)
                 )
     except Exception:
         pass
 
-    # de-dup the NFT rows (same pending_id)
+    # De-dup NFT rows by pending_id, preserving the username-preferred ordering
     seen = set()
     nft_rows = []
-    for r in nft_by_pub + nft_by_user:
+    for r in nft_by_user + nft_by_pub:
         k = r.get("pending_id")
         if k in seen:
             continue
@@ -772,15 +789,20 @@ def list_claimables_plus():
     Unified “Claims” list for the UI:
     - All staking claimable balances (regular + vote)
     - Pending NFT claims (ready to deliver)
-    Query: ?pub=G... or ?u=username  (pub preferred)
+    Prefers username (?u=) resolution to pub.
+    Query: ?u=username  or  ?pub=G...
     """
-    pub = _clean(request.args.get("pub", "") or "")
-    u   = _clean(request.args.get("u", "") or "")
-    if not pub and not u:
+    u_param = _clean(request.args.get("u", "") or "")
+    pub_param = _clean(request.args.get("pub", "") or "")
+
+    pub_from_u = _pub_for_username(u_param) if u_param else None
+    pub = pub_from_u or pub_param
+
+    if not (pub and pub.startswith("G")) and not u_param:
         abort(400, "provide pub or u")
 
-    stake_rows = _compute_claimables_out(pub) if pub else []
-    nft_rows   = _pending_nft_for(pub=pub, username=u)
+    stake_rows = _compute_claimables_out(pub) if (pub and pub.startswith("G")) else []
+    nft_rows   = _pending_nft_for(pub=pub if pub else "", username=u_param if u_param else "")
     return jsonify({"ok": True, "claimables": stake_rows, "pending_nfts": nft_rows})
 
 # -------------------------- build claim(s) + resolver ---------------------
