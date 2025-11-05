@@ -3705,7 +3705,74 @@ def _issue_nft_claimables_for_order(order_id: int, buyer_user_id: int):
     except Exception as e:
         print(f"[nft_claimables] exception order_id={order_id}: {e}")
         return False
+# ========================================================================== #
+# ===================== NFT PENDING-CLAIM INSERT HELPER ===================== #
+# ========================================================================== #
+# --- BEGIN: NFT claim insert helper ---------------------------------------
+def _insert_nft_pending_claim(cx, *, order_id: int):
+    """
+    Create/ensure a pending NFT claim row for the buyer of this order.
+    Works even if buyer_pub is unknown at checkout time.
+    """
+    # Resolve order, item, buyer
+    o = cx.execute("SELECT * FROM orders WHERE id=?", (order_id,)).fetchone()
+    if not o:
+        return
 
+    buyer_user_id = o.get("buyer_user_id")
+    buyer = cx.execute("SELECT id, username, pi_username FROM users WHERE id=?", (buyer_user_id,)).fetchone()
+    buyer_username = (buyer.get("username") or buyer.get("pi_username") or "") if buyer else ""
+
+    it = cx.execute("SELECT * FROM items WHERE id=?", (o["item_id"],)).fetchone()
+    if not it:
+        return
+
+    # Find the SOLD listing we just attached to this order
+    lst = cx.execute("""
+        SELECT nl.*, nc.code AS asset_code, nc.issuer, nc.id AS collection_id
+        FROM nft_listings nl
+        JOIN nft_collections nc ON nc.id = nl.collection_id
+        WHERE nl.order_id=? AND nl.status='sold'
+        ORDER BY nl.id DESC LIMIT 1
+    """, (order_id,)).fetchone()
+    if not lst:
+        # Nothing to do for non-NFT items
+        return
+
+    # Build minimal assets descriptor (extend as needed)
+    serial = lst.get("serial")
+    asset_code = lst.get("asset_code")
+    issuer = lst.get("issuer") or ""
+    assets = [{"code": asset_code, "issuer": issuer, "serial": serial}] if asset_code else []
+
+    # Try to find a pub for the buyer (may not exist yet)
+    uw = cx.execute("SELECT pub FROM user_wallets WHERE lower(username)=lower(?)", (buyer_username,)).fetchone()
+    buyer_pub = (uw["pub"] if uw else "") or ""
+
+    now = int(time.time())
+
+    # Upsert: one pending per order_id
+    exists = cx.execute("SELECT id FROM nft_pending_claims WHERE order_id=?", (order_id,)).fetchone()
+    if exists:
+        cx.execute("""
+          UPDATE nft_pending_claims
+          SET buyer_user_id=?, buyer_username=?, buyer_pub=?, issuer=?, assets_json=?, status='pending'
+          WHERE order_id=?
+        """, (buyer_user_id, buyer_username, buyer_pub, issuer, json.dumps(assets, separators=(",",":")), order_id))
+    else:
+        cx.execute("""
+          INSERT INTO nft_pending_claims(
+            order_id, buyer_user_id, buyer_username, buyer_pub,
+            issuer, assets_json, status, created_at
+          ) VALUES(?,?,?,?,?,?, 'pending', ?)
+        """, (
+            order_id, buyer_user_id, buyer_username, buyer_pub,
+            issuer, json.dumps(assets, separators=(",",":")), now
+        ))
+# --- END: NFT claim insert helper -----------------------------------------
+# ========================================================================== #
+# ================== END NFT PENDING-CLAIM INSERT HELPER =================== #
+# ========================================================================== #
 # ----------------- FULFILLMENT + EMAIL -----------------
 def fulfill_session(s, tx_hash, buyer, shipping):
     """
@@ -3834,7 +3901,14 @@ def fulfill_session(s, tx_hash, buyer, shipping):
                         print(f"[fulfill][nft] expected {qty} listings but found {len(avail) if avail else 0} "
                               f"for item_id={it['id'] if it else None} — nothing marked sold")
             except Exception as e:
-                print(f"[fulfill][nft] mark sold error item_id={it['id'] if it else None}: {e}")
+                print(f"[fulfill][nft] marked SOLD {len(ids)} listings item_id={it['id']} order_id={order_id} ids={ids}")
+
+# >>> NEW: ensure a pending NFT claim row exists for this order
+try:
+    _insert_nft_pending_claim(cx, order_id=order_id)
+    print(f"[fulfill][nft] claim row ensured for order_id={order_id}")
+except Exception as e:
+    print(f"[fulfill][nft] pending-claim insert failed order_id={order_id}: {e}")
 
             # ----------------- CRAFTED ITEM → voucher creation (as before) -----------------
             if it and (it["fulfillment_kind"] == "crafting") and it["crafted_item_id"]:
