@@ -718,57 +718,63 @@
   </div>
 
   <!-- MY WALLET MODAL -->
-  <div class="modal" id="myWalletModal" role="dialog" aria-modal="true" aria-labelledby="myWalletTitle" hidden>
-    <div class="modal-card">
-      <div class="modal-header">
-        <div class="modal-title">
-          <img src="/static/izzapay-mark.svg" alt="">
-          <span id="myWalletTitle">My IZZA Wallet</span>
-        </div>
-        <button class="close-btn" type="button" id="closeMyWalletBtn">Close</button>
+<div class="modal" id="myWalletModal" role="dialog" aria-modal="true" aria-labelledby="myWalletTitle" hidden>
+  <div class="modal-card">
+    <div class="modal-header">
+      <div class="modal-title">
+        <img src="/static/izzapay-mark.svg" alt="">
+        <span id="myWalletTitle">My IZZA Wallet</span>
       </div>
-      <div class="modal-body">
+      <button class="close-btn" type="button" id="closeMyWalletBtn">Close</button>
+    </div>
+    <div class="modal-body">
+      <div class="blox">
+        <div class="small-muted">Signed in as</div>
+        <div><strong id="mwUser">—</strong></div>
+      </div>
+      <div class="blox" style="margin-top:10px">
+        <div class="small-muted">Active Wallet (public key)</div>
+        <div class="mono" id="mwPub" style="word-break:break-all">—</div>
+      </div>
+      <div class="grid" style="gap:12px;margin-top:10px">
         <div class="blox">
-          <div class="small-muted">Signed in as</div>
-          <div><strong id="mwUser">—</strong></div>
+          <h4>Balances</h4>
+          <div class="small-muted">Pi</div><div class="mono" id="mwPi">—</div>
+          <div class="small-muted" style="margin-top:8px">IZZA</div><div class="mono" id="mwIzza">—</div>
         </div>
-        <div class="blox" style="margin-top:10px">
-          <div class="small-muted">Active Wallet (public key)</div>
-          <div class="mono" id="mwPub" style="word-break:break-all">—</div>
-        </div>
-        <div class="grid" style="gap:12px;margin-top:10px">
-          <div class="blox">
-            <h4>Balances</h4>
-            <div class="small-muted">Pi</div><div class="mono" id="mwPi">—</div>
-            <div class="small-muted" style="margin-top:8px">IZZA</div><div class="mono" id="mwIzza">—</div>
-          </div>
-          <div class="blox">
-            <h4>Actions</h4>
+        <div class="blox">
+          <h4>Actions</h4>
+
+          <!-- row with Reveal + My IZZA NFTs -->
+          <div style="display:flex;gap:8px;flex-wrap:wrap">
             <button id="revealOnceBtn" class="cta">Reveal Secret (once)</button>
-            <div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:8px">
-              <button id="openStakeBtn" class="cta">📥 Stake IZZA</button>
-              <button id="openClaimBtn" class="cta">💰 Claim Rewards</button>
+            <button id="openMyNftsBtn" class="cta">My IZZA NFTs</button>
+          </div>
+
+          <div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:8px">
+            <button id="openStakeBtn" class="cta">📥 Stake IZZA</button>
+            <button id="openClaimBtn" class="cta">💰 Claim Rewards</button>
+          </div>
+          <div class="help" style="margin-top:8px">
+            <strong>Non-custodial wallet</strong>, secret never sent to server.
+            <br><em>Reveal once per session only.</em>
+          </div>
+          <pre id="secretOnce" style="display:none;margin-top:10px;padding:10px;border:1px dashed rgba(255,255,255,.12);border-radius:10px"></pre>
+          <div class="blox" style="margin-top:10px">
+            <h4>Import Secret (existing wallet)</h4>
+            <div class="field"><label>Public Key (G…)</label><input id="impPub" type="text" placeholder="G..." autocomplete="off"></div>
+            <div class="field"><label>Secret Key (S…)</label><input id="impSec" type="password" placeholder="S..." autocomplete="off"></div>
+            <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center">
+              <button id="importSecretBtn" class="cta">Save Secret Locally</button>
+              <label style="display:flex;gap:8px;align-items:center"><input id="impUseForOrders" type="checkbox" checked><span>Set as Active for Orders</span></label>
             </div>
-            <div class="help" style="margin-top:8px">
-              <strong>Non-custodial wallet</strong> — secret never sent to server.
-              <br><em>Reveal once per session only.</em>
-            </div>
-            <pre id="secretOnce" style="display:none;margin-top:10px;padding:10px;border:1px dashed rgba(255,255,255,.12);border-radius:10px"></pre>
-            <div class="blox" style="margin-top:10px">
-              <h4>Import Secret (existing wallet)</h4>
-              <div class="field"><label>Public Key (G…)</label><input id="impPub" type="text" placeholder="G..." autocomplete="off"></div>
-              <div class="field"><label>Secret Key (S…)</label><input id="impSec" type="password" placeholder="S..." autocomplete="off"></div>
-              <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center">
-                <button id="importSecretBtn" class="cta">Save Secret Locally</button>
-                <label style="display:flex;gap:8px;align-items:center"><input id="impUseForOrders" type="checkbox" checked><span>Set as Active for Orders</span></label>
-              </div>
-              <div id="impMsg" class="help" style="margin-top:6px"></div>
-            </div>
+            <div id="impMsg" class="help" style="margin-top:6px"></div>
           </div>
         </div>
       </div>
     </div>
   </div>
+</div>
 
   <!-- ORDER BOOK MODAL -->
   <div class="modal" id="orderbookModal" role="dialog" aria-modal="true" aria-labelledby="orderbookTitle" hidden>
