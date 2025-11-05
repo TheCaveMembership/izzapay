@@ -2331,12 +2331,24 @@ def merchant_new_item(slug):
     image_url        = (data.get("image_url") or "").strip()
     image_url        = _coerce_image_url_to_media(image_url)
 
-    # NEW: inline SVG from the dashboard's hidden field
+    # inline SVG from dashboard hidden field (already in your template)
     svg_code         = (data.get("svg_code") or "").strip()
 
     description      = (data.get("description") or "").strip()
     crafted_item_id  = (data.get("crafted_item_id") or "").strip() or None
     fulfillment_kind = "crafting" if crafted_item_id else "physical"
+
+    # --- NFT toggle + identity coming from the form ---
+    is_nft = 1 if (data.get("nft_enabled") in ("1", "true", "on")) else 0
+    try:
+        nft_collection_id = int(data.get("nft_collection_id") or "0") or None
+    except ValueError:
+        nft_collection_id = None
+    # If empty → primary listing; if provided → list that exact serial (1-of-1)
+    try:
+        nft_serial = int(data.get("nft_serial") or "0") or None
+    except ValueError:
+        nft_serial = None
 
     # If it's a crafted item and we have SVG, enforce SVG-only rendering
     if crafted_item_id and svg_code:
@@ -2347,16 +2359,23 @@ def merchant_new_item(slug):
         pi_price = float((data.get("pi_price") or "0").strip())
     except ValueError:
         pi_price = 0.0
-    try:
-        stock_qty = int((data.get("stock_qty") or "0").strip())
-    except ValueError:
-        stock_qty = 0
-    allow_backorder = 1 if data.get("allow_backorder") else 0
+
+    # Stock + backorders:
+    # - Normal: use merchant-provided values
+    # - NFT: force stock=1 and backorders off so it can be SOLD cleanly
+    if is_nft:
+        stock_qty = 1
+        allow_backorder = 0
+    else:
+        try:
+            stock_qty = int((data.get("stock_qty") or "0").strip())
+        except ValueError:
+            stock_qty = 0
+        allow_backorder = 1 if data.get("allow_backorder") else 0
 
     # Optional dynamic pricing fields
     dynamic_price_mode   = (data.get("dynamic_price_mode") or "").strip() or None
     dynamic_payload_json = (data.get("dynamic_payload_json") or "").strip() or None
-    # Normalize payload to compact JSON if provided; on error, drop it
     if dynamic_payload_json:
         try:
             dynamic_payload_json = json.dumps(json.loads(dynamic_payload_json), separators=(",", ":"))
@@ -2377,9 +2396,11 @@ def merchant_new_item(slug):
     max_pi_price = _float_or_none(data.get("max_pi_price"))
 
     link_id = uuid.uuid4().hex[:8]
+    now = int(time.time())
 
     with conn() as cx:
-        cx.execute(
+        # ---------- 1) Insert the item ----------
+        cur = cx.execute(
             """
             INSERT INTO items(
               merchant_id, link_id, title, sku,
@@ -2409,6 +2430,37 @@ def merchant_new_item(slug):
                 max_pi_price,
             )
         )
+        item_id = cur.lastrowid
+        # Fallback in case lastrowid isn't available (rare)
+        if not item_id:
+            row = cx.execute("SELECT id FROM items WHERE link_id=?", (link_id,)).fetchone()
+            item_id = row["id"] if row else None
+
+        # ---------- 2) If NFT toggle is on, create the marketplace listing tied to this item ----------
+        if is_nft:
+            # Guard: we need a collection id to list an NFT
+            if not nft_collection_id:
+                # No collection chosen — roll back item insert to avoid a stray product
+                raise RuntimeError("NFT listing requires nft_collection_id")
+
+            cx.execute(
+                """
+                INSERT INTO nft_listings(
+                  collection_id, serial, seller_user_id,
+                  price_pi, status, created_at,
+                  item_id
+                )
+                VALUES(?,?,?,?, 'active', ?, ?)
+                """,
+                (
+                    nft_collection_id,
+                    nft_serial,          # NULL for primary sale, or the exact serial number
+                    u["id"],             # seller = merchant owner
+                    float(pi_price),
+                    now,
+                    item_id,
+                )
+            )
 
     tok = data.get("t")
     return redirect(f"/merchant/{slug}/items{('?t='+tok) if tok else ''}")
