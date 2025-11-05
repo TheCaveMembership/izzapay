@@ -2274,46 +2274,19 @@ claimSelected?.addEventListener('click', async ()=>{
       }
     }
 
-    // 2) NFTs: ensure trustlines first, then ask server to deliver
-if (nftPicks.length){
-  try{
-    const res = await ensureTrustlinesForNfts(pub, nftPicks);
-    if (res?.added) {
-      claimMsg.textContent = `✅ Added ${res.added} NFT trustline(s). Delivering…`;
-      // small settle delay so Horizon sees new trustlines
-      await new Promise(r=>setTimeout(r, 800));
-    }
-  }catch(e){
-    if (e?.code === 'WALLET_OPENED'){
-      // user was sent to a wallet; stop and let them return then Refresh
-      return;
-    }
-    // a real error occurred
-    return;
-  }
-
-  // Trustlines exist now — deliver each group
-  for (const pick of nftPicks){
-    const r2 = await fetch('/api/nft/claim', {
-      method:'POST',
-      headers:{'Content-Type':'application/json'},
-      body: JSON.stringify({
-        buyer_pub: pub,
-        assets: pick.assets,
-        issuer: pick.issuer
-      })
-    });
-    let j2 = {};
-    try { j2 = await r2.json(); } catch {}
-    if (!r2.ok || !j2?.ok){
-      const msg = j2?.error || j2?.message || `HTTP ${r2.status}`;
-      claimMsg.textContent = `❌ NFT claim error: ${msg}`;
-      log('nft.claim.fail', { issuer: pick.issuer, assets: pick.assets, msg });
-      return;
-    }
-    log('nft.claim.ok', { issuer: pick.issuer, n: pick.assets.length });
-  }
-}
+    // 2) Issue any selected NFTs to the same wallet
+    if (nftPicks.length){
+      for (const pick of nftPicks){
+        const r2 = await fetch('/api/nft/claim', {
+          method:'POST',
+          headers:{'Content-Type':'application/json'},
+          body: JSON.stringify({
+            buyer_pub: pub,
+            assets: pick.assets,
+            issuer: pick.issuer,
+            as_claimable: true
+          })
+        });
         let j2 = {};
         try { j2 = await r2.json(); } catch {}
         if (!r2.ok || !j2?.ok){
