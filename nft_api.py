@@ -319,17 +319,20 @@ def queue_claim():
 
 @bp_nft.route("/api/nft/pending", methods=["GET"])
 def list_pending():
-    """
-    List pending NFT claims for UI. Query by ?u=username or ?pub=G...
-    """
-    u = (request.args.get("u") or "").strip()
+    u   = (request.args.get("u") or "").strip()
     pub = (request.args.get("pub") or "").strip()
 
     _ensure_pending_table()
-    rows = []
     try:
         with _db() as cx:
-            if pub and _isG(pub):
+            if pub and _isG(pub) and u:
+                cur = cx.execute("""
+                  SELECT * FROM nft_pending_claims
+                  WHERE status='pending'
+                    AND (buyer_pub=? OR lower(buyer_username)=lower(?))
+                  ORDER BY created_at ASC
+                """, (pub, u))
+            elif pub and _isG(pub):
                 cur = cx.execute("""
                   SELECT * FROM nft_pending_claims
                   WHERE buyer_pub=? AND status='pending'
