@@ -4744,8 +4744,8 @@ def buyer_status(token):
     if not o:
         abort(404)
     with conn() as cx:
-        i = cx.execute("SELECT * FROM items WHERE id=?", (o["item_id"]),).fetchone()
-        m = cx.execute("SELECT * FROM merchants WHERE id=?", (o["merchant_id"]),).fetchone()  # <-- tuple fixed
+        i = cx.execute("SELECT * FROM items WHERE id=?", (o["item_id"],)).fetchone()
+        m = cx.execute("SELECT * FROM merchants WHERE id=?", (o["merchant_id"],)).fetchone()
     return render_template("buyer_status.html", o=o, i=i, m=m, colorway=m["colorway"])
 
 
