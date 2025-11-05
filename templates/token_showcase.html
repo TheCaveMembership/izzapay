@@ -2343,6 +2343,23 @@ closeMyWalletBtn?.addEventListener('click',  ()=>closeModal(myWalletModal));
 closeOrderbookBtn?.addEventListener('click', ()=>{ stopObRefresh(); closeModal(orderbookModal); });
 closePlaceOrderBtn?.addEventListener('click',()=> closeModal(placeOrderModal));
 
+// =======================
+// MY NFT MODAL HANDLERS
+// =======================
+openMyNftsBtn?.addEventListener('click', async ()=>{
+  // ensure user + active wallet
+  if (!ACTIVE_PUB) { await fetchActiveWallet(); }
+  nftPubEcho.textContent = ACTIVE_PUB || document.getElementById('acctPub')?.value || '—';
+  await loadMyNfts();
+  openModal(myNftsModal, closeMyNftsBtn);
+  log('ui.nfts.open', { pub: nftPubEcho.textContent.slice(0,6) + '…' });
+});
+
+closeMyNftsBtn?.addEventListener('click', ()=>{
+  log('ui.nfts.close');
+  closeModal(myNftsModal);
+});
+
 // Backdrop click closes whichever is open
 backdrop?.addEventListener('click', ()=>{
   if (!orderbookModal.hidden){ stopObRefresh(); }
