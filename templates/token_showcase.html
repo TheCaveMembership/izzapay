@@ -242,7 +242,23 @@
 }
 #claimTbl .pill-regular{ background:#7a44ff22; border:1px solid #7a44ff66; }
 #claimTbl .pill-vote   { background:#ffcd6022; border:1px solid #ffcd6080; color:#2a1b00; }
+/* NFT group styling (turquoise/cyan) */
+#claimTbl tr.group-head.is-nft > td,
+#claimTbl tr.group-row.is-nft   > td {
+  background: rgba(72,212,255,.12);
+  border: 1px solid rgba(72,212,255,.45);
+}
 
+/* NFT chip */
+#claimLegend .pill-nft,
+#claimTbl .pill-nft{
+  background: #48d4ff22;
+  border: 1px solid #48d4ff80;
+  color: #001a22;
+  /* match look/weight of your other chips */
+  display:inline-block; padding:2px 8px; border-radius:12px;
+  font-size:12px; font-weight:800; text-transform:uppercase;
+}
 /* numbers and hints */
 #claimTbl .num{ font-family:ui-monospace,SFMono-Regular,Menlo,monospace; font-variant-numeric:tabular-nums; text-align:right; }
 #claimTbl .lockhint{ font-size:12px; opacity:.8; display:block; }
@@ -818,17 +834,19 @@
           <div class="small-muted">Claimable Balances</div>
 
           <div id="claimLegend" style="display:flex;align-items:center;gap:12px;margin:6px 0 8px">
-            <span class="pill pill-regular" aria-hidden="true">normal</span>
-            <small class="small-muted">= regular stake</small>
-            <span class="pill pill-vote" aria-hidden="true">vote</span>
-            <small class="small-muted">= vote stake</small>
-          </div>
+  <span class="pill pill-regular" aria-hidden="true">normal</span>
+  <small class="small-muted">= regular stake</small>
+  <span class="pill pill-vote" aria-hidden="true">vote</span>
+  <small class="small-muted">= vote stake</small>
+  <span class="pill pill-nft" aria-hidden="true">nft</span>
+  <small class="small-muted">= purchased NFTs</small>
+</div>
 
           <table id="claimTbl">
             <thead>
               <tr><th>Pick</th><th>Kind</th><th>Amount and Share</th><th>Unlock</th></tr>
             </thead>
-            <tbody></tbody>
+              <tbody id="claimBody"></tbody>
           </table>
         </div>
         <div id="claimMsg" class="help" style="margin-top:8px"></div>
