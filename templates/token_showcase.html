@@ -1912,10 +1912,17 @@ async function listClaimables(){
       return;
     }
 
-    // ---- STRONG GROUPING (don't collapse different contracts)
-    // Prefer server contract_id; else derive a unique signature.
+    // NEW: split staking vs NFTs (doesn't change stake/vote rendering)
+    const stakeRows = [];
+    const nftRows   = [];
+    for (const row of rows){
+      const k = String(row.kind||'').toLowerCase();
+      if (k === 'nft') nftRows.push(row); else stakeRows.push(row);
+    }
+
+    // ================= STAKING (unchanged: normal + vote) =================
     const groups = {};
-    for (const r of rows){
+    for (const r of stakeRows){
       const unlockTs = Number(r.unlock_ts || r.unlock_unix || 0);
       const kindStr  = (r.kind || r.bucket || r.pool || '').toString().toLowerCase().includes('vote') ? 'vote' : 'regular';
 
@@ -1930,18 +1937,13 @@ async function listClaimables(){
       (groups[gid] ||= []).push({ ...r, __unlockTs: unlockTs, __kind: kindStr });
     }
 
-    // ---- Sort contracts by unlock date (ascending; unknowns last)
     const ordered = Object.entries(groups).sort((a,b)=>{
       const au = a[1][0].__unlockTs || Number.MAX_SAFE_INTEGER;
       const bu = b[1][0].__unlockTs || Number.MAX_SAFE_INTEGER;
       return au - bu;
     });
 
-    // Pretty names for proposals (defined once)
-    const PROPOSAL_NAMES = {
-      rooftop_rumble: 'Rooftop Rumble',
-      pizza_panic: 'Pizza Panic'
-    };
+    const PROPOSAL_NAMES = { rooftop_rumble: 'Rooftop Rumble', pizza_panic: 'Pizza Panic' };
     const prettyProposal = id => PROPOSAL_NAMES[id] || id || 'Vote';
 
     for (const [, recs] of ordered){
@@ -1952,7 +1954,6 @@ async function listClaimables(){
       const pillClass = kind === 'vote' ? 'pill-vote' : 'pill-regular';
       const unlocked  = unlockTs ? (Date.now() >= unlockTs*1000) : true;
 
-      // Collect ids and totals per contract (robust)
       const ids = [];
       let principal = 0, reward = 0;
       for (const r of recs){
@@ -1968,22 +1969,18 @@ async function listClaimables(){
             null;
           if (id) ids.push(String(id).trim());
         }
-
         const role = (r.role || r.kind || '').toString().toLowerCase();
         if (role.includes('reward')) reward += Number(r.amount||0);
         else                         principal += Number(r.amount||0);
       }
 
-      // ---- Header row (ONE checkbox per contract)
       const trHead = document.createElement('tr');
       trHead.className = `group-head is-${kind}` + (unlocked ? '' : ' locked');
 
-      // If vote, show proposal next to the pill
       const voteLabel = (kind === 'vote' && any?.proposal)
         ? `VOTE • ${prettyProposal(any.proposal)}`
         : (kind === 'vote' ? 'VOTE' : 'NORMAL');
 
-      // ensure both value and data-attr carry the same CSV
       const csv = ids.map(x => x.trim()).filter(Boolean).join(',');
 
       trHead.innerHTML = `
@@ -2001,15 +1998,10 @@ async function listClaimables(){
       </td>`;
       claimTblBody.appendChild(trHead);
 
-      // ---- Compact block: principal + reward/est share
       const trBlock = document.createElement('tr');
       trBlock.className = `group-row is-${kind}` + (unlocked ? '' : ' locked');
 
-      // Use server-provided % for vote contracts; numeric reward for regular
-      const estPct = (kind === 'vote')
-        ? Number(any?.vote_est_share_pct)
-        : null;
-
+      const estPct = (kind === 'vote') ? Number(any?.vote_est_share_pct) : null;
       const rewardHTML = (kind === 'vote')
         ? `<div class="line" style="display:flex;justify-content:space-between;align-items:center;white-space:nowrap;">
              <span class="pill pill-vote" aria-hidden="true">EST. SHARE</span>
@@ -2036,7 +2028,40 @@ async function listClaimables(){
       claimTblBody.appendChild(trBlock);
     }
 
-    claimSelected.disabled = false;
+    // ================= NFTs (new turquoise block, no checkboxes) =================
+    for (const r of nftRows){
+      const assets = Array.isArray(r.assets) ? r.assets : [];
+      const codes  = assets.map(a => String(a)).join(', ');
+
+      const trHead = document.createElement('tr');
+      trHead.className = `group-head is-nft`;
+      trHead.innerHTML = `
+        <td colspan="4">
+          <div style="display:flex;align-items:center;gap:10px;white-space:nowrap;">
+            <span class="pill pill-nft">NFT</span>
+            <strong>Purchased NFTs • ready to deliver</strong>
+          </div>
+        </td>`;
+      claimTblBody.appendChild(trHead);
+
+      const trBody = document.createElement('tr');
+      trBody.className = `group-row is-nft`;
+      trBody.innerHTML = `
+        <td colspan="4">
+          <div class="block" style="display:flex;flex-direction:column;gap:8px;">
+            <div class="line" style="display:flex;justify-content:space-between;align-items:center;white-space:nowrap;">
+              <span>Assets</span>
+              <span class="num" style="text-align:right">${codes || '—'}</span>
+            </div>
+            <span class="lockhint">These are recorded to your account and will appear as in-game items or be issued on-chain when finalized.</span>
+          </div>
+        </td>`;
+      claimTblBody.appendChild(trBody);
+    }
+
+    // enable batch-claim button only if there are real Horizon ids selected-capable
+    const anyConcrete = !!document.querySelector('.cbPick');
+    claimSelected.disabled = !anyConcrete;
     claimMsg.textContent = '';
     log('claimables.rendered');
   }catch(e){
