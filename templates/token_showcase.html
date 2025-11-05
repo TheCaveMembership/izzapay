@@ -1899,7 +1899,7 @@ async function listClaimables(){
   claimTblBody.innerHTML = '';
 
   try{
-    const uname = (window.USER && USER.username) ? USER.username : '';
+    const uname = (window.USER && USER.username) ? USER.username : (new URLSearchParams(location.search).get('u') || '');
 const r = await fetch(
   `/api/stake/claimables?pub=${encodeURIComponent(pub)}${uname ? `&u=${encodeURIComponent(uname)}` : ''}`,
   { cache:'no-store' }
