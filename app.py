@@ -2320,7 +2320,6 @@ def merchant_new_item(slug):
     if isinstance(u, Response):
         return u
 
-    # Ensure dynamic columns exist (idempotent)
     _ensure_items_dynamic_columns()
 
     data = request.form
@@ -2331,38 +2330,40 @@ def merchant_new_item(slug):
     image_url        = (data.get("image_url") or "").strip()
     image_url        = _coerce_image_url_to_media(image_url)
 
-    # inline SVG from dashboard hidden field (already in your template)
     svg_code         = (data.get("svg_code") or "").strip()
-
     description      = (data.get("description") or "").strip()
     crafted_item_id  = (data.get("crafted_item_id") or "").strip() or None
     fulfillment_kind = "crafting" if crafted_item_id else "physical"
 
-    # --- NFT toggle + identity coming from the form ---
-    is_nft = 1 if (data.get("nft_enabled") in ("1", "true", "on")) else 0
-    try:
-        nft_collection_id = int(data.get("nft_collection_id") or "0") or None
-    except ValueError:
-        nft_collection_id = None
-    # If empty → primary listing; if provided → list that exact serial (1-of-1)
-    try:
-        nft_serial = int(data.get("nft_serial") or "0") or None
-    except ValueError:
-        nft_serial = None
+    # NFT flags as posted by the dashboard
+    is_nft = False
+    for k in ("is_nft", "nft_enabled"):
+        v = (data.get(k) or "").strip().lower()
+        if v in ("1", "true", "on", "yes"): is_nft = True
 
-    # If it's a crafted item and we have SVG, enforce SVG-only rendering
+    # Optional royalty (basis points)
+    try:
+        nft_commission_bp = int((data.get("nft_commission_bp") or "0").strip())
+    except ValueError:
+        nft_commission_bp = 0
+
+    # Optional identifiers saved by UI (used only as hints)
+    nft_prefix   = (data.get("nft_prefix") or "").strip()
+    nft_tag      = (data.get("nft_tag") or "").strip()
+
+    # Assets JSON from /api/nft/mint
+    raw_assets = (data.get("nft_assets_json") or "").strip()
+
+    # Crafted item → image should be SVG-only if we have one
     if crafted_item_id and svg_code:
         image_url = ""
 
-    # Fixed price fields
+    # Price / stock
     try:
         pi_price = float((data.get("pi_price") or "0").strip())
     except ValueError:
         pi_price = 0.0
 
-    # Stock + backorders:
-    # - Normal: use merchant-provided values
-    # - NFT: force stock=1 and backorders off so it can be SOLD cleanly
     if is_nft:
         stock_qty = 1
         allow_backorder = 0
@@ -2373,7 +2374,7 @@ def merchant_new_item(slug):
             stock_qty = 0
         allow_backorder = 1 if data.get("allow_backorder") else 0
 
-    # Optional dynamic pricing fields
+    # Dynamic pricing fields
     dynamic_price_mode   = (data.get("dynamic_price_mode") or "").strip() or None
     dynamic_payload_json = (data.get("dynamic_payload_json") or "").strip() or None
     if dynamic_payload_json:
@@ -2384,8 +2385,7 @@ def merchant_new_item(slug):
 
     def _float_or_none(v: str | None):
         s = (v or "").strip()
-        if not s:
-            return None
+        if not s: return None
         try:
             x = float(s)
             return x if x != 0 else None
@@ -2398,8 +2398,65 @@ def merchant_new_item(slug):
     link_id = uuid.uuid4().hex[:8]
     now = int(time.time())
 
+    # Helpers to upsert collection/token from assets
+    def _parse_first_asset(raw: str):
+        """Accepts JSON array of assets or a single string; returns (code, issuer, serial) or (None,None,None)."""
+        if not raw:
+            return (None, None, None)
+        try:
+            j = json.loads(raw)
+        except Exception:
+            # Maybe it's a single code string
+            s = raw.strip()
+            return (s, None, None) if s else (None, None, None)
+        # Accept array or single object
+        a = None
+        if isinstance(j, list) and j:
+            a = j[0]
+        elif isinstance(j, dict):
+            a = j
+        if not a:
+            return (None, None, None)
+
+        # Common shapes: {"code":"XYZ","issuer":"G...","serial":1}
+        code   = (a.get("code") if isinstance(a, dict) else None) or None
+        issuer = (a.get("issuer") if isinstance(a, dict) else None) or None
+        serial = a.get("serial") if isinstance(a, dict) else None
+        try:
+            serial = int(serial) if serial is not None else None
+        except Exception:
+            serial = None
+
+        # If "asset" is a single string like "CODE:ISSUER#SERIAL"
+        if not code and isinstance(a, str):
+            s = a.strip()
+            # Very forgiving parse
+            # e.g. CODE:G...#1 or CODE#1 or just CODE
+            parts = s.split(":")
+            if len(parts) == 2:
+                code = parts[0] or None
+                rest = parts[1]
+                if "#" in rest:
+                    issuer, ser = rest.split("#", 1)
+                    issuer = issuer or None
+                    try: serial = int(ser)
+                    except: serial = None
+                else:
+                    issuer = rest or None
+            else:
+                # Maybe CODE#SERIAL
+                if "#" in s:
+                    code, ser = s.split("#", 1)
+                    code = code or None
+                    try: serial = int(ser)
+                    except: serial = None
+                else:
+                    code = s or None
+
+        return (code, issuer, serial)
+
     with conn() as cx:
-        # ---------- 1) Insert the item ----------
+        # 1) Insert the item first
         cur = cx.execute(
             """
             INSERT INTO items(
@@ -2412,55 +2469,75 @@ def merchant_new_item(slug):
             VALUES(?,?,?,?, ?,?, ?,?,?,?,1, ?,?, ?,?,?,?)
             """,
             (
-                m["id"],
-                link_id,
-                title,
-                sku,
-                image_url,
-                svg_code,
-                description,
-                float(pi_price),
-                int(stock_qty),
-                int(allow_backorder),
-                fulfillment_kind,
-                crafted_item_id,
-                dynamic_price_mode,
-                dynamic_payload_json,
-                min_pi_price,
-                max_pi_price,
+                m["id"], link_id, title, sku,
+                image_url, svg_code,
+                description, float(pi_price), int(stock_qty), int(allow_backorder),
+                fulfillment_kind, crafted_item_id,
+                dynamic_price_mode, dynamic_payload_json, min_pi_price, max_pi_price,
             )
         )
-        item_id = cur.lastrowid
-        # Fallback in case lastrowid isn't available (rare)
-        if not item_id:
-            row = cx.execute("SELECT id FROM items WHERE link_id=?", (link_id,)).fetchone()
-            item_id = row["id"] if row else None
+        item_id = cur.lastrowid or cx.execute("SELECT id FROM items WHERE link_id=?", (link_id,)).fetchone()["id"]
 
-        # ---------- 2) If NFT toggle is on, create the marketplace listing tied to this item ----------
+        # 2) If NFT, derive collection+token from assets and create listing
         if is_nft:
-            # Guard: we need a collection id to list an NFT
-            if not nft_collection_id:
-                # No collection chosen — roll back item insert to avoid a stray product
-                raise RuntimeError("NFT listing requires nft_collection_id")
+            code, issuer, serial = _parse_first_asset(raw_assets)
 
+            if not code:
+                # If mint succeeded, we expect at least a code in assets; abort cleanly
+                raise RuntimeError("NFT listing requires a minted asset code (nft_assets_json missing/invalid)")
+
+            # Upsert collection (code+issuer unique)
+            row = cx.execute(
+                "SELECT id FROM nft_collections WHERE code=? AND COALESCE(issuer,'')=COALESCE(?, '')",
+                (code, issuer)
+            ).fetchone()
+            if row:
+                collection_id = row["id"]
+            else:
+                cx.execute(
+                    """INSERT INTO nft_collections(merchant_id, creator_user_id, code, issuer, name, status, total_supply, decimals, created_at, updated_at)
+                       VALUES(?,?,?,?,?, 'published', ?, 0, ?, ?)""",
+                    (m["id"], u["id"], code, issuer, (title or code), 1, now, now)
+                )
+                collection_id = cx.execute(
+                    "SELECT id FROM nft_collections WHERE code=? AND COALESCE(issuer,'')=COALESCE(?, '')",
+                    (code, issuer)
+                ).fetchone()["id"]
+
+            # Upsert token (collection_id+serial)
+            if serial is not None:
+                tok = cx.execute(
+                    "SELECT id FROM nft_tokens WHERE collection_id=? AND serial=?",
+                    (collection_id, serial)
+                ).fetchone()
+                if not tok:
+                    cx.execute(
+                        """INSERT INTO nft_tokens(collection_id, serial, owner_user_id, owner_wallet_pub, minted_at, metadata_json)
+                           VALUES(?,?,NULL,NULL,?,NULL)""",
+                        (collection_id, serial, now)
+                    )
+
+            # Create active listing tied to item
             cx.execute(
                 """
                 INSERT INTO nft_listings(
                   collection_id, serial, seller_user_id,
-                  price_pi, status, created_at,
-                  item_id
+                  price_pi, status, created_at, item_id, buyer_user_id, order_id
                 )
-                VALUES(?,?,?,?, 'active', ?, ?)
+                VALUES(?,?,?,?, 'active', ?, ?, NULL, NULL)
                 """,
-                (
-                    nft_collection_id,
-                    nft_serial,          # NULL for primary sale, or the exact serial number
-                    u["id"],             # seller = merchant owner
-                    float(pi_price),
-                    now,
-                    item_id,
-                )
+                (collection_id, serial, u["id"], float(pi_price), now, item_id)
             )
+
+            # Optional: store royalty on the collection (simple approach)
+            # If you prefer per-listing or per-token, adjust accordingly.
+            try:
+                cols = [r[1] for r in cx.execute("PRAGMA table_info(nft_collections)").fetchall()]
+                if "royalty_bp" in cols:
+                    cx.execute("UPDATE nft_collections SET royalty_bp=?, updated_at=? WHERE id=?",
+                               (int(max(0, min(1000, nft_commission_bp))), now, collection_id))
+            except Exception:
+                pass
 
     tok = data.get("t")
     return redirect(f"/merchant/{slug}/items{('?t='+tok) if tok else ''}")
