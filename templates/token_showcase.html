@@ -1899,7 +1899,11 @@ async function listClaimables(){
   claimTblBody.innerHTML = '';
 
   try{
-    const r = await fetch(`/api/stake/claimables?pub=${encodeURIComponent(pub)}`, { cache:'no-store' });
+    const uname = (window.USER && USER.username) ? USER.username : '';
+const r = await fetch(
+  `/api/stake/claimables?pub=${encodeURIComponent(pub)}${uname ? `&u=${encodeURIComponent(uname)}` : ''}`,
+  { cache:'no-store' }
+);
     const j = await r.json();
     if (!r.ok || !j?.ok) throw new Error(j?.error || 'fetch failed');
 
