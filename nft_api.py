@@ -221,6 +221,18 @@ def _pay_asset(secret_from: str, to_g: str, amount: str, asset: Asset, memo=None
 def _require(b, msg="bad_request"):
     if not b: abort(400, msg)
 
+def _account_has_trustline(pub_g: str, asset: Asset) -> bool:
+    """Check if an account already has a trustline to the given asset."""
+    try:
+        acc = server.load_account(pub_g)
+        code, issuer = asset.code, asset.issuer
+        for b in acc.balances:
+            if b.get("asset_code") == code and b.get("asset_issuer") == issuer:
+                return True
+        return False
+    except Exception:
+        return False
+
 # --------------------- Pending NFT claims: tiny queue ---------------------
 
 # Table is created in db.ensure_schema(); keep an idempotent fallback here.
@@ -423,6 +435,12 @@ def mint():
 
     izza = Asset(IZZA_CODE, IZZA_ISS)
 
+    # Ensure distributor trusts IZZA before fee collection (idempotent).
+    try:
+        _change_trust(DISTR_S, izza, limit="100000000")  # harmless if already exists
+    except Exception as e:
+        log.warning("NFT_DISTR_TRUST_IZZA_FAIL %s: %s", type(e).__name__, e)
+
     # 1) fee charge: creator -> distributor in IZZA
     try:
         log.info("NFT_FEE_CHARGE start total=%s asset=%s:%s to=%s",
@@ -451,8 +469,9 @@ def mint():
             abort(400, f"mint_trust_failed: {code}: {e}")
 
         iss_acc = _load(iss_kp.public_key)
+        # FIX: correct argument order for append_payment_op (destination, amount, asset)
         tx = (TransactionBuilder(iss_acc, PP, base_fee=_base_fee())
-              .append_payment_op(DISTR_G, asset, "1")  # (destination, asset, amount)
+              .append_payment_op(destination=DISTR_G, amount="1", asset=asset)
               .set_timeout(180).build())
         tx.sign(iss_kp)
         try:
@@ -489,12 +508,12 @@ def claim():
 
     for code in assets:
         asset = Asset(code, issuer_g)
-        # ensure buyer trustline (via distributor op)
-        try:
-            _change_trust(DISTR_S, asset, limit="1")  # distributor trusts already, but harmless
-        except Exception as e:
-            log.error("NFT_CLAIM_TRUST_FAIL asset=%s %s: %s", code, type(e).__name__, e)
-            abort(400, f"deliver_trust_failed: {code}: {e}")
+
+        # FIX: do NOT try to create buyer trustline using distributor secret.
+        # Instead, verify buyer already trusts; if not, return crisp error.
+        if not _account_has_trustline(buyer, asset):
+            abort(400, f"buyer_missing_trustline:{code}")
+
         # send to buyer
         try:
             _pay_asset(DISTR_S, buyer, "1", asset, memo="IZZA NFT")
@@ -506,7 +525,10 @@ def claim():
     if pending_id:
         try:
             with _db() as cx:
-                cx.execute("UPDATE nft_pending_claims SET status='claimed', claimed_at=? WHERE id=?", (int(time.time()), int(pending_id)))
+                cx.execute(
+                    "UPDATE nft_pending_claims SET status='claimed', claimed_at=? WHERE id=?",
+                    (int(time.time()), int(pending_id))
+                )
                 cx.commit()
         except Exception as e:
             log.warning("NFT_PENDING_MARK_FAIL id=%s err=%s", pending_id, e)
