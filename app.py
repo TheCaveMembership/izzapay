@@ -3874,9 +3874,7 @@ def fulfill_session(s, tx_hash, buyer, shipping):
             print(f"[fulfill] order_id={order_id} item_id={it['id'] if it else None} qty={qty} "
                   f"gross={line_gross:.7f} fee={line_fee:.7f} net={line_net:.7f}")
 
-                        # ----------------- MARK NFT LISTINGS AS SOLD -----------------
-            # If this product is an NFT listing–backed product, grab 'qty' active rows and mark them sold.
-            # Assumes your merchant dashboard created rows in nft_listings with item_id pointing to this item.
+            # ----------------- MARK NFT LISTINGS AS SOLD -----------------
             try:
                 # We treat status 'active' or 'listed' as available
                 avail = cx.execute(
@@ -3887,11 +3885,15 @@ def fulfill_session(s, tx_hash, buyer, shipping):
 
                 if avail and len(avail) == qty:
                     now = int(time.time())
-                    # Optional: capture buyer username for auditing
+                    # Optional: capture buyer username for auditing (fallback to pi_username)
                     buyer_un = None
                     try:
-                        urow = cx.execute("SELECT username FROM users WHERE id=?", (buyer_user_id,)).fetchone()
-                        buyer_un = urow["username"] if urow else None
+                        urow = cx.execute("""
+                            SELECT COALESCE(NULLIF(username,''), NULLIF(pi_username,'')) AS un
+                            FROM users
+                            WHERE id=?
+                        """, (buyer_user_id,)).fetchone()
+                        buyer_un = (urow["un"] if urow and urow["un"] else None)
                     except Exception:
                         buyer_un = None
 
@@ -4021,7 +4023,6 @@ def fulfill_session(s, tx_hash, buyer, shipping):
             "UPDATE sessions SET state='paid', pi_tx_hash=? WHERE id=?",
             (tx_hash, s["id"])
         )
-
     # ===== Emails (buyer) — unchanged except for logging =====
     try:
         display_rows = []
