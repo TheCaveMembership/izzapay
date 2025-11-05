@@ -187,23 +187,54 @@
     footer{margin-top:16px;color:var(--muted);font-size:13px;text-align:center}
 
     /* modal */
-    .modal-backdrop{position:fixed;inset:0;background:rgba(0,0,0,.55);display:none;z-index:999;backdrop-filter:saturate(140%) blur(2px)}
-    .modal{position:fixed;inset:0;display:none;z-index:1000;align-items:center;justify-content:center;padding:24px}
-    .modal[open], .modal-backdrop[open]{display:flex}
-    .modal-card{
-      width:min(980px,96vw);max-height:86vh;overflow:auto;border-radius:18px;
-      background:linear-gradient(180deg, rgba(10,8,18,.9), rgba(6,5,12,.96));
-      border:1px solid rgba(255,255,255,.08);
-      box-shadow:0 40px 120px rgba(0,0,0,.55), 0 0 80px rgba(122,68,255,.35) inset;
-      animation:pop .18s ease-out;
-    }
-    /* --- Claim modal overflow fix (mobile-safe) --- */
+.modal-backdrop{position:fixed;inset:0;background:rgba(0,0,0,.55);display:none;z-index:999;backdrop-filter:saturate(140%) blur(2px)}
+.modal{position:fixed;inset:0;display:none;z-index:1000;align-items:center;justify-content:center;padding:24px}
+.modal[open], .modal-backdrop[open]{display:flex}
+.modal-card{
+  width:min(980px,96vw);max-height:86vh;overflow:auto;border-radius:18px;
+  background:linear-gradient(180deg, rgba(10,8,18,.9), rgba(6,5,12,.96));
+  border:1px solid rgba(255,255,255,.08);
+  box-shadow:0 40px 120px rgba(0,0,0,.55), 0 0 80px rgba(122,68,255,.35) inset;
+  animation:pop .18s ease-out;
+}
+
+/* --- Claim modal overflow fix (mobile-safe) --- */
 .modal-body{ overflow-x: hidden; }                   /* never push modal sideways */
 
 /* Keep modals comfortably centered on phones */
 @media (max-width: 480px){
   .modal{ align-items: flex-start; }                /* avoid being forced too low */
   .modal-card{ margin-top: max(10px, env(safe-area-inset-top)); }
+}
+
+/* ===== Legend pills row: normal, vote, NFT ===== */
+#claimLegend,
+.claim-modes{
+  display:flex;
+  align-items:center;
+  justify-content:space-between;
+  gap:10px;
+  margin:8px 0 14px;
+  flex-wrap:nowrap;
+}
+.claim-pill{
+  flex:1 1 0;
+  display:inline-flex;
+  align-items:center;
+  justify-content:center;
+  padding:8px 10px;
+  border-radius:999px;
+  border:1px solid var(--line, #26283a);
+  background:rgba(255,255,255,0.04);
+  font-weight:600;
+  letter-spacing:.2px;
+  user-select:none;
+  white-space:nowrap;
+  min-width:0;
+}
+.claim-pill.is-active{
+  border-color:rgba(255,205,96,.65);
+  box-shadow:0 0 0 1px rgba(255,255,255,.06) inset;
 }
 
 /* === CLEAN CLAIM UI (simple blocks) === */
@@ -234,14 +265,6 @@
   background:rgba(255,205,96,.12);
   border:1px solid rgba(255,205,96,.45);
 }
-
-/* pills */
-#claimTbl .pill{
-  display:inline-block; padding:2px 8px; border-radius:12px;
-  font-size:12px; font-weight:800; text-transform:uppercase;
-}
-#claimTbl .pill-regular{ background:#7a44ff22; border:1px solid #7a44ff66; }
-#claimTbl .pill-vote   { background:#ffcd6022; border:1px solid #ffcd6080; color:#2a1b00; }
 /* NFT group styling (turquoise/cyan) */
 #claimTbl tr.group-head.is-nft > td,
 #claimTbl tr.group-row.is-nft   > td {
@@ -249,19 +272,37 @@
   border: 1px solid rgba(72,212,255,.45);
 }
 
-/* NFT chip */
-#claimLegend .pill-nft,
-#claimTbl .pill-nft{
-  background: #48d4ff22;
-  border: 1px solid #48d4ff80;
-  color: #001a22;
-  /* match look/weight of your other chips */
+/* generic pill look */
+#claimTbl .pill{
   display:inline-block; padding:2px 8px; border-radius:12px;
   font-size:12px; font-weight:800; text-transform:uppercase;
 }
+#claimTbl .pill-regular{ background:#7a44ff22; border:1px solid #7a44ff66; }
+#claimTbl .pill-vote   { background:#ffcd6022; border:1px solid #ffcd6080; color:#2a1b00; }
+/* NFT chip */
+#claimLegend .pill-nft,
+#claimTbl .pill-nft{
+  background:#48d4ff22;
+  border:1px solid #48d4ff80;
+  color:#001a22;
+  display:inline-block; padding:2px 8px; border-radius:12px;
+  font-size:12px; font-weight:800; text-transform:uppercase;
+}
+
 /* numbers and hints */
-#claimTbl .num{ font-family:ui-monospace,SFMono-Regular,Menlo,monospace; font-variant-numeric:tabular-nums; text-align:right; }
+#claimTbl .num{
+  font-family:ui-monospace,SFMono-Regular,Menlo,monospace;
+  font-variant-numeric:tabular-nums;
+  text-align:right;
+}
 #claimTbl .lockhint{ font-size:12px; opacity:.8; display:block; }
+
+/* checkbox alignment for selectable rows */
+#claimTbl .chk{
+  display:inline-flex; align-items:center; justify-content:center;
+  width:28px; height:28px; margin-right:8px;
+}
+#claimTbl input[type="checkbox"]{ width:18px; height:18px; }
 
 /* locked state actually used by the rows */
 #claimTbl tr.locked{ opacity:.55; }
