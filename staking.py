@@ -715,29 +715,38 @@ def list_claimables():
     """
     List claimable balances for this asset and claimant (by pub) and
     also append pending crafted-NFT claims that belong to the same user
-    (by pub or by resolved username).
+    (by pub or by resolved/provided username).
+    Query: ?pub=G...  and optionally ?u=<username>
     Returns: {"ok": True, "claimables": merged, "records": stake_only}
     """
     pub = _clean(request.args.get("pub", ""))
     if not (pub and pub.startswith("G")):
         abort(400, "bad pub")
 
-    # 1) existing staking claimables
+    # Optional explicit username from the client (fallback for pre-link purchases)
+    u_param = _clean(request.args.get("u", "")) or ""
+    # Username known from wallet mapping (if any)
+    uname_from_pub = _username_for_pub(pub) or ""
+
+    # 1) existing staking claimables (Horizon)
     stake_rows = _compute_claimables_out(pub)
 
     # 2) crafted-NFT pending claims by pub
     nft_by_pub = _pending_nft_for(pub=pub, username="")
 
     # 3) also pick up any rows saved only by username (common at checkout time)
-    uname = _username_for_pub(pub) or ""
+    #    Prefer explicit ?u=... if provided; else use uname_from_pub (if mapped)
+    uname = (u_param or uname_from_pub)
     nft_by_user = _pending_nft_for(pub="", username=uname) if uname else []
 
-    # Optional: backfill buyer_pub for username-scoped rows now that we know pub
+    # Best-effort backfill: now that we know (pub, username), set buyer_pub=''
+    # rows to the real pub so future reads can find them by pub alone.
     try:
         if uname:
             with sqlite3.connect(_SQLITE_PATH, check_same_thread=False) as bcx:
                 bcx.execute(
-                    "UPDATE nft_pending_claims SET buyer_pub=? "
+                    "UPDATE nft_pending_claims "
+                    "SET buyer_pub=? "
                     "WHERE status='pending' AND buyer_pub='' AND lower(buyer_username)=lower(?)",
                     (pub, uname)
                 )
@@ -749,7 +758,8 @@ def list_claimables():
     nft_rows = []
     for r in nft_by_pub + nft_by_user:
         k = r.get("pending_id")
-        if k in seen: continue
+        if k in seen:
+            continue
         seen.add(k)
         nft_rows.append(r)
 
