@@ -3867,11 +3867,11 @@ def fulfill_session(s, tx_hash, buyer, shipping):
             print(f"[fulfill] order_id={order_id} item_id={it['id'] if it else None} qty={qty} "
                   f"gross={line_gross:.7f} fee={line_fee:.7f} net={line_net:.7f}")
 
-            # ----------------- MARK NFT LISTINGS AS SOLD -----------------
-            # If this product is an NFT listing-backed product, grab 'qty' active rows and mark them sold.
+                        # ----------------- MARK NFT LISTINGS AS SOLD -----------------
+            # If this product is an NFT listing–backed product, grab 'qty' active rows and mark them sold.
             # Assumes your merchant dashboard created rows in nft_listings with item_id pointing to this item.
             try:
-                # (We treat status 'active' or 'listed' as available)
+                # We treat status 'active' or 'listed' as available
                 avail = cx.execute(
                     "SELECT id FROM nft_listings WHERE item_id=? AND status IN ('active','listed') "
                     "ORDER BY id ASC LIMIT ?",
@@ -3890,19 +3890,23 @@ def fulfill_session(s, tx_hash, buyer, shipping):
 
                     ids = [r["id"] for r in avail]
                     cx.executemany(
-                        "UPDATE nft_listings SET status='sold', order_id=?, buyer_user_id=?, buyer_username=?, sold_at=? "
+                        "UPDATE nft_listings "
+                        "SET status='sold', order_id=?, buyer_user_id=?, buyer_username=?, sold_at=? "
                         "WHERE id=?",
                         [(order_id, buyer_user_id, buyer_un, now, nid) for nid in ids]
                     )
                     nft_marked_sold.extend([(order_id, nid) for nid in ids])
-                    print(f"[fulfill][nft] marked SOLD {len(ids)} listings item_id={it['id']} order_id={order_id} ids={ids}")
+                    print(f"[fulfill][nft] marked SOLD {len(ids)} listings item_id={it['id'] if it else None} "
+                          f"order_id={order_id} ids={ids}")
                 else:
                     if qty > 0:
-                        print(f"[fulfill][nft] expected {qty} listings but found {len(avail) if avail else 0} "
+                        found = len(avail) if avail else 0
+                        print(f"[fulfill][nft] expected {qty} listings but found {found} "
                               f"for item_id={it['id'] if it else None} — nothing marked sold")
-                        except Exception as e:
+            except Exception as e:
                 # Use a safe message; 'ids' might not exist if the error happened earlier
-                print(f"[fulfill][nft] SOLD mark error item_id={it['id'] if it else None} order_id={order_id}: {e}")
+                print(f"[fulfill][nft] SOLD mark error item_id={it['id'] if it else None} "
+                      f"order_id={order_id}: {e}")
 
             # >>> NEW: ensure a pending NFT claim row exists for this order
             try:
@@ -3975,7 +3979,7 @@ def fulfill_session(s, tx_hash, buyer, shipping):
                             )
                     print(f"[fulfill][craft] vouchers created item_id={it['id']} qty={qty}")
                 except Exception as e:
-                    print(f"[fulfill][craft] voucher create error item_id={it['id']}: {e}")
+                    print(f"[fulfill][craft] voucher create error item_id={it['id'] if it else None}: {e}")
 
             # ----------------- IC CREDITS awarding (unchanged) -----------------
             try:
