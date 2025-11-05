@@ -1228,23 +1228,23 @@ async function hydrateUserAndWallet() {
     const me = await fetch('/api/auth/me', { credentials:'include', cache:'no-store' })
       .then(r => r.ok ? r.json() : null).catch(()=>null);
     if (me?.uid) USER = { uid: me.uid, username: me.username };
+    if (USER) window.USER = USER;   // ensure global visibility after session hydrate
   } catch (_) {}
 
   // 2) If no USER, silently Pi-auth (Pi Browser usually returns instantly)
   if (!USER) {
-    try { await piSignIn(); } catch (_) { /* user canceled: fine, read-only */ }
+    try { await piSignIn(); } catch (_) { /* user canceled, read only */ }
   }
 
   // 3) Ask server for the mapped active wallet
   await fetchActiveWallet();
 
-  // 4) If server has nothing (lost session or new browser), fall back to local
+  // 4) If server has nothing, fall back to local
   if (!ACTIVE_PUB) {
     try {
       const local = JSON.parse(localStorage.getItem('izza_test_wallet') || 'null');
       if (local?.pub) {
         ACTIVE_PUB = local.pub;
-        // re-link to server so future visits work without local fallback
         try { await linkActiveWallet(ACTIVE_PUB); } catch (_) {}
       }
     } catch (_) {}
@@ -1260,7 +1260,7 @@ async function hydrateUserAndWallet() {
 }
 let __hydrated = false;
 (async () => {
-  await hydrateUserAndWallet();     // get USER + ACTIVE_PUB (server/local)
+  await hydrateUserAndWallet();
   __hydrated = true;
 })();
 // run hydration before gates that might show "create wallet"
@@ -1340,6 +1340,7 @@ async function piSignIn(){
     }
 
     USER = { uid: auth.user.uid, username: auth.user.username };
+    if (USER) window.USER = USER;  // make USER visible to other helpers and UI
     return USER;
   }catch(e){
     log('pi.auth.fail', { err:String(e) });
