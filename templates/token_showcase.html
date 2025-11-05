@@ -775,7 +775,35 @@
     </div>
   </div>
 </div>
+<!-- MY IZZA NFTs MODAL -->
+<div class="modal" id="myNftsModal" role="dialog" aria-modal="true" aria-labelledby="myNftsTitle" hidden>
+  <div class="modal-card">
+    <div class="modal-header">
+      <div class="modal-title">
+        <img src="/static/izzapay-mark.svg" alt="">
+        <span id="myNftsTitle">My IZZA NFTs</span>
+      </div>
+      <button class="close-btn" type="button" id="closeMyNftsBtn">Close</button>
+    </div>
 
+    <div class="modal-body">
+      <div class="blox">
+        <div class="small-muted">Wallet</div>
+        <div class="mono wrapaddr" id="nftPubEcho">—</div>
+      </div>
+
+      <div class="blox" style="margin-top:10px">
+        <h4 style="margin:0 0 8px 0">Owned / Pending NFTs</h4>
+        <div id="nftList" style="display:grid;grid-template-columns:repeat(auto-fill,minmax(180px,1fr));gap:10px"></div>
+        <div id="nftMsg" class="help" style="margin-top:8px"></div>
+      </div>
+
+      <div class="top-cta" style="margin-top:10px">
+        <a id="nftCraftCta" class="cta" href="/izza-game/auth?dest=city">🧪 Craft more in IZZA City</a>
+      </div>
+    </div>
+  </div>
+</div>
   <!-- ORDER BOOK MODAL -->
   <div class="modal" id="orderbookModal" role="dialog" aria-modal="true" aria-labelledby="orderbookTitle" hidden>
     <div class="modal-card">
@@ -1594,6 +1622,13 @@ let lastFocus = null;
 // My Wallet modal (Actions)
 const revealOnceBtn = document.getElementById('revealOnceBtn');
 const secretOnce    = document.getElementById('secretOnce');
+  // NFTs modal
+const openMyNftsBtn  = document.getElementById('openMyNftsBtn');
+const myNftsModal    = document.getElementById('myNftsModal');
+const closeMyNftsBtn = document.getElementById('closeMyNftsBtn');
+const nftPubEcho     = document.getElementById('nftPubEcho');
+const nftListEl      = document.getElementById('nftList');
+const nftMsg         = document.getElementById('nftMsg');
 
 // ======== STAKING CONSTANTS / REFS ========
 const stakeModal    = document.getElementById('stakeModal');
