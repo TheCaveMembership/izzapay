@@ -2339,7 +2339,8 @@ def merchant_new_item(slug):
     is_nft = False
     for k in ("is_nft", "nft_enabled"):
         v = (data.get(k) or "").strip().lower()
-        if v in ("1", "true", "on", "yes"): is_nft = True
+        if v in ("1", "true", "on", "yes"):
+            is_nft = True
 
     # Optional royalty (basis points)
     try:
@@ -2347,14 +2348,14 @@ def merchant_new_item(slug):
     except ValueError:
         nft_commission_bp = 0
 
-    # Optional identifiers saved by UI (used only as hints)
-    nft_prefix   = (data.get("nft_prefix") or "").strip()
-    nft_tag      = (data.get("nft_tag") or "").strip()
+    # Optional identifiers (hints only)
+    nft_prefix = (data.get("nft_prefix") or "").strip()
+    nft_tag    = (data.get("nft_tag") or "").strip()
 
     # Assets JSON from /api/nft/mint
     raw_assets = (data.get("nft_assets_json") or "").strip()
 
-    # Crafted item → image should be SVG-only if we have one
+    # Crafted item → prefer SVG only
     if crafted_item_id and svg_code:
         image_url = ""
 
@@ -2374,7 +2375,7 @@ def merchant_new_item(slug):
             stock_qty = 0
         allow_backorder = 1 if data.get("allow_backorder") else 0
 
-    # Dynamic pricing fields
+    # Dynamic pricing
     dynamic_price_mode   = (data.get("dynamic_price_mode") or "").strip() or None
     dynamic_payload_json = (data.get("dynamic_payload_json") or "").strip() or None
     if dynamic_payload_json:
@@ -2385,7 +2386,8 @@ def merchant_new_item(slug):
 
     def _float_or_none(v: str | None):
         s = (v or "").strip()
-        if not s: return None
+        if not s:
+            return None
         try:
             x = float(s)
             return x if x != 0 else None
@@ -2398,18 +2400,17 @@ def merchant_new_item(slug):
     link_id = uuid.uuid4().hex[:8]
     now = int(time.time())
 
-    # Helpers to upsert collection/token from assets
+    # ---------- helpers ----------
     def _parse_first_asset(raw: str):
-        """Accepts JSON array of assets or a single string; returns (code, issuer, serial) or (None,None,None)."""
+        """Accept JSON array/object or a string; return (code, issuer, serial) or (None,None,None)."""
         if not raw:
             return (None, None, None)
         try:
             j = json.loads(raw)
         except Exception:
-            # Maybe it's a single code string
             s = raw.strip()
             return (s, None, None) if s else (None, None, None)
-        # Accept array or single object
+
         a = None
         if isinstance(j, list) and j:
             a = j[0]
@@ -2418,20 +2419,16 @@ def merchant_new_item(slug):
         if not a:
             return (None, None, None)
 
-        # Common shapes: {"code":"XYZ","issuer":"G...","serial":1}
-        code   = (a.get("code") if isinstance(a, dict) else None) or None
-        issuer = (a.get("issuer") if isinstance(a, dict) else None) or None
-        serial = a.get("serial") if isinstance(a, dict) else None
-        try:
-            serial = int(serial) if serial is not None else None
-        except Exception:
-            serial = None
+        if isinstance(a, dict):
+            code   = a.get("code")
+            issuer = a.get("issuer")
+            serial = a.get("serial")
+        else:
+            code = issuer = serial = None
 
-        # If "asset" is a single string like "CODE:ISSUER#SERIAL"
+        # tolerate string forms like "CODE:ISSUER#1" or "CODE#1"
         if not code and isinstance(a, str):
             s = a.strip()
-            # Very forgiving parse
-            # e.g. CODE:G...#1 or CODE#1 or just CODE
             parts = s.split(":")
             if len(parts) == 2:
                 code = parts[0] or None
@@ -2439,24 +2436,46 @@ def merchant_new_item(slug):
                 if "#" in rest:
                     issuer, ser = rest.split("#", 1)
                     issuer = issuer or None
-                    try: serial = int(ser)
-                    except: serial = None
+                    try:
+                        serial = int(ser)
+                    except Exception:
+                        serial = None
                 else:
                     issuer = rest or None
             else:
-                # Maybe CODE#SERIAL
                 if "#" in s:
                     code, ser = s.split("#", 1)
                     code = code or None
-                    try: serial = int(ser)
-                    except: serial = None
+                    try:
+                        serial = int(ser)
+                    except Exception:
+                        serial = None
                 else:
                     code = s or None
 
-        return (code, issuer, serial)
+        try:
+            serial = int(serial) if serial is not None else None
+        except Exception:
+            serial = None
+
+        return (code or None, issuer or None, serial)
+
+    def _issuer_fallback(issuer_in: str | None) -> str:
+        """
+        Make sure issuer is not NULL (your table requires NOT NULL).
+        Priority: payload issuer -> NFT_ISSUER_PUB -> DISTRIBUTOR_WALLET -> ADMIN_PI_WALLET -> "".
+        Empty string satisfies NOT NULL and matches our COALESCE('','') logic elsewhere.
+        """
+        issuer_env = (
+            os.getenv("NFT_ISSUER_PUB")
+            or os.getenv("DISTRIBUTOR_WALLET")
+            or os.getenv("ADMIN_PI_WALLET")
+            or ""
+        )
+        return (issuer_in or issuer_env or "").strip()
 
     with conn() as cx:
-        # 1) Insert the item first
+        # 1) Insert the item
         cur = cx.execute(
             """
             INSERT INTO items(
@@ -2476,35 +2495,55 @@ def merchant_new_item(slug):
                 dynamic_price_mode, dynamic_payload_json, min_pi_price, max_pi_price,
             )
         )
-        item_id = cur.lastrowid or cx.execute("SELECT id FROM items WHERE link_id=?", (link_id,)).fetchone()["id"]
+        item_id = cur.lastrowid or cx.execute(
+            "SELECT id FROM items WHERE link_id=?",
+            (link_id,)
+        ).fetchone()["id"]
 
-        # 2) If NFT, derive collection+token from assets and create listing
+        # 2) If NFT, derive collection+token and create listing
         if is_nft:
             code, issuer, serial = _parse_first_asset(raw_assets)
-
             if not code:
-                # If mint succeeded, we expect at least a code in assets; abort cleanly
+                # No minted asset to list; bail clearly
                 raise RuntimeError("NFT listing requires a minted asset code (nft_assets_json missing/invalid)")
+
+            issuer_norm = _issuer_fallback(issuer)
 
             # Upsert collection (code+issuer unique)
             row = cx.execute(
-                "SELECT id FROM nft_collections WHERE code=? AND COALESCE(issuer,'')=COALESCE(?, '')",
-                (code, issuer)
+                "SELECT id FROM nft_collections WHERE code=? AND issuer=?",
+                (code, issuer_norm)
             ).fetchone()
             if row:
                 collection_id = row["id"]
             else:
                 cx.execute(
-                    """INSERT INTO nft_collections(merchant_id, creator_user_id, code, issuer, name, status, total_supply, decimals, created_at, updated_at)
-                       VALUES(?,?,?,?,?, 'published', ?, 0, ?, ?)""",
-                    (m["id"], u["id"], code, issuer, (title or code), 1, now, now)
+                    """
+                    INSERT INTO nft_collections(
+                      merchant_id, creator_user_id, code, issuer, name, status,
+                      total_supply, decimals, created_at, updated_at
+                    )
+                    VALUES(?,?,?,?,?, 'published', ?, 0, ?, ?)
+                    """,
+                    (m["id"], u["id"], code, issuer_norm, (title or code), 1, now, now)
                 )
                 collection_id = cx.execute(
-                    "SELECT id FROM nft_collections WHERE code=? AND COALESCE(issuer,'')=COALESCE(?, '')",
-                    (code, issuer)
+                    "SELECT id FROM nft_collections WHERE code=? AND issuer=?",
+                    (code, issuer_norm)
                 ).fetchone()["id"]
 
-            # Upsert token (collection_id+serial)
+                # Optional royalty on collection if column exists
+                try:
+                    cols = [r[1] for r in cx.execute("PRAGMA table_info(nft_collections)").fetchall()]
+                    if "royalty_bp" in cols:
+                        cx.execute(
+                            "UPDATE nft_collections SET royalty_bp=?, updated_at=? WHERE id=?",
+                            (int(max(0, min(1000, nft_commission_bp))), now, collection_id)
+                        )
+                except Exception:
+                    pass
+
+            # Upsert token (collection_id+serial) when serial known
             if serial is not None:
                 tok = cx.execute(
                     "SELECT id FROM nft_tokens WHERE collection_id=? AND serial=?",
@@ -2512,12 +2551,16 @@ def merchant_new_item(slug):
                 ).fetchone()
                 if not tok:
                     cx.execute(
-                        """INSERT INTO nft_tokens(collection_id, serial, owner_user_id, owner_wallet_pub, minted_at, metadata_json)
-                           VALUES(?,?,NULL,NULL,?,NULL)""",
+                        """
+                        INSERT INTO nft_tokens(
+                          collection_id, serial, owner_user_id, owner_wallet_pub, minted_at, metadata_json
+                        )
+                        VALUES(?,?,NULL,NULL,?,NULL)
+                        """,
                         (collection_id, serial, now)
                     )
 
-            # Create active listing tied to item
+            # Create active listing tied to the item
             cx.execute(
                 """
                 INSERT INTO nft_listings(
@@ -2528,16 +2571,6 @@ def merchant_new_item(slug):
                 """,
                 (collection_id, serial, u["id"], float(pi_price), now, item_id)
             )
-
-            # Optional: store royalty on the collection (simple approach)
-            # If you prefer per-listing or per-token, adjust accordingly.
-            try:
-                cols = [r[1] for r in cx.execute("PRAGMA table_info(nft_collections)").fetchall()]
-                if "royalty_bp" in cols:
-                    cx.execute("UPDATE nft_collections SET royalty_bp=?, updated_at=? WHERE id=?",
-                               (int(max(0, min(1000, nft_commission_bp))), now, collection_id))
-            except Exception:
-                pass
 
     tok = data.get("t")
     return redirect(f"/merchant/{slug}/items{('?t='+tok) if tok else ''}")
