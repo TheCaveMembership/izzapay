@@ -3900,15 +3900,16 @@ def fulfill_session(s, tx_hash, buyer, shipping):
                     if qty > 0:
                         print(f"[fulfill][nft] expected {qty} listings but found {len(avail) if avail else 0} "
                               f"for item_id={it['id'] if it else None} — nothing marked sold")
-            except Exception as e:
-                print(f"[fulfill][nft] marked SOLD {len(ids)} listings item_id={it['id']} order_id={order_id} ids={ids}")
+                        except Exception as e:
+                # Use a safe message; 'ids' might not exist if the error happened earlier
+                print(f"[fulfill][nft] SOLD mark error item_id={it['id'] if it else None} order_id={order_id}: {e}")
 
-# >>> NEW: ensure a pending NFT claim row exists for this order
-try:
-    _insert_nft_pending_claim(cx, order_id=order_id)
-    print(f"[fulfill][nft] claim row ensured for order_id={order_id}")
-except Exception as e:
-    print(f"[fulfill][nft] pending-claim insert failed order_id={order_id}: {e}")
+            # >>> NEW: ensure a pending NFT claim row exists for this order
+            try:
+                _insert_nft_pending_claim(cx, order_id=order_id)
+                print(f"[fulfill][nft] claim row ensured for order_id={order_id}")
+            except Exception as e:
+                print(f"[fulfill][nft] pending-claim insert failed order_id={order_id}: {e}")
 
             # ----------------- CRAFTED ITEM → voucher creation (as before) -----------------
             if it and (it["fulfillment_kind"] == "crafting") and it["crafted_item_id"]:
