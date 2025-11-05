@@ -381,7 +381,26 @@ def quote():
     unit = PRICE_SINGLE if kind == "single" else per_unit(size)
     total = (unit * size).quantize(Decimal("0.000001"), rounding=ROUND_DOWN)
     return jsonify({"ok": True, "kind": kind, "size": size, "per_unit": str(unit), "total": str(total)})
+@bp_nft.get("/api/nft/owned")
+def api_nft_owned():
+    pub = (request.args.get("pub") or "").strip()
+    if not pub:
+        return jsonify({"ok": False, "error": "missing_pub"}), 400
 
+    try:
+        with _db() as cx:
+            rows = cx.execute("""
+                SELECT nt.serial, nc.code, nc.issuer
+                FROM nft_tokens nt
+                JOIN nft_collections nc ON nc.id = nt.collection_id
+                WHERE nt.owner_wallet_pub = ?
+                ORDER BY nc.code ASC, nt.serial ASC
+            """, (pub,)).fetchall()
+        out = [dict(code=r["code"], issuer=r["issuer"], serial=r["serial"]) for r in rows]
+        return jsonify({"ok": True, "rows": out}), 200
+    except Exception as e:
+        log.error("NFT_OWNED_FAIL %s: %s", type(e).__name__, e)
+        return jsonify({"ok": False, "error": "db_error"}), 500
 @bp_nft.route("/api/nft/mint", methods=["POST"])
 def mint():
     """
