@@ -3619,36 +3619,128 @@ def pi_complete():
     # Hand off to fulfillment (creates orders, marks NFT listings sold, issues claimables)
     return fulfill_session(s, txid, buyer, shipping)
 
-# --- NFT helper: create on-chain claimables for purchased NFTs -------------
-def _issue_nft_claimables_for_order(order_id: int, buyer_user_id: int):
+
+# ========================================================================== #
+# ===================== NFT PENDING-CLAIM INSERT HELPER ===================== #
+# ========================================================================== #
+def _insert_nft_pending_claim(cx, order_id: int) -> bool:
     """
-    Finds NFT units tied to this order and creates claimable balances (1 unit each)
-    so they appear in the user's Claims list (same place as stake claims).
-    Requirements:
-      - user_wallets has buyer's pub key
-      - nft_listings rows for this order have concrete asset codes or enough info
-        to derive them (collection code + serial -> concrete code).
+    Enqueue pending NFT claims for an order.
+    Stores assets_json as an array of strings like ["CODE001","CODE002",...].
+    If only username is known at checkout, we set buyer_pub='' and backfill later.
+    """
+    import json, time, re
+
+    # All listings sold by this order
+    rows = cx.execute(
+        """
+        SELECT nl.id AS listing_id,
+               nl.serial AS serial,
+               COALESCE(nl.buyer_user_id, 0) AS buyer_user_id,
+               nl.buyer_username AS buyer_username,
+               nc.code AS collection_code,
+               nc.issuer AS issuer
+        FROM nft_listings nl
+        JOIN nft_collections nc ON nc.id = nl.collection_id
+        WHERE nl.order_id = ? AND nl.status='sold'
+        ORDER BY nl.id ASC
+        """,
+        (order_id,)
+    ).fetchall()
+
+    if not rows:
+        return False
+
+    def _san(s: str) -> str:
+        return re.sub(r"[^A-Z0-9]", "", (s or "").upper())
+
+    # Group codes by issuer
+    by_issuer = {}
+    for r in rows:
+        issuer = r["issuer"]
+        code   = _san(r["collection_code"])
+        serial = r["serial"]
+        token_code = f"{code}{int(serial):03d}" if serial is not None else code
+        slot = by_issuer.setdefault(issuer, {
+            "assets": [],
+            "buyer_user_id": r["buyer_user_id"] or None,
+            "buyer_username": (r["buyer_username"] or "").strip() or None
+        })
+        slot["assets"].append(token_code)
+
+    now = int(time.time())
+
+    for issuer, info in by_issuer.items():
+        assets_json    = json.dumps(info["assets"], separators=(",",":"))
+        buyer_user_id  = info["buyer_user_id"]
+        buyer_username = info["buyer_username"] or None
+
+        # Try to resolve a pub now (ok to leave empty; we backfill on read)
+        buyer_pub = ''
+        try:
+            if buyer_user_id:
+                w = cx.execute(
+                    """
+                    SELECT uw.pub
+                    FROM user_wallets uw
+                    JOIN users u
+                      ON u.username = uw.username
+                      OR u.pi_username = uw.username
+                    WHERE u.id=? LIMIT 1
+                    """,
+                    (buyer_user_id,)
+                ).fetchone()
+                if w and w["pub"]:
+                    buyer_pub = w["pub"]
+        except Exception:
+            pass
+
+        # One row per (order_id, issuer); ignore if already present
+        cx.execute(
+            """
+            INSERT OR IGNORE INTO nft_pending_claims
+              (order_id, buyer_user_id, buyer_username, buyer_pub,
+               issuer, assets_json, status, created_at)
+            VALUES (?, ?, ?, ?, ?, ?, 'pending', ?)
+            """,
+            (order_id, buyer_user_id, buyer_username, buyer_pub, issuer, assets_json, now)
+        )
+
+    return True
+
+
+# --- NFT helper: create on-chain claimables for purchased NFTs -------------
+def _issue_nft_claimables_for_order(order_id: int, buyer_user_id: int) -> bool:
+    """
+    Optional on-chain step (e.g., claimable balances). If you don't want this yet,
+    you can return True early — but don't overwrite this function later.
     """
     try:
+        import json, re, requests
+
+        # Resolve buyer pub (match on either username or pi_username)
         with conn() as cx:
-            # Get buyer wallet pub
             w = cx.execute(
-                "SELECT u.pub FROM user_wallets u "
-"JOIN users ON users.pi_username = u.username "
-"WHERE users.id=? LIMIT 1",
+                """
+                SELECT uw.pub
+                FROM user_wallets uw
+                JOIN users u
+                  ON u.username = uw.username
+                  OR u.pi_username = uw.username
+                WHERE u.id=? LIMIT 1
+                """,
                 (buyer_user_id,)
             ).fetchone()
-            if not w or not (w["pub"] or "").startswith("G"):
-                print(f"[nft_claimables] no buyer pub for user_id={buyer_user_id}")
-                return False
+        if not w or not (w["pub"] or "").startswith("G"):
+            print(f"[nft_claimables] no buyer pub for user_id={buyer_user_id}")
+            return False
+        buyer_pub = w["pub"]
 
-            buyer_pub = w["pub"]
-
-            # Pull the sold NFT rows for this order
+        # Gather assets for this order (same mapping as insert helper)
+        with conn() as cx:
             rows = cx.execute(
                 """
-                SELECT t.serial, c.code AS collection_code, c.issuer AS issuer_g,
-                       COALESCE(t.metadata_json, '{}') AS meta
+                SELECT t.serial, c.code AS collection_code, c.issuer AS issuer
                 FROM nft_listings l
                 JOIN nft_collections c ON c.id = l.collection_id
                 JOIN nft_tokens t      ON t.collection_id = c.id AND t.serial = l.serial
@@ -3658,37 +3750,20 @@ def _issue_nft_claimables_for_order(order_id: int, buyer_user_id: int):
             ).fetchall()
 
         if not rows:
-            print(f"[nft_claimables] order_id={order_id} has no sold rows to mint")
+            print(f"[nft_claimables] order_id={order_id} has no sold rows")
             return False
 
-        # Build concrete asset codes; prefer explicit code in metadata_json
-        assets = []
-        import json, re
-        def _sanitize(s): return re.sub(r"[^A-Z0-9]", "", (s or "").upper())
-        for r in rows:
-            try:
-                meta = json.loads(r["meta"] or "{}")
-            except Exception:
-                meta = {}
-            explicit_code = (meta.get("asset_code") or "").strip()
-            if explicit_code:
-                code = _sanitize(explicit_code)[:12]
-            else:
-                code = (_sanitize(r["collection_code"]) + f"{int(r['serial']):03d}")[:12]
-            assets.append({"code": code, "issuer": r["issuer_g"]})
+        def _san(s: str) -> str:
+            return re.sub(r"[^A-Z0-9]", "", (s or "").upper())
 
-        if not assets:
-            print(f"[nft_claimables] order_id={order_id} resolved 0 assets")
-            return False
-
-        # Batch by issuer and create claimables via internal API
         by_issuer = {}
-        for a in assets:
-            by_issuer.setdefault(a["issuer"], []).append(a["code"])
+        for r in rows:
+            code = f"{_san(r['collection_code'])}{int(r['serial']):03d}"
+            by_issuer.setdefault(r["issuer"], []).append(code[:12])
 
         for issuer_g, codes in by_issuer.items():
             try:
-                print(f"[nft_claimables] creating claimables order_id={order_id} "
+                print(f"[nft_claimables] POST /api/nft/claim order_id={order_id} "
                       f"buyer_pub={buyer_pub} issuer={issuer_g} assets={codes}")
                 requests.post(
                     f"{APP_BASE_URL}/api/nft/claim",
@@ -3697,81 +3772,13 @@ def _issue_nft_claimables_for_order(order_id: int, buyer_user_id: int):
                 )
             except Exception as e:
                 print(f"[nft_claimables] soft-fail issuer={issuer_g} order_id={order_id}: {e}")
-                # Soft-fail: do not block checkout
-                pass
-
-        print(f"[nft_claimables] done order_id={order_id} user_id={buyer_user_id}")
         return True
     except Exception as e:
         print(f"[nft_claimables] exception order_id={order_id}: {e}")
         return False
 # ========================================================================== #
-# ===================== NFT PENDING-CLAIM INSERT HELPER ===================== #
+# ================== END NFT PENDING-CLAIM INSERT HELPER ==================== #
 # ========================================================================== #
-# --- BEGIN: NFT claim insert helper ---------------------------------------
-def _insert_nft_pending_claim(cx, *, order_id: int):
-    """
-    Create/ensure a pending NFT claim row for the buyer of this order.
-    Works even if buyer_pub is unknown at checkout time.
-    """
-    # Resolve order, item, buyer
-    o = cx.execute("SELECT * FROM orders WHERE id=?", (order_id,)).fetchone()
-    if not o:
-        return
-
-    buyer_user_id = o.get("buyer_user_id")
-    buyer = cx.execute("SELECT id, username, pi_username FROM users WHERE id=?", (buyer_user_id,)).fetchone()
-    buyer_username = (buyer.get("username") or buyer.get("pi_username") or "") if buyer else ""
-
-    it = cx.execute("SELECT * FROM items WHERE id=?", (o["item_id"],)).fetchone()
-    if not it:
-        return
-
-    # Find the SOLD listing we just attached to this order
-    lst = cx.execute("""
-        SELECT nl.*, nc.code AS asset_code, nc.issuer, nc.id AS collection_id
-        FROM nft_listings nl
-        JOIN nft_collections nc ON nc.id = nl.collection_id
-        WHERE nl.order_id=? AND nl.status='sold'
-        ORDER BY nl.id DESC LIMIT 1
-    """, (order_id,)).fetchone()
-    if not lst:
-        # Nothing to do for non-NFT items
-        return
-
-    # Build minimal assets descriptor (extend as needed)
-    serial = lst.get("serial")
-    asset_code = lst.get("asset_code")
-    issuer = lst.get("issuer") or ""
-    assets = [{"code": asset_code, "issuer": issuer, "serial": serial}] if asset_code else []
-
-    # Try to find a pub for the buyer (may not exist yet)
-    uw = cx.execute("SELECT pub FROM user_wallets WHERE lower(username)=lower(?)", (buyer_username,)).fetchone()
-    buyer_pub = (uw["pub"] if uw else "") or ""
-
-    now = int(time.time())
-
-    # Upsert: one pending per order_id
-    exists = cx.execute("SELECT id FROM nft_pending_claims WHERE order_id=?", (order_id,)).fetchone()
-    if exists:
-        cx.execute("""
-          UPDATE nft_pending_claims
-          SET buyer_user_id=?, buyer_username=?, buyer_pub=?, issuer=?, assets_json=?, status='pending'
-          WHERE order_id=?
-        """, (buyer_user_id, buyer_username, buyer_pub, issuer, json.dumps(assets, separators=(",",":")), order_id))
-    else:
-        cx.execute("""
-          INSERT INTO nft_pending_claims(
-            order_id, buyer_user_id, buyer_username, buyer_pub,
-            issuer, assets_json, status, created_at
-          ) VALUES(?,?,?,?,?,?, 'pending', ?)
-        """, (
-            order_id, buyer_user_id, buyer_username, buyer_pub,
-            issuer, json.dumps(assets, separators=(",",":")), now
-        ))
-# --- END: NFT claim insert helper -----------------------------------------
-# ========================================================================== #
-# ================== END NFT PENDING-CLAIM INSERT HELPER =================== #
 # ========================================================================== #
 # ----------------- FULFILLMENT + EMAIL -----------------
 def fulfill_session(s, tx_hash, buyer, shipping):
