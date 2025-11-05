@@ -2705,7 +2705,49 @@ function getServer(){
   if (!ServerCtor) throw new Error('Stellar SDK loaded, but Server class is unavailable');
   return new ServerCtor(String(API_BASE).replace(/\/+$/,''));
 }
+function hasTrustFor(balances, code, issuer){
+  if (!Array.isArray(balances)) return false;
+  return balances.some(b => b.asset_code === code && b.asset_issuer === issuer);
+}
 
+async function ensureTrustlinesForNfts(pub, picks){
+  // picks: [{ issuer, assets:[code1, code2, ...] }, ...]
+  const ok = await ensureStellar();
+  if (!ok || !window.StellarSdk) throw new Error('Stellar SDK missing');
+  const SDK = window.StellarSdk;
+  const server = getServer();
+
+  const acct = await server.loadAccount(pub);
+  const existing = acct.balances || [];
+
+  const txb = new SDK.TransactionBuilder(acct, {
+    fee: (await server.fetchBaseFee()).toString(),
+    networkPassphrase: 'Pi Testnet'
+  });
+
+  let needs = 0;
+  for (const group of picks){
+    for (const code of group.assets){
+      if (!hasTrustFor(existing, code, group.issuer)){
+        txb.addOperation(SDK.Operation.changeTrust({
+          asset: new SDK.Asset(code, group.issuer)
+        }));
+        needs++;
+      }
+    }
+  }
+  if (!needs) return false; // nothing to do
+
+  const tx = txb.setTimeout(180).build();
+
+  // If we can sign locally, do it here; otherwise return false and let the server handle as_claimable
+  const localSec = getLocalSecret(pub, USER?.username);
+  if (!localSec) return false;
+
+  tx.sign(SDK.Keypair.fromSecret(localSec));
+  await server.submitTransaction(tx);
+  return true;
+}
 function explainHorizonError(e){
   try{
     const d   = e?.response?.data || e?.data || null;
