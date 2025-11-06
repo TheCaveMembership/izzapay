@@ -2375,40 +2375,65 @@ claimSelected?.addEventListener('click', async ()=>{
   }
 
   async function submitNftClaimOnce(group){
-    const u = (USER?.username || '');
-    const claimUrl = u ? `/api/nft/claim?u=${encodeURIComponent(u)}` : '/api/nft/claim';
-    const body = {
-  buyer_pub: pub,
-  assets: group.assets,
-  // If you have the pending row id, include it to auto-mark claimed:
-  pending_id: group.pendingId
-};
-    const r   = await fetch(claimUrl, { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(body) });
+  // group = { assets: [...], issuer, pendingId? }
+  const u = (USER?.username || '');
+  const claimUrl = u ? `/api/nft/claim?u=${encodeURIComponent(u)}` : '/api/nft/claim';
+
+  // Do NOT send issuer; server uses canonical env issuer internally.
+  const body = {
+    buyer_pub: (claimPub.value || '').trim(),
+    assets: group.assets,
+    pending_id: typeof group.pendingId === 'number' ? group.pendingId : undefined
+  };
+
+  // Helper to POST and always read body text for decisions
+  async function postAndRead(){
+    const r   = await fetch(claimUrl, {
+      method:'POST',
+      headers:{ 'Content-Type':'application/json' },
+      body: JSON.stringify(body)
+    });
     const txt = await r.text().catch(()=> '');
-    let j = {}; try { j = JSON.parse(txt); } catch { j = { ok:false, error: txt }; }
+    let j = {};
+    try { j = JSON.parse(txt); } catch { /* leave as {} */ }
 
-    // If backend still says buyer_missing_trustline:CODE — fix and retry exactly once
-    const missMatch = /buyer_missing_trustline:([A-Z0-9]{1,12})/i.exec(txt||'');
-    if ((!r.ok || !j?.ok) && missMatch){
-      const code = missMatch[1];
-      await addTrustlinesIfNeeded([{ code, issuer: group.issuer }]);
-      // Re-try once after trustline is added
-      const r2   = await fetch(claimUrl, { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(body) });
-      const txt2 = await r2.text().catch(()=> '');
-      let j2 = {}; try { j2 = JSON.parse(txt2); } catch { j2 = { ok:false, error: txt2 }; }
-      if (!r2.ok || !j2?.ok){
-        const msg = j2?.error || j2?.message || `HTTP ${r2.status}`;
-        throw new Error(`NFT claim error after trustline: ${msg}`);
-      }
-      return true;
-    }
+    // Emit full body to your client log so we can see exact errors
+    log('nft.claim.response', { ok: r.ok, status: r.status, body: (txt || '').slice(0, 400) });
 
-    if (!r.ok || !j?.ok){
-      const msg = j?.error || j?.message || `HTTP ${r.status}`;
-      throw new Error(`NFT claim error: ${msg}`);
-    }
-    return true;
+    return { r, txt, j };
   }
+
+  // First attempt
+  let { r, txt, j } = await postAndRead();
+
+  // If backend says buyer is missing a trustline → add it, then retry once
+  const miss = /buyer[_ ]?missing[_ ]?trustline:([A-Z0-9]{1,12})/i.exec(txt || '');
+  if ((!r.ok || !j?.ok) && miss){
+    const code = miss[1];
+    // Add for the canonical issuer from the pending row (group.issuer).
+    await addTrustlinesIfNeeded([{ code, issuer: group.issuer }]);
+
+    // Retry once after trustline is established
+    ({ r, txt, j } = await postAndRead());
+  }
+
+  // Handle other common Horizon errors more cleanly
+  if (!r.ok || !j?.ok){
+    const bodyMsg = (j?.error || j?.message || txt || '').trim();
+
+    if (/op_low_reserve/i.test(bodyMsg)){
+      throw new Error('Your wallet needs more native Pi for reserves. Top up a little Pi then try again.');
+    }
+    if (/tx_insufficient_fee/i.test(bodyMsg)){
+      throw new Error('Network is surging. Try again in a few seconds.');
+    }
+
+    // Fall back to the body text so we see the real cause
+    throw new Error(bodyMsg || `HTTP ${r.status}`);
+  }
+
+  return true;
+}
 
   // Status line
   const ops = [];
