@@ -2278,19 +2278,17 @@ claimSelected?.addEventListener('click', async ()=>{
 if (nftPicks.length){
   for (const pick of nftPicks){
 
-    // ---- Gather balances (works with or without StellarSdk.Server) ----
+    // === Ensure wallet trusts all NFT assets in this pick (already working) ===
     const SDK = window.StellarSdk;
     let balances = [];
     let acctJson = null;
 
     try{
       if (SDK && SDK.Server){
-        // Normal path with Server
-        const server  = getServer();         // your existing helper
+        const server  = getServer();
         const account = await server.loadAccount(pub);
         balances = account?.balances || [];
       } else {
-        // Fallback path: fetch account JSON directly from Horizon
         const HZ = (window.HORIZON_URL || 'https://api.testnet.minepi.com');
         const r  = await fetch(`${HZ}/accounts/${encodeURIComponent(pub)}`);
         acctJson = await r.json();
@@ -2303,7 +2301,6 @@ if (nftPicks.length){
       return;
     }
 
-    // ---- Figure out which assets in this pick are not yet trusted ----
     const needed = (pick.assets || [])
       .map(code => ({ code, issuer: pick.issuer }))
       .filter(a => !hasTrustFor(balances, a.code, a.issuer));
@@ -2311,10 +2308,9 @@ if (nftPicks.length){
     if (needed.length){
       const localSec = getLocalSecret(pub, USER?.username);
 
-      // A) If we have the local secret: build, sign, submit even without Server
       if (localSec){
         try{
-          // Get a base fee
+          // get fee (fallback safe)
           let fee = '100';
           try{
             const HZ = (window.HORIZON_URL || 'https://api.testnet.minepi.com');
@@ -2322,26 +2318,17 @@ if (nftPicks.length){
             if (fs?.last_ledger_base_fee) fee = String(fs.last_ledger_base_fee);
           }catch{}
 
-          // Build TransactionBuilder using either live account (Server) or JSON fallback
           let txb;
           if (SDK && SDK.Server){
             const server  = getServer();
             const account = await server.loadAccount(pub);
-            txb = new SDK.TransactionBuilder(account, {
-              fee,
-              networkPassphrase: NETWORK_PASSPHRASE
-            });
+            txb = new SDK.TransactionBuilder(account, { fee, networkPassphrase: NETWORK_PASSPHRASE });
           } else {
-            // Fallback: synthesize Account from acctJson + fee
             const seq = String(acctJson?.sequence || '0');
             const accountObj = new SDK.Account(pub, seq);
-            txb = new SDK.TransactionBuilder(accountObj, {
-              fee,
-              networkPassphrase: NETWORK_PASSPHRASE
-            });
+            txb = new SDK.TransactionBuilder(accountObj, { fee, networkPassphrase: NETWORK_PASSPHRASE });
           }
 
-          // Add changeTrust ops
           for (const a of needed){
             txb = txb.addOperation(SDK.Operation.changeTrust({
               asset: new SDK.Asset(a.code, a.issuer)
@@ -2351,7 +2338,6 @@ if (nftPicks.length){
           const tx = txb.setTimeout(180).build();
           tx.sign(SDK.Keypair.fromSecret(localSec));
 
-          // Submit with Server if available; else POST /transactions
           if (SDK && SDK.Server){
             const server = getServer();
             const resp = await server.submitTransaction(tx);
@@ -2376,7 +2362,7 @@ if (nftPicks.length){
           return;
         }
       } else {
-        // B) No local secret → SEP-7 multi-op trustline request
+        // SEP-7 flow
         try{
           const uri = await buildChangeTrustMultiSEP7(pub, needed);
           if (!uri) throw new Error('Could not build SEP-7 for trustlines');
@@ -2392,14 +2378,19 @@ if (nftPicks.length){
       }
     }
 
-    // ---- With trustlines in place, perform the NFT claim ----
-    const r2 = await fetch('/api/nft/claim', {
+    // === With trustlines in place, perform the NFT claim ===
+    const u = (USER?.username || '');
+    const claimUrl = u ? `/api/nft/claim?u=${encodeURIComponent(u)}` : '/api/nft/claim';
+
+    // First attempt: buyer_pub + to_pub (most servers accept either name)
+    let r2 = await fetch(claimUrl, {
       method:'POST',
       headers:{'Content-Type':'application/json'},
       body: JSON.stringify({
         buyer_pub: pub,
-        assets: pick.assets,
-        issuer: pick.issuer,
+        to_pub: pub,
+        assets: pick.assets,     // e.g. ["NFTTVPPP1"]
+        issuer: pick.issuer,     // e.g. "GDDFUCFI..."
         as_claimable: true
       })
     });
@@ -2407,6 +2398,25 @@ if (nftPicks.length){
     let j2 = {};
     try { j2 = await r2.json(); }
     catch { try { j2 = { error: await r2.text() }; } catch {} }
+
+    if (!r2.ok || !j2?.ok){
+      // One-shot fallback: some backends expect 'recipient_pub'
+      if (r2.status === 400){
+        log('nft.claim.retry.shape', { issuer: pick.issuer, assets: pick.assets });
+        r2 = await fetch(claimUrl, {
+          method:'POST',
+          headers:{'Content-Type':'application/json'},
+          body: JSON.stringify({
+            recipient_pub: pub,
+            assets: pick.assets,
+            issuer: pick.issuer,
+            as_claimable: true
+          })
+        });
+        try { j2 = await r2.json(); }
+        catch { try { j2 = { error: await r2.text() }; } catch {} }
+      }
+    }
 
     if (!r2.ok || !j2?.ok){
       const msg = j2?.error || j2?.message || `HTTP ${r2.status}`;
