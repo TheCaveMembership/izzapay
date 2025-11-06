@@ -2276,13 +2276,14 @@ claimSelected?.addEventListener('click', async ()=>{
 
     // 2) Issue any selected NFTs to the same wallet
 if (nftPicks.length){
+  // Best effort: ensure SDK is around before any work begins
+  try { await ensureStellar(); } catch(_){}
+
   for (const pick of nftPicks){
+    let SDK = window.StellarSdk;
 
-    const SDK = window.StellarSdk;
-    let balances = [];
-    let acctJson = null;
-
-    // ---------- 1) Fresh balances (first check) ----------
+    // ---------- 1) Load balances to see which NFT trustlines are missing ----------
+    let balances = [], acctJson = null;
     try{
       if (SDK && SDK.Server){
         const server  = getServer();
@@ -2309,19 +2310,15 @@ if (nftPicks.length){
     if (needed.length){
       const localSec = getLocalSecret(pub, USER?.username);
 
-      try{
-        // base fee
-        let fee = '100';
+      // Always prefer direct signing if we have a local secret.
+      if (localSec){
         try{
-          const HZ = (window.HORIZON_URL || 'https://api.testnet.minepi.com');
-          const fs = await fetch(`${HZ}/fee_stats`).then(r=>r.json()).catch(()=>null);
-          if (fs?.last_ledger_base_fee) fee = String(fs.last_ledger_base_fee);
-        }catch{}
-
-        if (localSec){
-          // Ensure SDK is available; if not, bail to SEP-7
+          // Ensure SDK; if it isn't available, try to load it once.
           const ok = await ensureStellar();
-          if (!(ok && window.StellarSdk && window.StellarSdk.Server)){
+          SDK = window.StellarSdk;
+
+          if (!(ok && SDK)){
+            // true fallback only when we cannot load SDK at all
             const uri = await buildChangeTrustMultiSEP7(pub, needed);
             if (uri){
               log('nft.trust.sep7.open.nosdk', { n: needed.length });
@@ -2329,12 +2326,14 @@ if (nftPicks.length){
               window.location.assign(uri);
               return;
             }
-            throw new Error('Stellar SDK unavailable and SEP-7 URI could not be built');
+            throw new Error('Stellar SDK unavailable and no SEP-7 URI could be built');
           }
 
-          // Direct sign via SDK
+          // Direct sign via SDK (no SDK.Account fallback paths)
           const server  = getServer();
           const account = await server.loadAccount(pub);
+
+          let fee = (await server.fetchBaseFee()).toString();
           let txb = new SDK.TransactionBuilder(account, { fee, networkPassphrase: NETWORK_PASSPHRASE });
           for (const a of needed){
             txb = txb.addOperation(SDK.Operation.changeTrust({ asset: new SDK.Asset(a.code, a.issuer) }));
@@ -2346,7 +2345,7 @@ if (nftPicks.length){
           if (!resp?.hash) throw new Error('submit queued/no hash');
           log('nft.trust.submit', { via: 'sdk', hash: resp.hash, n: needed.length });
 
-          // wait for Horizon to expose trustlines
+          // Wait for Horizon to expose the new balances to avoid races
           const okWait = await waitForTrust(pub, needed, { maxMs: 20000, stepMs: 700 });
           if (!okWait){
             log('nft.trust.wait.timeout', { n: needed.length });
@@ -2355,8 +2354,15 @@ if (nftPicks.length){
           }
           log('nft.trust.direct.ok', { n: needed.length });
 
-        } else {
-          // SEP-7 path
+        }catch(e){
+          // Do NOT silently switch to SEP-7 here; we prefer local signing.
+          log('nft.trust.direct.fail', { err: String(e) });
+          claimMsg.textContent = '❌ Trustline setup failed (direct): ' + String(e?.message || e);
+          return;
+        }
+      } else {
+        // No local secret → SEP-7 is appropriate.
+        try{
           const uri = await buildChangeTrustMultiSEP7(pub, needed);
           if (!uri) throw new Error('Could not build SEP-7 for trustlines');
           log('nft.trust.sep7.open', { n: needed.length });
@@ -2366,11 +2372,11 @@ if (nftPicks.length){
             '<br><small>After approval, return and press <b>Claim</b> again.</small>';
           window.location.assign(uri);
           return;
+        }catch(e){
+          claimMsg.textContent = '❌ Could not open wallet for trustlines: ' + String(e?.message || e);
+          log('nft.trust.sep7.fail', { err: String(e) });
+          return;
         }
-      }catch(e){
-        claimMsg.textContent = '❌ Trustline setup failed: ' + String(e?.message || e);
-        log('nft.trust.direct.fail', { err: String(e) });
-        return;
       }
     }
 
@@ -2400,37 +2406,24 @@ if (nftPicks.length){
 
     let { r: r2, j: j2, raw: raw1 } = await tryClaim();
 
-    // ---------- 4) If backend says buyer_missing_trustline, FIX IT NOW ----------
+    // ---------- 4) If backend says buyer_missing_trustline, add it via direct signing (not SEP-7) and retry once ----------
     if ((!r2.ok || !j2?.ok) && /buyer_missing_trustline/i.test(raw1||'')){
       const m = (raw1||'').match(/buyer_missing_trustline:([A-Z0-9]{1,12})/i);
       const missingCodes = m ? [m[1]] : pick.assets.slice(0);
       const missAssets = missingCodes.map(code => ({ code, issuer: pick.issuer }));
 
       const localSec = getLocalSecret(pub, USER?.username);
-      try{
-        if (localSec){
-          // Ensure SDK is available; else open SEP-7
+      if (localSec){
+        try{
           const ok = await ensureStellar();
-          if (!(ok && window.StellarSdk && window.StellarSdk.Server)){
-            const uri = await buildChangeTrustMultiSEP7(pub, missAssets);
-            if (uri){
-              log('nft.trust.sep7.open.afterFail.nosdk', { n: missAssets.length });
-              claimMsg.innerHTML = 'We need to add an NFT trustline before claiming. Opening your wallet…<br>' +
-                '<small>If nothing happens, tap:</small> ' +
-                '<a href="'+uri+'" style="word-break:break-all">Open in wallet</a>';
-              window.location.assign(uri);
-              return;
-            }
-            throw new Error('Stellar SDK unavailable and SEP-7 URI could not be built');
-          }
+          SDK = window.StellarSdk;
+          if (!(ok && SDK)) throw new Error('Stellar SDK unavailable to fix missing trustline');
 
-          // Direct add after fail
           const server  = getServer();
           const account = await server.loadAccount(pub);
-          let txb = new SDK.TransactionBuilder(account, {
-            fee: (await server.fetchBaseFee()).toString(),
-            networkPassphrase: NETWORK_PASSPHRASE
-          });
+          let fee = (await server.fetchBaseFee()).toString();
+
+          let txb = new SDK.TransactionBuilder(account, { fee, networkPassphrase: NETWORK_PASSPHRASE });
           for (const a of missAssets){
             txb = txb.addOperation(SDK.Operation.changeTrust({ asset: new SDK.Asset(a.code, a.issuer) }));
           }
@@ -2439,7 +2432,17 @@ if (nftPicks.length){
           await server.submitTransaction(tx);
 
           await waitForTrust(pub, missAssets, { maxMs: 20000, stepMs: 700 });
-        } else {
+
+          // retry once
+          ({ r: r2, j: j2 } = await tryClaim());
+        }catch(e){
+          log('nft.trust.fix_after_claim.fail', { err: String(e) });
+          claimMsg.textContent = '❌ Could not add missing NFT trustline (direct): ' + String(e?.message || e);
+          return;
+        }
+      } else {
+        // No local secret → inform user to open wallet; we do not auto-switch for local-secret flows.
+        try{
           const uri = await buildChangeTrustMultiSEP7(pub, missAssets);
           if (uri){
             log('nft.trust.sep7.open.afterFail', { n: missAssets.length });
@@ -2449,15 +2452,12 @@ if (nftPicks.length){
             window.location.assign(uri);
             return;
           }
+          throw new Error('Could not build SEP-7 URI for missing trustline');
+        }catch(e){
+          claimMsg.textContent = '❌ Missing trustline and no wallet link: ' + String(e?.message || e);
+          return;
         }
-      }catch(e){
-        log('nft.trust.fix_after_claim.fail', { err: String(e) });
-        claimMsg.textContent = '❌ Could not add missing NFT trustline: ' + String(e?.message || e);
-        return;
       }
-
-      // re-attempt once after fix
-      ({ r: r2, j: j2 } = await tryClaim());
     }
 
     if (!r2.ok || !j2?.ok){
