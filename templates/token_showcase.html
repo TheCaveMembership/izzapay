@@ -2141,7 +2141,7 @@ async function listClaimables(){
     // ================= NFTs, per-asset rows with trustline button =================
     // one header per issuer, then one row per asset with its own checkbox and trust button
     for (const r of nftRows){
-      const issuer = String(r.issuer || r.issuer_g || '').trim();
+      const issuer = String(r.issuer || '').trim();  // FIX: no fallback issuer
       const assets = Array.isArray(r.assets) ? r.assets.map(a => String(a).trim()).filter(Boolean) : [];
       if (!issuer || !assets.length) continue;
 
@@ -2269,16 +2269,39 @@ if (!window.__izzaTrustBtnBound){
     btn.disabled = true;
     claimMsg.textContent = `Adding trustline for ${code}…`;
 
-    // reuse batch helper from claim button, defined below
     try{
-      await addTrustlinesIfNeeded([{ code, issuer }]);
-      // refresh row UI
-      row?.classList.remove('locked');
-      if (chk) chk.disabled = false;
-      if (state) state.textContent = 'Trusted';
-      claimMsg.textContent = `✅ Trustline added for ${code}, you can select it now.`;
+      // FIX: call the local helper that does direct-sign + wait
+      await ensureNftTrust(pub, issuer, [code]);
+
+      // refresh balances and flip UI
+      let fresh = [];
+      try {
+        fresh = await (async function loadBalancesViaServer(){
+          const ok = await ensureStellar().catch(()=>false);
+          const HZ = (window.HORIZON_URL || 'https://api.testnet.minepi.com');
+          if (ok && window.StellarSdk){
+            const server  = getServer();
+            const account = await server.loadAccount(pub);
+            return account?.balances || [];
+          }
+          const r = await fetch(`${HZ}/accounts/${encodeURIComponent(pub)}`);
+          const j = await r.json();
+          if (!r.ok || !j?.account_id) throw new Error('Could not load account via Horizon');
+          return j.balances || [];
+        })();
+      } catch {}
+
+      const trusted = !!(fresh||[]).find(b => b.asset_code===code && b.asset_issuer===issuer);
+      if (trusted){
+        row?.classList.remove('locked');
+        if (chk)   chk.disabled = false;
+        if (state) state.textContent = 'Trusted';
+        claimMsg.textContent = `✅ Trustline added for ${code}, you can select it now.`;
+      }else{
+        claimMsg.textContent = `⏳ Trustline submitted — try again in a few seconds if still disabled.`;
+        btn.disabled = false;
+      }
     }catch(err){
-      // if sep-7 handoff occurred, user returns and can retry
       btn.disabled = false;
       const msg = String(err?.message || err || 'Trustline error');
       claimMsg.textContent = `❌ ${msg}`;
