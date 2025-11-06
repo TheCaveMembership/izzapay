@@ -2289,18 +2289,15 @@ if (nftPicks.length){
         const account = await server.loadAccount(pub);
         balances = account?.balances || [];
       } else {
-        // Fallback: read balances via Horizon REST (works even if SDK.Server is unavailable)
         const HZ = (window.HORIZON_URL || 'https://api.testnet.minepi.com');
         const r  = await fetch(`${HZ}/accounts/${encodeURIComponent(pub)}`);
-        acctJson = await r.json().catch(()=>null);
-        if (!r.ok || !acctJson?.account_id){
-          throw new Error(`Could not load account via Horizon (HTTP ${r.status})`);
-        }
+        acctJson = await r.json();
+        if (!r.ok || !acctJson?.account_id) throw new Error('Could not load account via Horizon');
         balances = acctJson.balances || [];
       }
     }catch(e){
       claimMsg.textContent = '❌ Could not load account: ' + String(e?.message || e);
-      log('nft.trust.account_load_fail', { err: String(e?.message || e) });
+      log('nft.trust.account_load_fail', { err: String(e) });
       return;
     }
 
@@ -2311,25 +2308,9 @@ if (nftPicks.length){
     if (needed.length){
       const localSec = getLocalSecret(pub, USER?.username);
 
-      // If StellarSdk itself is missing entirely, jump to SEP-7
-      if (!SDK){
-        try{
-          const uri = await buildChangeTrustMultiSEP7(pub, needed);
-          if (!uri) throw new Error('Could not build SEP-7 for trustlines');
-          log('nft.trust.sep7.open', { n: needed.length, reason: 'no_sdk' });
-          claimMsg.innerHTML = 'Opening your wallet to add NFT trustlines…<br><small>If nothing happens, tap the link:</small> <a href="'+uri+'" style="word-break:break-all">Open in wallet</a>';
-          window.location.assign(uri);
-          return; // user returns and taps Claim again
-        }catch(e){
-          claimMsg.textContent = '❌ Could not open wallet for trustlines: ' + String(e?.message || e);
-          log('nft.trust.sep7.fail', { err: String(e?.message || e) });
-          return;
-        }
-      }
-
       if (localSec){
         try{
-          // Fee with safe fallback
+          // get fee (fallback safe)
           let fee = '100';
           try{
             const HZ = (window.HORIZON_URL || 'https://api.testnet.minepi.com');
@@ -2339,21 +2320,13 @@ if (nftPicks.length){
 
           let txb;
           if (SDK && SDK.Server){
-            // Normal path with SDK.Server available
             const server  = getServer();
             const account = await server.loadAccount(pub);
-            txb = new SDK.TransactionBuilder(account, {
-              fee,
-              networkPassphrase: NETWORK_PASSPHRASE
-            });
+            txb = new SDK.TransactionBuilder(account, { fee, networkPassphrase: NETWORK_PASSPHRASE });
           } else {
-            // Fallback: construct Account with seq from acctJson and submit via REST
             const seq = String(acctJson?.sequence || '0');
             const accountObj = new SDK.Account(pub, seq);
-            txb = new SDK.TransactionBuilder(accountObj, {
-              fee,
-              networkPassphrase: NETWORK_PASSPHRASE
-            });
+            txb = new SDK.TransactionBuilder(accountObj, { fee, networkPassphrase: NETWORK_PASSPHRASE });
           }
 
           for (const a of needed){
@@ -2369,7 +2342,8 @@ if (nftPicks.length){
             const server = getServer();
             const resp = await server.submitTransaction(tx);
             if (!resp?.hash) throw new Error('submit queued/no hash');
-            log('nft.trust.submit.ok', { via: 'sdk', n: needed.length, hash: resp?.hash || null });
+            // extra visibility only
+            log('nft.trust.submit', { via: 'sdk', hash: resp.hash, n: needed.length });
           } else {
             const HZ = (window.HORIZON_URL || 'https://api.testnet.minepi.com');
             const resp = await fetch(`${HZ}/transactions`, {
@@ -2379,42 +2353,32 @@ if (nftPicks.length){
             });
             const txt = await resp.text().catch(()=> '');
             if (!resp.ok){
-              // Extra logging so you can see the raw Horizon error in Render logs
-              log('nft.trust.submit.fail', { via: 'rest', status: resp.status, body: txt.slice(0, 800) });
-              throw new Error(`submit failed ${resp.status}: ${txt}`);
-            } else {
-              log('nft.trust.submit.ok', { via: 'rest', n: needed.length, body: txt.slice(0, 300) });
+              const t = txt || '';
+              log('nft.trust.submit.fail', { via: 'rest', status: resp.status, body: t.slice(0, 800) });
+              throw new Error(`submit failed ${resp.status}: ${t}`);
             }
+            // extra visibility only
+            log('nft.trust.submit', { via: 'rest', n: needed.length, body: (txt || '').slice(0, 300) });
           }
-
-          // Wait until Horizon sees the new trustlines (prevents immediate-claim race)
-          try{
-            const ok = await waitForTrust(pub, needed, { maxMs: 6000, stepMs: 400 });
-            if (!ok){
-              claimMsg.textContent = '❌ Trustlines added but not visible yet. Try again in a few seconds.';
-              log('nft.trust.wait.timeout', { n: needed.length });
-              return;
-            }
-          }catch{}
 
           log('nft.trust.direct.ok', { n: needed.length });
         }catch(e){
           claimMsg.textContent = '❌ Trustline setup failed: ' + String(e?.message || e);
-          log('nft.trust.direct.fail', { err: String(e?.message || e) });
+          log('nft.trust.direct.fail', { err: String(e) });
           return;
         }
       } else {
-        // SEP-7 flow (no local secret)
+        // SEP-7 flow
         try{
           const uri = await buildChangeTrustMultiSEP7(pub, needed);
           if (!uri) throw new Error('Could not build SEP-7 for trustlines');
-          log('nft.trust.sep7.open', { n: needed.length, reason: 'no_local_secret' });
+          log('nft.trust.sep7.open', { n: needed.length });
           claimMsg.innerHTML = 'Opening your wallet to add NFT trustlines…<br><small>If nothing happens, tap the link:</small> <a href="'+uri+'" style="word-break:break-all">Open in wallet</a>';
           window.location.assign(uri);
           return; // user returns and taps Claim again
         }catch(e){
           claimMsg.textContent = '❌ Could not open wallet for trustlines: ' + String(e?.message || e);
-          log('nft.trust.sep7.fail', { err: String(e?.message || e) });
+          log('nft.trust.sep7.fail', { err: String(e) });
           return;
         }
       }
@@ -2424,89 +2388,73 @@ if (nftPicks.length){
     const u = (USER?.username || '');
     const claimUrl = u ? `/api/nft/claim?u=${encodeURIComponent(u)}` : '/api/nft/claim';
 
-    // First attempt: buyer_pub + to_pub (your current working shape)
-    let r2, j2, rawTxt = '';
-    try{
-      r2 = await fetch(claimUrl, {
-        method:'POST',
-        headers:{ 'Content-Type':'application/json' },
-        body: JSON.stringify({
-          buyer_pub: pub,
-          to_pub: pub,
-          assets: pick.assets,     // e.g. ["NFTTVPPP1"]
-          issuer: pick.issuer,     // e.g. "GDDFUCFI..."
-          as_claimable: true
-        })
-      });
-      rawTxt = await r2.text();             // read raw text first
-      try{ j2 = JSON.parse(rawTxt); }catch{ j2 = null; }
-    }catch(e){
-      claimMsg.textContent = '❌ NFT claim request failed: ' + String(e?.message || e);
-      log('nft.claim.request.fail', { err: String(e?.message || e) });
-      return;
-    }
+    // First attempt: buyer_pub + to_pub
+    let r2 = await fetch(claimUrl, {
+      method:'POST',
+      headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({
+        buyer_pub: pub,
+        to_pub: pub,
+        assets: pick.assets,     // e.g. ["NFTTVPPP1"]
+        issuer: pick.issuer,     // e.g. "GDDFUCFI..."
+        as_claimable: true
+      })
+    });
 
-    if (!r2.ok || !(j2?.ok)){
-      // Extra logging to see the exact backend error body in Render logs
-      log('nft.claim.first_shape.fail', {
-        status: r2.status,
-        body: (rawTxt || '').slice(0, 1200),
-        issuer: pick.issuer,
-        assets: pick.assets
-      });
+    // extra visibility only
+    let raw1 = '';
+    try { raw1 = await r2.clone().text(); } catch {}
+
+    let j2 = {};
+    try { j2 = await r2.json(); }
+    catch { try { j2 = { error: raw1 || await r2.text() }; } catch {} }
+
+    if (!r2.ok || !j2?.ok){
+      log('nft.claim.first_shape.fail', { status: r2.status, body: (raw1 || '').slice(0, 1200) });
 
       // One-shot fallback: some backends expect 'recipient_pub'
       if (r2.status === 400){
-        try{
-          const r3 = await fetch(claimUrl, {
-            method:'POST',
-            headers:{ 'Content-Type':'application/json' },
-            body: JSON.stringify({
-              recipient_pub: pub,
-              assets: pick.assets,
-              issuer: pick.issuer,
-              as_claimable: true
-            })
-          });
-          const txt3 = await r3.text();
-          let j3; try{ j3 = JSON.parse(txt3); }catch{ j3 = null; }
+        r2 = await fetch(claimUrl, {
+          method:'POST',
+          headers:{'Content-Type':'application/json'},
+          body: JSON.stringify({
+            recipient_pub: pub,
+            assets: pick.assets,
+            issuer: pick.issuer,
+            as_claimable: true
+          })
+        });
 
-          if (!(r3.ok && (j3?.ok))){
-            log('nft.claim.second_shape.fail', {
-              status: r3.status,
-              body: txt3.slice(0, 1200),
-              issuer: pick.issuer,
-              assets: pick.assets
-            });
-            const msg = j3?.error || j3?.message || `HTTP ${r3.status}`;
-            claimMsg.textContent = `❌ NFT claim error: ${msg}`;
-            return;
-          } else {
-            log('nft.claim.ok', { issuer: pick.issuer, n: pick.assets.length, shape: 'recipient_pub' });
-            continue; // to next pick
-          }
-        }catch(e){
-          claimMsg.textContent = '❌ NFT claim fallback failed: ' + String(e?.message || e);
-          log('nft.claim.fallback.exception', { err: String(e?.message || e) });
-          return;
+        // extra visibility only
+        let raw2 = '';
+        try { raw2 = await r2.clone().text(); } catch {}
+
+        try { j2 = await r2.json(); }
+        catch { try { j2 = { error: raw2 || await r2.text() }; } catch {} }
+
+        if (!r2.ok || !j2?.ok){
+          log('nft.claim.second_shape.fail', { status: r2.status, body: (raw2 || '').slice(0, 1200) });
         }
-      } else {
-        const msg = j2?.error || j2?.message || `HTTP ${r2.status}`;
-        claimMsg.textContent = `❌ NFT claim error: ${msg}`;
-        return;
       }
-    } else {
-      log('nft.claim.ok', { issuer: pick.issuer, n: pick.assets.length, shape: 'buyer_pub+to_pub' });
     }
+
+    if (!r2.ok || !j2?.ok){
+      const msg = j2?.error || j2?.message || `HTTP ${r2.status}`;
+      claimMsg.textContent = `❌ NFT claim error: ${msg}`;
+      log('nft.claim.fail', { issuer: pick.issuer, assets: pick.assets, msg });
+      return;
+    }
+
+    log('nft.claim.ok', { issuer: pick.issuer, n: pick.assets.length });
   }
 }
 
 claimMsg.textContent = '✅ Claimed. Refreshing…';
 await listClaimables();
-  }catch(e){
-    claimMsg.textContent = '❌ ' + String(e);
-    log('claim.exception', { err: String(e) });
-  }
+}catch(e){
+  claimMsg.textContent = '❌ ' + String(e);
+  log('claim.exception', { err: String(e) });
+}
 });
 
 // =================== Modal helpers ===================
