@@ -6,26 +6,9 @@
   <title>IZZA Token — Testnet Showcase</title>
   <meta name="description" content="IZZA (test) — token showcase for IZZA PAY / IZZA Game" />
 
-  <!-- ✳️ Expose NFT env vars to JS (minimal, non-invasive) -->
-  <meta name="izzapay:nft_issuer" content="{{ NFT_ISSUER_PUBLIC }}">
-  <meta name="izzapay:nft_distributor" content="{{ NFT_DISTR_PUBLIC }}">
-  <script>
-    // Prefer server-injected values, fall back to meta if templating is missing
-    (function () {
-      try {
-        window.NFT_ISSUER_PUBLIC = "{{ NFT_ISSUER_PUBLIC }}";
-        window.NFT_DISTR_PUBLIC  = "{{ NFT_DISTR_PUBLIC }}";
-      } catch (e) { /* ignore if not templated */ }
-      if (!window.NFT_ISSUER_PUBLIC) {
-        const m = document.querySelector('meta[name="izzapay:nft_issuer"]');
-        if (m) window.NFT_ISSUER_PUBLIC = m.content || '';
-      }
-      if (!window.NFT_DISTR_PUBLIC) {
-        const m = document.querySelector('meta[name="izzapay:nft_distributor"]');
-        if (m) window.NFT_DISTR_PUBLIC = m.content || '';
-      }
-    })();
-  </script>
+  <!-- 🔐 NFT env wiring (issuer + distributor) -->
+  <meta name="nft-issuer" content="{{ NFT_ISSUER_PUBLIC or '' }}">
+  <meta name="nft-distributor" content="{{ NFT_DISTR_PUBLIC or '' }}">
 
   <style>
     :root{
@@ -290,7 +273,7 @@
 #claimTbl tr.group-head.is-nft > td,
 #claimTbl tr.group-row.is-nft   > td {
   background: rgba(72,212,255,.12);
-  border: 1px solid rgba(72,212,255,.45);
+  border: 1 solid rgba(72,212,255,.45);
 }
 
 /* generic pill look */
@@ -438,47 +421,75 @@
     .cb-body .line{ display:flex; justify-content:space-between; align-items:center; }
     .cb-body .line.sub{ font-size:13px; opacity:.9; }
     @media (min-width:760px){ .claim-block{ margin:10px 0; } }
+
     /* === CLAIM MODAL: surgical fixes === */
+    #claimTbl thead { display:none !important; }
+    #claimTbl{ width:100%; table-layout:fixed; }
+    #claimTbl td{ padding:10px 12px; overflow:hidden; text-overflow:ellipsis; }
+    #claimTbl .num{ white-space:nowrap; }
+    .modal-body{ overflow-x:hidden; }
 
-/* 1) remove the column labels row */
-#claimTbl thead { display:none !important; }
-
-/* 2) keep rows inside the card, no right-edge creep */
-#claimTbl{ width:100%; table-layout:fixed; }          /* predictable cell widths */
-#claimTbl td{ padding:10px 12px; overflow:hidden; text-overflow:ellipsis; }
-#claimTbl .num{ white-space:nowrap; }                 /* numbers don’t wrap weirdly */
-.modal-body{ overflow-x:hidden; }                     /* belt-and-suspenders */
-
-/* 3) make the legend's VOTE pill gold (override generic .pill) */
-#claimLegend .pill-vote,
-#claimTbl .pill-vote{
-  background: rgba(255,205,96,.18) !important;
-  border: 1px solid rgba(255,205,96,.65) !important;
-  color: #2a1b00 !important;
-}
-    /* 1) Hide the "Stake • unlock 2025-.." label in each contract header */
-#claimTbl tr.group-head strong{ display:none !important; }
-
-/* 2) Make the VOTE pill text white (legend + rows) */
-#claimLegend .pill-vote,
-#claimTbl .pill-vote{
-  background: rgba(255,205,96,.18) !important;
-  border: 1px solid rgba(255,205,96,.65) !important;
-  color: #fff !important;
-  text-shadow: 0 1px 2px rgba(0,0,0,.45);
-}
+    #claimLegend .pill-vote,
+    #claimTbl .pill-vote{
+      background: rgba(255,205,96,.18) !important;
+      border: 1px solid rgba(255,205,96,.65) !important;
+      color: #2a1b00 !important;
+    }
+    #claimTbl tr.group-head strong{ display:none !important; }
+    #claimLegend .pill-vote,
+    #claimTbl .pill-vote{
+      background: rgba(255,205,96,.18) !important;
+      border: 1px solid rgba(255,205,96,.65) !important;
+      color: #fff !important;
+      text-shadow: 0 1px 2px rgba(0,0,0,.45);
+    }
   </style>
 </head>
 <body>
-  <!-- rest of your markup unchanged ... -->
+  <div class="wrap">
+    <header>
+      <a class="logo" href="{{ APP_BASE_URL or '/' }}" title="Back"
+         onclick="try{history.back();}catch(_){/*fallback*/}">
+        <img src="/static/izzapay-word.svg" alt="IZZA PAY">
+      </a>
+
+      <div class="top-cta" style="grid-column:1 / -1; width:100%; display:flex; gap:8px; justify-content:center; flex-wrap:wrap">
+        <button id="roadmapBtn" class="cta" type="button" aria-haspopup="dialog" aria-controls="roadmapModal">
+          <img src="/static/izzapay-mark.svg" alt="" aria-hidden="true">
+          View Mainnet Roadmap
+        </button>
+
+        <button id="walletBtn" class="cta" type="button" aria-haspopup="dialog" aria-controls="myWalletModal">
+          💼 IZZA Wallet
+        </button>
+      </div>
+
+      <div>
+        <h1>IZZA — Test Token Showcase</h1>
+        <p class="lead">Issuer, distributor, balances and activity on Pi Testnet.</p>
+      </div>
+      <div class="spacer"></div>
+    </header>
+
+    <!-- … everything else unchanged … -->
 
 <!-- Pi Platform SDK -->
 <script src="https://sdk.minepi.com/pi-sdk.js" defer></script>
-  <!-- libs (from CDN) -->
-  <!-- better: Chart first, then adapter -->
+<!-- libs (from CDN) -->
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/chartjs-adapter-date-fns@3"></script>
-  <script src="https://cdnjs.cloudflare.com/ajax/libs/stellar-sdk/10.5.1/stellar-sdk.min.js" integrity="sha512-+uYc8WQvG8c+0pT1+QqJp5gR1+N1iFj3F1p7Xw8eNsQqA+8k0vP9a6NqEgbjG7e0oZ2FQg3e3sH4q1P5gFKM0A==" crossorigin="anonymous" referrerpolicy="no-referrer"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/stellar-sdk/10.5.1/stellar-sdk.min.js" integrity="sha512-+uYc8WQvG8c+0pT1+QqJp5gR1+N1iFj3F1p7Xw8eNsQqA+8k0vP9a6NqEgbjG7e0oZ2FQg3e3sH4q1P5gFKM0A==" crossorigin="anonymous" referrerpolicy="no-referrer"></script>
+
+<!-- 🔐 Hydrate env into globals for claim code (read-only) -->
+<script>
+(function(){
+  const issuer = (document.querySelector('meta[name="nft-issuer"]')?.content || '').trim();
+  const distr  = (document.querySelector('meta[name="nft-distributor"]')?.content || '').trim();
+  // Expose as globals your claim code can consume
+  window.NFT_ISSUER_PUBLIC = issuer;
+  window.NFT_DISTR_PUBLIC  = distr;
+})();
+</script>
 
 <script>
 (() => {
