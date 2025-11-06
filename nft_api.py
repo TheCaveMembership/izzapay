@@ -1,5 +1,5 @@
 # nft_api.py
-import os, json, re, math, requests, logging, time, sqlite3
+import os, json, re, requests, logging, time, sqlite3
 from decimal import Decimal, ROUND_DOWN
 from flask import Blueprint, request, jsonify, abort, session
 from stellar_sdk import (
@@ -146,9 +146,7 @@ def _base_fee() -> int:
     except Exception:
         return 500
 
-def _native_balance(g: str) -> str:
-    j = _account_json(g)
-    return _balance_native_from_json(j)
+def _load(g): return server.load_account(g)
 
 # ---------- pricing ----------
 PRICE_SINGLE = Decimal("0.1")
@@ -160,8 +158,6 @@ def per_unit(n:int)->Decimal:
     return p
 
 # ---------- utils ----------
-def _dec(n): return Decimal(str(n))
-def _load(g): return server.load_account(g)
 def _sanitize(s: str) -> str: return re.sub(r"[^A-Z0-9]", "", (s or "").upper())
 def _mint_code_single(prefix="NFT", suffix=""): return (f"{_sanitize(prefix)}{_sanitize(suffix)}"[:12] or "NFTX")
 def _mint_code_collection(prefix="NFT", tag="", idx=1):
@@ -179,14 +175,13 @@ def _change_trust(secret: str, asset: Asset, limit="1"):
           .set_timeout(180).build())
     tx.sign(kp)
     try:
-        res = server.submit_transaction(tx)
-        return res
+        return server.submit_transaction(tx)
     except sx.BadResponseError as e:
-        msg = str(e)
-        if "op_low_reserve" in msg.lower():
-            raise
+        # ignore if already trusted (common), only bubble low reserve
+        msg = (getattr(e, "message", "") or str(e) or "").lower()
+        if "op_low_reserve" in msg: raise
         return {"ok": True}
-    except Exception as e:
+    except Exception:
         raise
 
 def _pay_asset(secret_from: str, to_g: str, amount: str, asset: Asset, memo=None):
@@ -212,26 +207,28 @@ def _account_has_trustline(pub_g: str, asset: Asset) -> bool:
             return True
     return False
 
-# ---------- lookups ----------
-def _active_wallet_pub_for_username(username: str | None) -> str | None:
-    if not username: return None
+# ---------- DB helpers ----------
+def _ensure_collection_row(code: str, issuer: str, total_supply: int = 1, decimals: int = 0):
+    """
+    Ensure nft_collections row exists and satisfies NOT NULL constraints.
+    """
+    now = _now_i()
     with _db() as cx:
-        r = cx.execute("SELECT pub FROM user_wallets WHERE username=?", (username,)).fetchone()
-        return r["pub"] if r and r["pub"] else None
+        cx.execute("""
+          INSERT INTO nft_collections(code, issuer, total_supply, decimals, status, created_at, updated_at)
+          VALUES(?, ?, ?, ?, 'draft', ?, ?)
+          ON CONFLICT(code, issuer) DO UPDATE SET
+            updated_at=excluded.updated_at
+        """, (code, issuer, int(total_supply), int(decimals), now, now))
+        cx.commit()
 
 def _upsert_collection_and_assign(code: str, issuer: str, owner_pub: str) -> None:
     """
-    Match your schema: nft_collections has UNIQUE(code, issuer).
-    nft_tokens has UNIQUE(collection_id, serial).
+    Match schema: nft_collections UNIQUE(code, issuer) with NOT NULL total_supply/decimals.
+    nft_tokens UNIQUE(collection_id, serial).
     """
+    _ensure_collection_row(code, issuer, total_supply=1, decimals=0)
     with _db() as cx:
-        # Ensure collection row
-        cx.execute("""
-          INSERT INTO nft_collections(code, issuer, created_at)
-          VALUES(?, ?, ?)
-          ON CONFLICT(code, issuer) DO NOTHING
-        """, (code, issuer, _now_i()))
-
         row = cx.execute(
             "SELECT id FROM nft_collections WHERE code=? AND issuer=?",
             (code, issuer)
@@ -272,13 +269,12 @@ def _ensure_distributor_holds_one(asset: Asset):
     try:
         server.submit_transaction(tx)
     except sx.BadResponseError as e:
-        body = getattr(e, "response", None)
         text = ""
         try:
-            text = body.text  # type: ignore[attr-defined]
+            text = e.response.text  # type: ignore[attr-defined]
         except Exception:
             text = str(e)
-        if "op_line_full" in text or "op_line_full" in str(e):
+        if "op_line_full" in text:
             return
         raise
     except Exception:
@@ -386,7 +382,7 @@ def mint():
 
     izza = Asset(IZZA_CODE, IZZA_ISS)
 
-    # Trustline for IZZA on distributor
+    # Trustline for IZZA on distributor (fee receiver)
     try:
         _change_trust(DISTR_S, izza, limit="100000000")
     except Exception as e:
@@ -398,7 +394,7 @@ def mint():
     except Exception as e:
         abort(400, f"fee_payment_failed: {e}")
 
-    # mint 1 unit for each code to distributor
+    # mint 1 unit for each code to distributor, and ensure DB rows exist
     iss_kp = Keypair.from_secret(ISSUER_S)
     minted = []
     for i in range(size):
@@ -407,7 +403,12 @@ def mint():
         try:
             _ensure_distributor_holds_one(asset)
         except Exception as e:
-            abort(400, f"mint_trust_failed: {code}: {e}")
+            abort(400, f"mint_trust_failed:{code}:{e}")
+        # ensure collection row now to satisfy future assigns
+        try:
+            _ensure_collection_row(code, iss_kp.public_key, total_supply=1, decimals=0)
+        except Exception as e:
+            log.warning("NFT_DB_COLLECTION_UPSERT_FAIL code=%s err=%s", code, e)
         minted.append(code)
 
     return jsonify({"ok": True, "assets": minted, "size": size, "total_fee": str(total)})
@@ -434,6 +435,8 @@ def claim():
     if not _isG(buyer): abort(400, "buyer_pub_invalid")
 
     delivered = 0
+    delivered_codes = []
+
     for code in assets:
         asset = Asset(code, issuer_g)
 
@@ -445,23 +448,47 @@ def claim():
         # On-chain delivery
         _pay_asset(DISTR_S, buyer, "1", asset, memo="IZZA NFT")
         delivered += 1
+        delivered_codes.append(code)
 
-        # Record ownership
+        # Record ownership (ensure collection row, then token)
         try:
             _upsert_collection_and_assign(code=code, issuer=issuer_g, owner_pub=buyer)
         except Exception as e:
             # do not fail claim if DB write has a constraint race
             log.warning("NFT_DB_ASSIGN_FAIL code=%s err=%s", code, e)
 
-    if pending_id:
-        try:
-            with _db() as cx:
+    # Mark pending claims as claimed
+    try:
+        with _db() as cx:
+            changed = 0
+            now = _now_i()
+            if pending_id:
                 cx.execute(
                     "UPDATE nft_pending_claims SET status='claimed', claimed_at=? WHERE id=?",
-                    (_now_i(), int(pending_id))
+                    (now, int(pending_id))
                 )
-                cx.commit()
-        except Exception as e:
-            log.warning("NFT_PENDING_MARK_FAIL id=%s err=%s", pending_id, e)
+                changed = cx.total_changes
+            else:
+                # Fallback: mark any pending rows for this buyer that contain any of the delivered asset codes
+                for code in delivered_codes:
+                    cx.execute("""
+                        UPDATE nft_pending_claims
+                        SET status='claimed', claimed_at=?
+                        WHERE status='pending'
+                          AND buyer_pub=?
+                          AND (assets_json LIKE ? OR assets_json LIKE ? OR assets_json LIKE ?)
+                    """, (
+                        now,
+                        buyer,
+                        f'%"{code}"%',   # appears in array
+                        f'%:{code}%',    # just-in-case formats
+                        f'%{code}%'
+                    ))
+                    changed += cx.total_changes
+            cx.commit()
+            if changed:
+                log.info("NFT_PENDING_MARKED_CLAIMED buyer=%s changed=%s", _mask(buyer), changed)
+    except Exception as e:
+        log.warning("NFT_PENDING_MARK_FAIL buyer=%s err=%s", _mask(buyer), e)
 
-    return jsonify({"ok": True, "delivered": delivered, "buyer_pub": buyer})
+    return jsonify({"ok": True, "delivered": delivered, "buyer_pub": buyer, "assets": delivered_codes})
