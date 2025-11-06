@@ -1112,7 +1112,7 @@
 
 <script>
 (() => {
-  // =================== Config from Jinja / server ===================
+  <!-- =================== Config from Jinja / server =================== -->
 const ASSET_CODE  = "{{ ASSET_CODE }}";
 const ISSUER      = "{{ ISSUER }}";
 const DISTRIBUTOR = "{{ DISTRIBUTOR }}";
@@ -1972,6 +1972,161 @@ function renderNftGroupsIntoClaimTable(nftRows){
     log('claimables.fail', { err: String(e) });
   }
 }
+
+/* ================= LIST CLAIMABLES (staking + nft) — ADDED ================= */
+async function listClaimables(){
+  const pub = (claimPub.value || '').trim();
+  if (!pub.startsWith('G')){
+    claimMsg.textContent = 'Enter a valid G… public key.';
+    return;
+  }
+  claimMsg.textContent = 'Loading…';
+  claimTblBody.innerHTML = '';
+  claimSelected.disabled = true;
+
+  try{
+    const uname = (window.USER && USER.username) ? USER.username : (new URLSearchParams(location.search).get('u') || '');
+    const url = `/api/stake/claimables?pub=${encodeURIComponent(pub)}${uname ? `&u=${encodeURIComponent(uname)}` : ''}`;
+    const r = await fetch(url, { cache:'no-store' });
+    const j = await r.json().catch(()=> ({}));
+    if (!r.ok) throw new Error(j?.error || `fetch failed (${r.status})`);
+
+    const rows = Array.isArray(j.claimables) ? j.claimables
+                : Array.isArray(j.records)    ? j.records
+                : Array.isArray(j.rows)       ? j.rows
+                : [];
+    if (!rows.length){
+      claimTblBody.innerHTML = `<tr><td colspan="4" class="help" style="padding:8px">No claimable balances.</td></tr>`;
+      claimMsg.textContent = '';
+      updateClaimSelectedState();
+      log('claimables.none');
+      return;
+    }
+
+    // Partition into stake vs nft
+    const stakeRows = [], nftRows = [];
+    for (const row of rows){
+      const k = String(row.kind || '').toLowerCase();
+      if (k === 'nft') nftRows.push(row); else stakeRows.push(row);
+    }
+
+    // Group staking rows by contract/group (unlock+kind fallback)
+    const groups = {};
+    for (const r of stakeRows){
+      const unlockTs = Number(r.unlock_ts || r.unlock_unix || 0);
+      const kindStr  = (r.kind || r.bucket || r.pool || '').toString().toLowerCase().includes('vote') ? 'vote' : 'regular';
+      const gid =
+        r.contract_id || r.stake_id || r.group_id || r.parent_id || r.batch_id ||
+        [
+          unlockTs || 0,
+          kindStr,
+          (r.tx || r.tx_hash || r.created_at || r.id || '').toString().slice(-10)
+        ].join('|');
+
+      (groups[gid] ||= []).push({ ...r, __unlockTs: unlockTs, __kind: kindStr });
+    }
+
+    // Render in unlock order
+    const ordered = Object.entries(groups).sort((a,b)=>{
+      const au = a[1][0].__unlockTs || Number.MAX_SAFE_INTEGER;
+      const bu = b[1][0].__unlockTs || Number.MAX_SAFE_INTEGER;
+      return au - bu;
+    });
+
+    const PROPOSAL_NAMES = { rooftop_rumble: 'Rooftop Rumble', pizza_panic: 'Pizza Panic' };
+    const prettyProposal = id => PROPOSAL_NAMES[id] || id || 'Vote';
+
+    for (const [, recs] of ordered){
+      const any       = recs[0];
+      const unlockTs  = any.__unlockTs || 0;
+      const unlockStr = unlockTs ? new Date(unlockTs*1000).toISOString().slice(0,10) : '—';
+      const kind      = any.__kind === 'vote' ? 'vote' : 'regular';
+      const pillClass = kind === 'vote' ? 'pill-vote' : 'pill-regular';
+      const unlocked  = unlockTs ? (Date.now() >= unlockTs*1000) : true;
+
+      // Collect ids + sum principal/reward
+      const ids = [];
+      let principal = 0, reward = 0;
+      for (const r of recs){
+        if (Array.isArray(r.ids) && r.ids.length){
+          ids.push(...r.ids.map(x => String(x).trim()));
+        } else {
+          const id =
+            r.id || r.claimable_balance_id || r.balance_id || r.cb_id ||
+            (r.balance && r.balance.id) || null;
+          if (id) ids.push(String(id).trim());
+        }
+        const role = (r.role || r.kind || '').toString().toLowerCase();
+        if (role.includes('reward')) reward += Number(r.amount || 0);
+        else                          principal += Number(r.amount || 0);
+      }
+      const csv = ids.map(x => x.trim()).filter(Boolean).join(',');
+      const voteLabel = (kind === 'vote' && any?.proposal)
+        ? `VOTE • ${prettyProposal(any.proposal)}`
+        : (kind === 'vote' ? 'VOTE' : 'NORMAL');
+
+      // Head row
+      const trHead = document.createElement('tr');
+      trHead.className = `group-head is-${kind}` + (unlocked ? '' : ' locked');
+      trHead.innerHTML = `
+        <td colspan="4">
+          <label class="group-toggle" style="display:flex;align-items:center;gap:10px;white-space:nowrap;">
+            <input
+              type="checkbox"
+              class="cbPick"
+              value="${csv}"
+              data-kind="stake"
+              data-balance-ids="${csv}"
+              ${unlocked ? '' : 'disabled'}>
+            <span class="pill ${pillClass}">${voteLabel}</span>
+            <strong>Stake • unlock ${unlockStr}</strong>
+          </label>
+        </td>`;
+      claimTblBody.appendChild(trHead);
+
+      // Body row
+      const trBody = document.createElement('tr');
+      trBody.className = `group-row is-${kind}` + (unlocked ? '' : ' locked');
+
+      const estPct = (kind === 'vote') ? Number(any?.vote_est_share_pct) : null;
+      const rewardHTML = (kind === 'vote')
+        ? `<div class="line" style="display:flex;justify-content:space-between;align-items:center;white-space:nowrap;">
+             <span class="pill pill-vote" aria-hidden="true">EST. SHARE</span>
+             <span class="num">${isFinite(estPct) ? estPct.toFixed(2) : '0.00'}%</span>
+           </div>`
+        : (reward > 0
+           ? `<div class="line" style="display:flex;justify-content:space-between;align-items:center;">
+                <span class="pill pill-reward" aria-hidden="true">REWARD</span>
+                <span class="num">${fmtNum(reward)}</span>
+              </div>`
+           : '');
+
+      trBody.innerHTML = `
+        <td colspan="4">
+          <div class="block" style="display:flex;flex-direction:column;gap:8px;">
+            <div class="line" style="display:flex;justify-content:space-between;align-items:center;white-space:nowrap;">
+              <span class="pill ${pillClass}" aria-hidden="true">PRINCIPAL</span>
+              <span class="num">${fmtNum(principal)}</span>
+            </div>
+            ${rewardHTML}
+            ${unlocked ? '' : `<span class="lockhint">Locked until ${unlockStr}</span>`}
+          </div>
+        </td>`;
+      claimTblBody.appendChild(trBody);
+    }
+
+    // NFTs
+    renderNftGroupsIntoClaimTable(nftRows);
+
+    claimMsg.textContent = '';
+    updateClaimSelectedState();
+    log('claimables.rendered', { n_groups: ordered.length, n_nft_groups: nftRows.length });
+  }catch(e){
+    claimMsg.textContent = '❌ ' + String(e);
+    log('claimables.fail', { err: String(e) });
+  }
+}
+/* ================= END listClaimables() ================= */
 
 // Manual refresh
 claimRefresh?.addEventListener('click', ()=>{
