@@ -1975,30 +1975,87 @@ voteStartBtn?.addEventListener('click', async ()=>{
 });
 
 // ======== LIST CLAIMABLES (grouped: one toggle, principal+reward in one box) ========
+
+// ---------- shared helpers (scope: top-level so both UI and claim click can use) ----------
+async function _loadBalancesFor(pub){
+  const ok = await ensureStellar().catch(()=>false);
+  const HZ = (window.HORIZON_URL || 'https://api.testnet.minepi.com');
+  if (ok && window.StellarSdk){
+    const server  = getServer();
+    const account = await server.loadAccount(pub);
+    return account?.balances || [];
+  }
+  const r = await fetch(`${HZ}/accounts/${encodeURIComponent(pub)}`);
+  const j = await r.json();
+  if (!r.ok || !j?.account_id) throw new Error('Could not load account via Horizon');
+  return j.balances || [];
+}
+function _haveTrust(balances, code, issuer){
+  try { return hasTrustFor(balances, code, issuer); } catch {}
+  return !!(balances||[]).find(b => b?.asset_code===code && b?.asset_issuer===issuer);
+}
+
+// Add one or more trustlines for this pub; uses local secret if present, else SEP-7
+async function addTrustlinesIfNeeded(pub, pairs){
+  if (!pairs?.length) return { added:false };
+
+  const balances = await _loadBalancesFor(pub);
+  const missing = [];
+  for (const p of pairs){
+    if (!p.code || !p.issuer) continue;
+    if (!_haveTrust(balances, p.code, p.issuer)){
+      missing.push({ code:p.code, issuer:p.issuer });
+    }
+  }
+  if (!missing.length) return { added:false };
+
+  const PASS = (window.NETWORK_PASSPHRASE || 'Pi Testnet');
+  const localSec = getLocalSecret(pub, USER?.username);
+  if (localSec){
+    const ok = await ensureStellar().catch(()=>false);
+    if (!(ok && window.StellarSdk)) throw new Error('Stellar SDK unavailable for trustline add');
+    const SDK    = window.StellarSdk;
+    const server = getServer();
+    const account = await server.loadAccount(pub);
+    const fee = (await server.fetchBaseFee()).toString();
+
+    let txb = new SDK.TransactionBuilder(account, { fee, networkPassphrase: PASS });
+    for (const a of missing){
+      txb = txb.addOperation(SDK.Operation.changeTrust({ asset: new SDK.Asset(a.code, a.issuer) }));
+    }
+    const tx = txb.setTimeout(180).build();
+    tx.sign(SDK.Keypair.fromSecret(localSec));
+    const resp = await server.submitTransaction(tx);
+    log('nft.trust.submit', { via: 'sdk', hash: resp?.hash, n: missing.length });
+
+    const okWait = await waitForTrust(pub, missing, { maxMs: 20000, stepMs: 700 }).catch(()=>false);
+    if (!okWait){
+      throw new Error('trustline propagation delay');
+    }
+    return { added:true };
+  } else {
+    const uri = await buildChangeTrustMultiSEP7(pub, missing);
+    if (!uri) throw new Error('Could not build SEP-7 URI for trustlines');
+    log('nft.trust.sep7.open', { n: missing.length });
+    claimMsg.innerHTML = 'Opening your wallet to add NFT trustlines…<br>' +
+      '<small>If nothing happens, tap this link:</small> ' +
+      `<a href="${uri}" style="word-break:break-all">Open in wallet</a>` +
+      '<br><small>After approval, come back and press <b>Claim</b> again.</small>';
+    window.location.assign(uri);
+    throw new Error('sep7 in flight');
+  }
+}
+
+// Direct single-row helper used by the per-NFT button
+async function ensureNftTrust(pub, issuer, codes){
+  return addTrustlinesIfNeeded(pub, codes.map(code => ({ code, issuer })));
+}
+
 async function listClaimables(){
   const pub = (claimPub.value||'').trim();
   if (!pub.startsWith('G')){ claimMsg.textContent='Enter a valid G… public key.'; return; }
   claimMsg.textContent = 'Loading…';
   claimTblBody.innerHTML = '';
-
-  // local helpers used for NFT trust precheck
-  async function loadBalancesViaServer(){
-    const ok = await ensureStellar().catch(()=>false);
-    const HZ   = (window.HORIZON_URL || 'https://api.testnet.minepi.com');
-    if (ok && window.StellarSdk){
-      const server  = getServer();
-      const account = await server.loadAccount(pub);
-      return account?.balances || [];
-    }
-    const r = await fetch(`${HZ}/accounts/${encodeURIComponent(pub)}`);
-    const j = await r.json();
-    if (!r.ok || !j?.account_id) throw new Error('Could not load account via Horizon');
-    return j.balances || [];
-  }
-  function haveTrust(balances, code, issuer){
-    try { return hasTrustFor(balances, code, issuer); } catch {}
-    return !!(balances||[]).find(b => b?.asset_code===code && b?.asset_issuer===issuer);
-  }
 
   try{
     const uname = (window.USER && USER.username) ? USER.username : (new URLSearchParams(location.search).get('u') || '');
@@ -2018,11 +2075,11 @@ async function listClaimables(){
       return;
     }
 
-    // prefetch balances once for NFT trust display
+    // Preload balances once so NFT trust state renders correctly
     let acctBalances = [];
-    try { acctBalances = await loadBalancesViaServer(); } catch {}
+    try { acctBalances = await _loadBalancesFor(pub); } catch {}
 
-    // split staking vs NFTs
+    // NEW: split staking vs NFTs
     const stakeRows = [];
     const nftRows   = [];
     for (const row of rows){
@@ -2030,7 +2087,7 @@ async function listClaimables(){
       if (k === 'nft') nftRows.push(row); else stakeRows.push(row);
     }
 
-    // ================= STAKING (unchanged) =================
+    // ================= STAKING (unchanged: normal + vote) =================
     const groups = {};
     for (const r of stakeRows){
       const unlockTs = Number(r.unlock_ts || r.unlock_unix || 0);
@@ -2138,14 +2195,13 @@ async function listClaimables(){
       claimTblBody.appendChild(trBlock);
     }
 
-    // ================= NFTs (canonical issuer per row) =================
-    // Show by issuer header, then one row per asset with checkbox + trust button
+    // ================= NFTs (by row, correct issuer from API) =================
     for (const r of nftRows){
-      const issuer = String(r.issuer || '').trim();      // canonical from API
+      const issuer = String(r.issuer || '').trim();
       const assets = Array.isArray(r.assets) ? r.assets.map(a => String(a).trim()).filter(Boolean) : [];
       if (!issuer || !assets.length) continue;
 
-      // issuer header
+      // header pill per issuer
       const head = document.createElement('tr');
       head.className = 'group-head is-nft';
       head.innerHTML = `
@@ -2157,9 +2213,8 @@ async function listClaimables(){
         </td>`;
       claimTblBody.appendChild(head);
 
-      // assets
       for (const code of assets){
-        const trusted = haveTrust(acctBalances, code, issuer);
+        const trusted = _haveTrust(acctBalances, code, issuer);
         const row = document.createElement('tr');
         row.className = `group-row is-nft${trusted ? '' : ' locked'}`;
         row.innerHTML = `
@@ -2186,7 +2241,6 @@ async function listClaimables(){
         claimTblBody.appendChild(row);
       }
 
-      // small hint line
       const hint = document.createElement('tr');
       hint.className = 'group-row is-nft';
       hint.innerHTML = `
@@ -2196,6 +2250,7 @@ async function listClaimables(){
       claimTblBody.appendChild(hint);
     }
 
+    // enable batch-claim button only if something selectable exists
     const anyConcrete = !!document.querySelector('.cbPick, .cbPickNft');
     claimSelected.disabled = !anyConcrete;
     claimMsg.textContent = '';
@@ -2211,38 +2266,7 @@ claimRefresh?.addEventListener('click', ()=>{
   listClaimables();
 });
 
-// ---------- NFT trust helpers (local to this section) ----------
-async function ensureNftTrust(pub, issuer, codes){
-  await ensureStellar();
-  const SDK    = window.StellarSdk;
-  const server = getServer();
-
-  const acct   = await server.loadAccount(pub);
-  const existing = new Set(
-    (acct.balances || [])
-      .filter(b => b.asset_type !== 'native')
-      .map(b => `${b.asset_code}:${b.asset_issuer}`)
-  );
-  const todo = codes.filter(c => !existing.has(`${c}:${issuer}`));
-  if (!todo.length) return { ok:true, created:0 };
-
-  let fee = (await server.fetchBaseFee()).toString();
-  let txb = new SDK.TransactionBuilder(acct, { fee, networkPassphrase: NETWORK_PASSPHRASE });
-  for (const code of todo){
-    txb = txb.addOperation(SDK.Operation.changeTrust({ asset: new SDK.Asset(code, issuer) }));
-  }
-  const tx = txb.setTimeout(180).build();
-  const sec = getLocalSecret(pub, USER?.username);
-  if (!sec) throw new Error('No local secret for direct signing');
-  tx.sign(SDK.Keypair.fromSecret(sec));
-  const resp = await server.submitTransaction(tx);
-  log('nft.trust.direct.ok', { created: todo.length, hash: resp?.hash || 'no-hash' });
-
-  await waitForTrust(pub, todo.map(code => ({code, issuer})), { maxMs: 20000, stepMs: 700 });
-  return { ok:true, created: todo.length };
-}
-
-// one-time delegated handler for the per-asset trustline buttons
+// ---------- one-time delegated handler for the per-asset trustline buttons ----------
 if (!window.__izzaTrustBtnBound){
   window.__izzaTrustBtnBound = true;
   claimTblBody.addEventListener('click', async (e)=>{
@@ -2266,21 +2290,9 @@ if (!window.__izzaTrustBtnBound){
 
       // refresh balances and flip UI
       let fresh = [];
-      try{
-        const ok = await ensureStellar().catch(()=>false);
-        const HZ = (window.HORIZON_URL || 'https://api.testnet.minepi.com');
-        if (ok && window.StellarSdk){
-          const server  = getServer();
-          const account = await server.loadAccount(pub);
-          fresh = account?.balances || [];
-        }else{
-          const r = await fetch(`${HZ}/accounts/${encodeURIComponent(pub)}`);
-          const j = await r.json();
-          if (r.ok && j?.account_id) fresh = j.balances || [];
-        }
-      }catch{}
-
+      try { fresh = await _loadBalancesFor(pub); } catch {}
       const trusted = !!(fresh||[]).find(b => b.asset_code===code && b.asset_issuer===issuer);
+
       if (trusted){
         row?.classList.remove('locked');
         if (chk)   chk.disabled = false;
@@ -2302,17 +2314,17 @@ claimSelected?.addEventListener('click', async ()=>{
   const pub = (claimPub.value||'').trim();
   if (!pub.startsWith('G')) { claimMsg.textContent = 'Enter a valid G… public key.'; return; }
 
+  // Prevent double clicks
   claimSelected.disabled = true;
 
-  // staking selections
+  // Expand group selections like "id1,id2" into individual ids (staking)
   const rawPicks = Array.from(document.querySelectorAll('.cbPick:checked'))
     .map(x => (x.dataset.balanceIds || x.value || '').trim());
   const picks = rawPicks.flatMap(v => v.split(',')).map(s => s.trim()).filter(Boolean);
 
-  // NFT selections → group by issuer
-  const nftPickEls = Array.from(document.querySelectorAll('.cbPickNft:checked'));
+  // Collect NFT selections (group by issuer)
   const byIssuer = new Map();
-  for (const el of nftPickEls){
+  for (const el of Array.from(document.querySelectorAll('.cbPickNft:checked'))){
     const issuer = (el.dataset.issuer || '').trim();
     const code   = (el.dataset.code || '').trim();
     if (!issuer || !code) continue;
@@ -2320,8 +2332,7 @@ claimSelected?.addEventListener('click', async ()=>{
     byIssuer.get(issuer).add(code);
   }
   const nftPicks = Array.from(byIssuer.entries()).map(([issuer, set]) => ({
-    issuer,
-    assets: Array.from(set)
+    issuer, assets: Array.from(set)
   }));
 
   if (!picks.length && !nftPicks.length){
@@ -2343,70 +2354,6 @@ claimSelected?.addEventListener('click', async ()=>{
     return null;
   }
   function uniq(arr){ return Array.from(new Set(arr)); }
-
-  async function loadBalancesViaServer(){
-    const ok = await ensureStellar().catch(()=>false);
-    if (ok && window.StellarSdk){
-      const server  = getServer();
-      const account = await server.loadAccount(pub);
-      return account?.balances || [];
-    }
-    const r = await fetch(`${HZ}/accounts/${encodeURIComponent(pub)}`);
-    const j = await r.json();
-    if (!r.ok || !j?.account_id) throw new Error('Could not load account via Horizon');
-    return j.balances || [];
-  }
-  function haveTrust(balances, code, issuer){
-    try { return hasTrustFor(balances, code, issuer); } catch {}
-    return !!(balances||[]).find(b => b?.asset_code===code && b?.asset_issuer===issuer);
-  }
-
-  async function addTrustlinesIfNeeded(pairs){
-    if (!pairs.length) return { added:false };
-    const balances = await loadBalancesViaServer();
-    const missing = [];
-    for (const p of pairs){
-      if (!haveTrust(balances, p.code, p.issuer)){
-        missing.push({ code:p.code, issuer:p.issuer });
-      }
-    }
-    if (!missing.length) return { added:false };
-
-    const localSec = getLocalSecret(pub, USER?.username);
-    if (localSec){
-      const ok = await ensureStellar().catch(()=>false);
-      if (!(ok && window.StellarSdk)) throw new Error('Stellar SDK unavailable for trustline add');
-      const SDK    = window.StellarSdk;
-      const server = getServer();
-      const account = await server.loadAccount(pub);
-      const fee = (await server.fetchBaseFee()).toString();
-      let txb = new SDK.TransactionBuilder(account, { fee, networkPassphrase: PASS });
-      for (const a of missing){
-        txb = txb.addOperation(SDK.Operation.changeTrust({ asset: new SDK.Asset(a.code, a.issuer) }));
-      }
-      const tx = txb.setTimeout(180).build();
-      tx.sign(SDK.Keypair.fromSecret(localSec));
-      const resp = await server.submitTransaction(tx);
-      log('nft.trust.submit', { via: 'sdk', hash: resp?.hash, n: missing.length });
-
-      const okWait = await waitForTrust(pub, missing, { maxMs: 20000, stepMs: 700 }).catch(()=>false);
-      if (!okWait){
-        claimMsg.textContent = '⏳ Added trustlines. Tap Claim again in a few seconds.';
-        throw new Error('trustline propagation delay');
-      }
-      return { added:true };
-    } else {
-      const uri = await buildChangeTrustMultiSEP7(pub, missing);
-      if (!uri) throw new Error('Could not build SEP-7 URI for trustlines');
-      log('nft.trust.sep7.open', { n: missing.length });
-      claimMsg.innerHTML = 'Opening your wallet to add NFT trustlines…<br>' +
-        '<small>If nothing happens, tap this link:</small> ' +
-        `<a href="${uri}" style="word-break:break-all">Open in wallet</a>` +
-        '<br><small>After approval, come back and press <b>Claim</b> again.</small>';
-      window.location.assign(uri);
-      throw new Error('sep7 in flight');
-    }
-  }
 
   async function submitStakeClaimIfAny(ids){
     const normalized = uniq(ids.map(normalizeBalanceId).filter(Boolean));
@@ -2461,17 +2408,18 @@ claimSelected?.addEventListener('click', async ()=>{
       buyer_pub: pub,
       to_pub: pub,
       assets: group.assets,
-      issuer: group.issuer,      // server ignores override, here for clarity
+      issuer: group.issuer,   // server ignores override; correct issuer is already enforced in API
       as_claimable: true
     };
     const r   = await fetch(claimUrl, { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(body) });
     const txt = await r.text().catch(()=> '');
     let j = {}; try { j = JSON.parse(txt); } catch { j = { ok:false, error: txt }; }
 
+    // If still missing trustline, add just that code then retry once
     const missMatch = /buyer_missing_trustline:([A-Z0-9]{1,12})/i.exec(txt||'');
     if ((!r.ok || !j?.ok) && missMatch){
       const code = missMatch[1];
-      await addTrustlinesIfNeeded([{ code, issuer: group.issuer }]);
+      await addTrustlinesIfNeeded(pub, [{ code, issuer: group.issuer }]);
       const r2   = await fetch(claimUrl, { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(body) });
       const txt2 = await r2.text().catch(()=> '');
       let j2 = {}; try { j2 = JSON.parse(txt2); } catch { j2 = { ok:false, error: txt2 }; }
@@ -2489,7 +2437,7 @@ claimSelected?.addEventListener('click', async ()=>{
     return true;
   }
 
-  // status
+  // Status line
   const ops = [];
   if (picks.length)     ops.push(`claimables:${picks.length}`);
   if (nftPicks.length)  ops.push(`nft_groups:${nftPicks.length}`);
@@ -2500,12 +2448,16 @@ claimSelected?.addEventListener('click', async ()=>{
     if (picks.length){
       await submitStakeClaimIfAny(picks);
     }
+
     if (nftPicks.length){
+      // Preflight all selected NFT trustlines (may SEP-7 and early-exit)
       const needAll = [];
       for (const g of nftPicks){
         for (const code of g.assets){ needAll.push({ code, issuer: g.issuer }); }
       }
-      await addTrustlinesIfNeeded(needAll);
+      await addTrustlinesIfNeeded(pub, needAll);
+
+      // Per-issuer claim calls
       for (const g of nftPicks){
         await submitNftClaimOnce(g);
         log('nft.claim.ok', { issuer: g.issuer, n: g.assets.length });
