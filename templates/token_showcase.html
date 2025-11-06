@@ -1602,7 +1602,8 @@ bootstrapAuthUI();
   };
 })();
 
-// =================== Modal wiring (only one open at a time) ===================
+// =================== Modal wiring (only one open at a time) =================== //
+// Core refs
 const roadmapBtn    = document.getElementById('roadmapBtn');
 const badgeOpen     = document.getElementById('badgeOpen');
 const modal         = document.getElementById('roadmapModal');
@@ -1614,14 +1615,15 @@ const myWalletModal     = document.getElementById('myWalletModal');
 const closeMyWalletBtn  = document.getElementById('closeMyWalletBtn');
 const orderBtn          = document.getElementById('orderBtn');
 const closePlaceOrderBtn= document.getElementById('closePlaceOrderBtn');
-const backdrop      = document.getElementById('modalBackdrop');
+const backdrop          = document.getElementById('modalBackdrop');
 
 const closeModalBtn = document.getElementById('closeModalBtn');
 let lastFocus = null;
 
-// My Wallet modal, Actions
+// My Wallet modal
 const revealOnceBtn = document.getElementById('revealOnceBtn');
 const secretOnce    = document.getElementById('secretOnce');
+
 // NFTs modal
 const openMyNftsBtn  = document.getElementById('openMyNftsBtn');
 const myNftsModal    = document.getElementById('myNftsModal');
@@ -1635,9 +1637,9 @@ const stakeModal    = document.getElementById('stakeModal');
 const claimModal    = document.getElementById('claimModal');
 const closeStakeBtn = document.getElementById('closeStakeBtn');
 const closeClaimBtn = document.getElementById('closeClaimBtn');
-const openStakeBtn  = document.getElementById('openStakeBtn');   // optional internal button
-const openClaimBtn  = document.getElementById('openClaimBtn');   // optional internal button
-const stakeQuickBtn = document.getElementById('stakeQuickBtn');  // your top-cta buttons
+const openStakeBtn  = document.getElementById('openStakeBtn');
+const openClaimBtn  = document.getElementById('openClaimBtn');
+const stakeQuickBtn = document.getElementById('stakeQuickBtn');
 const claimQuickBtn = document.getElementById('claimQuickBtn');
 
 const stakePub     = document.getElementById('stakePub');
@@ -1646,7 +1648,6 @@ const stakeDays    = document.getElementById('stakeDays');
 const stakePreview = document.getElementById('stakePreviewBtn');
 const stakeStart   = document.getElementById('stakeStartBtn');
 const stakeMsg     = document.getElementById('stakeMsg');
-// Cap days at [1..180] and show a hint if we clamp
 const stakeDaysMsg = document.getElementById('stakeDaysMsg');
 
 function clampStakeDays(v){
@@ -1663,7 +1664,6 @@ function clampStakeDays(v){
   }
   return d;
 }
-
 stakeDays?.addEventListener('input', ()=>{
   stakeDays.value = clampStakeDays(stakeDays.value);
 });
@@ -1673,6 +1673,7 @@ const stakeAPR     = document.getElementById('stakeAPR');
 const stakeReward  = document.getElementById('stakeReward');
 const stakeUnlock  = document.getElementById('stakeUnlock');
 
+// Claim UI refs
 const claimPub       = document.getElementById('claimPub');
 const claimRefresh   = document.getElementById('claimRefreshBtn');
 const claimSelected  = document.getElementById('claimSelectedBtn');
@@ -1682,17 +1683,14 @@ const claimMsg       = document.getElementById('claimMsg');
 // ---- robust “any checked?” (stake or NFT) scoped to the modal
 function anyClaimCheckedScope(scope){
   if (!scope) return false;
-  // stake rows
   const stakeChecked = scope.querySelector('.cbPick:checked, input[type="checkbox"][data-kind="stake"]:checked');
   if (stakeChecked) return true;
-  // nft rows (support multiple shapes)
-  const nftChecked =
-    scope.querySelector(
-      '.cbPickNft:checked,' +                                   // preferred class
-      'input[type="checkbox"][data-kind="nft"]:checked,' +      // data-kind
-      'input[type="checkbox"][data-contract-id^="nft|"]:checked,' + // contract id shape
-      'tr[data-kind="nft"] input[type="checkbox"]:checked'      // row wrapper
-    );
+  const nftChecked = scope.querySelector(
+    '.cbPickNft:checked,' +
+    'input[type="checkbox"][data-kind="nft"]:checked,' +
+    'input[type="checkbox"][data-contract-id^="nft|"]:checked,' +
+    'tr[data-kind="nft"] input[type="checkbox"]:checked'
+  );
   return !!nftChecked;
 }
 
@@ -1701,32 +1699,114 @@ function updateClaimSelectedState(){
   claimSelected.disabled = !anyClaimCheckedScope(scope);
 }
 
-// Toggle button state whenever user checks or unchecks any row
+// Toggle button state whenever user checks a row
 claimTblBody?.addEventListener('change', (e) => {
   const el = e.target;
   if (!el || el.type !== 'checkbox') return;
   updateClaimSelectedState();
 });
 
-// Also re-evaluate when the modal opens (fresh render)
+// Also re-evaluate on open, escape, and DOM changes
 claimModal?.addEventListener('toggle', ()=> updateClaimSelectedState());
 document.addEventListener('keydown', (e)=> {
   if (e.key === 'Escape') setTimeout(updateClaimSelectedState, 0);
 });
-
-// If your table is re-rendered via listClaimables(), observe DOM changes
-const claimObserver = new MutationObserver(()=>{
-  updateClaimSelectedState();
-});
+const claimObserver = new MutationObserver(()=> updateClaimSelectedState());
 if (claimTblBody){
   claimObserver.observe(claimTblBody, { childList:true, subtree:true });
 }
 
-// util
+// Simple utils
 function fmtNum(n, dp=7){ const x=Number(n); return isFinite(x)?x.toLocaleString(undefined,{minimumFractionDigits:dp,maximumFractionDigits:dp}):'—'; }
 function toUTC(ts){ try{ return new Date(ts*1000).toISOString().replace('T',' ').replace('Z',' UTC'); }catch{ return '—'; } }
 
-// ======== OPEN/CLOSE ========
+// =================== Modal helpers ===================
+function openModal(el, focusEl){
+  lastFocus = document.activeElement;
+  [modal, orderbookModal, placeOrderModal, myWalletModal, stakeModal, claimModal, myNftsModal].forEach(m=>{
+    m && (m.hidden = true, m.removeAttribute('open'));
+  });
+  el.hidden = false;
+  backdrop.hidden = false;
+  el.setAttribute('open','');
+  backdrop.setAttribute('open','');
+  document.body.style.overflow = 'hidden';
+  (focusEl || el.querySelector('.close-btn'))?.focus?.();
+  log('modal.open', { id: el?.id || 'unknown' });
+}
+function closeModal(el){
+  el.removeAttribute('open');
+  backdrop.removeAttribute('open');
+  el.hidden = true;
+  backdrop.hidden = true;
+  document.body.style.overflow = '';
+  lastFocus?.focus?.();
+  log('modal.close', { id: el?.id || 'unknown' });
+}
+
+// Open roadmap
+roadmapBtn?.addEventListener('click', ()=>openModal(modal, closeModalBtn));
+badgeOpen?.addEventListener('click',  ()=>openModal(modal, closeModalBtn));
+
+// Close buttons
+closeModalBtn?.addEventListener('click',     ()=>closeModal(modal));
+closeMyWalletBtn?.addEventListener('click',  ()=>closeModal(myWalletModal));
+closeOrderbookBtn?.addEventListener('click', ()=>{ stopObRefresh?.(); closeModal(orderbookModal); });
+closePlaceOrderBtn?.addEventListener('click',()=> closeModal(placeOrderModal));
+
+// Backdrop click
+backdrop?.addEventListener('click', ()=>{
+  if (!orderbookModal.hidden){ stopObRefresh?.(); }
+  [modal, orderbookModal, placeOrderModal, myWalletModal, stakeModal, claimModal, myNftsModal, voteModal].forEach(m=>{
+    if (m && !m.hidden) closeModal(m);
+  });
+});
+
+// =======================
+// MY NFT MODAL HANDLERS
+// =======================
+openMyNftsBtn?.addEventListener('click', async ()=>{
+  if (!ACTIVE_PUB) { await fetchActiveWallet(); }
+  nftPubEcho.textContent = ACTIVE_PUB || document.getElementById('acctPub')?.value || '—';
+  await loadMyNfts?.();
+  openModal(myNftsModal, closeMyNftsBtn);
+  log('ui.nfts.open', { pub: nftPubEcho.textContent.slice(0,6) + '…' });
+});
+closeMyNftsBtn?.addEventListener('click', ()=>{
+  log('ui.nfts.close');
+  closeModal(myNftsModal);
+});
+
+// Reveal Secret
+revealOnceBtn?.addEventListener('click', ()=>{
+  if (!ACTIVE_PUB) return;
+  if (hasViewedOnce(ACTIVE_PUB, USER?.username)) {
+    secretOnce.style.display = 'block';
+    secretOnce.textContent = 'Secret was already revealed once on this device.';
+    log('secret.reveal.blocked');
+    return;
+  }
+  const sec = getLocalSecret(ACTIVE_PUB, USER?.username);
+  secretOnce.style.display = 'block';
+  secretOnce.textContent = sec ? sec : 'No secret stored locally for this wallet.';
+  if (sec) markSecretViewedOnce(ACTIVE_PUB, USER?.username);
+  log('secret.reveal.once', { ok: !!sec });
+});
+
+// Wallet button
+walletBtn?.addEventListener('click', async ()=>{
+  if (!USER) {
+    try { await piSignIn(); } catch(_) {}
+  }
+  if (!ACTIVE_PUB){
+    await fetchActiveWallet();
+    if (!ACTIVE_PUB && NEW_WALLET) ACTIVE_PUB = NEW_WALLET.pub;
+  }
+  await refreshMyWalletModal?.();
+  openModal(myWalletModal, closeMyWalletBtn);
+});
+
+// ======== OPEN/CLOSE Stake + Claim ========
 openStakeBtn?.addEventListener('click', ()=>{
   stakePub.value = (ACTIVE_PUB || document.getElementById('acctPub')?.value || '');
   stakeMsg.textContent = '';
@@ -1744,14 +1824,13 @@ openClaimBtn?.addEventListener('click', ()=>{
   openModal(claimModal, closeClaimBtn);
   listClaimables();
 });
-// optional quick buttons near top
 stakeQuickBtn?.addEventListener('click', ()=> openStakeBtn?.click());
 claimQuickBtn?.addEventListener('click', ()=> openClaimBtn?.click());
 
 closeStakeBtn?.addEventListener('click', ()=> { log('ui.stake.close'); closeModal(stakeModal); });
 closeClaimBtn?.addEventListener('click', ()=> { log('ui.claim.close'); closeModal(claimModal); });
 
-// ======== PREVIEW ========
+// ======== STAKE PREVIEW ========
 stakePreview?.addEventListener('click', async ()=>{
   const pub = (stakePub.value||'').trim();
   const amt = Number(stakeAmt.value||'0');
@@ -1780,7 +1859,7 @@ stakePreview?.addEventListener('click', async ()=>{
   }
 });
 
-// ======== START STAKE (build XDR, then local sign or SEP-7) ========
+// ======== START STAKE ========
 stakeStart?.addEventListener('click', async ()=>{
   const pub = (stakePub.value||'').trim();
   const amt = Number(stakeAmt.value||'0');
@@ -1799,7 +1878,6 @@ stakeStart?.addEventListener('click', async ()=>{
     const xdr = j.xdr;
     const pass = j.network_passphrase || 'Pi Testnet';
 
-    // If we have the local secret for this pub, sign+submit directly
     const localSec = getLocalSecret(pub, USER?.username);
     if (localSec){
       const ok = await ensureStellar();
@@ -1814,7 +1892,7 @@ stakeStart?.addEventListener('click', async ()=>{
           stakeMsg.innerHTML = `✅ Staked. Tx: <code>${resp.hash}</code>`;
           log('stake.submit.ok', { hash: resp.hash });
         } else {
-          stakeMsg.textContent = 'Submitted; awaiting confirmation.';
+          stakeMsg.textContent = 'Submitted. Awaiting confirmation.';
           log('stake.submit.queued');
         }
       }catch(e){
@@ -1823,7 +1901,6 @@ stakeStart?.addEventListener('click', async ()=>{
         log('stake.submit.fail', { err: String(e), rc });
       }
     } else {
-      // Fallback to SEP-7 (external wallet signs alongside distributor)
       const uri = `web+stellar:tx?xdr=${encodeURIComponent(xdr)}&network_passphrase=${encodeURIComponent(pass)}`;
       window.location.href = uri;
       stakeMsg.innerHTML = `Opening your wallet to sign… If nothing happens, copy this URI:<br><code style="word-break:break-all">${uri}</code>`;
@@ -1835,434 +1912,72 @@ stakeStart?.addEventListener('click', async ()=>{
   }
 });
 
-// --- Vote modal refs
-const voteModal    = document.getElementById('voteModal');
-const closeVoteBtn = document.getElementById('closeVoteBtn');
-const voteQuickBtn = document.getElementById('voteQuickBtn');
-
-const votePub   = document.getElementById('votePub');
-const voteDays  = document.getElementById('voteDays'); // hidden/removed visually
-const voteGame  = document.getElementById('voteGame');
-const voteAmt   = document.getElementById('voteAmt');
-// 🔥 Hide "Lock Days" visually in the Vote modal — everything else stays intact
-document.getElementById('voteDays')?.closest('.row, .field')?.remove();
-
-const votePreviewBtn  = document.getElementById('votePreviewBtn');
-const voteStartBtn    = document.getElementById('voteStartBtn');
-const voteMsg         = document.getElementById('voteMsg');
-const votePreviewBox  = document.getElementById('votePreviewBox');
-const voteAPR         = document.getElementById('voteAPR');
-const voteVotes       = document.getElementById('voteVotes');
-const voteUnlock      = document.getElementById('voteUnlock');
-
-// Open/close
-voteQuickBtn?.addEventListener('click', async ()=>{
-  votePub.value = (ACTIVE_PUB || document.getElementById('acctPub')?.value || '');
-  voteMsg.textContent = '';
-  votePreviewBox.style.display = 'none';
-  voteStartBtn.disabled = true;
-  await loadVoteProposals();
-  openModal(voteModal, closeVoteBtn);
-  log('ui.vote.open');
-});
-closeVoteBtn?.addEventListener('click', ()=> { log('ui.vote.close'); closeModal(voteModal); });
-
-// Fetch proposals (title + id/slug) from your API
-async function loadVoteProposals(){
+// ================= CLAIMABLES TABLE RENDER: NFT groups =================
+// Call this from your existing listClaimables() after you have nftRows
+function renderNftGroupsIntoClaimTable(nftRows){
   try{
-    const r = await fetch('/api/arcade/proposals', { cache:'no-store' });
-    const j = await r.json();
-    const items = Array.isArray(j?.proposals) ? j.proposals : [];
-    voteGame.innerHTML = items.length
-      ? items.map(p=>`<option value="${p.id || p.slug}">${p.title}</option>`).join('')
-      : `<option disabled selected>No active proposals</option>`;
-    log('vote.proposals.ok', { count: items.length });
-  }catch(e){
-    voteGame.innerHTML = `<option disabled selected>Couldn’t load proposals</option>`;
-    log('vote.proposals.fail', { err: String(e) });
-  }
-}
+    for (const r of (nftRows || [])){
+      const issuer   = String(r.issuer || r.issuer_g || '').trim();
+      const assets   = Array.isArray(r.assets) ? r.assets.map(a => String(a).trim()).filter(Boolean) : [];
+      const pendingId= typeof r.pending_id === 'number' ? r.pending_id
+                      : typeof r.pendingId  === 'number' ? r.pendingId
+                      : (r.contract_id && String(r.contract_id).startsWith('nft|') ? Number(String(r.contract_id).split('|')[1]) : undefined);
+      const codesStr = assets.join(', ');
+      if (!issuer || !assets.length) continue;
 
-// Safe label swap
-(() => {
-  const lbl = document.querySelector('#voteAPR')
-              ?.closest('.row')
-              ?.querySelector('.label');
-  if (lbl) lbl.textContent = 'Your share if this game wins';
-})();
-
-async function getVoteRules(){
-  const r = await fetch('/api/vote/rules', { cache:'no-store' });
-  const j = await r.json();
-  // Expect shape: { round_end_unix: <number seconds>, pool_before?, ad_pool_pct? }
-  // If your backend returns ISO, normalize here:
-  if (!j.round_end_unix && j.round_end_iso){
-    j.round_end_unix = Math.floor(new Date(j.round_end_iso).getTime() / 1000);
-  }
-  return j;
-}
-
-  // Preview (vote) — 404-safe + Safari-safe time handling
-votePreviewBtn?.addEventListener('click', async ()=>{
-  const pub  = (votePub.value||'').trim();
-  const raw  = String(voteAmt.value||'0').trim();
-  const amt  = Number(raw.replace(/[^0-9.]/g,''));
-  const proposal = voteGame.value;
-  if (!pub.startsWith('G')){ voteMsg.textContent='Enter a valid G… public key.'; return; }
-  if (!(amt>0)){ voteMsg.textContent='Enter a positive amount.'; return; }
-  if (!proposal){ voteMsg.textContent='Pick a proposal.'; return; }
-
-  voteMsg.textContent = 'Calculating…';
-  try{
-    // Try server preview first
-    let j = null, ok = false;
-    try{
-      const r = await fetch('/api/vote/preview', {
-        method:'POST', headers:{'Content-Type':'application/json'},
-        body: JSON.stringify({ proposal, amount: String(Math.floor(amt*1e7)/1e7) })
-      });
-      ok = r.ok;
-      if (ok) j = await r.json();
-      if (r.status === 404) ok = false; // allow fallback
-    }catch(_){ ok = false; }
-
-    // Fallback to rules if preview route is missing on this deploy
-    if (!ok){
-      const rules = await getVoteRules();           // <= helper below
-      j = j || {};
-      j.ok = true;
-      j.round_end_unix = Number(rules.round_end_unix);    // seconds
-      j.pool_before    = Number(rules.pool_before || 0);  // optional
-      j.ad_pool_pct    = Number(rules.ad_pool_pct || 0);  // optional
-      j.your_share_pct_if_wins = 0; // we can’t know without server math; keep UI consistent
-    }
-
-    // Normalize timestamps (seconds → ms) for iOS/Safari
-    const endSec = Number(j.round_end_unix || 0);
-    const endMs  = endSec * 1000;
-    const endIso = isFinite(endMs) && endMs > 0
-      ? new Date(endMs).toISOString().replace('T',' ').replace('Z',' UTC')
-      : '—';
-
-    // Render
-    const pct = Number(j.your_share_pct_if_wins);
-    voteAPR.textContent    = isFinite(pct) ? `${pct.toFixed(2)}%` : '—';
-    voteVotes.textContent  = amt.toLocaleString(undefined,{maximumFractionDigits:7});
-    voteUnlock.textContent = endIso;
-
-    const helper = document.getElementById('voteShareHelp');
-    if (helper){
-      const pool = Number(j.pool_before);
-      const adP  = Number(j.ad_pool_pct);
-      helper.textContent =
-        `Assumes current pool ${isFinite(pool)?pool.toLocaleString():'—'} votes. ` +
-        `${isFinite(adP)?adP.toFixed(0):'—'}% of ad revenue goes to voters of the winning game.`;
-    }
-
-    votePreviewBox.style.display = '';
-    voteStartBtn.disabled = false;
-    voteMsg.textContent = '';
-    log('vote.preview.ok', { proposal, amt, fallback: !ok });
-  }catch(e){
-    voteMsg.textContent = '❌ ' + String(e);
-    log('vote.preview.fail', { err: String(e) });
-  }
-});
-
-// Start vote-stake (build + sign/submit same as regular)
-voteStartBtn?.addEventListener('click', async ()=>{
-  const pub  = (votePub.value||'').trim();
-  const amt  = Number(String(voteAmt.value||'0').replace(/[^0-9.]/g,''));
-  const proposal = voteGame.value;
-  if (!pub.startsWith('G') || !(amt>0) || !proposal){ return; }
-
-  voteMsg.textContent = 'Preparing vote-stake transaction…';
-  try{
-    const r = await fetch('/api/vote/stake', {
-      method:'POST', headers:{'Content-Type':'application/json'},
-      body: JSON.stringify({ pub, amount: String(Math.floor(amt*1e7)/1e7), proposal })
-    });
-    const j = await r.json().catch(()=> ({}));
-    if (!r.ok || !j?.ok) throw new Error(j?.error || j?.message || `HTTP ${r.status}`);
-
-    const xdr  = j.xdr;
-    const pass = j.network_passphrase || 'Pi Testnet';
-
-    // Prefer wallet signing unless we KNOW we have a matching local secret
-    const localSec = getLocalSecret(pub, USER?.username);
-    if (localSec) {
-      const ok = await ensureStellar();
-      if (!ok || !window.StellarSdk){ voteMsg.textContent='❌ Stellar SDK missing.'; return; }
-      const SDK = window.StellarSdk;
-      const tx  = SDK.TransactionBuilder.fromXDR(xdr, pass);
-      tx.sign(SDK.Keypair.fromSecret(localSec));
-      const server = getServer();
-      try{
-        const resp = await server.submitTransaction(tx);
-        voteMsg.innerHTML = resp?.hash ? `✅ Votes staked. Tx: <code>${resp.hash}</code>` : 'Submitted.';
-        log('vote.submit.ok', { hash: resp?.hash || null });
-      }catch(e){
-        const rc = e?.response?.data?.extras?.result_codes;
-        voteMsg.textContent = `❌ submit failed: ${JSON.stringify(rc) || String(e)}`;
-        log('vote.submit.fail', { err: String(e), rc });
-      }
-    } else {
-      const uri = `web+stellar:tx?xdr=${encodeURIComponent(xdr)}&network_passphrase=${encodeURIComponent(pass)}`;
-      window.location.href = uri;
-      voteMsg.innerHTML = `Opening wallet to sign…<br><small>If nothing opens, copy this into your wallet:</small><br><code style="word-break:break-all">${uri}</code>`;
-      log('vote.sep7.opened');
-    }
-  }catch(e){
-    voteMsg.textContent = '❌ ' + String(e);
-    log('vote.build.fail', { err: String(e) });
-  }
-});
-
-// ======== LIST CLAIMABLES (grouped: one toggle, principal+reward in one box) ========
-async function listClaimables(){
-  const pub = (claimPub.value||'').trim();
-  if (!pub.startsWith('G')){ claimMsg.textContent='Enter a valid G… public key.'; return; }
-  claimMsg.textContent = 'Loading…';
-  claimTblBody.innerHTML = '';
-
-  try{
-    const uname = (window.USER && USER.username) ? USER.username : (new URLSearchParams(location.search).get('u') || '');
-    const r = await fetch(
-      `/api/stake/claimables?pub=${encodeURIComponent(pub)}${uname ? `&u=${encodeURIComponent(uname)}` : ''}`,
-      { cache:'no-store' }
-    );
-    const j = await r.json();
-    if (!r.ok || !j?.ok) throw new Error(j?.error || 'fetch failed');
-
-    const rows = Array.isArray(j.claimables) ? j.claimables : (j.records||[]);
-    if (!rows.length){
-      claimTblBody.innerHTML = `<tr><td colspan="4" class="help" style="padding:8px">No claimable balances.</td></tr>`;
-      claimSelected.disabled = true;
-      claimMsg.textContent = '';
-      log('claimables.none');
-      return;
-    }
-
-    // NEW: split staking vs NFTs
-    const stakeRows = [];
-    const nftRows   = [];
-    for (const row of rows){
-      const k = String(row.kind||'').toLowerCase();
-      if (k === 'nft') nftRows.push(row); else stakeRows.push(row);
-    }
-
-    // ================= STAKING (unchanged: normal + vote) =================
-    const groups = {};
-    for (const r of stakeRows){
-      const unlockTs = Number(r.unlock_ts || r.unlock_unix || 0);
-      const kindStr  = (r.kind || r.bucket || r.pool || '').toString().toLowerCase().includes('vote') ? 'vote' : 'regular';
-
-      const gid =
-        r.contract_id || r.stake_id || r.group_id || r.parent_id || r.batch_id ||
-        [
-          unlockTs || 0,
-          kindStr,
-          (r.tx || r.tx_hash || r.source || r.created_at || r.id || '').toString().slice(-12)
-        ].join('|');
-
-      (groups[gid] ||= []).push({ ...r, __unlockTs: unlockTs, __kind: kindStr });
-    }
-
-    const ordered = Object.entries(groups).sort((a,b)=>{
-      const au = a[1][0].__unlockTs || Number.MAX_SAFE_INTEGER;
-      const bu = b[1][0].__unlockTs || Number.MAX_SAFE_INTEGER;
-      return au - bu;
-    });
-
-    const PROPOSAL_NAMES = { rooftop_rumble: 'Rooftop Rumble', pizza_panic: 'Pizza Panic' };
-    const prettyProposal = id => PROPOSAL_NAMES[id] || id || 'Vote';
-
-    for (const [, recs] of ordered){
-      const any       = recs[0];
-      const unlockTs  = any.__unlockTs || 0;
-      const unlockStr = unlockTs ? new Date(unlockTs*1000).toISOString().slice(0,10) : '—';
-      const kind      = any.__kind === 'vote' ? 'vote' : 'regular';
-      const pillClass = kind === 'vote' ? 'pill-vote' : 'pill-regular';
-      const unlocked  = unlockTs ? (Date.now() >= unlockTs*1000) : true;
-
-      const ids = [];
-      let principal = 0, reward = 0;
-      for (const r of recs){
-        if (Array.isArray(r.ids) && r.ids.length){
-          ids.push(...r.ids.map(x => String(x).trim()));
-        } else {
-          const id =
-            r.id ||
-            r.claimable_balance_id ||
-            r.balance_id ||
-            r.cb_id ||
-            (r.balance && r.balance.id) ||
-            null;
-          if (id) ids.push(String(id).trim());
-        }
-        const role = (r.role || r.kind || '').toString().toLowerCase();
-        if (role.includes('reward')) reward += Number(r.amount||0);
-        else                         principal += Number(r.amount||0);
-      }
+      const nftChkId = `nftpick_${issuer.slice(-6)}_${Math.random().toString(36).slice(2,7)}`;
 
       const trHead = document.createElement('tr');
-      trHead.className = `group-head is-${kind}` + (unlocked ? '' : ' locked');
-
-      const voteLabel = (kind === 'vote' && any?.proposal)
-        ? `VOTE • ${prettyProposal(any.proposal)}`
-        : (kind === 'vote' ? 'VOTE' : 'NORMAL');
-
-      const csv = ids.map(x => x.trim()).filter(Boolean).join(',');
-
+      trHead.className = 'group-head is-nft';
       trHead.innerHTML = `
         <td colspan="4">
-          <label class="group-toggle" style="display:flex;align-items:center;gap:10px;white-space:nowrap;">
+          <label class="group-toggle" for="${nftChkId}" style="display:flex;align-items:center;gap:10px;white-space:nowrap;cursor:pointer">
             <input
+              id="${nftChkId}"
               type="checkbox"
-              class="cbPick"
-              value="${csv}"
-              data-balance-ids="${csv}"
-              ${unlocked ? '' : 'disabled'}>
-            <span class="pill ${pillClass}">${voteLabel}</span>
-            <strong>Stake • unlock ${unlockStr}</strong>
+              class="cbPickNft"
+              data-kind="nft"
+              data-issuer="${issuer}"
+              data-assets="${assets.join(',')}"
+              ${typeof pendingId === 'number' ? `data-pending-id="${pendingId}"` : ''}
+              ${typeof pendingId === 'number' ? `data-contract-id="nft|${pendingId}"` : ''}
+              style="cursor:pointer"
+            />
+            <span class="pill pill-nft">NFT</span>
+            <strong>Purchased NFTs • ready to deliver</strong>
           </label>
         </td>`;
       claimTblBody.appendChild(trHead);
 
-      const trBlock = document.createElement('tr');
-      trBlock.className = `group-row is-${kind}` + (unlocked ? '' : ' locked');
-
-      const estPct = (kind === 'vote') ? Number(any?.vote_est_share_pct) : null;
-      const rewardHTML = (kind === 'vote')
-        ? `<div class="line" style="display:flex;justify-content:space-between;align-items:center;white-space:nowrap;">
-             <span class="pill pill-vote" aria-hidden="true">EST. SHARE</span>
-             <span class="num">${isFinite(estPct) ? estPct.toFixed(2) : '0.00'}%</span>
-           </div>`
-        : (reward > 0
-           ? `<div class="line" style="display:flex;justify-content:space-between;align-items:center;">
-                <span class="pill pill-reward" aria-hidden="true">REWARD</span>
-                <span class="num">${fmtNum(reward)}</span>
-              </div>`
-           : '');
-
-      trBlock.innerHTML = `
+      const trBody = document.createElement('tr');
+      trBody.className = 'group-row is-nft';
+      trBody.setAttribute('data-kind','nft');
+      trBody.innerHTML = `
         <td colspan="4">
           <div class="block" style="display:flex;flex-direction:column;gap:8px;">
             <div class="line" style="display:flex;justify-content:space-between;align-items:center;white-space:nowrap;">
-              <span class="pill ${pillClass}" aria-hidden="true">PRINCIPAL</span>
-              <span class="num">${fmtNum(principal)}</span>
+              <span>Assets</span>
+              <span class="num" style="text-align:right">${codesStr || '—'}</span>
             </div>
-            ${rewardHTML}
-            ${unlocked ? '' : `<span class="lockhint">Locked until ${unlockStr}</span>`}
+            <span class="lockhint">Checked NFTs will be issued to your wallet.</span>
           </div>
         </td>`;
-      claimTblBody.appendChild(trBlock);
+      claimTblBody.appendChild(trBody);
     }
-
-    // ================= NFTs (turquoise block WITH checkboxes) =================
-// We allow multiple NFT groups (by issuer). Each checkbox carries issuer + assets payload.
-for (const r of nftRows){
-  const issuer = String(r.issuer || r.issuer_g || '').trim();
-  const assets = Array.isArray(r.assets) ? r.assets.map(a => String(a).trim()).filter(Boolean) : [];
-  const codes  = assets.join(', ');
-  if (!issuer || !assets.length) continue;
-
-  // 🔧 NEW: normalize pending id from either shape, guard if absent
-  const pidRaw = (r.pending_id ?? r.pendingId);
-  const pendingId = (pidRaw !== undefined && pidRaw !== null) ? Number(pidRaw) : null;
-
-  const nftChkId = `nftpick_${issuer.slice(-6)}_${Math.random().toString(36).slice(2,7)}`;
-
-  const trHead = document.createElement('tr');
-  trHead.className = `group-head is-nft`;
-  trHead.innerHTML = `
-    <td colspan="4">
-      <label class="group-toggle" for="${nftChkId}" style="display:flex;align-items:center;gap:10px;white-space:nowrap;cursor:pointer">
-        <input
-          id="${nftChkId}"
-          type="checkbox"
-          class="cbPickNft"
-          data-kind="nft"
-          data-issuer="${issuer}"
-          data-assets="${assets.join(',')}"
-          ${pendingId !== null && Number.isFinite(pendingId) ? `data-pending-id="${pendingId}" data-contract-id="nft|${pendingId}"` : ''}
-          style="cursor:pointer"
-        />
-        <span class="pill pill-nft">NFT</span>
-        <strong>Purchased NFTs • ready to deliver</strong>
-      </label>
-    </td>`;
-
-  claimTblBody.appendChild(trHead);
-
-  const trBody = document.createElement('tr');
-  trBody.className = `group-row is-nft`;
-  trBody.innerHTML = `
-    <td colspan="4">
-      <div class="block" style="display:flex;flex-direction:column;gap:8px;">
-        <div class="line" style="display:flex;justify-content:space-between;align-items:center;white-space:nowrap;">
-          <span>Assets</span>
-          <span class="num" style="text-align:right">${codes || '—'}</span>
-        </div>
-        <span class="lockhint">Checked NFTs will be issued to your wallet.</span>
-      </div>
-    </td>`;
-  claimTblBody.appendChild(trBody);
-}
-
-// After rows exist, reflect current check state
-updateClaimSelectedState();
-claimMsg.textContent = '';
-log('claimables.rendered');
+    updateClaimSelectedState();
+    claimMsg.textContent = '';
+    log('claimables.rendered');
   }catch(e){
     claimMsg.textContent = '❌ ' + String(e);
     log('claimables.fail', { err: String(e) });
   }
 }
 
+// Manual refresh
 claimRefresh?.addEventListener('click', ()=>{
   log('claimables.refresh.click');
   listClaimables();
 });
-
-// ---------- NFT trust helpers (local to this section) ----------
-async function ensureNftTrust(pub, issuer, codes){
-  await ensureStellar();
-  const SDK    = window.StellarSdk;
-  const server = getServer();
-
-  // Skip codes already trusted
-  const acct   = await server.loadAccount(pub);
-  const existing = new Set(
-    (acct.balances || [])
-      .filter(b => b.asset_type !== 'native')
-      .map(b => `${b.asset_code}:${b.asset_issuer}`)
-  );
-  const todo = codes.filter(c => !existing.has(`${c}:${issuer}`));
-  if (!todo.length) return { ok:true, created:0 };
-
-  let fee = (await server.fetchBaseFee()).toString();
-  let txb = new SDK.TransactionBuilder(acct, { fee, networkPassphrase: NETWORK_PASSPHRASE });
-  for (const code of todo){
-    txb = txb.addOperation(SDK.Operation.changeTrust({ asset: new SDK.Asset(code, issuer) }));
-  }
-  const tx = txb.setTimeout(180).build();
-  const sec = getLocalSecret(pub, USER?.username);
-  if (!sec) throw new Error('No local secret for direct signing');
-  tx.sign(SDK.Keypair.fromSecret(sec));
-  const resp = await server.submitTransaction(tx);
-  log('nft.trust.direct.ok', { created: todo.length, hash: resp?.hash || 'no-hash' });
-
-  await waitForTrust(pub, todo.map(code => ({code, issuer})), { maxMs: 20000, stepMs: 700 });
-  return { ok:true, created: todo.length };
-}
-
-function bodyText(r){ return r.text().catch(()=> ''); }
-function needsTrustFromText(t){ return /buyer\s*_?\s*missing\s*_?\s*trustline/i.test(t||''); }
-function extractMissingCodes(t, fallback){
-  const m = (t||'').match(/buyer[_ ]?missing[_ ]?trustline:([A-Z0-9]{1,12})/i);
-  return m ? [m[1]] : (fallback || []);
-}
 
 // ---------- helpers used by claim handler ----------
 const HEX64 = /^[0-9a-fA-F]{64}$/;
@@ -2273,7 +1988,7 @@ const PASS  = (window.NETWORK_PASSPHRASE || 'Pi Testnet');
 function normalizeBalanceId(id){
   const s = String(id||'').replace(/^0x/i,'').trim();
   if (HEX64.test(s)) return s.toLowerCase();
-  if (HEX72.test(s)) return s.slice(8).toLowerCase(); // strip discriminant
+  if (HEX72.test(s)) return s.slice(8).toLowerCase();
   return null;
 }
 function uniq(arr){ return Array.from(new Set(arr)); }
@@ -2291,12 +2006,11 @@ async function loadBalancesViaServer(pub){
   return j.balances || [];
 }
 function haveTrust(balances, code, issuer){
-  try { return hasTrustFor(balances, code, issuer); } catch { /* fallback below */ }
+  try { return hasTrustFor(balances, code, issuer); } catch {}
   return !!(balances||[]).find(b => b?.asset_code===code && b?.asset_issuer===issuer);
 }
 
 async function addTrustlinesIfNeeded(pub, list){
-  // list: [{ code, issuer }, ...]
   const compact = [];
   const seen = new Set();
   for (const p of (list||[])){
@@ -2305,12 +2019,10 @@ async function addTrustlinesIfNeeded(pub, list){
   }
   if (!compact.length) return { added:false };
 
-  // 1) Inspect balances, compute missing
   const balances = await loadBalancesViaServer(pub);
   const missing = compact.filter(p => !haveTrust(balances, p.code, p.issuer));
   if (!missing.length) return { added:false };
 
-  // 2) Local sign if we have secret, else SEP-7
   const localSec = getLocalSecret(pub, USER?.username);
   if (localSec){
     const ok = await ensureStellar().catch(()=>false);
@@ -2347,114 +2059,138 @@ async function addTrustlinesIfNeeded(pub, list){
   }
 }
 
-// ---------- staking claim (unchanged) ----------
-async function submitStakeClaimIfAny(pub, ids){
-  const normalized = uniq(ids.map(normalizeBalanceId).filter(Boolean));
-  if (!normalized.length) return { done:false };
-  const r = await fetch('/api/stake/claim', {
-    method:'POST',
-    headers:{'Content-Type':'application/json'},
-    body: JSON.stringify({ pub, ids: normalized })
-  });
-  const j = await r.json().catch(()=>({}));
-  if (!r.ok || !j?.ok){
-    const msg = j?.error || j?.message || `HTTP ${r.status}`;
-    throw new Error(`Claimables error: ${msg}`);
-  }
-  const xdr  = j.xdr;
-  const pass = j.network_passphrase || PASS;
-
-  const localSec = getLocalSecret(pub, USER?.username);
-  if (localSec){
-    const ok = await ensureStellar().catch(()=>false);
-    if (!(ok && window.StellarSdk)) throw new Error('Stellar SDK missing');
-    const SDK = window.StellarSdk;
-    const tx  = SDK.TransactionBuilder.fromXDR(xdr, pass);
-    tx.sign(SDK.Keypair.fromSecret(localSec));
-    const server = getServer();
-    const resp = await server.submitTransaction(tx);
-    log('claim.submit.ok', { hash: resp?.hash });
-    return { done:true };
-  } else {
-    const uri = `web+stellar:tx?xdr=${encodeURIComponent(xdr)}&network_passphrase=${encodeURIComponent(pass)}`;
-    try{
-      window.location.assign(uri);
-      claimMsg.innerHTML = `Opening your wallet to sign claimables…<br><small>If nothing happens, tap the link:</small> <a href="${uri}" style="word-break:break-all">Open in wallet</a>`;
-    }catch{
-      claimMsg.innerHTML =
-        `Couldn’t open a wallet from this browser.<br><small>Copy this into your wallet:</small><br>` +
-        `<code id="claimDeepLink" style="word-break:break-all">${uri}</code><br>` +
-        `<button id="copyDeepLinkBtn" class="btn sm">Copy link</button>`;
-      document.getElementById('copyDeepLinkBtn')?.addEventListener('click', async ()=>{
-        try{ await navigator.clipboard.writeText(uri); claimMsg.innerHTML += '<br>✅ Copied.'; }
-        catch{ claimMsg.innerHTML += '<br>Copy failed, long-press to select.'; }
-      });
-    }
-    throw new Error('sep7 in flight');
-  }
-}
-
-// ---------- NFT id normalization ----------
-function normalizePendingIdFromDataset(el){
-  // Supports data-pending-id or contract_id like "nft|123"
-  const attr = el.dataset.pendingId || el.dataset.pendingid || '';
-  if (/^\d+$/.test(attr)) return parseInt(attr, 10);
-  const cid = String(el.dataset.contractId || el.dataset.contractid || '').trim();
-  if (cid.toLowerCase().startsWith('nft|')){
-    const rest = cid.split('|')[1];
-    if (/^\d+$/.test(rest)) return parseInt(rest, 10);
-  }
-  return undefined;
-}
-function normalizePendingIdFromRow(row){
-  if (typeof row.pendingId === 'number') return row.pendingId;
-  if (typeof row.pending_id === 'number') return row.pending_id;
-  const cid = String(row.contract_id || '').trim();
-  if (cid.toLowerCase().startsWith('nft|')){
-    const rest = cid.split('|')[1];
-    if (/^\d+$/.test(rest)) return parseInt(rest, 10);
-  }
-  return undefined;
-}
-function buildNftIdsFromGroups(groups){
-  // Send both "13" and "nft|13" (backend can accept either)
-  const raw = [];
-  for (const g of groups){
-    const pid = normalizePendingIdFromRow(g);
-    if (typeof pid === 'number'){
-      raw.push(String(pid));
-      raw.push(`nft|${pid}`);
-    }
-  }
-  return uniq(raw);
-}
-
-// ======== CLAIM SELECTED (batch) — stake claimables + NFT claims ======== //
+// ======== CLAIM SELECTED ========
 claimSelected?.addEventListener('click', async ()=>{
   const pub = (claimPub.value||'').trim();
   if (!pub.startsWith('G')) { claimMsg.textContent = 'Enter a valid G… public key.'; return; }
 
-  // Prevent double clicks
   claimSelected.disabled = true;
 
-  // Expand group selections like "id1,id2" into individual ids (staking)
+  // Stake picks
   const rawPicks = Array.from(document.querySelectorAll('.cbPick:checked'))
     .map(x => (x.dataset.balanceIds || x.value || '').trim());
   const picks = rawPicks.flatMap(v => v.split(',')).map(s => s.trim()).filter(Boolean);
 
-  // Collect NFT selections (issuer + assets are on each checkbox row)
+  // NFT picks with pendingId
   const nftPicks = Array.from(document.querySelectorAll('.cbPickNft:checked')).map(el => ({
     issuer: (el.dataset.issuer || '').trim(),
     assets: (el.dataset.assets || '').split(',').map(a => a.trim()).filter(Boolean),
-    pendingId: normalizePendingIdFromDataset(el),
-    contract_id: el.dataset.contractId || el.dataset.contractid || ''
-  })).filter(x => x.issuer && x.assets.length && typeof x.pendingId === 'number');
+    pendingId: el.dataset.pendingId ? Number(el.dataset.pendingId) : undefined
+  })).filter(x => x.issuer && x.assets.length);
 
   if (!picks.length && !nftPicks.length){
     claimMsg.textContent='Pick at least one balance or NFT.';
     log('claim.none');
     claimSelected.disabled = false;
     return;
+  }
+
+  const HZ   = (window.HORIZON_URL || 'https://api.testnet.minepi.com');
+  const PASS = (window.NETWORK_PASSPHRASE || 'Pi Testnet');
+
+  function normalizeBalanceId(id){
+    const s = String(id||'').replace(/^0x/i,'').trim();
+    if (HEX64.test(s)) return s.toLowerCase();
+    if (HEX72.test(s)) return s.slice(8).toLowerCase();
+    return null;
+  }
+  function uniq(arr){ return Array.from(new Set(arr)); }
+
+  async function submitStakeClaimIfAny(ids){
+    const normalized = uniq(ids.map(normalizeBalanceId).filter(Boolean));
+    if (!normalized.length) return { done:false };
+    const r = await fetch('/api/stake/claim', {
+      method:'POST',
+      headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({ pub, ids: normalized })
+    });
+    const j = await r.json().catch(()=>({}));
+    if (!r.ok || !j?.ok){
+      const msg = j?.error || j?.message || `HTTP ${r.status}`;
+      throw new Error(`Claimables error: ${msg}`);
+    }
+    const xdr  = j.xdr;
+    const pass = j.network_passphrase || PASS;
+
+    const localSec = getLocalSecret(pub, USER?.username);
+    if (localSec){
+      const ok = await ensureStellar().catch(()=>false);
+      if (!(ok && window.StellarSdk)) throw new Error('Stellar SDK missing');
+      const SDK = window.StellarSdk;
+      const tx  = SDK.TransactionBuilder.fromXDR(xdr, pass);
+      tx.sign(SDK.Keypair.fromSecret(localSec));
+      const server = getServer();
+      const resp = await server.submitTransaction(tx);
+      log('claim.submit.ok', { hash: resp?.hash });
+      return { done:true };
+    } else {
+      const uri = `web+stellar:tx?xdr=${encodeURIComponent(xdr)}&network_passphrase=${encodeURIComponent(pass)}`;
+      try{
+        window.location.assign(uri);
+        claimMsg.innerHTML = `Opening your wallet to sign claimables…<br><small>If nothing happens, tap the link:</small> <a href="${uri}" style="word-break:break-all">Open in wallet</a>`;
+      }catch{
+        claimMsg.innerHTML =
+          `Couldn’t open a wallet from this browser.<br><small>Copy this into your wallet:</small><br>` +
+          `<code id="claimDeepLink" style="word-break:break-all">${uri}</code><br>` +
+          `<button id="copyDeepLinkBtn" class="btn sm">Copy link</button>`;
+        document.getElementById('copyDeepLinkBtn')?.addEventListener('click', async ()=>{
+          try{ await navigator.clipboard.writeText(uri); claimMsg.innerHTML += '<br>✅ Copied.'; }
+          catch{ claimMsg.innerHTML += '<br>Copy failed, long-press to select.'; }
+        });
+      }
+      throw new Error('sep7 in flight');
+    }
+  }
+
+  async function submitNftClaimOnce(group){
+    // group = { assets: [...], issuer, pendingId? }
+    const u = (USER?.username || '');
+    const claimUrl = u ? `/api/nft/claim?u=${encodeURIComponent(u)}` : '/api/nft/claim';
+    const body = {
+      buyer_pub: pub,
+      assets: group.assets,
+      pending_id: typeof group.pendingId === 'number' ? group.pendingId : undefined
+    };
+
+    async function postAndRead(){
+      const r   = await fetch(claimUrl, {
+        method:'POST',
+        headers:{ 'Content-Type':'application/json' },
+        body: JSON.stringify(body)
+      });
+      const txt = await r.text().catch(()=> '');
+      let j = {};
+      try { j = JSON.parse(txt); } catch {}
+      log('nft.claim.response', { ok: r.ok, status: r.status, body: (txt || '').slice(0, 400) });
+      return { r, txt, j };
+    }
+
+    // First attempt
+    let { r, txt, j } = await postAndRead();
+
+    // If backend says buyer missing trustline:CODE → add, then retry once
+    const miss = /buyer[_ ]?missing[_ ]?trustline:([A-Z0-9]{1,12})/i.exec(txt || '');
+    if ((!r.ok || !j?.ok) && miss){
+      const code = miss[1];
+      await addTrustlinesIfNeeded(pub, [{ code, issuer: group.issuer }]);
+      ({ r, txt, j } = await postAndRead());
+    }
+
+    // Errors
+    if (!r.ok || !j?.ok){
+      const bodyMsg = (j?.error || j?.message || txt || '').trim();
+      claimMsg.textContent = `❌ ${bodyMsg.slice(0, 200)}`;
+      log('nft.claim.fail.detail', { status: r.status, body: bodyMsg.slice(0, 400) });
+
+      if (/op_low_reserve/i.test(bodyMsg)){
+        throw new Error('Your wallet needs more native Pi for reserves. Top up a little Pi then try again.');
+      }
+      if (/tx_insufficient_fee/i.test(bodyMsg)){
+        throw new Error('Network is surging. Try again in a few seconds.');
+      }
+      throw new Error(bodyMsg || `HTTP ${r.status}`);
+    }
+    return true;
   }
 
   // Status line
@@ -2465,65 +2201,23 @@ claimSelected?.addEventListener('click', async ()=>{
   log('claim.build.start', { n_ids: picks.length, n_nft: nftPicks.length });
 
   try{
-    // A) Staking claimables first (unchanged)
+    // A) Staking claimables first
     if (picks.length){
-      await submitStakeClaimIfAny(pub, picks);
+      await submitStakeClaimIfAny(picks);
     }
 
-    // B) NFTs — preflight trustlines for all selected groups, then claim in one batch
+    // B) NFTs — preflight trustlines then claim
     if (nftPicks.length){
-      // Preflight trustlines across all selected asset codes
       const needAll = [];
       for (const g of nftPicks){
         for (const code of g.assets){ needAll.push({ code, issuer: g.issuer }); }
       }
-      await addTrustlinesIfNeeded(pub, needAll);  // may hand off to SEP-7
+      await addTrustlinesIfNeeded(pub, needAll);   // pass pub here
 
-      // Build nft_ids and claim once
-      const nft_ids = buildNftIdsFromGroups(nftPicks);
-      const r = await fetch('/api/nft/claim', {
-        method:'POST',
-        headers:{ 'Content-Type':'application/json' },
-        body: JSON.stringify({ pub, nft_ids })
-      });
-      const txt = await r.text().catch(()=> '');
-      let j = {};
-      try { j = JSON.parse(txt); } catch {}
-
-      log('nft.claim.response', { ok: r.ok, status: r.status, body: (txt || '').slice(0, 400) });
-
-      // If backend reports missing trustline mid-flight, add and retry once
-      if ((!r.ok || !j?.ok) && needsTrustFromText(txt)){
-        // Retry after a targeted trust add, using what the server hinted or our full list
-        const hinted = extractMissingCodes(txt, []);
-        const need = (hinted.length
-          ? hinted.map(code => ({ code, issuer: nftPicks[0].issuer }))
-          : needAll);
-        await addTrustlinesIfNeeded(pub, need);
-
-        const r2 = await fetch('/api/nft/claim', {
-          method:'POST',
-          headers:{ 'Content-Type':'application/json' },
-          body: JSON.stringify({ pub, nft_ids })
-        });
-        const txt2 = await r2.text().catch(()=> '');
-        try { j = JSON.parse(txt2); } catch { j = {}; }
-        log('nft.claim.response', { ok: r2.ok, status: r2.status, body: (txt2 || '').slice(0, 400) });
-
-        if (!r2.ok || !j?.ok){
-          const bodyMsg = (j?.error || j?.message || txt2 || '').trim();
-          if (/op_low_reserve/i.test(bodyMsg))  throw new Error('Your wallet needs more native Pi for reserves. Top up a little Pi then try again.');
-          if (/tx_insufficient_fee/i.test(bodyMsg)) throw new Error('Network is surging. Try again in a few seconds.');
-          throw new Error(bodyMsg || `HTTP ${r2.status}`);
-        }
-      } else if (!r.ok || !j?.ok){
-        const bodyMsg = (j?.error || j?.message || txt || '').trim();
-        if (/op_low_reserve/i.test(bodyMsg))  throw new Error('Your wallet needs more native Pi for reserves. Top up a little Pi then try again.');
-        if (/tx_insufficient_fee/i.test(bodyMsg)) throw new Error('Network is surging. Try again in a few seconds.');
-        throw new Error(bodyMsg || `HTTP ${r.status}`);
+      for (const g of nftPicks){
+        await submitNftClaimOnce(g);
+        log('nft.claim.ok', { issuer: g.issuer, n: g.assets.length, pendingId: g.pendingId });
       }
-
-      log('nft.claim.ok', { n: nft_ids.length });
     }
 
     claimMsg.textContent = '✅ Claimed. Refreshing…';
