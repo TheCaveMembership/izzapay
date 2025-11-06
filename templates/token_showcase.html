@@ -3170,7 +3170,63 @@ async function buildChangeTrustSEP7(pub){
     return null;
   }
 }
+// ===== NFT trust helpers, place right after buildChangeTrustSEP7(pub) =====
 
+// check if a wallet already trusts an asset
+function hasTrustFor(balances, code, issuer){
+  return Array.isArray(balances)
+    && balances.some(b => b.asset_code === code && b.asset_issuer === issuer);
+}
+
+// build a single SEP-7 link that includes multiple changeTrust ops, one per NFT
+async function buildChangeTrustMultiSEP7(pub, assets /* [{code,issuer}] */){
+  const ok = await ensureStellar();
+  if (!ok || !window.StellarSdk) return null;
+
+  const SDK    = window.StellarSdk;
+  const server = getServer();
+  const acct   = await server.loadAccount(pub);
+
+  let txb = new SDK.TransactionBuilder(acct, {
+    fee: (await server.fetchBaseFee()).toString(),
+    networkPassphrase: NETWORK_PASSPHRASE
+  });
+
+  for (const a of assets){
+    txb = txb.addOperation(SDK.Operation.changeTrust({
+      asset: new SDK.Asset(a.code, a.issuer)
+    }));
+  }
+
+  const tx  = txb.setTimeout(180).build();
+  const xdr = tx.toXDR();
+  return `${SEP7_PREFIX}xdr=${encodeURIComponent(xdr)}&network_passphrase=${encodeURIComponent(NETWORK_PASSPHRASE)}`;
+}
+
+// direct signer for multiple NFT trustlines at once if we have the secret locally
+async function addTrustlinesDirect(pub, secret, assets /* [{code,issuer}] */){
+  const ok = await ensureStellar();
+  if (!ok || !window.StellarSdk) throw new Error('Stellar SDK missing');
+
+  const SDK    = window.StellarSdk;
+  const server = getServer();
+  const acct   = await server.loadAccount(pub);
+
+  let txb = new SDK.TransactionBuilder(acct, {
+    fee: (await server.fetchBaseFee()).toString(),
+    networkPassphrase: NETWORK_PASSPHRASE
+  });
+
+  for (const a of assets){
+    txb = txb.addOperation(SDK.Operation.changeTrust({
+      asset: new SDK.Asset(a.code, a.issuer)
+    }));
+  }
+
+  const tx = txb.setTimeout(180).build();
+  tx.sign(SDK.Keypair.fromSecret(secret));
+  return server.submitTransaction(tx);
+}
 // Initial gate & UI
 setTimeout(()=>{ if (ACTIVE_PUB) refreshAccountGate(ACTIVE_PUB); }, 0);
 
