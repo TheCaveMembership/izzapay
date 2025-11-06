@@ -33,6 +33,9 @@ ISSUER_PUB   = _getenv("ISSUER_PUB", required=True)
 DISTR_PUB    = _getenv("DISTR_PUB", required=True)
 DISTR_SECRET = _getenv("DISTR_SECRET", required=True)
 
+# NEW: optional canonical NFT issuer (matches nft_api.py behavior)
+NFT_ISSUER_G = _getenv("NFT_ISSUER_PUBLIC", None) or _getenv("NFT_CANONICAL_ISSUER", None)
+
 VOTE_ROUND_LENGTH_DAYS = int(_getenv("VOTE_ROUND_LENGTH_DAYS", "180") or "180")
 VOTE_ROUND_END_ENV     = _getenv("VOTE_ROUND_END", None)
 
@@ -641,12 +644,13 @@ def _compute_claimables_out(pub: str) -> list[dict]:
         out.append(rec_out)
     return out
 
-# --------- NEW: include pending NFT claims in the same list for the UI ----
+# --------- include pending NFT claims in the same list for the UI ----
 
 def _pending_nft_for(pub: str = "", username: str = "") -> list[dict]:
     """
     Read pending NFT claims from nft_pending_claims and normalize into the same-ish
     shape used by the stake claim list, so the UI can render them together.
+    Normalize issuer to the canonical NFT issuer if provided via env.
     """
     if not pub and not username:
         return []
@@ -678,7 +682,8 @@ def _pending_nft_for(pub: str = "", username: str = "") -> list[dict]:
             assets = json.loads(r.get("assets_json") or "[]")
         except Exception:
             assets = []
-        # Map to a pseudo-claim row:
+        # Normalize issuer to canonical if configured
+        issuer_norm = NFT_ISSUER_G or r.get("issuer") or ""
         out.append({
             "kind": "nft",
             "role": "nft",
@@ -687,7 +692,7 @@ def _pending_nft_for(pub: str = "", username: str = "") -> list[dict]:
             "id": f"nft-{r['id']}",
             "contract_id": f"nft|{r['id']}",     # unique handle for UI selection
             "assets": assets,                    # list of asset codes to deliver
-            "issuer": r.get("issuer"),
+            "issuer": issuer_norm,
             "buyer_pub": r.get("buyer_pub"),
             "order_id": r.get("order_id"),
             "created_at": r.get("created_at"),
@@ -767,6 +772,15 @@ def list_claimables():
                     "WHERE status='pending' AND (buyer_pub='' OR buyer_pub IS NULL) AND lower(buyer_username)=lower(?)",
                     (pub, uname)
                 )
+                # Also backfill issuer to canonical if we have it and DB field is empty
+                if NFT_ISSUER_G:
+                    bcx.execute(
+                        "UPDATE nft_pending_claims "
+                        "SET issuer=? "
+                        "WHERE status='pending' AND (issuer='' OR issuer IS NULL) AND lower(buyer_username)=lower(?)",
+                        (NFT_ISSUER_G, uname)
+                    )
+                bcx.commit()
     except Exception:
         pass
 
