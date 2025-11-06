@@ -2378,12 +2378,11 @@ claimSelected?.addEventListener('click', async ()=>{
     const u = (USER?.username || '');
     const claimUrl = u ? `/api/nft/claim?u=${encodeURIComponent(u)}` : '/api/nft/claim';
     const body = {
-      buyer_pub: pub,
-      to_pub: pub,
-      assets: group.assets,
-      issuer: group.issuer,
-      as_claimable: true
-    };
+  buyer_pub: pub,
+  assets: group.assets,
+  // If you have the pending row id, include it to auto-mark claimed:
+  pending_id: group.pendingId
+};
     const r   = await fetch(claimUrl, { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(body) });
     const txt = await r.text().catch(()=> '');
     let j = {}; try { j = JSON.parse(txt); } catch { j = { ok:false, error: txt }; }
