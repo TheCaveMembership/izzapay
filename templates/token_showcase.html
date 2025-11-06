@@ -1619,10 +1619,10 @@ const backdrop      = document.getElementById('modalBackdrop');
 const closeModalBtn = document.getElementById('closeModalBtn');
 let lastFocus = null;
 
-// My Wallet modal (Actions)
+// My Wallet modal, Actions
 const revealOnceBtn = document.getElementById('revealOnceBtn');
 const secretOnce    = document.getElementById('secretOnce');
-  // NFTs modal
+// NFTs modal
 const openMyNftsBtn  = document.getElementById('openMyNftsBtn');
 const myNftsModal    = document.getElementById('myNftsModal');
 const closeMyNftsBtn = document.getElementById('closeMyNftsBtn');
@@ -1678,19 +1678,51 @@ const claimRefresh   = document.getElementById('claimRefreshBtn');
 const claimSelected  = document.getElementById('claimSelectedBtn');
 const claimTblBody   = document.querySelector('#claimTbl tbody');
 const claimMsg       = document.getElementById('claimMsg');
+
+// ---- robust “any checked?” (stake or NFT) scoped to the modal
+function anyClaimCheckedScope(scope){
+  if (!scope) return false;
+  // stake rows
+  const stakeChecked = scope.querySelector('.cbPick:checked, input[type="checkbox"][data-kind="stake"]:checked');
+  if (stakeChecked) return true;
+  // nft rows (support multiple shapes)
+  const nftChecked =
+    scope.querySelector(
+      '.cbPickNft:checked,' +                                   // preferred class
+      'input[type="checkbox"][data-kind="nft"]:checked,' +      // data-kind
+      'input[type="checkbox"][data-contract-id^="nft|"]:checked,' + // contract id shape
+      'tr[data-kind="nft"] input[type="checkbox"]:checked'      // row wrapper
+    );
+  return !!nftChecked;
+}
+
 function updateClaimSelectedState(){
-  const anyChecked = document.querySelector('.cbPick:checked, .cbPickNft:checked');
-  claimSelected.disabled = !anyChecked;
+  const scope = claimModal || document;
+  claimSelected.disabled = !anyClaimCheckedScope(scope);
 }
 
 // Toggle button state whenever user checks or unchecks any row
 claimTblBody?.addEventListener('change', (e) => {
   const el = e.target;
-  if (!el) return;
-  if (el.classList?.contains('cbPick') || el.classList?.contains('cbPickNft')) {
-    updateClaimSelectedState();
-  }
+  if (!el || el.type !== 'checkbox') return;
+  updateClaimSelectedState();
 });
+
+// Also re-evaluate when the modal opens (fresh render)
+claimModal?.addEventListener('toggle', ()=> updateClaimSelectedState());
+document.addEventListener('keydown', (e)=> {
+  if (e.key === 'Escape') setTimeout(updateClaimSelectedState, 0);
+});
+
+// If your table is re-rendered via listClaimables(), observe DOM changes
+const claimObserver = new MutationObserver(()=>{
+  updateClaimSelectedState();
+});
+if (claimTblBody){
+  claimObserver.observe(claimTblBody, { childList:true, subtree:true });
+}
+
+// util
 function fmtNum(n, dp=7){ const x=Number(n); return isFinite(x)?x.toLocaleString(undefined,{minimumFractionDigits:dp,maximumFractionDigits:dp}):'—'; }
 function toUTC(ts){ try{ return new Date(ts*1000).toISOString().replace('T',' ').replace('Z',' UTC'); }catch{ return '—'; } }
 
@@ -2216,11 +2248,177 @@ async function ensureNftTrust(pub, issuer, codes){
   await waitForTrust(pub, todo.map(code => ({code, issuer})), { maxMs: 20000, stepMs: 700 });
   return { ok:true, created: todo.length };
 }
+
 function bodyText(r){ return r.text().catch(()=> ''); }
 function needsTrustFromText(t){ return /buyer\s*_?\s*missing\s*_?\s*trustline/i.test(t||''); }
 function extractMissingCodes(t, fallback){
   const m = (t||'').match(/buyer[_ ]?missing[_ ]?trustline:([A-Z0-9]{1,12})/i);
   return m ? [m[1]] : (fallback || []);
+}
+
+// ---------- helpers used by claim handler ----------
+const HEX64 = /^[0-9a-fA-F]{64}$/;
+const HEX72 = /^[0-9a-fA-F]{72}$/;
+const HZ    = (window.HORIZON_URL || 'https://api.testnet.minepi.com');
+const PASS  = (window.NETWORK_PASSPHRASE || 'Pi Testnet');
+
+function normalizeBalanceId(id){
+  const s = String(id||'').replace(/^0x/i,'').trim();
+  if (HEX64.test(s)) return s.toLowerCase();
+  if (HEX72.test(s)) return s.slice(8).toLowerCase(); // strip discriminant
+  return null;
+}
+function uniq(arr){ return Array.from(new Set(arr)); }
+
+async function loadBalancesViaServer(pub){
+  const ok = await ensureStellar().catch(()=>false);
+  if (ok && window.StellarSdk){
+    const server  = getServer();
+    const account = await server.loadAccount(pub);
+    return account?.balances || [];
+  }
+  const r = await fetch(`${HZ}/accounts/${encodeURIComponent(pub)}`);
+  const j = await r.json();
+  if (!r.ok || !j?.account_id) throw new Error('Could not load account via Horizon');
+  return j.balances || [];
+}
+function haveTrust(balances, code, issuer){
+  try { return hasTrustFor(balances, code, issuer); } catch { /* fallback below */ }
+  return !!(balances||[]).find(b => b?.asset_code===code && b?.asset_issuer===issuer);
+}
+
+async function addTrustlinesIfNeeded(pub, list){
+  // list: [{ code, issuer }, ...]
+  const compact = [];
+  const seen = new Set();
+  for (const p of (list||[])){
+    const key = `${p.code}:${p.issuer}`;
+    if (!seen.has(key)) { seen.add(key); compact.push(p); }
+  }
+  if (!compact.length) return { added:false };
+
+  // 1) Inspect balances, compute missing
+  const balances = await loadBalancesViaServer(pub);
+  const missing = compact.filter(p => !haveTrust(balances, p.code, p.issuer));
+  if (!missing.length) return { added:false };
+
+  // 2) Local sign if we have secret, else SEP-7
+  const localSec = getLocalSecret(pub, USER?.username);
+  if (localSec){
+    const ok = await ensureStellar().catch(()=>false);
+    if (!(ok && window.StellarSdk)) throw new Error('Stellar SDK unavailable for trustlines');
+    const SDK = window.StellarSdk;
+    const server = getServer();
+    const account = await server.loadAccount(pub);
+    const fee = (await server.fetchBaseFee()).toString();
+    let txb = new SDK.TransactionBuilder(account, { fee, networkPassphrase: PASS });
+    for (const a of missing){
+      txb = txb.addOperation(SDK.Operation.changeTrust({ asset: new SDK.Asset(a.code, a.issuer) }));
+    }
+    const tx = txb.setTimeout(180).build();
+    tx.sign(SDK.Keypair.fromSecret(localSec));
+    const resp = await server.submitTransaction(tx);
+    log('nft.trust.submit', { via:'sdk', hash: resp?.hash, n: missing.length });
+
+    const okWait = await waitForTrust(pub, missing, { maxMs: 20000, stepMs: 700 }).catch(()=>false);
+    if (!okWait){
+      claimMsg.textContent = '⏳ Added trustlines. Tap Claim again in a few seconds.';
+      throw new Error('trustline propagation delay');
+    }
+    return { added:true };
+  } else {
+    const uri = await buildChangeTrustMultiSEP7(pub, missing);
+    if (!uri) throw new Error('Could not build SEP-7 URI for trustlines');
+    log('nft.trust.sep7.open', { n: missing.length });
+    claimMsg.innerHTML = 'Opening your wallet to add NFT trustlines…<br>' +
+      '<small>If nothing happens, tap this link:</small> ' +
+      `<a href="${uri}" style="word-break:break-all">Open in wallet</a>` +
+      '<br><small>After approval, come back and press <b>Claim</b> again.</small>';
+    window.location.assign(uri);
+    throw new Error('sep7 in flight');
+  }
+}
+
+// ---------- staking claim (unchanged) ----------
+async function submitStakeClaimIfAny(pub, ids){
+  const normalized = uniq(ids.map(normalizeBalanceId).filter(Boolean));
+  if (!normalized.length) return { done:false };
+  const r = await fetch('/api/stake/claim', {
+    method:'POST',
+    headers:{'Content-Type':'application/json'},
+    body: JSON.stringify({ pub, ids: normalized })
+  });
+  const j = await r.json().catch(()=>({}));
+  if (!r.ok || !j?.ok){
+    const msg = j?.error || j?.message || `HTTP ${r.status}`;
+    throw new Error(`Claimables error: ${msg}`);
+  }
+  const xdr  = j.xdr;
+  const pass = j.network_passphrase || PASS;
+
+  const localSec = getLocalSecret(pub, USER?.username);
+  if (localSec){
+    const ok = await ensureStellar().catch(()=>false);
+    if (!(ok && window.StellarSdk)) throw new Error('Stellar SDK missing');
+    const SDK = window.StellarSdk;
+    const tx  = SDK.TransactionBuilder.fromXDR(xdr, pass);
+    tx.sign(SDK.Keypair.fromSecret(localSec));
+    const server = getServer();
+    const resp = await server.submitTransaction(tx);
+    log('claim.submit.ok', { hash: resp?.hash });
+    return { done:true };
+  } else {
+    const uri = `web+stellar:tx?xdr=${encodeURIComponent(xdr)}&network_passphrase=${encodeURIComponent(pass)}`;
+    try{
+      window.location.assign(uri);
+      claimMsg.innerHTML = `Opening your wallet to sign claimables…<br><small>If nothing happens, tap the link:</small> <a href="${uri}" style="word-break:break-all">Open in wallet</a>`;
+    }catch{
+      claimMsg.innerHTML =
+        `Couldn’t open a wallet from this browser.<br><small>Copy this into your wallet:</small><br>` +
+        `<code id="claimDeepLink" style="word-break:break-all">${uri}</code><br>` +
+        `<button id="copyDeepLinkBtn" class="btn sm">Copy link</button>`;
+      document.getElementById('copyDeepLinkBtn')?.addEventListener('click', async ()=>{
+        try{ await navigator.clipboard.writeText(uri); claimMsg.innerHTML += '<br>✅ Copied.'; }
+        catch{ claimMsg.innerHTML += '<br>Copy failed, long-press to select.'; }
+      });
+    }
+    throw new Error('sep7 in flight');
+  }
+}
+
+// ---------- NFT id normalization ----------
+function normalizePendingIdFromDataset(el){
+  // Supports data-pending-id or contract_id like "nft|123"
+  const attr = el.dataset.pendingId || el.dataset.pendingid || '';
+  if (/^\d+$/.test(attr)) return parseInt(attr, 10);
+  const cid = String(el.dataset.contractId || el.dataset.contractid || '').trim();
+  if (cid.toLowerCase().startsWith('nft|')){
+    const rest = cid.split('|')[1];
+    if (/^\d+$/.test(rest)) return parseInt(rest, 10);
+  }
+  return undefined;
+}
+function normalizePendingIdFromRow(row){
+  if (typeof row.pendingId === 'number') return row.pendingId;
+  if (typeof row.pending_id === 'number') return row.pending_id;
+  const cid = String(row.contract_id || '').trim();
+  if (cid.toLowerCase().startsWith('nft|')){
+    const rest = cid.split('|')[1];
+    if (/^\d+$/.test(rest)) return parseInt(rest, 10);
+  }
+  return undefined;
+}
+function buildNftIdsFromGroups(groups){
+  // Send both "13" and "nft|13" (backend can accept either)
+  const raw = [];
+  for (const g of groups){
+    const pid = normalizePendingIdFromRow(g);
+    if (typeof pid === 'number'){
+      raw.push(String(pid));
+      raw.push(`nft|${pid}`);
+    }
+  }
+  return uniq(raw);
 }
 
 // ======== CLAIM SELECTED (batch) — stake claimables + NFT claims ======== //
@@ -2234,14 +2432,15 @@ claimSelected?.addEventListener('click', async ()=>{
   // Expand group selections like "id1,id2" into individual ids (staking)
   const rawPicks = Array.from(document.querySelectorAll('.cbPick:checked'))
     .map(x => (x.dataset.balanceIds || x.value || '').trim());
-
   const picks = rawPicks.flatMap(v => v.split(',')).map(s => s.trim()).filter(Boolean);
 
-  // Collect NFT selections
+  // Collect NFT selections (issuer + assets are on each checkbox row)
   const nftPicks = Array.from(document.querySelectorAll('.cbPickNft:checked')).map(el => ({
     issuer: (el.dataset.issuer || '').trim(),
-    assets: (el.dataset.assets || '').split(',').map(a => a.trim()).filter(Boolean)
-  })).filter(x => x.issuer && x.assets.length);
+    assets: (el.dataset.assets || '').split(',').map(a => a.trim()).filter(Boolean),
+    pendingId: normalizePendingIdFromDataset(el),
+    contract_id: el.dataset.contractId || el.dataset.contractid || ''
+  })).filter(x => x.issuer && x.assets.length && typeof x.pendingId === 'number');
 
   if (!picks.length && !nftPicks.length){
     claimMsg.textContent='Pick at least one balance or NFT.';
@@ -2250,247 +2449,82 @@ claimSelected?.addEventListener('click', async ()=>{
     return;
   }
 
-  // Helpers we rely on from your file
-  const HEX64 = /^[0-9a-fA-F]{64}$/;
-  const HEX72 = /^[0-9a-fA-F]{72}$/;
-  const HZ   = (window.HORIZON_URL || 'https://api.testnet.minepi.com');
-  const PASS = (window.NETWORK_PASSPHRASE || 'Pi Testnet');
-
-  function normalizeBalanceId(id){
-    const s = String(id||'').replace(/^0x/i,'').trim();
-    if (HEX64.test(s)) return s.toLowerCase();
-    if (HEX72.test(s)) return s.slice(8).toLowerCase();
-    return null;
-  }
-
-  function uniq(arr){ return Array.from(new Set(arr)); }
-
-  async function loadBalancesViaServer(){
-    const ok = await ensureStellar().catch(()=>false);
-    if (ok && window.StellarSdk){
-      const server  = getServer();
-      const account = await server.loadAccount(pub);
-      return account?.balances || [];
-    }
-    // Fallback to raw Horizon fetch
-    const r = await fetch(`${HZ}/accounts/${encodeURIComponent(pub)}`);
-    const j = await r.json();
-    if (!r.ok || !j?.account_id) throw new Error('Could not load account via Horizon');
-    return j.balances || [];
-  }
-
-  function haveTrust(balances, code, issuer){
-    try { return hasTrustFor(balances, code, issuer); } catch { /* fall through */ }
-    // Minimal inline fallback if helper not present
-    return !!(balances||[]).find(b => b?.asset_code===code && b?.asset_issuer===issuer);
-  }
-
-  async function addTrustlinesIfNeeded(picks){
-    // picks: [{ code, issuer }, ...]
-    if (!picks.length) return { added:false };
-
-    // 1) Inspect balances, compute missing
-    const balances = await loadBalancesViaServer();
-    const missing = [];
-    for (const p of picks){
-      if (!haveTrust(balances, p.code, p.issuer)){
-        missing.push({ code:p.code, issuer:p.issuer });
-      }
-    }
-    if (!missing.length) return { added:false };
-
-    // 2) Direct sign if we have the local secret, else SEP-7
-    const localSec = getLocalSecret(pub, USER?.username);
-    if (localSec){
-      const ok = await ensureStellar().catch(()=>false);
-      if (!(ok && window.StellarSdk)) throw new Error('Stellar SDK unavailable for direct trustline add');
-      const SDK    = window.StellarSdk;
-      const server = getServer();
-      const account = await server.loadAccount(pub);
-      const fee = (await server.fetchBaseFee()).toString();
-      let txb = new SDK.TransactionBuilder(account, { fee, networkPassphrase: PASS });
-      for (const a of missing){
-        txb = txb.addOperation(SDK.Operation.changeTrust({ asset: new SDK.Asset(a.code, a.issuer) }));
-      }
-      const tx = txb.setTimeout(180).build();
-      tx.sign(SDK.Keypair.fromSecret(localSec));
-      const resp = await server.submitTransaction(tx);
-      log('nft.trust.submit', { via: 'sdk', hash: resp?.hash, n: missing.length });
-
-      // 3) Wait for Horizon to reflect new trustlines
-      const okWait = await waitForTrust(pub, missing, { maxMs: 20000, stepMs: 700 }).catch(()=>false);
-      if (!okWait){
-        claimMsg.textContent = '⏳ Added trustlines. Tap Claim again in a few seconds.';
-        throw new Error('trustline propagation delay');
-      }
-      return { added:true };
-    } else {
-      // SEP-7 batch change_trust
-      const uri = await buildChangeTrustMultiSEP7(pub, missing);
-      if (!uri) throw new Error('Could not build SEP-7 URI for trustlines');
-      log('nft.trust.sep7.open', { n: missing.length });
-      claimMsg.innerHTML = 'Opening your wallet to add NFT trustlines…<br>' +
-        '<small>If nothing happens, tap this link:</small> ' +
-        `<a href="${uri}" style="word-break:break-all">Open in wallet</a>` +
-        '<br><small>After approval, come back and press <b>Claim</b> again.</small>';
-      // Hand off to wallet, stop flow here
-      window.location.assign(uri);
-      throw new Error('sep7 in flight');
-    }
-  }
-
-  async function submitStakeClaimIfAny(ids){
-    const normalized = uniq(ids.map(normalizeBalanceId).filter(Boolean));
-    if (!normalized.length) return { done:false };
-    const r = await fetch('/api/stake/claim', {
-      method:'POST',
-      headers:{'Content-Type':'application/json'},
-      body: JSON.stringify({ pub, ids: normalized })
-    });
-    const j = await r.json().catch(()=>({}));
-    if (!r.ok || !j?.ok){
-      const msg = j?.error || j?.message || `HTTP ${r.status}`;
-      throw new Error(`Claimables error: ${msg}`);
-    }
-    const xdr  = j.xdr;
-    const pass = j.network_passphrase || PASS;
-
-    // Prefer local sign
-    const localSec = getLocalSecret(pub, USER?.username);
-    if (localSec){
-      const ok = await ensureStellar().catch(()=>false);
-      if (!(ok && window.StellarSdk)) throw new Error('Stellar SDK missing');
-      const SDK = window.StellarSdk;
-      const tx  = SDK.TransactionBuilder.fromXDR(xdr, pass);
-      tx.sign(SDK.Keypair.fromSecret(localSec));
-      const server = getServer();
-      const resp = await server.submitTransaction(tx);
-      log('claim.submit.ok', { hash: resp?.hash });
-      return { done:true };
-    } else {
-      // SEP-7 fallback
-      const uri = `web+stellar:tx?xdr=${encodeURIComponent(xdr)}&network_passphrase=${encodeURIComponent(pass)}`;
-      try{
-        window.location.assign(uri);
-        claimMsg.innerHTML = `Opening your wallet to sign claimables…<br><small>If nothing happens, tap the link:</small> <a href="${uri}" style="word-break:break-all">Open in wallet</a>`;
-      }catch{
-        claimMsg.innerHTML =
-          `Couldn’t open a wallet from this browser.<br><small>Copy this into your wallet:</small><br>` +
-          `<code id="claimDeepLink" style="word-break:break-all">${uri}</code><br>` +
-          `<button id="copyDeepLinkBtn" class="btn sm">Copy link</button>`;
-        document.getElementById('copyDeepLinkBtn')?.addEventListener('click', async ()=>{
-          try{ await navigator.clipboard.writeText(uri); claimMsg.innerHTML += '<br>✅ Copied.'; }
-          catch{ claimMsg.innerHTML += '<br>Copy failed, long-press to select.'; }
-        });
-      }
-      // Stop here, user returns and presses Refresh
-      throw new Error('sep7 in flight');
-    }
-  }
-
-  async function submitNftClaimOnce(group){
-  // group = { assets: [...], issuer, pendingId? }
-  const u = (USER?.username || '');
-  const claimUrl = u ? `/api/nft/claim?u=${encodeURIComponent(u)}` : '/api/nft/claim';
-
-  // Do NOT send issuer; server uses canonical env issuer internally.
-  const body = {
-    buyer_pub: (claimPub.value || '').trim(),
-    assets: group.assets,
-    pending_id: typeof group.pendingId === 'number' ? group.pendingId : undefined
-  };
-
-  // Helper to POST and always read body text for decisions
-  async function postAndRead(){
-    const r   = await fetch(claimUrl, {
-      method:'POST',
-      headers:{ 'Content-Type':'application/json' },
-      body: JSON.stringify(body)
-    });
-    const txt = await r.text().catch(()=> '');
-    let j = {};
-    try { j = JSON.parse(txt); } catch { /* leave as {} */ }
-
-    // Emit full body to your client log so we can see exact errors
-    log('nft.claim.response', { ok: r.ok, status: r.status, body: (txt || '').slice(0, 400) });
-
-    return { r, txt, j };
-  }
-
-  // First attempt
-  let { r, txt, j } = await postAndRead();
-
-  // If backend says buyer is missing a trustline → add it, then retry once
-  const miss = /buyer[_ ]?missing[_ ]?trustline:([A-Z0-9]{1,12})/i.exec(txt || '');
-  if ((!r.ok || !j?.ok) && miss){
-    const code = miss[1];
-    // Add for the canonical issuer from the pending row (group.issuer).
-    await addTrustlinesIfNeeded([{ code, issuer: group.issuer }]);
-
-    // Retry once after trustline is established
-    ({ r, txt, j } = await postAndRead());
-  }
-
-  // Handle other common Horizon errors more cleanly
-  if (!r.ok || !j?.ok){
-    const bodyMsg = (j?.error || j?.message || txt || '').trim();
-
-    if (/op_low_reserve/i.test(bodyMsg)){
-      throw new Error('Your wallet needs more native Pi for reserves. Top up a little Pi then try again.');
-    }
-    if (/tx_insufficient_fee/i.test(bodyMsg)){
-      throw new Error('Network is surging. Try again in a few seconds.');
-    }
-
-    // Fall back to the body text so we see the real cause
-    throw new Error(bodyMsg || `HTTP ${r.status}`);
-  }
-
-  return true;
-}
-
   // Status line
   const ops = [];
-  if (picks.length)   ops.push(`claimables:${picks.length}`);
+  if (picks.length)    ops.push(`claimables:${picks.length}`);
   if (nftPicks.length) ops.push(`nft_groups:${nftPicks.length}`);
   claimMsg.textContent = `Building claim, ${ops.join(' + ')}…`;
   log('claim.build.start', { n_ids: picks.length, n_nft: nftPicks.length });
 
   try{
-    // A) Staking claimables first
+    // A) Staking claimables first (unchanged)
     if (picks.length){
-      await submitStakeClaimIfAny(picks);
+      await submitStakeClaimIfAny(pub, picks);
     }
 
-    // B) NFTs — preflight trustlines for all selected groups, then claim
+    // B) NFTs — preflight trustlines for all selected groups, then claim in one batch
     if (nftPicks.length){
-      // Preflight missing trustlines for every selected asset code across groups
+      // Preflight trustlines across all selected asset codes
       const needAll = [];
       for (const g of nftPicks){
         for (const code of g.assets){ needAll.push({ code, issuer: g.issuer }); }
       }
-      // Batch add as needed, may fall into SEP-7 and stop if the user must sign
-      await addTrustlinesIfNeeded(needAll);
+      await addTrustlinesIfNeeded(pub, needAll);  // may hand off to SEP-7
 
-      // If we are still here, either we already had trustlines or they were added via local signing
-      // Now do per-group NFT claims
-      for (const g of nftPicks){
-        await submitNftClaimOnce(g);
-        log('nft.claim.ok', { issuer: g.issuer, n: g.assets.length });
+      // Build nft_ids and claim once
+      const nft_ids = buildNftIdsFromGroups(nftPicks);
+      const r = await fetch('/api/nft/claim', {
+        method:'POST',
+        headers:{ 'Content-Type':'application/json' },
+        body: JSON.stringify({ pub, nft_ids })
+      });
+      const txt = await r.text().catch(()=> '');
+      let j = {};
+      try { j = JSON.parse(txt); } catch {}
+
+      log('nft.claim.response', { ok: r.ok, status: r.status, body: (txt || '').slice(0, 400) });
+
+      // If backend reports missing trustline mid-flight, add and retry once
+      if ((!r.ok || !j?.ok) && needsTrustFromText(txt)){
+        // Retry after a targeted trust add, using what the server hinted or our full list
+        const hinted = extractMissingCodes(txt, []);
+        const need = (hinted.length
+          ? hinted.map(code => ({ code, issuer: nftPicks[0].issuer }))
+          : needAll);
+        await addTrustlinesIfNeeded(pub, need);
+
+        const r2 = await fetch('/api/nft/claim', {
+          method:'POST',
+          headers:{ 'Content-Type':'application/json' },
+          body: JSON.stringify({ pub, nft_ids })
+        });
+        const txt2 = await r2.text().catch(()=> '');
+        try { j = JSON.parse(txt2); } catch { j = {}; }
+        log('nft.claim.response', { ok: r2.ok, status: r2.status, body: (txt2 || '').slice(0, 400) });
+
+        if (!r2.ok || !j?.ok){
+          const bodyMsg = (j?.error || j?.message || txt2 || '').trim();
+          if (/op_low_reserve/i.test(bodyMsg))  throw new Error('Your wallet needs more native Pi for reserves. Top up a little Pi then try again.');
+          if (/tx_insufficient_fee/i.test(bodyMsg)) throw new Error('Network is surging. Try again in a few seconds.');
+          throw new Error(bodyMsg || `HTTP ${r2.status}`);
+        }
+      } else if (!r.ok || !j?.ok){
+        const bodyMsg = (j?.error || j?.message || txt || '').trim();
+        if (/op_low_reserve/i.test(bodyMsg))  throw new Error('Your wallet needs more native Pi for reserves. Top up a little Pi then try again.');
+        if (/tx_insufficient_fee/i.test(bodyMsg)) throw new Error('Network is surging. Try again in a few seconds.');
+        throw new Error(bodyMsg || `HTTP ${r.status}`);
       }
+
+      log('nft.claim.ok', { n: nft_ids.length });
     }
 
     claimMsg.textContent = '✅ Claimed. Refreshing…';
     await listClaimables();
   }catch(e){
-    // Surface the last error clearly
     const msg = String(e?.message || e);
-    // Only keep the "❌" prefix once
     claimMsg.textContent = msg.startsWith('❌') ? msg : `❌ ${msg}`;
     log('claim.exception', { err: msg });
   }finally{
-    // Re-enable button in all cases unless we handed off to SEP-7
-    // If SEP-7 handoff happened, we threw 'sep7 in flight', but still re-enable to allow retry after return
     claimSelected.disabled = false;
   }
 });
