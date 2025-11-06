@@ -128,7 +128,7 @@ log.info("NFT_ISSUER_CANON %s", _mask(CANONICAL_ISSUER_G))
 PP = _network_passphrase()
 
 # Requests client with timeouts to prevent worker timeouts on slow Horizon
-_client = RequestsClient(num_retries=1, post_timeout=10, get_timeout=10)
+_client = RequestsClient(num_retries=1, post_timeout=10)
 server = Server(HORIZON_URL, client=_client)
 
 # ---------- Horizon account helpers ----------
