@@ -2135,21 +2135,24 @@ async function listClaimables(){
       const codes  = assets.join(', ');
       if (!issuer || !assets.length) continue;
 
-      const trHead = document.createElement('tr');
-      trHead.className = `group-head is-nft`;
-      trHead.innerHTML = `
-        <td colspan="4">
-          <label class="group-toggle" style="display:flex;align-items:center;gap:10px;white-space:nowrap;">
-            <input
-              type="checkbox"
-              class="cbPickNft"
-              data-issuer="${issuer}"
-              data-assets="${assets.join(',')}"
-            >
-            <span class="pill pill-nft">NFT</span>
-            <strong>Purchased NFTs • ready to deliver</strong>
-          </label>
-        </td>`;
+      const nftChkId = `nftpick_${issuer.slice(-6)}_${Math.random().toString(36).slice(2,7)}`;
+const trHead = document.createElement('tr');
+trHead.className = `group-head is-nft`;
+trHead.innerHTML = `
+  <td colspan="4">
+    <label class="group-toggle" for="${nftChkId}" style="display:flex;align-items:center;gap:10px;white-space:nowrap;cursor:pointer">
+      <input
+        id="${nftChkId}"
+        type="checkbox"
+        class="cbPickNft"
+        data-issuer="${issuer}"
+        data-assets="${assets.join(',')}"
+        style="cursor:pointer"
+      >
+      <span class="pill pill-nft">NFT</span>
+      <strong>Purchased NFTs • ready to deliver</strong>
+    </label>
+  </td>`;
       claimTblBody.appendChild(trHead);
 
       const trBody = document.createElement('tr');
