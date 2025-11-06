@@ -523,6 +523,58 @@ def mint():
     log.info("NFT_MINT_OK size=%s total_fee=%s first_asset=%s", size, str(total), minted[0] if minted else "")
     return jsonify({"ok": True, "assets": minted, "size": size, "total_fee": str(total)})
 
+# ---------- internal: ensure distributor has 1 unit for a code ----------
+def _ensure_minted_to_distributor(code: str):
+    """
+    Idempotent: if distributor already holds >=1 of code (issuer = canonical), do nothing.
+    Otherwise:
+      - ensure distributor trustline to asset(code, CANONICAL_ISSUER_G)
+      - issue 1 unit from issuer to distributor
+    """
+    code_san = _sanitize(code)[:12]
+    if not code_san:
+        abort(400, "asset_code_invalid")
+    if len(code_san) > 12:
+        abort(400, "asset_code_too_long")
+
+    iss_kp = Keypair.from_secret(ISSUER_S)
+    asset = Asset(code_san, iss_kp.public_key)
+
+    # does distributor already have it?
+    try:
+        d_acc = server.load_account(DISTR_G)
+        for b in d_acc.balances:
+            if b.get("asset_code") == code_san and b.get("asset_issuer") == iss_kp.public_key:
+                try:
+                    bal = Decimal(str(b.get("balance", "0")))
+                except Exception:
+                    bal = Decimal("0")
+                if bal >= Decimal("1"):
+                    return  # already minted to distributor
+                break
+    except Exception as e:
+        log.warning("NFT_DISTR_READ_FAIL %s: %s", type(e).__name__, e)
+
+    # ensure trustline (idempotent)
+    try:
+        _change_trust(DISTR_S, asset, limit="1")
+    except Exception as e:
+        log.warning("NFT_DISTR_TRUST_ENSURE %s: %s", type(e).__name__, e)
+
+    # issue 1 to distributor
+    iss_acc = _load(iss_kp.public_key)
+    tx = (TransactionBuilder(iss_acc, PP, base_fee=_base_fee())
+          .append_payment_op(destination=DISTR_G, amount="1", asset=asset)
+          .set_timeout(180).build())
+    tx.sign(iss_kp)
+    try:
+        log.debug("NFT_ENSURE_ISSUE start asset=%s to=%s", code_san, _mask(DISTR_G))
+        server.submit_transaction(tx)
+        log.debug("NFT_ENSURE_ISSUE ok asset=%s", code_san)
+    except Exception as e:
+        log.error("NFT_ENSURE_ISSUE fail asset=%s %s: %s", code_san, type(e).__name__, e)
+        abort(400, f"mint_issue_failed:{code_san}: {e}")
+
 @bp_nft.route("/api/nft/claim", methods=["POST"])
 def claim():
     """
@@ -549,19 +601,28 @@ def claim():
 
     log.info("NFT_CLAIM_REQ buyer=%s count=%s issuer=%s", _mask(buyer), len(assets), _mask(issuer_g))
 
-    for code in assets:
+    for raw_code in assets:
+        code = _sanitize(raw_code)[:12]
+        if not code:
+            abort(400, "asset_code_invalid")
+        if len(code) > 12:
+            abort(400, "asset_code_too_long")
+
+        # 0) make sure distributor has 1 unit (mint-on-claim), idempotent
+        _ensure_minted_to_distributor(code)
+
         asset = Asset(code, issuer_g)
 
-        # Verify buyer trustline, return crisp error if missing
+        # 1) Verify buyer trustline, crisp error if missing
         if not _account_has_trustline(buyer, asset):
             abort(400, f"buyer_missing_trustline:{code}")
 
-        # send to buyer
+        # 2) send to buyer
         try:
             _pay_asset(DISTR_S, buyer, "1", asset, memo="IZZA NFT")
         except Exception as e:
             log.error("NFT_CLAIM_DELIVER_FAIL asset=%s %s: %s", code, type(e).__name__, e)
-            abort(400, f"deliver_failed: {code}: {e}")
+            abort(400, f"deliver_failed:{code}: {e}")
 
     # Mark pending row as claimed if provided
     if pending_id:
