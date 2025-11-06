@@ -2277,39 +2277,32 @@ claimSelected?.addEventListener('click', async ()=>{
     // 2) Issue any selected NFTs to the same wallet
 if (nftPicks.length){
   const usernameQ = USER?.username ? `?u=${encodeURIComponent(USER.username)}` : '';
-
   for (const pick of nftPicks){
-
     // ---------- A) Ensure trustlines exist ----------
     try{
       const server   = getServer();
       const account  = await server.loadAccount(pub);
       const balances = account?.balances || [];
-
-      const needed = (pick.assets || [])
+      const needed   = (pick.assets || [])
         .map(code => ({ code, issuer: pick.issuer }))
         .filter(a => !hasTrustFor(balances, a.code, a.issuer));
 
       if (needed.length){
         const localSec = getLocalSecret(pub, USER?.username);
-
         if (localSec){
           log('nft.trust.direct.start', { n: needed.length });
           await addTrustlinesDirect(pub, localSec, needed);
           log('nft.trust.direct.ok', { n: needed.length });
-        } else {
+        }else{
           const uri = await buildChangeTrustMultiSEP7(pub, needed);
           if (!uri) throw new Error('Could not build SEP-7 changeTrust');
           log('nft.trust.sep7.open', { n: needed.length });
-          claimMsg.innerHTML =
-            'Opening your wallet to add NFT trustlines…<br>' +
-            '<small>If nothing happens, tap:</small> ' +
-            '<a href="'+uri+'" style="word-break:break-all">Open in wallet</a>';
+          claimMsg.innerHTML = 'Opening your wallet to add NFT trustlines…<br><small>If nothing happens, tap:</small> <a href="'+uri+'" style="word-break:break-all">Open in wallet</a>';
           window.location.assign(uri);
-          return; // user returns and taps Claim again
+          return; // user returns and taps Refresh
         }
 
-        // Horizon can lag — wait until the new trustlines appear
+        // after adding directly, wait until Horizon sees them
         const ok = await waitForTrust(pub, needed);
         if (!ok){
           claimMsg.textContent = '❌ Trustlines added but not visible yet. Try again in a few seconds.';
@@ -2317,7 +2310,7 @@ if (nftPicks.length){
           return;
         }
       }
-    } catch(e){
+    }catch(e){
       claimMsg.textContent = '❌ Trustline setup failed: ' + String(e?.message || e);
       log('nft.trust.fail', { err: String(e) });
       return;
@@ -2325,27 +2318,25 @@ if (nftPicks.length){
 
     // ---------- B) Claim delivery (try several body shapes until one works) ----------
     const shapes = [
-      // original shape
+      // your original shape
       {
         buyer_pub: pub,
-        assets: pick.assets,
-        issuer: pick.issuer,
+        assets: pick.assets,          // ["NFTCODE1", ...]
+        issuer: pick.issuer,          // "G...ISSUER"
         as_claimable: true
       },
-      // alternate names some backends expect
+      // common alternates some APIs expect
       {
         recipient_pub: pub,
         asset_codes: pick.assets,
         asset_issuer: pick.issuer,
         as_claimable: true
       },
-      // object assets
       {
         to_pub: pub,
-        assets: pick.assets.map(code => ({ code, issuer: pick.issuer })),
+        assets: pick.assets.map(code => ({ code, issuer: pick.issuer })), // [{code,issuer}]
         as_claimable: true
       },
-      // minimal alt
       {
         to: pub,
         codes: pick.assets,
@@ -2359,26 +2350,25 @@ if (nftPicks.length){
     for (const body of shapes){
       try{
         log('nft.claim.attempt', { shape: Object.keys(body).sort() });
-
         const r = await fetch('/api/nft/claim' + usernameQ, {
           method: 'POST',
           headers: { 'Content-Type':'application/json' },
           body: JSON.stringify(body)
         });
 
-        const txt = await r.text();                // get exact server message
+        // read text first so we can show exact server message on error
+        const txt = await r.text();
         let j; try { j = JSON.parse(txt); } catch { j = null; }
-
         if (r.ok && (j?.ok === true || j?.status === 'ok')){
           log('nft.claim.ok', { issuer: pick.issuer, n: pick.assets.length, shape: Object.keys(body).sort() });
           delivered = true;
           break;
-        } else {
+        }else{
           lastText = txt || `HTTP ${r.status}`;
           log('nft.claim.fail', { issuer: pick.issuer, assets: pick.assets, status: r.status, body: lastText });
           // try next shape
         }
-      } catch(e){
+      }catch(e){
         lastText = String(e);
         log('nft.claim.exception', { err: lastText });
         // try next shape
