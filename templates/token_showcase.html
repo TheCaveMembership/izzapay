@@ -1619,10 +1619,10 @@ const backdrop      = document.getElementById('modalBackdrop');
 const closeModalBtn = document.getElementById('closeModalBtn');
 let lastFocus = null;
 
-// My Wallet modal, Actions
+// My Wallet modal (Actions)
 const revealOnceBtn = document.getElementById('revealOnceBtn');
 const secretOnce    = document.getElementById('secretOnce');
-// NFTs modal
+  // NFTs modal
 const openMyNftsBtn  = document.getElementById('openMyNftsBtn');
 const myNftsModal    = document.getElementById('myNftsModal');
 const closeMyNftsBtn = document.getElementById('closeMyNftsBtn');
@@ -1637,7 +1637,7 @@ const closeStakeBtn = document.getElementById('closeStakeBtn');
 const closeClaimBtn = document.getElementById('closeClaimBtn');
 const openStakeBtn  = document.getElementById('openStakeBtn');   // optional internal button
 const openClaimBtn  = document.getElementById('openClaimBtn');   // optional internal button
-const stakeQuickBtn = document.getElementById('stakeQuickBtn');  // your top cta buttons
+const stakeQuickBtn = document.getElementById('stakeQuickBtn');  // your top-cta buttons
 const claimQuickBtn = document.getElementById('claimQuickBtn');
 
 const stakePub     = document.getElementById('stakePub');
@@ -1646,7 +1646,7 @@ const stakeDays    = document.getElementById('stakeDays');
 const stakePreview = document.getElementById('stakePreviewBtn');
 const stakeStart   = document.getElementById('stakeStartBtn');
 const stakeMsg     = document.getElementById('stakeMsg');
-// Cap days at [1, 180] and show a hint if we clamp
+// Cap days at [1..180] and show a hint if we clamp
 const stakeDaysMsg = document.getElementById('stakeDaysMsg');
 
 function clampStakeDays(v){
@@ -1678,70 +1678,21 @@ const claimRefresh   = document.getElementById('claimRefreshBtn');
 const claimSelected  = document.getElementById('claimSelectedBtn');
 const claimTblBody   = document.querySelector('#claimTbl tbody');
 const claimMsg       = document.getElementById('claimMsg');
-
-// Robust checked selectors, scoped to the claim modal so we do not pick other checkboxes
-const NFT_CHECKED_SEL =
-  '.cbPickNft:checked, ' +
-  'input[type="checkbox"][data-kind="nft"]:checked, ' +
-  'input[type="checkbox"][data-contract-id^="nft|"]:checked, ' +
-  'input[type="checkbox"][value^="nft|"]:checked';
-
-const STAKE_CHECKED_SEL =
-  '.cbPick:checked, ' +
-  'input[type="checkbox"][data-kind="stake"]:checked, ' +
-  'input[type="checkbox"][data-balance-ids]:checked';
-
 function updateClaimSelectedState(){
-  const scope = claimModal || document;
-  const anyChecked = scope.querySelector(STAKE_CHECKED_SEL + ', ' + NFT_CHECKED_SEL);
-  if (claimSelected){
-    claimSelected.disabled = !anyChecked;
-  }
+  const anyChecked = document.querySelector('.cbPick:checked, .cbPickNft:checked');
+  claimSelected.disabled = !anyChecked;
 }
 
-// Keep the button state in sync with user interaction
-// 1, direct changes inside the claim modal
-claimModal?.addEventListener('change', (e)=>{
-  const t = e.target;
-  if (!t) return;
-  if (t.matches('input[type="checkbox"]')){
+// Toggle button state whenever user checks or unchecks any row
+claimTblBody?.addEventListener('change', (e) => {
+  const el = e.target;
+  if (!el) return;
+  if (el.classList?.contains('cbPick') || el.classList?.contains('cbPickNft')) {
     updateClaimSelectedState();
   }
 });
-
-// 2, table body delegation, works even if rows are re-rendered
-claimTblBody?.addEventListener('change', (e)=>{
-  const t = e.target;
-  if (!t) return;
-  if (t.matches('input[type="checkbox"]')){
-    updateClaimSelectedState();
-  }
-});
-
-// 3, observe DOM mutations in the claim table to re-evaluate button state after listClaimables
-if (claimTblBody){
-  const mo = new MutationObserver(()=> updateClaimSelectedState());
-  mo.observe(claimTblBody, { childList: true, subtree: true, attributes: true, attributeFilter: ['checked'] });
-}
-
-// 4, when opening the claim modal through any entry point, update once the UI is visible
-openClaimBtn?.addEventListener('click', ()=> setTimeout(updateClaimSelectedState, 0));
-claimQuickBtn?.addEventListener('click', ()=> setTimeout(updateClaimSelectedState, 0));
-closeClaimBtn?.addEventListener('click', ()=> setTimeout(updateClaimSelectedState, 0));
-
-// Initial state
-updateClaimSelectedState();
-
-function fmtNum(n, dp=7){
-  const x = Number(n);
-  return isFinite(x)
-    ? x.toLocaleString(undefined, { minimumFractionDigits: dp, maximumFractionDigits: dp })
-    : '—';
-}
-function toUTC(ts){
-  try { return new Date(ts * 1000).toISOString().replace('T',' ').replace('Z',' UTC'); }
-  catch { return '—'; }
-}
+function fmtNum(n, dp=7){ const x=Number(n); return isFinite(x)?x.toLocaleString(undefined,{minimumFractionDigits:dp,maximumFractionDigits:dp}):'—'; }
+function toUTC(ts){ try{ return new Date(ts*1000).toISOString().replace('T',' ').replace('Z',' UTC'); }catch{ return '—'; } }
 
 // ======== OPEN/CLOSE ========
 openStakeBtn?.addEventListener('click', ()=>{
