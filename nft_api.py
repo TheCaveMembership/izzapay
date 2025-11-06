@@ -65,20 +65,6 @@ if not (ISSUER_S and ISSUER_G and DISTR_S and DISTR_G):
 if not IZZA_ISS:
     raise RuntimeError("Missing IZZA_TOKEN_ISSUER env var")
 
-# ---------- Canonical issuer guard ----------
-try:
-    _pub_from_secret = Keypair.from_secret(ISSUER_S).public_key
-except Exception:
-    _pub_from_secret = None
-
-if not _pub_from_secret or _pub_from_secret != ISSUER_G:
-    raise RuntimeError(
-        f"NFT issuer mismatch: NFT_ISSUER_PUBLIC={ISSUER_G} "
-        f"does not match public key of NFT_ISSUER_SECRET={_mask(_pub_from_secret or '')}"
-    )
-
-CANONICAL_ISSUER_G = ISSUER_G  # single source of truth
-
 def _log_env_summary():
     try:
         log.info("NFT_ENV_SUMMARY %s", json.dumps({
@@ -104,7 +90,7 @@ def _log_env_summary():
 def _network_passphrase():
     if PASSPHRASE.lower() != "auto":
         return PASSPHRASE
-    # detect from Horizon root, safe defaulting
+    # detect from Horizon root (safe defaulting)
     try:
         r = requests.get(HORIZON_URL, timeout=6)
         r.raise_for_status()
@@ -118,7 +104,6 @@ def _network_passphrase():
 
 # log env once on import
 _log_env_summary()
-log.info("NFT_ISSUER_CANON %s", _mask(CANONICAL_ISSUER_G))
 
 PP = _network_passphrase()
 server = Server(HORIZON_URL)
@@ -139,7 +124,7 @@ def _base_fee() -> int:
         return 500
 
 def _native_balance(g: str) -> str:
-    """Return native balance, as string, for quick preflight logging."""
+    """Return native balance (as string) for quick preflight logging."""
     try:
         acc = server.load_account(g)
         for b in acc.balances:
@@ -201,7 +186,7 @@ def _change_trust(secret: str, asset: Asset, limit="1"):
         log.debug("NFT_TRUST_CHANGE ok hash=%s", (res.get("hash") if isinstance(res, dict) else ""))
         return res
     except sx.BadResponseError as e:
-        # Already trusted or benign, proceed
+        # Already trusted or benign – we just proceed
         msg = str(e)
         log.warning("NFT_TRUST_CHANGE horizon_error %s", msg)
         if "op_low_reserve" in msg.lower():
@@ -266,7 +251,7 @@ def _ensure_pending_table():
                 status TEXT NOT NULL DEFAULT 'pending',  -- pending | claimed | canceled
                 created_at INTEGER NOT NULL,
                 claimed_at INTEGER,
-                UNIQUE(order_id)
+                UNIQUE(order_id)               -- one row per order if you pass it
               );
             """)
     except Exception:
@@ -290,22 +275,23 @@ def queue_claim():
     Internal helper you can call right after a successful checkout for an NFT product.
     Body:
       {
-        "order_id": 123,
-        "buyer_username": "cam",
+        "order_id": 123,                  # optional but recommended
+        "buyer_username": "cam",          # optional; will be resolved to user_id if exists
         "buyer_pub": "G...",              # REQUIRED
-        "issuer": "G...",                 # ignored, issuer is canonical
+        "issuer": "G...",                 # optional; defaults to NFT_ISSUER_PUBLIC
         "assets": ["NFTABC001", ...]      # REQUIRED, non-empty
       }
     """
     j = request.get_json(silent=True) or {}
-    order_id       = j.get("order_id")
+    order_id = j.get("order_id")
     buyer_username = (j.get("buyer_username") or "").strip() or None
-    buyer_pub      = (j.get("buyer_pub") or "").strip()
-    issuer         = CANONICAL_ISSUER_G                  # force canonical
-    assets         = list(j.get("assets") or [])
+    buyer_pub = (j.get("buyer_pub") or "").strip()
+    issuer = (j.get("issuer") or ISSUER_G).strip()
+    assets = list(j.get("assets") or [])
 
     _require(buyer_pub and assets, "buyer_pub_and_assets_required")
     if not _isG(buyer_pub): abort(400, "buyer_pub_invalid")
+    if not _isG(issuer): issuer = ISSUER_G
 
     buyer_user_id = _username_to_user_id(buyer_username)
 
@@ -377,12 +363,12 @@ def list_pending():
             "order_id": r["order_id"],
             "buyer_username": r["buyer_username"],
             "buyer_pub": r["buyer_pub"],
-            "issuer": CANONICAL_ISSUER_G,   # normalize on read
+            "issuer": r["issuer"],
             "assets": assets,
             "status": r["status"],
             "created_at": r["created_at"],
-            "kind": "nft",                  # tag for UI
-            "contract_id": f"nft|{r['id']}",
+            "kind": "nft",                       # so UI can tag these in the same list
+            "contract_id": f"nft|{r['id']}",     # unique like the stake group ids
         })
     return jsonify({"ok": True, "pending": out})
 
@@ -395,7 +381,6 @@ def quote():
     unit = PRICE_SINGLE if kind == "single" else per_unit(size)
     total = (unit * size).quantize(Decimal("0.000001"), rounding=ROUND_DOWN)
     return jsonify({"ok": True, "kind": kind, "size": size, "per_unit": str(unit), "total": str(total)})
-
 @bp_nft.get("/api/nft/owned")
 def api_nft_owned():
     pub = (request.args.get("pub") or "").strip()
@@ -416,24 +401,23 @@ def api_nft_owned():
     except Exception as e:
         log.error("NFT_OWNED_FAIL %s: %s", type(e).__name__, e)
         return jsonify({"ok": False, "error": "db_error"}), 500
-
 @bp_nft.route("/api/nft/mint", methods=["POST"])
 def mint():
     """
     Creator flow:
     body {
-      "creator_pub": "G...",        # creator wallet G
-      "creator_sec": "S...",        # creator S
+      "creator_pub": "G...",        // creator wallet G (display)
+      "creator_sec": "S...",        // creator S (saved locally in wallet + sent here only if you trust server)
       "kind": "single"|"collection",
-      "size": 1|10|25...,           # collection size if kind=collection
-      "prefix": "NFT",
-      "collection_tag": "ABC",
-      "royalty_bp": 0               # optional, ignored on-chain here
+      "size": 1|10|25...,           // collection size if kind=collection
+      "prefix": "NFT",              // optional asset code prefix
+      "collection_tag": "ABC",      # optional suffix/stable tag for a set
+      "royalty_bp": 0               # optional creator royalty in basis points (0..1000); ignored on-chain here
     }
     Steps:
-     1) charge fee in IZZA, creator -> distributor
+     1) charge fee in IZZA (creator -> distributor)
      2) for each unit, create new asset code and issue 1 unit to distributor
-     3) return list of asset codes
+     3) return list of asset codes to store with the listing
     """
     j = request.get_json(silent=True) or {}
     creator_pub = (j.get("creator_pub") or "").strip()
@@ -456,7 +440,7 @@ def mint():
     if not _isS(creator_sec):
         abort(400, "creator_sec_invalid")
 
-    # Validate env public keys once more in the hot path, log only
+    # Validate env public keys once more in the hot path (log only)
     if not _isG(IZZA_ISS):
         log.error("NFT_ENV_BAD IZZA_TOKEN_ISSUER invalid G… value: %s", _mask(IZZA_ISS))
     if not _isG(ISSUER_G):
@@ -473,9 +457,9 @@ def mint():
 
     izza = Asset(IZZA_CODE, IZZA_ISS)
 
-    # Ensure distributor trusts IZZA before fee collection, idempotent
+    # Ensure distributor trusts IZZA before fee collection (idempotent).
     try:
-        _change_trust(DISTR_S, izza, limit="100000000")
+        _change_trust(DISTR_S, izza, limit="100000000")  # harmless if already exists
     except Exception as e:
         log.warning("NFT_DISTR_TRUST_IZZA_FAIL %s: %s", type(e).__name__, e)
 
@@ -489,7 +473,7 @@ def mint():
         log.error("NFT_FEE_CHARGE fail %s: %s", type(e).__name__, e)
         abort(400, f"fee_payment_failed: {e}")
 
-    # 2) mint NFT assets to distributor, 1 unit each
+    # 2) mint NFT assets to distributor (1 unit each)
     iss_kp = Keypair.from_secret(ISSUER_S)
     minted = []
     for i in range(size):
@@ -507,6 +491,7 @@ def mint():
             abort(400, f"mint_trust_failed: {code}: {e}")
 
         iss_acc = _load(iss_kp.public_key)
+        # FIX: correct argument order for append_payment_op (destination, amount, asset)
         tx = (TransactionBuilder(iss_acc, PP, base_fee=_base_fee())
               .append_payment_op(destination=DISTR_G, amount="1", asset=asset)
               .set_timeout(180).build())
@@ -530,29 +515,24 @@ def claim():
     body {
       "buyer_pub": "G...",
       "assets": ["NFTABC001","NFTABC002", ...],
-      "issuer": "G...",   # ignored, issuer is canonical
-      "pending_id": 123
+      "issuer": "G..."   # optional, defaults to NFT_ISSUER_PUBLIC
+      "pending_id": 123  # optional; if provided and delivery succeeds, marks claimed
     }
     """
     j = request.get_json(silent=True) or {}
-    buyer      = (j.get("buyer_pub") or "").strip()
-    assets     = list(j.get("assets") or [])
-    issuer_g   = CANONICAL_ISSUER_G
+    buyer = (j.get("buyer_pub") or "").strip()
+    assets = list(j.get("assets") or [])
+    issuer_g = (j.get("issuer") or ISSUER_G).strip()
     pending_id = j.get("pending_id")
     _require(buyer and assets, "buyer_and_assets_required")
-
-    # Defensive log if caller tried to override issuer
-    req_issuer = (j.get("issuer") or "").strip()
-    if req_issuer and req_issuer != issuer_g:
-        log.warning("NFT_CLAIM_ISSUER_OVERRIDE_IGNORED got=%s expected=%s",
-                    _mask(req_issuer), _mask(issuer_g))
 
     log.info("NFT_CLAIM_REQ buyer=%s count=%s issuer=%s", _mask(buyer), len(assets), _mask(issuer_g))
 
     for code in assets:
         asset = Asset(code, issuer_g)
 
-        # Verify buyer trustline, return crisp error if missing
+        # FIX: do NOT try to create buyer trustline using distributor secret.
+        # Instead, verify buyer already trusts; if not, return crisp error.
         if not _account_has_trustline(buyer, asset):
             abort(400, f"buyer_missing_trustline:{code}")
 
