@@ -384,18 +384,7 @@ def list_pending():
             "kind": "nft",                  # tag for UI
             "contract_id": f"nft|{r['id']}",
         })
-        return jsonify({"ok": True, "pending": out})
-
-# --- add near other routes ---
-@bp_nft.get("/api/nft/canon")
-def nft_canon():
-    """Expose the canonical NFT issuer and network details for the UI."""
-    return jsonify({
-        "ok": True,
-        "issuer": CANONICAL_ISSUER_G,
-        "horizon": HORIZON_URL,
-        "passphrase_mode": ("auto" if PASSPHRASE.lower() == "auto" else "explicit")
-    })
+    return jsonify({"ok": True, "pending": out})
 
 # ---------- API ----------
 @bp_nft.route("/api/nft/quote", methods=["POST"])
