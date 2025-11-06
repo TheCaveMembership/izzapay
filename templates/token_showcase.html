@@ -1637,7 +1637,7 @@ const closeStakeBtn = document.getElementById('closeStakeBtn');
 const closeClaimBtn = document.getElementById('closeClaimBtn');
 const openStakeBtn  = document.getElementById('openStakeBtn');   // optional internal button
 const openClaimBtn  = document.getElementById('openClaimBtn');   // optional internal button
-const stakeQuickBtn = document.getElementById('stakeQuickBtn');  // your top cta buttons
+const stakeQuickBtn = document.getElementById('stakeQuickBtn');  // your top-cta buttons
 const claimQuickBtn = document.getElementById('claimQuickBtn');
 
 const stakePub     = document.getElementById('stakePub');
@@ -1646,7 +1646,7 @@ const stakeDays    = document.getElementById('stakeDays');
 const stakePreview = document.getElementById('stakePreviewBtn');
 const stakeStart   = document.getElementById('stakeStartBtn');
 const stakeMsg     = document.getElementById('stakeMsg');
-// Cap days at [1, 180] and show a hint if we clamp
+// Cap days at [1..180] and show a hint if we clamp
 const stakeDaysMsg = document.getElementById('stakeDaysMsg');
 
 function clampStakeDays(v){
@@ -1679,69 +1679,52 @@ const claimSelected  = document.getElementById('claimSelectedBtn');
 const claimTblBody   = document.querySelector('#claimTbl tbody');
 const claimMsg       = document.getElementById('claimMsg');
 
-// Robust checked selectors, scoped to the claim modal so we do not pick other checkboxes
-const NFT_CHECKED_SEL =
-  '.cbPickNft:checked, ' +
-  'input[type="checkbox"][data-kind="nft"]:checked, ' +
-  'input[type="checkbox"][data-contract-id^="nft|"]:checked, ' +
-  'input[type="checkbox"][value^="nft|"]:checked';
-
-const STAKE_CHECKED_SEL =
-  '.cbPick:checked, ' +
-  'input[type="checkbox"][data-kind="stake"]:checked, ' +
-  'input[type="checkbox"][data-balance-ids]:checked';
+// ---- robust “any checked?” (stake or NFT) scoped to the modal
+function anyClaimCheckedScope(scope){
+  if (!scope) return false;
+  // stake rows
+  const stakeChecked = scope.querySelector('.cbPick:checked, input[type="checkbox"][data-kind="stake"]:checked');
+  if (stakeChecked) return true;
+  // nft rows (support multiple shapes)
+  const nftChecked =
+    scope.querySelector(
+      '.cbPickNft:checked,' +                                   // preferred class
+      'input[type="checkbox"][data-kind="nft"]:checked,' +      // data-kind
+      'input[type="checkbox"][data-contract-id^="nft|"]:checked,' + // contract id shape
+      'tr[data-kind="nft"] input[type="checkbox"]:checked'      // row wrapper
+    );
+  return !!nftChecked;
+}
 
 function updateClaimSelectedState(){
   const scope = claimModal || document;
-  const anyChecked = scope.querySelector(STAKE_CHECKED_SEL + ', ' + NFT_CHECKED_SEL);
-  if (claimSelected){
-    claimSelected.disabled = !anyChecked;
-  }
+  claimSelected.disabled = !anyClaimCheckedScope(scope);
 }
 
-// Keep the button state in sync with user interaction
-// 1, direct changes inside the claim modal
-claimModal?.addEventListener('change', (e)=>{
-  const t = e.target;
-  if (!t) return;
-  if (t.matches('input[type="checkbox"]')){
-    updateClaimSelectedState();
-  }
+// Toggle button state whenever user checks or unchecks any row
+claimTblBody?.addEventListener('change', (e) => {
+  const el = e.target;
+  if (!el || el.type !== 'checkbox') return;
+  updateClaimSelectedState();
 });
 
-// 2, table body delegation, works even if rows are re-rendered
-claimTblBody?.addEventListener('change', (e)=>{
-  const t = e.target;
-  if (!t) return;
-  if (t.matches('input[type="checkbox"]')){
-    updateClaimSelectedState();
-  }
+// Also re-evaluate when the modal opens (fresh render)
+claimModal?.addEventListener('toggle', ()=> updateClaimSelectedState());
+document.addEventListener('keydown', (e)=> {
+  if (e.key === 'Escape') setTimeout(updateClaimSelectedState, 0);
 });
 
-// 3, observe DOM mutations in the claim table to re-evaluate button state after listClaimables
+// If your table is re-rendered via listClaimables(), observe DOM changes
+const claimObserver = new MutationObserver(()=>{
+  updateClaimSelectedState();
+});
 if (claimTblBody){
-  const mo = new MutationObserver(()=> updateClaimSelectedState());
-  mo.observe(claimTblBody, { childList: true, subtree: true, attributes: true, attributeFilter: ['checked'] });
+  claimObserver.observe(claimTblBody, { childList:true, subtree:true });
 }
 
-// 4, when opening the claim modal through any entry point, update once the UI is visible
-openClaimBtn?.addEventListener('click', ()=> setTimeout(updateClaimSelectedState, 0));
-claimQuickBtn?.addEventListener('click', ()=> setTimeout(updateClaimSelectedState, 0));
-closeClaimBtn?.addEventListener('click', ()=> setTimeout(updateClaimSelectedState, 0));
-
-// Initial state
-updateClaimSelectedState();
-
-function fmtNum(n, dp=7){
-  const x = Number(n);
-  return isFinite(x)
-    ? x.toLocaleString(undefined, { minimumFractionDigits: dp, maximumFractionDigits: dp })
-    : '—';
-}
-function toUTC(ts){
-  try { return new Date(ts * 1000).toISOString().replace('T',' ').replace('Z',' UTC'); }
-  catch { return '—'; }
-}
+// util
+function fmtNum(n, dp=7){ const x=Number(n); return isFinite(x)?x.toLocaleString(undefined,{minimumFractionDigits:dp,maximumFractionDigits:dp}):'—'; }
+function toUTC(ts){ try{ return new Date(ts*1000).toISOString().replace('T',' ').replace('Z',' UTC'); }catch{ return '—'; } }
 
 // ======== OPEN/CLOSE ========
 openStakeBtn?.addEventListener('click', ()=>{
