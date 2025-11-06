@@ -1678,7 +1678,19 @@ const claimRefresh   = document.getElementById('claimRefreshBtn');
 const claimSelected  = document.getElementById('claimSelectedBtn');
 const claimTblBody   = document.querySelector('#claimTbl tbody');
 const claimMsg       = document.getElementById('claimMsg');
+function updateClaimSelectedState(){
+  const anyChecked = document.querySelector('.cbPick:checked, .cbPickNft:checked');
+  claimSelected.disabled = !anyChecked;
+}
 
+// Toggle button state whenever user checks or unchecks any row
+claimTblBody?.addEventListener('change', (e) => {
+  const el = e.target;
+  if (!el) return;
+  if (el.classList?.contains('cbPick') || el.classList?.contains('cbPickNft')) {
+    updateClaimSelectedState();
+  }
+});
 function fmtNum(n, dp=7){ const x=Number(n); return isFinite(x)?x.toLocaleString(undefined,{minimumFractionDigits:dp,maximumFractionDigits:dp}):'—'; }
 function toUTC(ts){ try{ return new Date(ts*1000).toISOString().replace('T',' ').replace('Z',' UTC'); }catch{ return '—'; } }
 
@@ -2155,11 +2167,10 @@ async function listClaimables(){
       claimTblBody.appendChild(trBody);
     }
 
-    // enable batch-claim button only if something selectable exists
-    const anyConcrete = !!document.querySelector('.cbPick, .cbPickNft');
-    claimSelected.disabled = !anyConcrete;
-    claimMsg.textContent = '';
-    log('claimables.rendered');
+    // After rows exist, reflect current check state
+updateClaimSelectedState();      // enables only when user actually checks
+claimMsg.textContent = '';
+log('claimables.rendered');
   }catch(e){
     claimMsg.textContent = '❌ ' + String(e);
     log('claimables.fail', { err: String(e) });
