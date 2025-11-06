@@ -892,118 +892,6 @@ def _build_claim_tx_batch(pub: str, balance_ids: list[str]):
     tx = tb.set_timeout(180).build()
     return {"ok": True, "xdr": tx.to_xdr(), "network_passphrase": NET_PASSPHRASE}
 
-# ---------- NEW: NFT claim helpers & endpoints ----------------------------
-
-def _parse_nft_ids(raw_list) -> list[int]:
-    """Accept ['nft|12','13',' 14 '] → [12,13,14]. Ignore garbage."""
-    out: list[int] = []
-    for x in raw_list or []:
-        if x is None: continue
-        s = str(x).strip()
-        if not s: continue
-        if s.lower().startswith("nft|"):
-            s = s.split("|", 1)[1].strip()
-        # keep only digits
-        if s.isdigit():
-            try:
-                out.append(int(s))
-            except Exception:
-                pass
-    # de-dup preserving order
-    seen = set()
-    uniq = []
-    for i in out:
-        if i in seen: continue
-        seen.add(i); uniq.append(i)
-    return uniq
-
-def _claim_nfts(pub: str, nft_ids: list[int]) -> dict:
-    """
-    Marks pending NFT claims as 'claimed' for this pub.
-    If you have an on-chain mint/transfer, call it where indicated.
-    Returns summary dict.
-    """
-    if not nft_ids:
-        return {"updated": 0, "rows": []}
-
-    updated_rows = []
-    now = int(time.time())
-    try:
-        cx = sqlite3.connect(_SQLITE_PATH, check_same_thread=False)
-        cx.row_factory = sqlite3.Row
-
-        # Ensure table has columns we rely on; tolerate older schema
-        try:
-            cx.execute("ALTER TABLE nft_pending_claims ADD COLUMN claimed_at INTEGER")
-        except Exception:
-            pass
-        try:
-            cx.execute("ALTER TABLE nft_pending_claims ADD COLUMN status TEXT")
-        except Exception:
-            pass
-
-        # Fetch rows first (validate ownership/status)
-        qmarks = ",".join(["?"] * len(nft_ids))
-        rows = cx.execute(
-            f"SELECT * FROM nft_pending_claims WHERE id IN ({qmarks})",
-            nft_ids
-        ).fetchall()
-
-        ok_ids = []
-        for r in rows:
-            rd = dict(r)
-            # Only allow claiming if status pending and belongs to this pub (or pub empty but username maps)
-            status = (rd.get("status") or "").lower() or "pending"
-            buyer_pub = (rd.get("buyer_pub") or "").strip()
-            buyer_user = (rd.get("buyer_username") or "").strip()
-            # If buyer_pub missing, try to backfill from mapping of username
-            if not buyer_pub and buyer_user:
-                mapped_pub = _pub_for_username(buyer_user) or ""
-                buyer_pub = mapped_pub
-
-            if status == "pending" and buyer_pub == pub:
-                ok_ids.append(rd["id"])
-                updated_rows.append({
-                    "id": rd["id"],
-                    "order_id": rd.get("order_id"),
-                    "assets_json": rd.get("assets_json"),
-                })
-
-        if ok_ids:
-            qmarks2 = ",".join(["?"] * len(ok_ids))
-            cx.execute(
-                f"UPDATE nft_pending_claims "
-                f"SET status='claimed', claimed_at=? "
-                f"WHERE id IN ({qmarks2})",
-                [now] + ok_ids
-            )
-            cx.commit()
-
-        cx.close()
-        return {"updated": len(ok_ids), "rows": updated_rows}
-    except Exception as e:
-        log.warning("nft_claim_fail: %s", e)
-        return {"updated": 0, "rows": [], "error": str(e)}
-
-@bp_stake.route("/api/nft/claim", methods=["POST"])
-def nft_claim_only():
-    """
-    NFT-only claim endpoint.
-    Body: { pub: "G...", nft_ids: ["nft|12","13", ...] }
-    """
-    j = request.get_json(force=True) or {}
-    pub = _clean(j.get("pub") or "")
-    nft_ids_raw = j.get("nft_ids") or []
-    if not (pub and pub.startswith("G")):
-        abort(400, "bad pub")
-    ids = _parse_nft_ids(nft_ids_raw)
-    if not ids:
-        abort(400, "no nft_ids provided")
-    res = _claim_nfts(pub, ids)
-    return jsonify({"ok": True, "nft": res})
-
-# ----------------------------- build claim endpoints ----------------------
-
 @bp_stake.route("/api/stake/build-claim", methods=["POST"])
 def build_claim_tx():
     """Build a single ClaimClaimableBalance tx, legacy single id."""
@@ -1051,52 +939,26 @@ def build_claim_tx_batch():
 
     return _build_claim_tx_batch(pub, resolved)
 
-# ---- UI friendly alias for batch claim (NOW MIXED: stake + NFTs) ---------
+# ---- UI friendly alias for batch claim
 
 @bp_stake.route("/api/stake/claim", methods=["POST"])
 def claim_batch_ui_alias():
     """
-    UI alias that can handle:
-      - Staking claims (ids / balance_ids)
-      - NFT claims (nft_ids)
-      - Or both in one call
-
-    Body may include:
-      { pub: "G...", ids: [...], balance_ids: [...], nft_ids: ["nft|12","13"] }
+    UI alias for batch claim.
+    Body: { ids: [...] , pub: "G..." } or { balance_ids: [...] }
+    Accepts 64 hex, 72 hex, comma joined, or group contract_ids.
     """
     j = request.get_json(force=True) or {}
-    pub = _clean(j.get("pub") or "")
     ids = j.get("ids") or j.get("balance_ids") or []
-    nft_ids_raw = j.get("nft_ids") or []
-
+    pub = _clean(j.get("pub") or "")
+    if not isinstance(ids, list) or not ids:
+        abort(400, "no balance_ids provided")
     if not (pub and pub.startswith("G")):
         abort(400, "bad pub")
-
-    has_stake = isinstance(ids, list) and len(ids) > 0
-    has_nft   = isinstance(nft_ids_raw, list) and len(nft_ids_raw) > 0
-    if not (has_stake or has_nft):
-        abort(400, "no selections provided")
-
-    resp = {"ok": True}
-
-    # Stake part (optional)
-    if has_stake:
-        resolved = _resolve_ids(pub, ids)
-        if resolved:
-            resp["stake"] = _build_claim_tx_batch(pub, resolved)
-        else:
-            # keep UX friendly: if NFTs exist, don't fail the whole call
-            resp["stake"] = {"ok": False, "error": "no valid claimable balance ids"}
-
-    # NFT part (optional)
-    if has_nft:
-        parsed = _parse_nft_ids(nft_ids_raw)
-        if parsed:
-            resp["nft"] = _claim_nfts(pub, parsed)
-        else:
-            resp["nft"] = {"updated": 0, "rows": [], "error": "no valid nft_ids"}
-
-    return jsonify(resp)
+    resolved = _resolve_ids(pub, ids)
+    if not resolved:
+        abort(400, "no valid claimable balance ids")
+    return _build_claim_tx_batch(pub, resolved)
 
 # ----------------------------- arcade proposals ---------------------------
 
