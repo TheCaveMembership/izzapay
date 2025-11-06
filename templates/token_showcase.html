@@ -2160,53 +2160,58 @@ async function listClaimables(){
     }
 
     // ================= NFTs (turquoise block WITH checkboxes) =================
-    // We allow multiple NFT groups (by issuer). Each checkbox carries issuer + assets payload.
-    for (const r of nftRows){
-      const issuer = String(r.issuer || r.issuer_g || '').trim();
-      const assets = Array.isArray(r.assets) ? r.assets.map(a => String(a).trim()).filter(Boolean) : [];
-      const codes  = assets.join(', ');
-      if (!issuer || !assets.length) continue;
+// We allow multiple NFT groups (by issuer). Each checkbox carries issuer + assets payload.
+for (const r of nftRows){
+  const issuer = String(r.issuer || r.issuer_g || '').trim();
+  const assets = Array.isArray(r.assets) ? r.assets.map(a => String(a).trim()).filter(Boolean) : [];
+  const codes  = assets.join(', ');
+  if (!issuer || !assets.length) continue;
 
-      const nftChkId = `nftpick_${issuer.slice(-6)}_${Math.random().toString(36).slice(2,7)}`;
-const trHead = document.createElement('tr');
-trHead.className = `group-head is-nft`;
-trHead.innerHTML = `
-  <td colspan="4">
-    <label class="group-toggle" for="${nftChkId}" style="display:flex;align-items:center;gap:10px;white-space:nowrap;cursor:pointer">
-      <input
-  id="${nftChkId}"
-  type="checkbox"
-  class="cbPickNft"
-  data-kind="nft"
-  data-issuer="${issuer}"
-  data-assets="${assets.join(',')}"
-  data-pending-id="${pendingId}"
-  data-contract-id="nft|${pendingId}"
-  style="cursor:pointer"
-/>
-<span class="pill pill-nft">NFT</span>
-<strong>Purchased NFTs • ready to deliver</strong>
-    </label>
-  </td>`;
-      claimTblBody.appendChild(trHead);
+  // 🔧 NEW: normalize pending id from either shape, guard if absent
+  const pidRaw = (r.pending_id ?? r.pendingId);
+  const pendingId = (pidRaw !== undefined && pidRaw !== null) ? Number(pidRaw) : null;
 
-      const trBody = document.createElement('tr');
-      trBody.className = `group-row is-nft`;
-      trBody.innerHTML = `
-        <td colspan="4">
-          <div class="block" style="display:flex;flex-direction:column;gap:8px;">
-            <div class="line" style="display:flex;justify-content:space-between;align-items:center;white-space:nowrap;">
-              <span>Assets</span>
-              <span class="num" style="text-align:right">${codes || '—'}</span>
-            </div>
-            <span class="lockhint">Checked NFTs will be issued to your wallet.</span>
-          </div>
-        </td>`;
-      claimTblBody.appendChild(trBody);
-    }
+  const nftChkId = `nftpick_${issuer.slice(-6)}_${Math.random().toString(36).slice(2,7)}`;
 
-    // After rows exist, reflect current check state
-updateClaimSelectedState();      // enables only when user actually checks
+  const trHead = document.createElement('tr');
+  trHead.className = `group-head is-nft`;
+  trHead.innerHTML = `
+    <td colspan="4">
+      <label class="group-toggle" for="${nftChkId}" style="display:flex;align-items:center;gap:10px;white-space:nowrap;cursor:pointer">
+        <input
+          id="${nftChkId}"
+          type="checkbox"
+          class="cbPickNft"
+          data-kind="nft"
+          data-issuer="${issuer}"
+          data-assets="${assets.join(',')}"
+          ${pendingId !== null && Number.isFinite(pendingId) ? `data-pending-id="${pendingId}" data-contract-id="nft|${pendingId}"` : ''}
+          style="cursor:pointer"
+        />
+        <span class="pill pill-nft">NFT</span>
+        <strong>Purchased NFTs • ready to deliver</strong>
+      </label>
+    </td>`;
+
+  claimTblBody.appendChild(trHead);
+
+  const trBody = document.createElement('tr');
+  trBody.className = `group-row is-nft`;
+  trBody.innerHTML = `
+    <td colspan="4">
+      <div class="block" style="display:flex;flex-direction:column;gap:8px;">
+        <div class="line" style="display:flex;justify-content:space-between;align-items:center;white-space:nowrap;">
+          <span>Assets</span>
+          <span class="num" style="text-align:right">${codes || '—'}</span>
+        </div>
+        <span class="lockhint">Checked NFTs will be issued to your wallet.</span>
+      </div>
+    </td>`;
+  claimTblBody.appendChild(trBody);
+}
+
+// After rows exist, reflect current check state
+updateClaimSelectedState();
 claimMsg.textContent = '';
 log('claimables.rendered');
   }catch(e){
