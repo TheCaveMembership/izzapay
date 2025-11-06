@@ -2344,6 +2344,14 @@ if (nftPicks.length){
             if (!resp?.hash) throw new Error('submit queued/no hash');
             // extra visibility only
             log('nft.trust.submit', { via: 'sdk', hash: resp.hash, n: needed.length });
+
+            // NEW: wait for Horizon to expose the trustlines before claiming
+            const ok = await waitForTrust(pub, needed, { maxMs: 15000, stepMs: 600 });
+            if (!ok){
+              log('nft.trust.wait.timeout', { n: needed.length });
+              claimMsg.textContent = '⏳ Added NFT trustlines. Waiting for network… please press Claim again in a few seconds.';
+              return; // let user tap Claim again once balances are visible
+            }
           } else {
             const HZ = (window.HORIZON_URL || 'https://api.testnet.minepi.com');
             const resp = await fetch(`${HZ}/transactions`, {
@@ -2359,6 +2367,14 @@ if (nftPicks.length){
             }
             // extra visibility only
             log('nft.trust.submit', { via: 'rest', n: needed.length, body: (txt || '').slice(0, 300) });
+
+            // NEW: wait for Horizon to expose the trustlines before claiming
+            const ok = await waitForTrust(pub, needed, { maxMs: 15000, stepMs: 600 });
+            if (!ok){
+              log('nft.trust.wait.timeout.http', { n: needed.length });
+              claimMsg.textContent = '⏳ Added NFT trustlines. Waiting for network… please press Claim again in a few seconds.';
+              return;
+            }
           }
 
           log('nft.trust.direct.ok', { n: needed.length });
@@ -2373,7 +2389,11 @@ if (nftPicks.length){
           const uri = await buildChangeTrustMultiSEP7(pub, needed);
           if (!uri) throw new Error('Could not build SEP-7 for trustlines');
           log('nft.trust.sep7.open', { n: needed.length });
-          claimMsg.innerHTML = 'Opening your wallet to add NFT trustlines…<br><small>If nothing happens, tap the link:</small> <a href="'+uri+'" style="word-break:break-all">Open in wallet</a>';
+          // NEW: clearer instruction to return and claim
+          claimMsg.innerHTML = 'Opening your wallet to add NFT trustlines…<br>' +
+            '<small>If nothing happens, tap this link:</small> ' +
+            '<a href="'+uri+'" style="word-break:break-all">Open in wallet</a>' +
+            '<br><small>After you approve in your wallet, return here and press <b>Claim</b> again.</small>';
           window.location.assign(uri);
           return; // user returns and taps Claim again
         }catch(e){
