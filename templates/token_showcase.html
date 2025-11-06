@@ -2319,46 +2319,36 @@ if (nftPicks.length){
         }catch{}
 
         if (localSec){
-          // direct-sign multi changeTrust
-          let txb;
-          if (SDK && SDK.Server){
-            const server  = getServer();
-            const account = await server.loadAccount(pub);
-            txb = new SDK.TransactionBuilder(account, { fee, networkPassphrase: NETWORK_PASSPHRASE });
-          } else {
-            const seq = String(acctJson?.sequence || '0');
-            const accountObj = new SDK.Account(pub, seq);
-            txb = new SDK.TransactionBuilder(accountObj, { fee, networkPassphrase: NETWORK_PASSPHRASE });
+          // Ensure SDK is available; if not, bail to SEP-7
+          const ok = await ensureStellar();
+          if (!(ok && window.StellarSdk && window.StellarSdk.Server)){
+            const uri = await buildChangeTrustMultiSEP7(pub, needed);
+            if (uri){
+              log('nft.trust.sep7.open.nosdk', { n: needed.length });
+              claimMsg.innerHTML = 'Opening your wallet to add NFT trustlines…<br><small>If nothing happens, tap:</small> <a href="'+uri+'" style="word-break:break-all">Open in wallet</a>';
+              window.location.assign(uri);
+              return;
+            }
+            throw new Error('Stellar SDK unavailable and SEP-7 URI could not be built');
           }
+
+          // Direct sign via SDK
+          const server  = getServer();
+          const account = await server.loadAccount(pub);
+          let txb = new SDK.TransactionBuilder(account, { fee, networkPassphrase: NETWORK_PASSPHRASE });
           for (const a of needed){
             txb = txb.addOperation(SDK.Operation.changeTrust({ asset: new SDK.Asset(a.code, a.issuer) }));
           }
           const tx = txb.setTimeout(180).build();
           tx.sign(SDK.Keypair.fromSecret(localSec));
 
-          if (SDK && SDK.Server){
-            const server = getServer();
-            const resp = await server.submitTransaction(tx);
-            if (!resp?.hash) throw new Error('submit queued/no hash');
-            log('nft.trust.submit', { via: 'sdk', hash: resp.hash, n: needed.length });
-          } else {
-            const HZ = (window.HORIZON_URL || 'https://api.testnet.minepi.com');
-            const resp = await fetch(`${HZ}/transactions`, {
-              method: 'POST',
-              headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-              body: `tx=${encodeURIComponent(tx.toXDR())}`
-            });
-            const txt = await resp.text().catch(()=> '');
-            if (!resp.ok){
-              log('nft.trust.submit.fail', { via: 'rest', status: resp.status, body: (txt||'').slice(0,800) });
-              throw new Error(`submit failed ${resp.status}: ${txt}`);
-            }
-            log('nft.trust.submit', { via: 'rest', n: needed.length });
-          }
+          const resp = await server.submitTransaction(tx);
+          if (!resp?.hash) throw new Error('submit queued/no hash');
+          log('nft.trust.submit', { via: 'sdk', hash: resp.hash, n: needed.length });
 
           // wait for Horizon to expose trustlines
-          const ok = await waitForTrust(pub, needed, { maxMs: 20000, stepMs: 700 });
-          if (!ok){
+          const okWait = await waitForTrust(pub, needed, { maxMs: 20000, stepMs: 700 });
+          if (!okWait){
             log('nft.trust.wait.timeout', { n: needed.length });
             claimMsg.textContent = '⏳ Added NFT trustlines. Please press Claim again in a few seconds.';
             return;
@@ -2396,7 +2386,6 @@ if (nftPicks.length){
       as_claimable: true
     };
 
-    // helper
     const tryClaim = async () => {
       const r = await fetch(claimUrl, {
         method:'POST',
@@ -2413,7 +2402,6 @@ if (nftPicks.length){
 
     // ---------- 4) If backend says buyer_missing_trustline, FIX IT NOW ----------
     if ((!r2.ok || !j2?.ok) && /buyer_missing_trustline/i.test(raw1||'')){
-      // extract the missing asset code from message, fall back to full pick
       const m = (raw1||'').match(/buyer_missing_trustline:([A-Z0-9]{1,12})/i);
       const missingCodes = m ? [m[1]] : pick.assets.slice(0);
       const missAssets = missingCodes.map(code => ({ code, issuer: pick.issuer }));
@@ -2421,34 +2409,34 @@ if (nftPicks.length){
       const localSec = getLocalSecret(pub, USER?.username);
       try{
         if (localSec){
-          // direct add, then wait
-          let txb;
-          if (SDK && SDK.Server){
-            const server  = getServer();
-            const account = await server.loadAccount(pub);
-            txb = new SDK.TransactionBuilder(account, { fee: (await server.fetchBaseFee()).toString(), networkPassphrase: NETWORK_PASSPHRASE });
-          } else {
-            const seq = String(acctJson?.sequence || '0');
-            const accountObj = new SDK.Account(pub, seq);
-            txb = new SDK.TransactionBuilder(accountObj, { fee: '100', networkPassphrase: NETWORK_PASSPHRASE });
+          // Ensure SDK is available; else open SEP-7
+          const ok = await ensureStellar();
+          if (!(ok && window.StellarSdk && window.StellarSdk.Server)){
+            const uri = await buildChangeTrustMultiSEP7(pub, missAssets);
+            if (uri){
+              log('nft.trust.sep7.open.afterFail.nosdk', { n: missAssets.length });
+              claimMsg.innerHTML = 'We need to add an NFT trustline before claiming. Opening your wallet…<br>' +
+                '<small>If nothing happens, tap:</small> ' +
+                '<a href="'+uri+'" style="word-break:break-all">Open in wallet</a>';
+              window.location.assign(uri);
+              return;
+            }
+            throw new Error('Stellar SDK unavailable and SEP-7 URI could not be built');
           }
+
+          // Direct add after fail
+          const server  = getServer();
+          const account = await server.loadAccount(pub);
+          let txb = new SDK.TransactionBuilder(account, {
+            fee: (await server.fetchBaseFee()).toString(),
+            networkPassphrase: NETWORK_PASSPHRASE
+          });
           for (const a of missAssets){
             txb = txb.addOperation(SDK.Operation.changeTrust({ asset: new SDK.Asset(a.code, a.issuer) }));
           }
           const tx = txb.setTimeout(180).build();
           tx.sign(SDK.Keypair.fromSecret(localSec));
-
-          if (SDK && SDK.Server){
-            const server = getServer();
-            await server.submitTransaction(tx);
-          } else {
-            const HZ = (window.HORIZON_URL || 'https://api.testnet.minepi.com');
-            await fetch(`${HZ}/transactions`, {
-              method: 'POST',
-              headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-              body: `tx=${encodeURIComponent(tx.toXDR())}`
-            });
-          }
+          await server.submitTransaction(tx);
 
           await waitForTrust(pub, missAssets, { maxMs: 20000, stepMs: 700 });
         } else {
@@ -2490,7 +2478,6 @@ await listClaimables();
   log('claim.exception', { err: String(e) });
 }
 });
-
 // =================== Modal helpers ===================
 function openModal(el, focusEl){
   lastFocus = document.activeElement;
