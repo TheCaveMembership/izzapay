@@ -2275,29 +2275,70 @@ claimSelected?.addEventListener('click', async ()=>{
     }
 
     // 2) Issue any selected NFTs to the same wallet
-    if (nftPicks.length){
-      for (const pick of nftPicks){
-        const r2 = await fetch('/api/nft/claim', {
-          method:'POST',
-          headers:{'Content-Type':'application/json'},
-          body: JSON.stringify({
-            buyer_pub: pub,
-            assets: pick.assets,
-            issuer: pick.issuer,
-            as_claimable: true
-          })
-        });
-        let j2 = {};
-        try { j2 = await r2.json(); } catch {}
-        if (!r2.ok || !j2?.ok){
-          const msg = j2?.error || j2?.message || `HTTP ${r2.status}`;
-          claimMsg.textContent = `❌ NFT claim error: ${msg}`;
-          log('nft.claim.fail', { issuer: pick.issuer, assets: pick.assets, msg });
-          return;
+if (nftPicks.length){
+  for (const pick of nftPicks){
+
+    // === Ensure wallet trusts all NFT assets in this pick ===
+    const server   = getServer();
+    const account  = await server.loadAccount(pub);
+    const balances = account?.balances || [];
+
+    // Build unique list of {code, issuer} that are missing
+    const needed = (pick.assets || [])
+      .map(code => ({ code, issuer: pick.issuer }))
+      .filter(a => !hasTrustFor(balances, a.code, a.issuer));
+
+    if (needed.length){
+      const localSec = getLocalSecret(pub, USER?.username);
+      try{
+        if (localSec){
+          log('nft.trust.direct.start', { n: needed.length });
+          await addTrustlinesDirect(pub, localSec, needed);  // or addNftTrustlinesDirect if you renamed it
+          log('nft.trust.direct.ok', { n: needed.length });
+        }else{
+          const uri = await buildChangeTrustMultiSEP7(pub, needed);
+          if (!uri) throw new Error('Could not build SEP-7 for trustlines');
+          log('nft.trust.sep7.open', { n: needed.length });
+          claimMsg.innerHTML = 'Opening your wallet to add NFT trustlines…<br><small>If nothing happens, tap the link:</small> <a href="'+uri+'" style="word-break:break-all">Open in wallet</a>';
+          window.location.assign(uri);
+          return; // user returns from wallet and presses Claim again
         }
-        log('nft.claim.ok', { issuer: pick.issuer, n: pick.assets.length });
+      }catch(e){
+        claimMsg.textContent = '❌ Trustline setup failed: ' + String(e?.message || e);
+        log('nft.trust.fail', { err: String(e) });
+        return;
       }
     }
+
+    // === With trustlines in place, perform the NFT claim ===
+    const r2 = await fetch('/api/nft/claim', {
+      method:'POST',
+      headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({
+        buyer_pub: pub,
+        assets: pick.assets,
+        issuer: pick.issuer,
+        as_claimable: true
+      })
+    });
+
+    // Be robust to non-JSON error bodies
+    let j2 = {};
+    try { j2 = await r2.json(); }
+    catch {
+      try { j2 = { error: await r2.text() }; } catch {}
+    }
+
+    if (!r2.ok || !j2?.ok){
+      const msg = j2?.error || j2?.message || `HTTP ${r2.status}`;
+      claimMsg.textContent = `❌ NFT claim error: ${msg}`;
+      log('nft.claim.fail', { issuer: pick.issuer, assets: pick.assets, msg });
+      return;
+    }
+
+    log('nft.claim.ok', { issuer: pick.issuer, n: pick.assets.length });
+  }
+}
 
     claimMsg.textContent = '✅ Claimed. Refreshing…';
     await listClaimables();
