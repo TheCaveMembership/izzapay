@@ -2174,15 +2174,18 @@ trHead.innerHTML = `
   <td colspan="4">
     <label class="group-toggle" for="${nftChkId}" style="display:flex;align-items:center;gap:10px;white-space:nowrap;cursor:pointer">
       <input
-        id="${nftChkId}"
-        type="checkbox"
-        class="cbPickNft"
-        data-issuer="${issuer}"
-        data-assets="${assets.join(',')}"
-        style="cursor:pointer"
-      >
-      <span class="pill pill-nft">NFT</span>
-      <strong>Purchased NFTs • ready to deliver</strong>
+  id="${nftChkId}"
+  type="checkbox"
+  class="cbPickNft"
+  data-kind="nft"
+  data-issuer="${issuer}"
+  data-assets="${assets.join(',')}"
+  data-pending-id="${pendingId}"
+  data-contract-id="nft|${pendingId}"
+  style="cursor:pointer"
+/>
+<span class="pill pill-nft">NFT</span>
+<strong>Purchased NFTs • ready to deliver</strong>
     </label>
   </td>`;
       claimTblBody.appendChild(trHead);
