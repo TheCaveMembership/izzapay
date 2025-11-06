@@ -2305,12 +2305,12 @@ if (nftPicks.length){
       .map(code => ({ code, issuer: pick.issuer }))
       .filter(a => !hasTrustFor(balances, a.code, a.issuer));
 
-    // ---------- 2) Add any missing trustlines ----------
+    // ---------- 2) Add any missing trustlines (pre-claim) ----------
     if (needed.length){
       const localSec = getLocalSecret(pub, USER?.username);
 
       try{
-        // build tx (SDK or REST) with multiple changeTrust ops
+        // base fee
         let fee = '100';
         try{
           const HZ = (window.HORIZON_URL || 'https://api.testnet.minepi.com');
@@ -2319,7 +2319,7 @@ if (nftPicks.length){
         }catch{}
 
         if (localSec){
-          // direct-sign path
+          // direct-sign multi changeTrust
           let txb;
           if (SDK && SDK.Server){
             const server  = getServer();
@@ -2356,12 +2356,12 @@ if (nftPicks.length){
             log('nft.trust.submit', { via: 'rest', n: needed.length });
           }
 
-          // wait for Horizon to expose new trustlines
-          const ok = await waitForTrust(pub, needed, { maxMs: 15000, stepMs: 600 });
+          // wait for Horizon to expose trustlines
+          const ok = await waitForTrust(pub, needed, { maxMs: 20000, stepMs: 700 });
           if (!ok){
             log('nft.trust.wait.timeout', { n: needed.length });
             claimMsg.textContent = '⏳ Added NFT trustlines. Please press Claim again in a few seconds.';
-            return; // user taps Claim again
+            return;
           }
           log('nft.trust.direct.ok', { n: needed.length });
 
@@ -2373,9 +2373,9 @@ if (nftPicks.length){
           claimMsg.innerHTML = 'Opening your wallet to add NFT trustlines…<br>' +
             '<small>If nothing happens, tap this link:</small> ' +
             '<a href="'+uri+'" style="word-break:break-all">Open in wallet</a>' +
-            '<br><small>After approval, return here and press <b>Claim</b> again.</small>';
+            '<br><small>After approval, return and press <b>Claim</b> again.</small>';
           window.location.assign(uri);
-          return; // will re-enter on next Claim
+          return;
         }
       }catch(e){
         claimMsg.textContent = '❌ Trustline setup failed: ' + String(e?.message || e);
@@ -2384,37 +2384,7 @@ if (nftPicks.length){
       }
     }
 
-    // ---------- 3) Re-verify balances RIGHT before claim ----------
-    try{
-      if (SDK && SDK.Server){
-        const server  = getServer();
-        const account = await server.loadAccount(pub);
-        balances = account?.balances || [];
-      } else {
-        const HZ = (window.HORIZON_URL || 'https://api.testnet.minepi.com');
-        const r  = await fetch(`${HZ}/accounts/${encodeURIComponent(pub)}`);
-        const j  = await r.json();
-        if (!r.ok || !j?.account_id) throw new Error('Could not refresh account via Horizon');
-        balances = j.balances || [];
-      }
-    }catch(e){
-      claimMsg.textContent = '❌ Could not refresh account: ' + String(e?.message || e);
-      log('nft.trust.recheck_fail', { err: String(e) });
-      return;
-    }
-
-    const stillMissing = (pick.assets || [])
-      .map(code => ({ code, issuer: pick.issuer }))
-      .filter(a => !hasTrustFor(balances, a.code, a.issuer));
-
-    if (stillMissing.length){
-      // If we land here, user didn’t approve SEP-7 yet or network not visible
-      claimMsg.textContent = '⏳ NFT trustline not visible yet. Please add trustline, then press Claim again.';
-      log('nft.trust.still_missing', { n: stillMissing.length });
-      return;
-    }
-
-    // ---------- 4) Perform the NFT claim (single schema only) ----------
+    // ---------- 3) Perform the NFT claim (single canonical schema) ----------
     const u = (USER?.username || '');
     const claimUrl = u ? `/api/nft/claim?u=${encodeURIComponent(u)}` : '/api/nft/claim';
 
@@ -2426,7 +2396,7 @@ if (nftPicks.length){
       as_claimable: true
     };
 
-    // attempt + one guarded retry if server reports buyer_missing_trustline
+    // helper
     const tryClaim = async () => {
       const r = await fetch(claimUrl, {
         method:'POST',
@@ -2441,22 +2411,65 @@ if (nftPicks.length){
 
     let { r: r2, j: j2, raw: raw1 } = await tryClaim();
 
-    // If trustline race hit the server, do a short wait and retry once
+    // ---------- 4) If backend says buyer_missing_trustline, FIX IT NOW ----------
     if ((!r2.ok || !j2?.ok) && /buyer_missing_trustline/i.test(raw1||'')){
-      log('nft.claim.retry.trust_wait', { body: (raw1||'').slice(0,400) });
-      await new Promise(res => setTimeout(res, 1200));
-      // refresh balances once more to help Horizon catch up
+      // extract the missing asset code from message, fall back to full pick
+      const m = (raw1||'').match(/buyer_missing_trustline:([A-Z0-9]{1,12})/i);
+      const missingCodes = m ? [m[1]] : pick.assets.slice(0);
+      const missAssets = missingCodes.map(code => ({ code, issuer: pick.issuer }));
+
+      const localSec = getLocalSecret(pub, USER?.username);
       try{
-        const server  = getServer();
-        const account = await server.loadAccount(pub);
-        balances = account?.balances || [];
-      }catch{}
-      const miss2 = (pick.assets || [])
-        .map(code => ({ code, issuer: pick.issuer }))
-        .filter(a => !hasTrustFor(balances, a.code, a.issuer));
-      if (!miss2.length){
-        ({ r: r2, j: j2 } = await tryClaim());
+        if (localSec){
+          // direct add, then wait
+          let txb;
+          if (SDK && SDK.Server){
+            const server  = getServer();
+            const account = await server.loadAccount(pub);
+            txb = new SDK.TransactionBuilder(account, { fee: (await server.fetchBaseFee()).toString(), networkPassphrase: NETWORK_PASSPHRASE });
+          } else {
+            const seq = String(acctJson?.sequence || '0');
+            const accountObj = new SDK.Account(pub, seq);
+            txb = new SDK.TransactionBuilder(accountObj, { fee: '100', networkPassphrase: NETWORK_PASSPHRASE });
+          }
+          for (const a of missAssets){
+            txb = txb.addOperation(SDK.Operation.changeTrust({ asset: new SDK.Asset(a.code, a.issuer) }));
+          }
+          const tx = txb.setTimeout(180).build();
+          tx.sign(SDK.Keypair.fromSecret(localSec));
+
+          if (SDK && SDK.Server){
+            const server = getServer();
+            await server.submitTransaction(tx);
+          } else {
+            const HZ = (window.HORIZON_URL || 'https://api.testnet.minepi.com');
+            await fetch(`${HZ}/transactions`, {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+              body: `tx=${encodeURIComponent(tx.toXDR())}`
+            });
+          }
+
+          await waitForTrust(pub, missAssets, { maxMs: 20000, stepMs: 700 });
+        } else {
+          const uri = await buildChangeTrustMultiSEP7(pub, missAssets);
+          if (uri){
+            log('nft.trust.sep7.open.afterFail', { n: missAssets.length });
+            claimMsg.innerHTML = 'We need to add an NFT trustline before claiming. Opening your wallet…<br>' +
+              '<small>If nothing happens, tap:</small> ' +
+              '<a href="'+uri+'" style="word-break:break-all">Open in wallet</a>';
+            window.location.assign(uri);
+            return;
+          }
+        }
+      }catch(e){
+        log('nft.trust.fix_after_claim.fail', { err: String(e) });
+        claimMsg.textContent = '❌ Could not add missing NFT trustline: ' + String(e?.message || e);
+        return;
       }
+
+      // re-attempt once after fix
+      ({ r: r2, j: j2 } = await tryClaim());
     }
 
     if (!r2.ok || !j2?.ok){
