@@ -296,18 +296,22 @@
   color:#ffffff; /* white text */
 }
 
-/* turquoise = NFT */
+/* turquoise = NFT — adjusted to match size of other pills */
 #claimLegend .pill-nft,
 #claimTbl .pill-nft{
   background:#48d4ff22;
   border:1px solid #48d4ff80;
-  color:#ffffff; /* now white like others */
-  display:inline-block;
-  padding:2px 8px;
-  border-radius:12px;
+  color:#ffffff; /* white text */
+  display:inline-flex;
+  align-items:center;
+  justify-content:center;
+  padding:4px 12px;       /* increased height + width */
+  border-radius:999px;    /* same rounded look */
   font-size:12px;
   font-weight:800;
   text-transform:uppercase;
+  line-height:1.2;        /* ensure consistent vertical height */
+  min-height:24px;        /* uniform size */
 }
     
 /* numbers and hints */
