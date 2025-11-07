@@ -212,11 +212,15 @@
 .claim-modes{
   display:flex;
   align-items:center;
-  justify-content:space-between;
   gap:10px;
   margin:8px 0 14px;
-  flex-wrap:nowrap;
+  flex-wrap:wrap;              /* was nowrap — allow wrapping */
+  justify-content:flex-start;  /* was space-between — keeps pills together */
 }
+
+/* Hide the explanatory "= ..." bits without touching the pills */
+#claimLegend > :not(.claim-pill){ display:none !important; }
+
 .claim-pill{
   flex:1 1 0;
   display:inline-flex;
@@ -226,6 +230,7 @@
   border-radius:999px;
   border:1px solid var(--line, #26283a);
   background:rgba(255,255,255,0.04);
+  color:#fff;                  /* unify: white text on every pill */
   font-weight:600;
   letter-spacing:.2px;
   user-select:none;
