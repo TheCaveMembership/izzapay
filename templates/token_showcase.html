@@ -2944,15 +2944,43 @@ function startFundingWatcher(pub){
   }, 2500);
 }
 
-// --- Fill "My Wallet" modal ---
+// --- Fill "My Wallet" modal (also echoes pub to My IZZA NFTs) ---
 async function refreshMyWalletModal(){
+  // signed-in user
   document.getElementById('mwUser').textContent = USER?.username || '—';
-  document.getElementById('mwPub').textContent  = ACTIVE_PUB || '—';
   document.getElementById('secretOnce').style.display = 'none';
 
-  if (!ACTIVE_PUB) return;
+  // try to ensure ACTIVE_PUB is always valid
+  let pub = (window.ACTIVE_PUB || '').trim();
+  if (!pub && typeof fetchActiveWallet === 'function'){
+    try{
+      const active = await fetchActiveWallet(USER?.username);
+      if (active && active.pub) pub = active.pub;
+    }catch(_){}
+  }
+  if (!pub){
+    const fallback = (document.getElementById('acctPub')?.value || '').trim();
+    if (fallback) pub = fallback;
+  }
+  window.ACTIVE_PUB = pub || window.ACTIVE_PUB || '';
+
+  // display wallet info
+  document.getElementById('mwPub').textContent = pub || '—';
+
+  // mirror pub to My IZZA NFTs modal header so user sees same wallet
+  const nftEcho = document.getElementById('nftPubEcho');
+  if (nftEcho) nftEcho.textContent = pub || '—';
+
+  // no wallet connected yet
+  if (!pub){
+    document.getElementById('mwPi').textContent   = '—';
+    document.getElementById('mwIzza').textContent = '—';
+    return;
+  }
+
+  // load balances
   try{
-    const j = await loadAccount(ACTIVE_PUB);
+    const j = await loadAccount(pub);
     const piBal   = (j?.balances||[]).find(b=>b.asset_type==='native')?.balance || '0';
     const izzaBal = (j?.balances||[]).find(b=>b.asset_code===ASSET_CODE && b.asset_issuer===ISSUER)?.balance || '0';
     document.getElementById('mwPi').textContent   = piBal;
@@ -2981,7 +3009,6 @@ function updateSecretRowVisibility(pub){
 
 let NEW_WALLET = null; // { pub, sec } only when generated here
 function isLocalWallet(pub){ return NEW_WALLET && NEW_WALLET.pub === pub; }
-
 async function refreshAccountGate(pubMaybe){
   const pub = (pubMaybe || acctPubInput.value || '').trim();
   if (!pub){ addTrustlineBtn.disabled = true; setOrderReady(false); return; }
