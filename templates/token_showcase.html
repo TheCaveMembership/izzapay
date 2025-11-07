@@ -274,21 +274,42 @@
 
 /* generic pill look */
 #claimTbl .pill{
-  display:inline-block; padding:2px 8px; border-radius:12px;
-  font-size:12px; font-weight:800; text-transform:uppercase;
+  display:inline-block;
+  padding:2px 8px;
+  border-radius:12px;
+  font-size:12px;
+  font-weight:800;
+  text-transform:uppercase;
 }
-#claimTbl .pill-regular{ background:#7a44ff22; border:1px solid #7a44ff66; }
-#claimTbl .pill-vote   { background:#ffcd6022; border:1px solid #ffcd6080; color:#2a1b00; }
-/* NFT chip */
+
+/* purple = regular stake */
+#claimTbl .pill-regular{
+  background:#7a44ff22;
+  border:1px solid #7a44ff66;
+  color:#ffffff; /* white text */
+}
+
+/* gold = vote stake */
+#claimTbl .pill-vote{
+  background:#ffcd6022;
+  border:1px solid #ffcd6080;
+  color:#ffffff; /* white text */
+}
+
+/* turquoise = NFT */
 #claimLegend .pill-nft,
 #claimTbl .pill-nft{
   background:#48d4ff22;
   border:1px solid #48d4ff80;
-  color:#001a22;
-  display:inline-block; padding:2px 8px; border-radius:12px;
-  font-size:12px; font-weight:800; text-transform:uppercase;
+  color:#ffffff; /* now white like others */
+  display:inline-block;
+  padding:2px 8px;
+  border-radius:12px;
+  font-size:12px;
+  font-weight:800;
+  text-transform:uppercase;
 }
-
+    
 /* numbers and hints */
 #claimTbl .num{
   font-family:ui-monospace,SFMono-Regular,Menlo,monospace;
