@@ -55,13 +55,13 @@
     <section class="section" id="s-auth">
       <h1 class="reveal">SIGN IN WITH PI</h1>
 
-      <!-- ✅ Single enlarged visual -->
-      <!-- CHANGED #1: swap token image to egg animation -->
-      <img src="/static/assets/creature-egg-hatch.svg" alt="IZZA Creature Egg" class="token-logo reveal">
+      <!-- 🥚 swap the image (edit #1) -->
+      <img src="/static/assets/creatures/egg-hatch.svg" alt="IZZA Creature Egg" class="token-logo reveal">
 
-      <p class="reveal">Authenticate to view the <strong>IZZA Token</strong> page with your Pi username.</p>
+      <p class="reveal">Authenticate to view the <strong>IZZA Creatures</strong> page with your Pi username.</p>
 
       <div class="cta-row reveal">
+        <!-- keep the same id so the JS matches -->
         <button id="piTokenAuthBtn" class="btn purple">Authenticate with Pi</button>
         <a class="btn ghost" href="/">Cancel</a>
       </div>
@@ -112,7 +112,7 @@
 
         const next = document.createElement('input');
         next.type='hidden'; next.name='next';
-        next.value = '/creatures.html'; /* CHANGED #2: redirect to creatures */
+        next.value = '/creatures.html'; /* edit #2: redirect to creatures */
         form.appendChild(next);
 
         document.body.appendChild(form);
