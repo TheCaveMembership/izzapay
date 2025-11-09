@@ -9,52 +9,50 @@
     :root{
       --bg:#000; --txt:#e8f1ff; --muted:#9fb0d6; --line:#1d2540;
       --piPurple1:#7a44ff; --piPurple2:#b784ff; --gold1:#ffcf4d; --gold2:#ffb23a;
-      --panel:#0b0f1f; --card:#0e1422; --danger:#ff5d6c; --ok:#58d08a;
+      --panel:#0b0f1f; --card:#0e1422;
     }
     html,body{background:#000;color:var(--txt);font-family:Inter,Arial,sans-serif;margin:0}
-    .wrap{max-width:1100px;margin:0 auto;padding:16px 16px 140px}
-    .topbar{display:flex;align-items:center;justify-content:center;gap:10px;padding:12px 0;border-bottom:1px solid var(--line);
-            position:sticky;top:0;background:rgba(0,0,0,.9);backdrop-filter:blur(10px);z-index:50;flex-wrap:wrap}
-    .btn{display:inline-flex;align-items:center;justify-content:center;padding:12px 14px;border-radius:14px;font-weight:700;letter-spacing:.2px;
-         border:1px solid #2a3550;color:#cfe0ff;background:var(--panel);cursor:pointer;text-decoration:none;gap:8px}
+    .wrap{max-width:1100px;margin:0 auto;padding:16px 16px 120px}
+    .topbar{display:flex;align-items:center;justify-content:center;gap:12px;padding:12px 0;border-bottom:1px solid var(--line);
+            position:sticky;top:0;background:rgba(0,0,0,.9);backdrop-filter:blur(10px);z-index:50}
+    .btn{display:inline-flex;align-items:center;justify-content:center;padding:14px 18px;border-radius:14px;font-weight:700;letter-spacing:.2px;
+         border:1px solid #2a3550;color:#cfe0ff;background:var(--panel);cursor:pointer;text-decoration:none}
     .btn.purple{background:linear-gradient(180deg,var(--piPurple1),var(--piPurple2));color:#fff;border-color:transparent}
     .btn.gold{background:linear-gradient(180deg,var(--gold1),var(--gold2));color:#1a1400;border-color:transparent}
-    .btn.inline{padding:8px 10px;border-radius:10px}
     h1{font-size:clamp(26px,8.5vw,56px);margin:16px 0 6px;text-align:center}
     p{color:var(--muted);text-align:center}
-    .row{display:flex;gap:10px;justify-content:center;flex-wrap:wrap;margin:10px 0 18px}
+    .row{display:flex;gap:12px;justify-content:center;flex-wrap:wrap;margin:10px 0 18px}
     .grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(280px,1fr));gap:12px;margin-top:12px}
+
     .box{border:1px solid #2a3550;border-radius:16px;background:var(--panel);padding:14px}
     .col{flex:1 1 320px;max-width:520px}
     .box h3{margin:4px 0 10px}
+
+    /* SIMPLE EGG PREVIEW */
     .slot{position:relative;overflow:hidden;border-radius:16px;border:1px solid #2a3550;background:var(--card);
           height:clamp(110px,22vw,160px);display:flex;align-items:center;justify-content:center}
     #eggPreview{display:block;width:120px;height:120px;object-fit:contain;filter:drop-shadow(0 2px 6px rgba(0,0,0,.35))}
     .hint{font-size:12px;color:#9fb0d6;margin-top:6px;text-align:center}
-    #liveSvg{ width:220px; height:220px; object-fit:contain;border-radius:12px;border:1px solid #223056;background:#0e1422 }
-    .chip{display:inline-flex;align-items:center;gap:6px;padding:6px 10px;border-radius:999px;border:1px solid #2a3550;background:#0e1422;font-size:12px}
-    .pill{position:relative}
-    .bell{position:relative}
-    .badge{position:absolute;top:-6px;right:-6px;background:#ff5d6c;color:#fff;border-radius:999px;font-size:11px;line-height:1;padding:3px 6px;border:2px solid #000;min-width:18px;text-align:center}
-    .list{display:flex;flex-direction:column;gap:8px;margin-top:8px}
-    .rowSplit{display:flex;align-items:center;justify-content:space-between;gap:8px}
-    input[type="text"].field{padding:10px 12px;border:1px solid #2a3550;border-radius:12px;background:#0e1422;color:#e8f1ff;min-width:220px}
-    select.field{padding:10px 12px;border:1px solid #2a3550;border-radius:12px;background:#0e1422;color:#e8f1ff}
-    .small{font-size:12px;color:#9fb0d6}
-    .success{color:var(--ok)}
-    .warn{color:#ffb86b}
-    .danger{color:var(--danger)}
-    .thumb{display:inline-flex;flex-direction:column;align-items:center;gap:6px;margin:6px;padding:8px;border:1px solid #223056;border-radius:12px;background:#0e1422}
-    .thumb img{width:88px;height:88px;object-fit:contain}
-    .thumb .cap{font-size:12px;color:#9fb0d6}
 
-    /* Modal */
+    #liveSvg{ width:220px; height:220px; object-fit:contain;border-radius:12px;border:1px solid #223056;background:#0e1422 }
+
+    /* Wallet modal on TOP of everything */
     .modal{position:fixed;inset:0;background:rgba(0,0,0,.55);display:flex;align-items:center;justify-content:center;z-index:9999}
     .modal[hidden]{display:none}
-    .modal-card{background:var(--panel);border:1px solid var(--line);border-radius:14px;max-width:620px;width:94%;padding:14px}
+    .modal-card{background:var(--panel);border:1px solid var(--line);border-radius:14px;max-width:560px;width:94%;padding:14px}
     .modal-header{display:flex;align-items:center;justify-content:space-between;gap:10px}
     .modal-title{display:flex;align-items:center;gap:8px;font-weight:800}
     .close-btn{border:1px solid var(--line);border-radius:10px;background:#0b0f1f;padding:8px 10px;color:#fff;cursor:pointer}
+    .small-muted{font-size:12px;color:#9fb0d6}
+    .blox{display:flex;flex-direction:column;gap:6px}
+    .mono{font-family:ui-monospace,Menlo,Consolas,monospace}
+    .success{color:#5ad49e}
+    .warn{color:#ffb86b}
+
+    /* Thumb grid */
+    .thumb{display:inline-flex;flex-direction:column;align-items:center;gap:6px;margin:6px;padding:8px;border:1px solid #223056;border-radius:12px;background:#0e1422}
+    .thumb img{width:88px;height:88px;object-fit:contain}
+    .thumb .cap{font-size:12px;color:#9fb0d6}
   </style>
   <script src="https://sdk.minepi.com/pi-sdk.js"></script>
 </head>
@@ -64,8 +62,6 @@
       <a class="btn" href="/">BACK HOME</a>
       <button class="btn purple upper" id="openWallet">IZZA WALLET</button>
       <button class="btn" id="btnMyCreatures">MY CREATURES</button>
-      <button class="btn inline" id="btnFriends">Friends</button>
-      <button class="btn inline bell" id="btnBell">Notifications<span id="bellBadge" class="badge" style="display:none">0</span></button>
     </div>
 
     <h1>IZZA CREATURES</h1>
@@ -95,28 +91,9 @@
       <h3>My Creatures</h3>
       <div id="myCreaturesList" class="row" style="justify-content:flex-start;flex-wrap:wrap"></div>
     </div>
-
-    <!-- Friends panel -->
-    <div class="box" id="friendsPanel" style="display:none;margin-top:14px">
-      <h3>Friends & Battles</h3>
-      <div class="row">
-        <input id="friendSearch" class="field" type="text" placeholder="Search users…">
-        <button class="btn inline" id="friendSearchBtn">Search</button>
-      </div>
-      <div class="small" style="text-align:center">Shows IZZA users who signed in with Pi and match your letters.</div>
-      <div id="friendSearchResults" class="list"></div>
-
-      <div style="margin-top:14px"></div>
-      <div class="rowSplit">
-        <h4 style="margin:0">Your Friends</h4>
-        <button class="btn inline" id="refreshFriends">Refresh</button>
-      </div>
-      <div id="friendsList" class="list"></div>
-    </div>
-
   </div>
 
-  <!-- Wallet modal (unchanged) -->
+  <!-- Wallet modal -->
   <div class="modal" id="myWalletModal" role="dialog" aria-modal="true" aria-labelledby="myWalletTitle" hidden>
     <div class="modal-card">
       <div class="modal-header">
@@ -128,68 +105,35 @@
       </div>
       <div class="modal-body">
         <div class="blox">
-          <div class="small">Signed in as</div>
+          <div class="small-muted">Signed in as</div>
           <div><strong id="mwUser">—</strong></div>
         </div>
         <div class="blox" style="margin-top:10px">
-          <div class="small">Active Wallet, public key</div>
-          <div class="chip mono" id="mwPub">—</div>
-          <div class="small">Open the full wallet once, then save your S-key locally here.</div>
+          <div class="small-muted">Active Wallet, public key</div>
+          <div class="mono" id="mwPub">—</div>
+          <div class="small-muted">Need to set or switch your active wallet? Open the full wallet once below, then return here to save your S-key locally.</div>
         </div>
 
         <div class="blox" style="margin-top:10px">
-          <div class="small">Balances (Testnet)</div>
+          <div class="small-muted">Balances (Testnet)</div>
           <div>Test Pi: <strong id="balPi">—</strong></div>
           <div>IZZA: <strong id="balIzza">—</strong></div>
         </div>
 
         <div class="blox" style="margin-top:10px">
-          <div class="small">Local S-key status</div>
+          <div class="small-muted">Local S-key status</div>
           <div id="mwSStatus">—</div>
           <div class="row" style="margin-top:6px">
             <input class="btn" style="flex:1;min-width:240px;text-align:left" id="mwSInput" placeholder="S... private key" autocomplete="off" spellcheck="false" autocapitalize="none">
             <button class="btn purple" type="button" id="mwSaveBtn">Save S-key</button>
             <button class="btn" type="button" id="mwForgetBtn">Forget</button>
           </div>
-          <div class="small">Saved only on this device.</div>
+          <div class="small-muted">Your S-key is stored locally on this device only.</div>
         </div>
 
         <div class="row" style="margin-top:12px;justify-content:flex-end">
           <a class="btn gold" href="/token/auth?next=/token/izza">Open Full Wallet</a>
         </div>
-      </div>
-    </div>
-  </div>
-
-  <!-- Notifications modal -->
-  <div class="modal" id="notifyModal" hidden>
-    <div class="modal-card">
-      <div class="modal-header">
-        <div class="modal-title">Notifications</div>
-        <button class="close-btn" id="closeNotify">Close</button>
-      </div>
-      <div class="modal-body">
-        <h4 style="margin:8px 0">Friend Requests</h4>
-        <div id="inboxFR" class="list"></div>
-        <h4 style="margin:12px 0">Battle Requests</h4>
-        <div id="inboxBR" class="list"></div>
-      </div>
-    </div>
-  </div>
-
-  <!-- Battle choose creature modal -->
-  <div class="modal" id="chooseCreatureModal" hidden>
-    <div class="modal-card">
-      <div class="modal-header">
-        <div class="modal-title">Choose Creature for Battle</div>
-        <button class="close-btn" id="closeChooseCreature">Close</button>
-      </div>
-      <div class="modal-body">
-        <div class="row">
-          <select id="battleCreatureSelect" class="field"></select>
-          <button class="btn purple" id="sendBattleConfirm">Send Battle Request</button>
-        </div>
-        <div class="small" id="battleSendMsg"></div>
       </div>
     </div>
   </div>
@@ -208,52 +152,33 @@
   const openHabitat = document.getElementById('openHabitat');
   const eggPreview = document.getElementById('eggPreview');
 
-  const btnFriends = document.getElementById('btnFriends');
-  const friendsPanel = document.getElementById('friendsPanel');
-  const friendSearch = document.getElementById('friendSearch');
-  const friendSearchBtn = document.getElementById('friendSearchBtn');
-  const friendSearchResults = document.getElementById('friendSearchResults');
-  const friendsList = document.getElementById('friendsList');
-  const refreshFriends = document.getElementById('refreshFriends');
+  // Curated preview seeds to ensure variety (rarity, palette, pattern)
+  const previewSkins = [
+    "LEG-sapphire-stripe",
+    "EP-ember-metallic",
+    "RARE-violet-swirl",
+    "UN-mint-mosaic",
+    "COM-gold-speckle",
+    "RARE-rose-stripe",
+    "EP-obsidian-metallic",
+    "COM-turquoise-speckle"
+  ];
 
-  const btnBell = document.getElementById('btnBell');
-  const bellBadge = document.getElementById('bellBadge');
-  const notifyModal = document.getElementById('notifyModal');
-  const closeNotify = document.getElementById('closeNotify');
-  const inboxFR = document.getElementById('inboxFR');
-  const inboxBR = document.getElementById('inboxBR');
+  function loadEggSkin(seed){
+    // Preview without background/status, but WITH rarity sparkles via seed hints
+    eggPreview.src = `/nftsvg/EGGDEMO.svg?skin=${encodeURIComponent(seed)}&nobg=1&nc=${Date.now()}`;
+  }
+  loadEggSkin(previewSkins[0]);
 
-  const chooseCreatureModal = document.getElementById('chooseCreatureModal');
-  const closeChooseCreature = document.getElementById('closeChooseCreature');
-  const battleCreatureSelect = document.getElementById('battleCreatureSelect');
-  const battleSendMsg = document.getElementById('battleSendMsg');
-  const sendBattleConfirm = document.getElementById('sendBattleConfirm');
-
-  // Wallet modal (unchanged)
-  function openMyWallet(){ document.getElementById('myWalletModal').removeAttribute('hidden'); refreshMyWalletModal(); }
-  function closeMyWallet(){ document.getElementById('myWalletModal').setAttribute('hidden',''); }
-  document.getElementById('openWallet').addEventListener('click', openMyWallet);
-  document.getElementById('closeMyWalletBtn').addEventListener('click', closeMyWallet);
-
-  // ---------- Username canon ----------
-  const SRV_USER = {{ (username or '') | tojson }};
-  function stripAt(s){ return (s||'').toString().trim().replace(/^@+/, ''); }
-  const USER_CANON = (()=>{
-    const fromSrv = stripAt(SRV_USER);
-    if(fromSrv) return fromSrv;
-    try{ const raw = localStorage.getItem('piAuthUser'); if(raw){ const j=JSON.parse(raw); if(j && j.username) return stripAt(j.username); } }catch{}
-    try{ const uCanon = localStorage.getItem('izzaUserCanon'); if(uCanon) return stripAt(uCanon);
-         const u = localStorage.getItem('izzaUserU'); if(u) return stripAt(u); }catch{}
-    return '';
-  })();
-  try{
-    if(USER_CANON){
-      localStorage.setItem('izzaUserCanon', USER_CANON);
-      localStorage.setItem('izzaUserU', USER_CANON.toLowerCase());
+  async function spinEggs(finalSeed){
+    for(let i=0;i<9;i++){
+      loadEggSkin(previewSkins[i % previewSkins.length]);
+      await new Promise(r=>setTimeout(r,120));
     }
-  }catch{}
+    loadEggSkin(finalSeed);
+  }
 
-  // ---------- Local wallet helpers (unchanged) ----------
+  // ---------- Local wallet helpers ----------
   function __readVault(){ try{ const s=localStorage.getItem('izza_test_wallet'); return s?JSON.parse(s):null; }catch{return null} }
   function __writeVault(j){ try{ localStorage.setItem('izza_test_wallet', JSON.stringify(j||{})); }catch{} }
   function __forgetSecret(pub){ try{ const v=__readVault()||{}; if(v && v.pub===pub){ delete v.sec; __writeVault(v); } }catch{} }
@@ -281,6 +206,37 @@
     return r.json().catch(()=>null);
   }
 
+  // ---------- Username canonization ----------
+  const SRV_USER = {{ (username or '') | tojson }};
+  function stripAt(s){ return (s||'').toString().trim().replace(/^@+/, ''); }
+  const USER_CANON = (()=>{
+    const fromSrv = stripAt(SRV_USER);
+    if(fromSrv) return fromSrv;
+    try{
+      const raw = localStorage.getItem('piAuthUser');
+      if(raw){ const j=JSON.parse(raw); if(j && j.username) return stripAt(j.username); }
+    }catch{}
+    try{
+      const uCanon = localStorage.getItem('izzaUserCanon');
+      if(uCanon) return stripAt(uCanon);
+      const u = localStorage.getItem('izzaUserU');
+      if(u) return stripAt(u);
+    }catch{}
+    return '';
+  })();
+  try{
+    if(USER_CANON){
+      localStorage.setItem('izzaUserCanon', USER_CANON);
+      localStorage.setItem('izzaUserU', USER_CANON.toLowerCase());
+    }
+  }catch{}
+
+  // ---------- Wallet modal wiring ----------
+  function openMyWallet(){ document.getElementById('myWalletModal').removeAttribute('hidden'); refreshMyWalletModal(); }
+  function closeMyWallet(){ document.getElementById('myWalletModal').setAttribute('hidden',''); }
+  document.getElementById('openWallet').addEventListener('click', openMyWallet);
+  document.getElementById('closeMyWalletBtn').addEventListener('click', closeMyWallet);
+
   async function refreshMyWalletModal(){
     document.getElementById('mwUser').textContent = USER_CANON ? '@'+USER_CANON : '—';
     const active = await fetchActiveWallet(USER_CANON);
@@ -298,8 +254,41 @@
       document.getElementById('balIzza').textContent = '—';
     }
   }
+  document.getElementById('mwSaveBtn').addEventListener('click', async ()=>{
+    const active = await fetchActiveWallet(USER_CANON);
+    const pub = active && active.pub || '';
+    if(!/^G[A-Z0-9]{55}$/.test(pub)){ alert('Open your IZZA wallet once to set an active wallet, then return.'); return; }
+    const secret = (document.getElementById('mwSInput').value||'').trim();
+    if(!/^S[A-Z0-9]{55}$/.test(secret)){ alert('Enter a valid S-key'); return; }
+    const v = __readVault() || {}; v.pub = pub; v.sec = secret; __writeVault(v);
+    const res = await linkActiveWallet(USER_CANON, pub, secret);
+    if(!res.ok){ alert('Server link failed: ' + (res.json && res.json.error || res.status)); }
+    document.getElementById('mwSInput').value = '';
+    refreshMyWalletModal();
+    alert('S-key saved locally and linked.');
+  });
+  document.getElementById('mwForgetBtn').addEventListener('click', async ()=>{
+    const active = await fetchActiveWallet(USER_CANON);
+    const pub = active && active.pub || '';
+    if(pub) __forgetSecret(pub);
+    refreshMyWalletModal();
+  });
 
-  // ---------- Live preview (unchanged text tweak) ----------
+  // ---------- Gate for mint / feed ----------
+  async function ensureUserAndWalletGate(){
+    const active = await fetchActiveWallet(USER_CANON);
+    const pub = active && active.pub || '';
+    if(!USER_CANON){ alert('Sign in with Pi first.'); return null; }
+    if(!pub){ alert('Open your IZZA wallet once to set an active wallet, then return.'); return null; }
+    if(!isLocalWallet(pub)){
+      openMyWallet();
+      alert('Save your S-key locally first.');
+      return null;
+    }
+    return { user:USER_CANON, pub, sec:getLocalSecret(pub) };
+  }
+
+  // ---------- Live preview ----------
   let lastCode = null, lastIssuer = null;
   async function refreshLive(){
     if(!lastCode){ liveHint.textContent='Mint an egg to see it here'; return; }
@@ -324,40 +313,21 @@
       }
     }catch(e){}
     try{ await refreshMyWalletModal(); }catch{}
-
-    // initial counters + friends
-    try{ await refreshCounters(); }catch{}
-    try{ await loadFriends(); }catch{}
   })();
 
-  // ---------- Mint ----------
+  // ---------- Mint flow (with auto-claim) ----------
   mintBtn.addEventListener('click', async ()=>{
     mintMsg.textContent = 'Your creature is being fabricated by the hands of IZZA gods';
     const gate = await ensureUserAndWalletGate();
     if(!gate){ return; }
-
-    const previewSkins = [
-      "LEG-sapphire-stripe","EP-ember-metallic","RARE-violet-swirl","UN-mint-mosaic",
-      "COM-gold-speckle","RARE-rose-stripe","EP-obsidian-metallic","COM-turquoise-speckle"
-    ];
-    async function spinEggs(finalSeed){
-      for(let i=0;i<9;i++){
-        loadEggSkin(previewSkins[i % previewSkins.length]);
-        await new Promise(r=>setTimeout(r,120));
-      }
-      loadEggSkin(finalSeed);
-    }
-    function loadEggSkin(seed){
-      eggPreview.src = `/nftsvg/EGGDEMO.svg?skin=${encodeURIComponent(seed)}&nobg=1&nc=${Date.now()}`;
-    }
-    loadEggSkin(previewSkins[0]);
 
     const finalSkin = previewSkins[Math.floor(Math.random()*previewSkins.length)];
     await spinEggs(finalSkin);
 
     try{
       const res = await fetch('/api/creatures/mint', {
-        method:'POST', headers:{'Content-Type':'application/json'},
+        method:'POST',
+        headers:{'Content-Type':'application/json'},
         body: JSON.stringify({ buyer_pub:gate.pub, buyer_sec:gate.sec, skin: finalSkin })
       }).then(r=>r.json());
       if(!(res && res.ok)) throw new Error(res && res.error || 'mint_failed');
@@ -365,7 +335,8 @@
       lastCode = res.asset.code; lastIssuer = res.asset.issuer;
 
       const ac = await fetch('/api/creatures/auto-claim', {
-        method:'POST', headers:{'Content-Type':'application/json'},
+        method:'POST',
+        headers:{'Content-Type':'application/json'},
         body: JSON.stringify({ code:lastCode, owner_pub:gate.pub })
       }).then(r=>r.json()).catch(()=>null);
 
@@ -396,30 +367,10 @@
     refreshLive();
   });
 
-  // ---------- Gate helper ----------
-  async function ensureUserAndWalletGate(){
-    const active = await fetchActiveWallet(USER_CANON);
-    const pub = active && active.pub || '';
-    if(!USER_CANON){ alert('Sign in with Pi first.'); return null; }
-    if(!pub){ alert('Open your IZZA wallet once to set an active wallet, then return.'); return null; }
-    if(!isLocalWallet(pub)){
-      openMyWallet();
-      alert('Save your S-key locally first.');
-      return null;
-    }
-    return { user:USER_CANON, pub, sec:getLocalSecret(pub) };
-  }
-
   // ---------- My Creatures ----------
   const myBox  = document.getElementById('myCreaturesBox');
   const myList = document.getElementById('myCreaturesList');
   document.getElementById('btnMyCreatures').addEventListener('click', async ()=>{
-    await loadMyCreaturesThumbs();
-    myBox.style.display = 'block';
-    window.scrollTo({top: myBox.offsetTop - 12, behavior:'smooth'});
-  });
-
-  async function loadMyCreaturesThumbs(){
     myList.innerHTML = '';
     const qs = USER_CANON ? ('?u='+encodeURIComponent(USER_CANON)) : '';
     const j = await fetch('/api/creatures/mine'+qs, {credentials:'include'}).then(r=>r.json()).catch(()=>({items:[]}));
@@ -441,220 +392,10 @@
       wrap.appendChild(a);
       myList.appendChild(wrap);
     });
-  }
-
-  // ---------- Friends panel ----------
-  btnFriends.addEventListener('click', ()=>{
-    friendsPanel.style.display = (friendsPanel.style.display === 'none' || !friendsPanel.style.display) ? 'block' : 'none';
-    if(friendsPanel.style.display === 'block'){ loadFriends(); }
+    myBox.style.display = 'block';
+    window.scrollTo({top: myBox.offsetTop - 12, behavior:'smooth'});
   });
 
-  friendSearchBtn.addEventListener('click', doFriendSearch);
-  friendSearch.addEventListener('keydown', (e)=>{ if(e.key==='Enter') doFriendSearch(); });
-
-  async function doFriendSearch(){
-    const q = friendSearch.value.trim();
-    friendSearchResults.innerHTML = '';
-    if(!q){ return; }
-    const qs = USER_CANON ? ('?u='+encodeURIComponent(USER_CANON)) : '';
-    const j = await fetch('/api/friends/search'+qs + '&q=' + encodeURIComponent(q)).then(r=>r.json()).catch(()=>({items:[]}));
-    const items = j.items || [];
-    if(items.length === 0){
-      friendSearchResults.innerHTML = '<div class="small">No matching users.</div>';
-      return;
-    }
-    items.forEach(u=>{
-      const row = document.createElement('div');
-      row.className = 'rowSplit';
-      row.innerHTML = `<div class="chip">@${u}</div>`;
-      const btn = document.createElement('button');
-      btn.className = 'btn inline';
-      btn.textContent = 'Send Friend Request';
-      btn.addEventListener('click', ()=> sendFriendRequest(u, row));
-      row.appendChild(btn);
-      friendSearchResults.appendChild(row);
-    });
-  }
-
-  async function sendFriendRequest(toUser, rowEl){
-    const qs = USER_CANON ? ('?u='+encodeURIComponent(USER_CANON)) : '';
-    const r = await fetch('/api/friends/request'+qs, {
-      method:'POST', headers:{'Content-Type':'application/json'},
-      body: JSON.stringify({ to_user: toUser })
-    }).then(r=>r.json()).catch(()=>null);
-    if(!r){ alert('Failed'); return; }
-    if(r.auto_accepted){
-      rowEl.innerHTML = `<div class="chip success">@${toUser} — now friends</div>`;
-    }else if(r.already_friends){
-      rowEl.innerHTML = `<div class="chip">@${toUser}</div><span class="small">Already friends</span>`;
-    }else{
-      rowEl.innerHTML = `<div class="chip">@${toUser}</div><span class="small">Request sent</span>`;
-    }
-    refreshCounters();
-    loadFriends();
-  }
-
-  async function loadFriends(){
-    friendsList.innerHTML = '';
-    const qs = USER_CANON ? ('?u='+encodeURIComponent(USER_CANON)) : '';
-    const j = await fetch('/api/friends/list'+qs).then(r=>r.json()).catch(()=>({items:[]}));
-    const items = j.items || [];
-    if(items.length === 0){
-      friendsList.innerHTML = '<div class="small">No friends yet.</div>';
-      return;
-    }
-    items.forEach(u=>{
-      const row = document.createElement('div');
-      row.className = 'rowSplit';
-      row.innerHTML = `<div class="chip">@${u}</div>`;
-      const btn = document.createElement('button');
-      btn.className = 'btn inline';
-      btn.textContent = 'Battle…';
-      btn.addEventListener('click', ()=> openChooseCreature(u));
-      row.appendChild(btn);
-      friendsList.appendChild(row);
-    });
-  }
-
-  // ---------- Notifications ----------
-  btnBell.addEventListener('click', async ()=>{
-    await loadNotifications();
-    notifyModal.removeAttribute('hidden');
-  });
-  closeNotify.addEventListener('click', ()=> notifyModal.setAttribute('hidden',''));
-
-  async function refreshCounters(){
-    const qs = USER_CANON ? ('?u='+encodeURIComponent(USER_CANON)) : '';
-    const j = await fetch('/api/notify/counters'+qs).then(r=>r.json()).catch(()=>({total:0}));
-    const t = j.total || 0;
-    bellBadge.textContent = String(t);
-    bellBadge.style.display = t > 0 ? 'inline-block' : 'none';
-  }
-
-  async function loadNotifications(){
-    inboxFR.innerHTML = '';
-    inboxBR.innerHTML = '';
-    const qs = USER_CANON ? ('?u='+encodeURIComponent(USER_CANON)) : '';
-
-    // friend requests
-    const fr = await fetch('/api/friends/inbox'+qs).then(r=>r.json()).catch(()=>({items:[]}));
-    (fr.items||[]).forEach(it=>{
-      const row = document.createElement('div'); row.className='rowSplit';
-      row.innerHTML = `<div class="chip">@${it.from_user}</div>`;
-      const box = document.createElement('div'); box.style.display='flex'; box.style.gap='6px';
-      const a = document.createElement('button'); a.className='btn inline'; a.textContent='Accept';
-      const d = document.createElement('button'); d.className='btn inline'; d.textContent='Decline';
-      a.addEventListener('click', ()=> actFriend(it.id, 'accept', row));
-      d.addEventListener('click', ()=> actFriend(it.id, 'decline', row));
-      box.appendChild(a); box.appendChild(d);
-      row.appendChild(box);
-      inboxFR.appendChild(row);
-    });
-    if((fr.items||[]).length===0){ inboxFR.innerHTML = '<div class="small">No friend requests.</div>'; }
-
-    // battle requests
-    const br = await fetch('/api/battle/inbox'+qs).then(r=>r.json()).catch(()=>({items:[]}));
-    (br.items||[]).forEach(it=>{
-      const row = document.createElement('div'); row.className='rowSplit';
-      row.innerHTML = `<div class="chip">@${it.from_user} • wants to battle (creature ${it.creature_code})</div>`;
-      const box = document.createElement('div'); box.style.display='flex'; box.style.gap='6px';
-      const a = document.createElement('button'); a.className='btn inline'; a.textContent='Accept…';
-      const d = document.createElement('button'); d.className='btn inline'; d.textContent='Decline';
-      a.addEventListener('click', async ()=>{
-        // choose my creature to accept
-        await prepareCreaturePicker();
-        sendBattleConfirm.onclick = async ()=>{
-          const myCode = battleCreatureSelect.value;
-          await actBattle(it.id, 'accept', myCode, row);
-        };
-        chooseCreatureModal.removeAttribute('hidden');
-      });
-      d.addEventListener('click', ()=> actBattle(it.id, 'decline', null, row));
-      box.appendChild(a); box.appendChild(d);
-      row.appendChild(box);
-      inboxBR.appendChild(row);
-    });
-    if((br.items||[]).length===0){ inboxBR.innerHTML = '<div class="small">No battle requests.</div>'; }
-  }
-
-  async function actFriend(id, action, rowEl){
-    const qs = USER_CANON ? ('?u='+encodeURIComponent(USER_CANON)) : '';
-    await fetch('/api/friends/act'+qs, {
-      method:'POST', headers:{'Content-Type':'application/json'},
-      body: JSON.stringify({ id, action })
-    });
-    rowEl.innerHTML = `<div class="small">Request ${action}ed.</div>`;
-    refreshCounters(); loadFriends();
-  }
-
-  async function actBattle(id, action, creature_code, rowEl){
-    const qs = USER_CANON ? ('?u='+encodeURIComponent(USER_CANON)) : '';
-    const body = { id, action };
-    if(action==='accept'){ body.creature_code = creature_code || ''; }
-    await fetch('/api/battle/act'+qs, {
-      method:'POST', headers:{'Content-Type':'application/json'},
-      body: JSON.stringify(body)
-    });
-    chooseCreatureModal.setAttribute('hidden','');
-    rowEl.innerHTML = `<div class="small">Battle ${action}ed.</div>`;
-    refreshCounters();
-  }
-
-  // ---------- Battle: choose creature then send request ----------
-  let pendingBattleTarget = null;
-  function openChooseCreature(friendUser){
-    pendingBattleTarget = friendUser;
-    prepareCreaturePicker().then(()=>{
-      battleSendMsg.textContent = '';
-      chooseCreatureModal.removeAttribute('hidden');
-      sendBattleConfirm.onclick = sendBattleRequest;
-    });
-  }
-  closeChooseCreature.addEventListener('click', ()=> chooseCreatureModal.setAttribute('hidden',''));
-
-  async function prepareCreaturePicker(){
-    // pull from /api/creatures/mine
-    const qs = USER_CANON ? ('?u='+encodeURIComponent(USER_CANON)) : '';
-    const j = await fetch('/api/creatures/mine'+qs, {credentials:'include'}).then(r=>r.json()).catch(()=>({items:[]}));
-    const items = j.items || [];
-    battleCreatureSelect.innerHTML = '';
-    if(items.length === 0){
-      battleCreatureSelect.innerHTML = '<option value="">No creatures yet</option>';
-      return;
-    }
-    items.forEach(it=>{
-      const opt = document.createElement('option');
-      opt.value = it.code;
-      opt.textContent = `${it.code}${it.stage ? ' — ' + it.stage : ''}`;
-      battleCreatureSelect.appendChild(opt);
-    });
-  }
-
-  async function sendBattleRequest(){
-    const code = battleCreatureSelect.value;
-    if(!code){ battleSendMsg.textContent = 'Pick a creature.'; return; }
-    const qs = USER_CANON ? ('?u='+encodeURIComponent(USER_CANON)) : '';
-    const r = await fetch('/api/battle/request'+qs, {
-      method:'POST', headers:{'Content-Type':'application/json'},
-      body: JSON.stringify({ to_user: pendingBattleTarget, creature_code: code })
-    }).then(r=>r.json()).catch(()=>null);
-    if(r && r.ok){
-      battleSendMsg.innerHTML = '<span class="success">Battle request sent.</span>';
-      setTimeout(()=> chooseCreatureModal.setAttribute('hidden',''), 600);
-    }else{
-      battleSendMsg.innerHTML = '<span class="danger">Failed to send.</span>';
-    }
-    refreshCounters();
-  }
-
-  // ---------- Bell polling ----------
-  async function pollBell(){ try{ await refreshCounters(); }catch{} }
-  setInterval(pollBell, 12000);
-
-  // ---------- Egg preview helpers (shared with mint above) ----------
-  function loadEggSkin(seed){
-    eggPreview.src = `/nftsvg/EGGDEMO.svg?skin=${encodeURIComponent(seed)}&nobg=1&nc=${Date.now()}`;
-  }
 })();
 </script>
 </body>
