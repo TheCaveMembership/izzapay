@@ -146,9 +146,24 @@ def _stage_from_elapsed(elapsed: int, hunger: int, existing_stage: str | None) -
     if elapsed < TEST_PRIME:       return "teen"
     return "prime"
 
+# Palette & pattern chooser with optional seed hints (e.g., 'sapphire', 'stripe')
 def _choose_palette(seed: str):
+    s = (seed or "").lower()
     rnd = random.Random(seed)
-    return rnd.choice(["gold","violet","turquoise","rose","lime"]), rnd.choice(["speckle","stripe","swirl","mosaic","metallic"])
+
+    # Supported palettes
+    palettes = ["gold","violet","turquoise","rose","lime","sapphire","ember","obsidian","mint"]
+
+    # Optional explicit base via seed hints
+    hinted = next((p for p in palettes if p in s), None)
+    base = hinted or rnd.choice(palettes)
+
+    # Supported patterns (keep only the ones we render)
+    pats = ["speckle","stripe","swirl","mosaic","metallic"]
+    pat_hint = next((p for p in pats if p in s), None)
+    pattern = pat_hint or rnd.choice(pats)
+
+    return base, pattern
 
 def _apply_hunger_progress(row: sqlite3.Row) -> tuple[int, str, int, int, int]:
     now = _now_i()
@@ -485,25 +500,28 @@ def creature_svg(code):
     pattern = st["pattern"] or "speckle"
     elapsed = int(st["elapsed"])
 
-    # colors
+    # Optional preview seed hint for EGGDEMO (affects rarity showcase)
+    skin_hint = (request.args.get("skin") or "") if str(code).upper() == "EGGDEMO" else ""
+
+    # colors (extended)
     bg = {
-        "gold":"#130e00","violet":"#0e061a","turquoise":"#02151a","rose":"#1a0710","lime":"#0c1a06"
+        "gold":"#130e00","violet":"#0e061a","turquoise":"#02151a","rose":"#1a0710","lime":"#0c1a06",
+        "sapphire":"#06101e","ember":"#1a0b06","obsidian":"#0b0b10","mint":"#04130d"
     }.get(base, "#0b0b10")
     glow = {
-        "gold":"#ffcd60","violet":"#b784ff","turquoise":"#48d4ff","rose":"#ff7aa2","lime":"#89ff7a"
+        "gold":"#ffcd60","violet":"#b784ff","turquoise":"#48d4ff","rose":"#ff7aa2","lime":"#89ff7a",
+        "sapphire":"#5aa8ff","ember":"#ff8a4d","obsidian":"#8a96a8","mint":"#7affc9"
     }.get(base, "#b784ff")
     body = {
-        "gold":"#ffe39a","violet":"#d7c0ff","turquoise":"#7fe6ff","rose":"#ffb6c8","lime":"#b4ffaf"
+        "gold":"#ffe39a","violet":"#d7c0ff","turquoise":"#7fe6ff","rose":"#ffb6c8","lime":"#b4ffaf",
+        "sapphire":"#b9d9ff","ember":"#ffd2b8","obsidian":"#cfd6e4","mint":"#c5ffeb"
     }.get(base, "#e8f1ff")
 
-    # NEW: contrasting ink just for pattern strokes/fills
+    # High-contrast ink for patterns
     def _pattern_contrast(b):
         return {
-            "gold":      "#48d4ff",  # turquoise
-            "violet":    "#89ff7a",  # lime
-            "turquoise": "#ff7aa2",  # rose
-            "rose":      "#48d4ff",  # turquoise
-            "lime":      "#b784ff",  # violet
+            "gold":"#48d4ff", "violet":"#89ff7a", "turquoise":"#ff7aa2", "rose":"#48d4ff", "lime":"#b784ff",
+            "sapphire":"#ffcd60", "ember":"#48d4ff", "obsidian":"#7affc9", "mint":"#b784ff"
         }.get(b, "#e8f1ff")
     pcol = _pattern_contrast(base)
 
@@ -515,15 +533,29 @@ def creature_svg(code):
     elif stage == "prime":    egg_scale = "1.06"
     else:                     egg_scale = "1.0"
 
-    # wither masks only when starving in prime (not when dead)
-    wither = "1" if ((elapsed >= TEST_PRIME and hunger >= 90) and stage != "dead") else "0"
+    # Rarity helper (deterministic). Preview can force via seed hints.
+    def _rarity_from(code_seed: str, hint: str) -> str:
+        h = hint.lower()
+        if "leg" in h: return "legendary"
+        if "ep"  in h: return "epic"
+        if "rare" in h: return "rare"
+        if "un" in h: return "uncommon"
+        if "com" in h: return "common"
+        r = random.Random(code_seed + ":rar").random()
+        if r < 0.01:  return "legendary"
+        if r < 0.05:  return "epic"
+        if r < 0.14:  return "rare"
+        if r < 0.36:  return "uncommon"
+        return "common"
+
+    rarity = _rarity_from(st["code"], skin_hint)
 
     rnd = random.Random(st["code"])
     crown  = (rnd.randint(1,3) == 1)
     flames = (rnd.randint(1,4) == 1)
     lasers = (rnd.randint(1,5) == 1)
 
-    # Pattern fragments (use pcol instead of glow)
+    # Pattern fragments (use pcol)
     pattern_svg = ""
     if pattern == "speckle":
         dots = []
@@ -547,6 +579,7 @@ def creature_svg(code):
     elif pattern == "metallic":
         pattern_svg = '<ellipse rx="95" ry="70" fill="url(#metal)"/>'
 
+    # Cosmetic add-ons
     crown_svg = ''
     if crown and stage in ('baby','teen','prime'):
         crown_svg = f'''
@@ -575,9 +608,72 @@ def creature_svg(code):
             </line>
           </g>'''
 
+    # Rarity-driven sparkles/shine (no DB changes; purely visual)
+    shine_defs = f'''
+      <symbol id="twinkle">
+        <polygon points="0,-3 0.8,-0.8 3,0 0.8,0.8 0,3 -0.8,0.8 -3,0 -0.8,-0.8" />
+      </symbol>
+      <linearGradient id="sweep" x1="0" x2="1" y1="0" y2="0">
+        <stop offset="0" stop-color="#fff" stop-opacity="0"/>
+        <stop offset=".5" stop-color="#fff" stop-opacity=".55"/>
+        <stop offset="1" stop-color="#fff" stop-opacity="0"/>
+      </linearGradient>
+      <radialGradient id="aurora" cx="50%" cy="50%" r="65%">
+        <stop offset="0" stop-color="{glow}" stop-opacity=".35"/>
+        <stop offset="1" stop-color="{bg}" stop-opacity="0"/>
+      </radialGradient>
+    '''
+
+    # Build sparkle layers by rarity
+    sparkle_svg = ''
+    if rarity in ('uncommon','rare','epic','legendary'):
+        # base twinkles
+        t = []
+        rndt = random.Random(st["code"] + ":twk")
+        n = 6 if rarity == 'uncommon' else 10 if rarity == 'rare' else 14 if rarity == 'epic' else 18
+        for i in range(n):
+            x = rndt.randint(-70, 70); y = rndt.randint(-50, 50); d = rndt.randint(6,10)
+            dur = 1.0 + (i % 5) * 0.2
+            t.append(f'''
+              <g transform="translate({x},{y})">
+                <use href="#twinkle" fill="#fff" opacity=".0">
+                  <animate attributeName="opacity" values="0;1;0" dur="{dur}s" repeatCount="indefinite" />
+                </use>
+              </g>''')
+        sparkle_svg += ''.join(t)
+
+    if rarity in ('rare','epic','legendary'):
+        # rotating star ring
+        sparkle_svg += f'''
+          <g opacity=".35">
+            <g>
+              <circle r="120" fill="none" stroke="{glow}" stroke-width="2" opacity=".25"/>
+              <g>
+                <g>
+                  <use href="#twinkle" fill="{glow}">
+                    <animateTransform attributeName="transform" attributeType="XML" type="rotate"
+                      from="0 0 0" to="360 0 0" dur="6s" repeatCount="indefinite"/>
+                  </use>
+                </g>
+              </g>
+            </g>
+          </g>'''
+
+    if rarity in ('epic','legendary'):
+        # aurora behind egg
+        sparkle_svg += f'''
+          <ellipse rx="170" ry="120" fill="url(#aurora)" opacity=".45" filter="url(#soft)"/>'''
+
+    if rarity == 'legendary':
+        # prism sweep across body
+        sparkle_svg += f'''
+          <rect x="-100" y="-80" width="200" height="160" fill="url(#sweep)" opacity=".7">
+            <animate attributeName="x" from="-160" to="160" dur="2.2s" repeatCount="indefinite"/>
+          </rect>'''
+
     show_hunger = (stage in ('baby','teen','prime'))
 
-    # Shuffle-preview only: hide bg/status when &nobg=1 on EGGDEMO (already added earlier)
+    # Shuffle-preview only: hide bg/status when &nobg=1 on EGGDEMO
     hide_bg = (str(code).upper() == "EGGDEMO") and (str(request.args.get("nobg", "")).lower() not in ("", "0", "false", "no"))
     bg_rect = "" if hide_bg else f'<rect width="512" height="512" fill="{bg}"/>'
     glow_circ = "" if hide_bg else f'<circle cx="256" cy="360" r="160" fill="url(#g0)" opacity=".14" filter="url(#soft)"/>'
@@ -596,6 +692,7 @@ def creature_svg(code):
     <linearGradient id="egg"><stop offset="0" stop-color="#fff"/><stop offset="1" stop-color="{glow}"/></linearGradient>
     <linearGradient id="metal"><stop offset="0" stop-color="#fff" stop-opacity=".8"/><stop offset="1" stop-color="{body}" stop-opacity=".9"/></linearGradient>
     <filter id="soft"><feGaussianBlur stdDeviation="6"/></filter>
+    {shine_defs}
   </defs>
   {bg_rect}
   {glow_circ}
@@ -615,8 +712,8 @@ def creature_svg(code):
       {crown_svg}
       {flames_svg}
       {lasers_svg}
+      {sparkle_svg}
     </g>
-    <rect x="-160" y="-200" width="320" height="360" fill="#000" opacity="{wither}"/>
   </g>
 {status_block}
   <a xlink:href="{url_for('creatures.habitat_page', code=st['code'], _external=True)}">
