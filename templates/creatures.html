@@ -156,7 +156,7 @@
   // egg preview seeds (no carousel, just swap a few skins quickly)
   const previewSkins = Array.from({length:8}).map((_,i)=>String(i+1));
   function loadEggSkin(seed){
-    // no background on shuffle preview
+    // no background AND no status text on shuffle preview
     eggPreview.src = `/nftsvg/EGGDEMO.svg?skin=${encodeURIComponent(seed)}&nobg=1&nc=${Date.now()}`;
   }
   loadEggSkin(previewSkins[0]);
@@ -310,13 +310,14 @@
 
   // ---------- Mint flow (with auto-claim) ----------
   mintBtn.addEventListener('click', async ()=>{
-    mintMsg.textContent = '';
+    // show fabrication message immediately during spin
+    mintMsg.textContent = 'Your creature is being fabricated by the hands of IZZA gods';
     const gate = await ensureUserAndWalletGate();
     if(!gate){ return; }
 
     // pick a pretend final skin for the spin
     const finalSkin = previewSkins[Math.floor(Math.random()*previewSkins.length)];
-    await spinEggs(finalSkin);
+    await spinEggs(finalSeed = finalSkin);
 
     try{
       const res = await fetch('/api/creatures/mint', {
