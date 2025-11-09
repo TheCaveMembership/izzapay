@@ -439,15 +439,10 @@ def creatures_feed():
         if stage == "dead":
             # must feed once per day for 3 days consecutively
             last_feed = int(last_feed_at or row["hatch_start"] or now)
-            # if more than a day since last feed, advance the streak by 1; if less than a day, ignore duplicate same-day feeds
             days_since_last = (now - last_feed) / float(DAY_SECS)
             if days_since_last >= 1.0:
                 revive_progress += 1
                 last_feed_at = now
-            else:
-                # same "day" feed doesn't count a new step; keep progress
-                pass
-
             if revive_progress >= REVIVE_DAYS_REQUIRED:
                 stage = "baby"
                 hunger = 50
@@ -525,7 +520,8 @@ def creature_svg(code):
     else:                     egg_scale = "1.0"
 
     # “wither” blackout for starving prime OR dead
-    wither = "1" if (stage == "dead" or (elapsed >= TEST_PRIME and hunger >= 90)) else "0"
+    # — remove black box when dead
+    wither = "1" if ((elapsed >= TEST_PRIME and hunger >= 90) and stage != "dead") else "0"
 
     # RARITY (higher odds for testing): crown 1/3, flames 1/4, lasers 1/5
     rnd = random.Random(st["code"])
@@ -589,19 +585,13 @@ def creature_svg(code):
     # hunger label only after baby
     show_hunger = (stage in ('baby','teen','prime'))
 
-    # dead look
+    # dead look (remove box overlay entirely)
     dead_overlay = ''
-    if stage == "dead":
-        dead_overlay = '''
-          <g>
-            <rect x="-160" y="-200" width="320" height="360" fill="#2a2a2a" opacity=".9"/>
-            <g stroke="#ff4d4d" stroke-width="6">
-              <line x1="-30" y1="-20" x2="-10" y2="0"/>
-              <line x1="-30" y1="0" x2="-10" y2="-20"/>
-              <line x1="10" y1="-20" x2="30" y2="0"/>
-              <line x1="10" y1="0" x2="30" y2="-20"/>
-            </g>
-          </g>'''
+
+    # Hide background for shuffle-only preview: EGGDEMO with ?nobg=1
+    hide_bg = (str(code).upper() == "EGGDEMO") and (str(request.args.get("nobg", "")).lower() not in ("", "0", "false", "no"))
+    bg_rect = "" if hide_bg else f'<rect width="512" height="512" fill="{bg}"/>'
+    glow_circ = "" if hide_bg else f'<circle cx="256" cy="360" r="160" fill="url(#g0)" opacity=".14" filter="url(#soft)"/>'
 
     svg = f"""<svg viewBox="0 0 512 512"
   xmlns="http://www.w3.org/2000/svg"
@@ -612,8 +602,8 @@ def creature_svg(code):
     <linearGradient id="metal"><stop offset="0" stop-color="#fff" stop-opacity=".8"/><stop offset="1" stop-color="{body}" stop-opacity=".9"/></linearGradient>
     <filter id="soft"><feGaussianBlur stdDeviation="6"/></filter>
   </defs>
-  <rect width="512" height="512" fill="{bg}"/>
-  <circle cx="256" cy="360" r="160" fill="url(#g0)" opacity=".14" filter="url(#soft)"/>
+  {bg_rect}
+  {glow_circ}
   <g transform="translate(256,300) scale({egg_scale})">
     <!-- egg shell -->
     <ellipse rx="120" ry="160" fill="url(#egg)" opacity="{ '1' if stage in ('egg','cracking') else '0'}"/>
