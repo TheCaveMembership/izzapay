@@ -10,7 +10,7 @@
     :root{
       --bg:#000; --txt:#e8f1ff; --muted:#9fb0d6; --line:#1d2540;
       --piPurple1:#7a44ff; --piPurple2:#b784ff; --ring:0 0 0 2px rgba(183,132,255,.28);
-      --gold1:#ffcf4d;
+      --gold1:#ffcf4d; --gold2:#ffb23a;
     }
     body{
       background:#000;color:var(--txt);font-family:Inter,Arial,Helvetica,sans-serif;margin:0;text-align:center
@@ -31,10 +31,28 @@
     .btn.purple{background:linear-gradient(180deg,var(--piPurple1),var(--piPurple2));color:#fff}
     .btn.ghost{background:transparent;color:#cfe0ff;border-color:#2a3550}
     .btn:focus-visible{outline:none;box-shadow:var(--ring)}
+    .btn[disabled]{opacity:.6;cursor:not-allowed}
     h1{margin:16px 0 6px;font-size:clamp(26px,8.5vw,56px);line-height:1.05}
     p{color:var(--muted);margin:8px 0 16px}
     .cta-row{display:flex;justify-content:center;gap:12px;flex-wrap:wrap}
     .err{color:#ff9aa2;white-space:pre-wrap}
+
+    /* Hatch stage container */
+    .hatch-wrap{
+      width:min(420px,85vw); margin:14px auto 6px;
+      filter:drop-shadow(0 0 20px rgba(183,132,255,.28));
+    }
+    /* Soft glow under the SVG */
+    .glow{
+      width:100%; height:12px; margin:8px auto 0; border-radius:999px;
+      background: radial-gradient(50% 100% at 50% 50%, rgba(255,207,77,.35), rgba(255,207,77,0) 70%);
+      animation: glowPulse 4s ease-in-out infinite;
+    }
+    @keyframes glowPulse{
+      0%{opacity:.6; transform:scaleX(.95)}
+      50%{opacity:1; transform:scaleX(1)}
+      100%{opacity:.6; transform:scaleX(.95)}
+    }
   </style>
   <script src="https://sdk.minepi.com/pi-sdk.js"></script>
 </head>
@@ -46,6 +64,98 @@
 
     <section class="section" id="s-auth">
       <h1 class="reveal">SIGN IN WITH PI</h1>
+
+      <!-- 20s looping egg → crack → hatch animation -->
+      <div class="hatch-wrap reveal" aria-hidden="true">
+        <svg viewBox="0 0 400 300" role="img" aria-label="IZZA Creature Egg hatching" width="100%" height="auto">
+          <defs>
+            <!-- gradients -->
+            <linearGradient id="eggGrad" x1="0%" y1="0%" x2="0%" y2="100%">
+              <stop offset="0%" stop-color="#ffe6a6"/>
+              <stop offset="100%" stop-color="#ffd16a"/>
+            </linearGradient>
+            <linearGradient id="bgGrad" x1="0%" y1="0%" x2="100%" y2="0%">
+              <stop offset="0%" stop-color="rgba(122,68,255,0.18)"/>
+              <stop offset="100%" stop-color="rgba(255,207,77,0.18)"/>
+            </linearGradient>
+            <filter id="softGlow" x="-30%" y="-30%" width="160%" height="160%">
+              <feGaussianBlur stdDeviation="6" result="b"/>
+              <feMerge><feMergeNode in="b"/><feMergeNode in="SourceGraphic"/></feMerge>
+            </filter>
+          </defs>
+
+          <!-- atmospheric bars -->
+          <rect x="0" y="0" width="400" height="300" fill="url(#bgGrad)" opacity=".25"/>
+
+          <!-- nest shadow -->
+          <ellipse cx="200" cy="238" rx="90" ry="18" fill="#000" opacity=".3">
+            <animate attributeName="opacity" dur="20s" values=".30;.35;.30" repeatCount="indefinite"/>
+          </ellipse>
+
+          <!-- egg whole (visible 0–6s) -->
+          <g id="eggWhole" filter="url(#softGlow)">
+            <ellipse cx="200" cy="180" rx="70" ry="92" fill="url(#eggGrad)" stroke="#b78b2f" stroke-width="2"/>
+            <!-- subtle breathing before crack -->
+            <animateTransform attributeName="transform" type="scale" additive="sum"
+              dur="6s" values="1 1; 1.02 1.02; 1 1" repeatCount="indefinite"/>
+            <animate attributeName="opacity" dur="20s" values="1;1;0;0" keyTimes="0;0.28;0.30;1" repeatCount="indefinite"/>
+          </g>
+
+          <!-- crack lines appear 6–9s -->
+          <g id="cracks" opacity="0" stroke="#8a5a00" stroke-width="2" stroke-linecap="round">
+            <path d="M200 120 l-8 10 10 8 -10 9 12 8 -8 9 10 7 -7 10" fill="none"/>
+            <path d="M180 140 l-10 6 12 6 -8 7 10 7 -6 8" fill="none"/>
+            <path d="M215 135 l12 8 -8 9 11 6 -9 8 10 7" fill="none"/>
+            <animate attributeName="opacity" dur="20s"
+              values="0;0;1;1;0;0" keyTimes="0;0.30;0.33;0.46;0.50;1" repeatCount="indefinite"/>
+          </g>
+
+          <!-- top shell pops off ~9–12s -->
+          <g id="topShell" opacity="0">
+            <path d="M130 160 Q200 115 270 160 Q230 140 200 150 Q170 140 130 160"
+                  fill="url(#eggGrad)" stroke="#b78b2f" stroke-width="2"/>
+            <animate attributeName="opacity" dur="20s"
+              values="0;0;0;1;1;0" keyTimes="0;0.44;0.45;0.46;0.60;0.61" repeatCount="indefinite"/>
+            <animateTransform attributeName="transform" type="translate" dur="20s"
+              values="0 0; 0 0; 0 -70; 0 -70; 0 0"
+              keyTimes="0;0.45;0.50;0.60;0.61" repeatCount="indefinite"/>
+            <animateTransform attributeName="transform" type="rotate" dur="20s" additive="sum"
+              values="0 200 160; 0 200 160; -18 200 160; -18 200 160; 0 200 160"
+              keyTimes="0;0.45;0.50;0.60;0.61" repeatCount="indefinite"/>
+          </g>
+
+          <!-- bottom shell jiggle ~9–12s -->
+          <g id="bottomShell" opacity="0">
+            <ellipse cx="200" cy="210" rx="70" ry="50" fill="url(#eggGrad)" stroke="#b78b2f" stroke-width="2"/>
+            <animate attributeName="opacity" dur="20s"
+              values="0;0;0;1;1;0" keyTimes="0;0.44;0.45;0.46;0.60;0.61" repeatCount="indefinite"/>
+            <animateTransform attributeName="transform" type="translate" dur="20s"
+              values="0 0; 0 0; 0 4; 0 0; 0 0"
+              keyTimes="0;0.45;0.50;0.55;0.60" repeatCount="indefinite"/>
+          </g>
+
+          <!-- creature emerges ~10–16s, then hides to loop -->
+          <g id="creature" opacity="0" filter="url(#softGlow)">
+            <!-- body -->
+            <ellipse cx="200" cy="190" rx="46" ry="42" fill="#7a44ff"/>
+            <!-- tummy -->
+            <ellipse cx="200" cy="198" rx="26" ry="22" fill="#b784ff"/>
+            <!-- eyes -->
+            <circle cx="186" cy="182" r="6" fill="#fff"/><circle cx="214" cy="182" r="6" fill="#fff"/>
+            <circle cx="186" cy="182" r="2.8" fill="#222"/><circle cx="214" cy="182" r="2.8" fill="#222"/>
+            <!-- ears -->
+            <path d="M170 170 Q178 150 190 168 Z" fill="#7a44ff"/>
+            <path d="M230 170 Q222 150 210 168 Z" fill="#7a44ff"/>
+            <!-- bounce and wave -->
+            <animate attributeName="opacity" dur="20s"
+              values="0;0;0;1;1;0" keyTimes="0;0.50;0.52;0.60;0.78;0.80" repeatCount="indefinite"/>
+            <animateTransform attributeName="transform" type="translate" dur="20s"
+              values="0 12; 0 12; 0 0; 0 -3; 0 0; 0 12"
+              keyTimes="0;0.52;0.60;0.68;0.78;0.80" repeatCount="indefinite"/>
+          </g>
+        </svg>
+        <div class="glow"></div>
+      </div>
 
       <p class="reveal">Authenticate to access <strong>IZZA CREATURES</strong>.</p>
 
@@ -69,26 +179,55 @@
     function setMsg(t){ if(msg) msg.textContent = t || ''; }
     function setErr(t){ if(err) err.textContent = t || ''; }
 
-    function initPi(){
-      if (!window.Pi || !Pi.init) return false;
-      try { Pi.init({ version: "2.0", sandbox: sandbox }); return true; }
-      catch(e){ console.error("Pi.init failed", e); setErr("Pi.init failed: " + (e?.message || e)); return false; }
+    // ——— Pi SDK readiness with retries (prevents “stuck on Requesting authorization…”) ———
+    async function waitForPiInit(maxWaitMs = 3000){
+      const start = Date.now();
+      while(Date.now() - start < maxWaitMs){
+        if (window.Pi && typeof Pi.init === 'function') {
+          try { Pi.init({ version: "2.0", sandbox: sandbox }); return true; }
+          catch(e){ /* try again shortly */ }
+        }
+        await new Promise(r=>setTimeout(r, 120));
+      }
+      return false;
     }
-    if (!initPi()) setMsg("Open in Pi Browser or refresh. Pi SDK is initializing.");
+
+    // Simple timeout wrapper for Pi.authenticate hanging edge-cases
+    function withTimeout(promise, ms){
+      let t; const timeout = new Promise((_,rej)=> t = setTimeout(()=> rej(new Error("Pi auth timed out. Please try again.")), ms));
+      return Promise.race([promise.finally(()=>clearTimeout(t)), timeout]);
+    }
+
+    // Bootstrap
+    (async function boot(){
+      setMsg("Preparing Pi SDK…");
+      const ok = await waitForPiInit();
+      if(!ok){
+        setMsg("Open in Pi Browser or refresh. Pi SDK is initializing.");
+        btn.disabled = false; // still allow attempt; will error gracefully if not in Pi Browser
+        return;
+      }
+      setMsg("");
+      btn.disabled = false;
+    })();
 
     btn?.addEventListener('click', async function(){
       setErr('');
-      if (!window.Pi || !Pi.authenticate) {
+      if (!window.Pi || typeof Pi.authenticate !== 'function') {
         setMsg("Open this page inside Pi Browser so the Pi SDK can run.");
         return;
       }
+      // lock UI
+      btn.disabled = true;
       setMsg("Requesting authorization…");
 
       try{
-        const auth = await Pi.authenticate(['username'], function onIncompletePaymentFound(){});
+        const auth = await withTimeout(Pi.authenticate(['username'], function onIncompletePaymentFound(){}), 15000);
+
         try{ localStorage.setItem('piAuthUser', JSON.stringify(auth.user||null)); }catch{}
         try{ localStorage.setItem('piAccessToken', auth.accessToken || ''); }catch{}
 
+        // Post to server for exchange, then go to /creatures
         const form = document.createElement('form');
         form.method = 'POST';
         form.action = '/auth/exchange';
@@ -109,6 +248,7 @@
         console.error(e);
         setMsg("Authorization failed. Please try again.");
         setErr(e?.message || String(e));
+        btn.disabled = false; // allow retry
       }
     });
   })();
