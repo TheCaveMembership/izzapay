@@ -9,26 +9,60 @@
     :root{
       --bg:#000; --txt:#e8f1ff; --muted:#9fb0d6; --line:#1d2540;
       --piPurple1:#7a44ff; --piPurple2:#b784ff; --gold1:#ffcf4d; --gold2:#ffb23a;
+      --panel:#0b0f1f; --card:#0e1422;
     }
-    body{background:#000;color:var(--txt);font-family:Inter,Arial,sans-serif;margin:0;text-align:center}
+    html,body{background:#000;color:var(--txt);font-family:Inter,Arial,sans-serif;margin:0}
     .wrap{max-width:1100px;margin:0 auto;padding:16px 16px 120px}
     .topbar{display:flex;align-items:center;justify-content:center;gap:12px;padding:12px 0;border-bottom:1px solid var(--line);
             position:sticky;top:0;background:rgba(0,0,0,.9);backdrop-filter:blur(10px);z-index:10}
     .btn{display:inline-flex;align-items:center;justify-content:center;padding:14px 18px;border-radius:14px;font-weight:700;letter-spacing:.2px;
-         border:1px solid #2a3550;color:#cfe0ff;background:#0b0f1f;cursor:pointer;text-decoration:none}
+         border:1px solid #2a3550;color:#cfe0ff;background:var(--panel);cursor:pointer;text-decoration:none}
     .btn.purple{background:linear-gradient(180deg,var(--piPurple1),var(--piPurple2));color:#fff;border-color:transparent}
     .btn.gold{background:linear-gradient(180deg,var(--gold1),var(--gold2));color:#1a1400;border-color:transparent}
-    h1{font-size:clamp(26px,8.5vw,56px);margin:16px 0 6px}
-    p{color:var(--muted)}
+    h1{font-size:clamp(26px,8.5vw,56px);margin:16px 0 6px;text-align:center}
+    p{color:var(--muted);text-align:center}
     .row{display:flex;gap:12px;justify-content:center;flex-wrap:wrap;margin:10px 0 18px}
-    .slot{position:relative;overflow:hidden;border-radius:16px;border:1px solid #2a3550;background:#0b0f1f}
-    .slot .track{display:flex;gap:12px;transition:transform .9s cubic-bezier(.22,.8,.36,1);padding:12px}
-    .slot .egg{width:140px;height:140px;display:flex;align-items:center;justify-content:center;background:#0e1422;border-radius:14px;border:1px solid #223056}
-    .egg img{width:110px;height:110px}
-    .hint{font-size:12px;color:#9fb0d6;margin-top:6px}
-    .box{border:1px solid #2a3550;border-radius:16px;background:#0b0f1f;padding:14px}
-    .col{flex:1 1 320px;max-width:520px}
     .grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(280px,1fr));gap:12px;margin-top:12px}
+
+    /* Cards */
+    .box{border:1px solid #2a3550;border-radius:16px;background:var(--panel);padding:14px}
+    .col{flex:1 1 320px;max-width:520px}
+    .box h3{margin:4px 0 10px}
+
+    /* Slot carousel */
+    .slot{position:relative;overflow:hidden;border-radius:16px;border:1px solid #2a3550;background:var(--card)}
+    .slot::before,
+    .slot::after{
+      content:"";position:absolute;inset:0;pointer-events:none;
+      background:linear-gradient(90deg, rgba(0,0,0,.7), transparent 18%, transparent 82%, rgba(0,0,0,.7));
+      z-index:2
+    }
+    .slot .track{display:flex;gap:12px;transition:transform 1.2s cubic-bezier(.18,.9,.22,1);padding:12px}
+    .slot .egg{
+      width:clamp(92px, 20vw, 140px);height:clamp(92px, 20vw, 140px);
+      display:flex;align-items:center;justify-content:center;background:#0e1422;border-radius:14px;border:1px solid #223056;
+      box-shadow:0 2px 8px rgba(0,0,0,.25)
+    }
+    .egg img{width:75%;height:75%;object-fit:contain;filter:drop-shadow(0 2px 4px rgba(0,0,0,.35))}
+    .hint{font-size:12px;color:#9fb0d6;margin-top:6px;text-align:center}
+
+    /* Live preview */
+    #liveSvg{
+      width:220px;height:220px;object-fit:contain;border-radius:12px;border:1px solid #223056;background:#0e1422
+    }
+
+    /* Minimal modal (wallet) */
+    .modal{position:fixed;inset:0;background:rgba(0,0,0,.5);display:flex;align-items:center;justify-content:center}
+    .modal[hidden]{display:none}
+    .modal-card{background:var(--panel);border:1px solid var(--line);border-radius:14px;max-width:560px;width:94%;padding:14px}
+    .modal-header{display:flex;align-items:center;justify-content:space-between;gap:10px}
+    .modal-title{display:flex;align-items:center;gap:8px;font-weight:800}
+    .close-btn{border:1px solid var(--line);border-radius:10px;background:#0b0f1f;padding:8px 10px;color:#fff;cursor:pointer}
+    .small-muted{font-size:12px;color:var(--muted)}
+    .blox{display:flex;flex-direction:column;gap:6px}
+    .mono{font-family:ui-monospace,Menlo,Consolas,monospace}
+    .success{color:#5ad49e}
+    .warn{color:#ffb86b}
   </style>
   <script src="https://sdk.minepi.com/pi-sdk.js"></script>
 </head>
@@ -36,8 +70,9 @@
   <div class="wrap">
     <div class="topbar">
       <a class="btn" href="/">BACK HOME</a>
-      <a class="btn purple upper" id="openWallet">IZZA WALLET</a>
-      <a class="btn gold upper" id="openClaims">CLAIMS LIST</a>
+      <!-- opens local wallet modal instead of forcing token page -->
+      <button class="btn purple upper" id="openWallet">IZZA WALLET</button>
+      <button class="btn gold upper" id="openClaims">CLAIMS LIST</button>
     </div>
 
     <h1>IZZA CREATURES</h1>
@@ -46,39 +81,68 @@
     <div class="grid">
       <div class="col box">
         <h3>Mint Egg</h3>
-        <div class="slot" id="slot">
-          <div class="track" id="track"></div>
-        </div>
-        <div class="row">
-          <button class="btn purple" id="mintBtn">MINT EGG, 5 IZZA</button>
-        </div>
-        <div class="hint">The carousel behaves like a slot, it spins then stops on your egg</div>
+        <div class="slot"><div class="track" id="track"></div></div>
+        <div class="row"><button class="btn purple" id="mintBtn">MINT EGG, 5 IZZA</button></div>
+        <div class="hint">The carousel spins like a slot, and stops on your egg</div>
         <div id="mintMsg" class="hint"></div>
       </div>
 
       <div class="col box">
         <h3>My Latest Creature</h3>
-        <div id="liveWrap">
-          <img id="liveSvg" alt="creature" style="width:220px;height:220px;object-fit:contain;border-radius:12px;border:1px solid #223056;background:#0e1422">
-        </div>
+        <div id="liveWrap"><img id="liveSvg" alt="creature"></div>
         <div class="row">
           <button class="btn" id="feedBtn">FEED</button>
-          <a class="btn" id="openHabitat" target="_blank">OPEN HABITAT</a>
+          <a class="btn" id="openHabitat" target="_blank" rel="noopener">OPEN HABITAT</a>
         </div>
         <div id="liveHint" class="hint"></div>
       </div>
     </div>
   </div>
 
+  <!-- Minimal IZZA Wallet modal -->
+  <div class="modal" id="myWalletModal" role="dialog" aria-modal="true" aria-labelledby="myWalletTitle" hidden>
+    <div class="modal-card">
+      <div class="modal-header">
+        <div class="modal-title">
+          <img src="/static/izzapay-mark.svg" alt="" style="width:22px;height:22px">
+          <span id="myWalletTitle">My IZZA Wallet</span>
+        </div>
+        <button class="close-btn" type="button" id="closeMyWalletBtn">Close</button>
+      </div>
+      <div class="modal-body">
+        <div class="blox">
+          <div class="small-muted">Signed in as</div>
+          <div><strong id="mwUser">—</strong></div>
+        </div>
+        <div class="blox" style="margin-top:10px">
+          <div class="small-muted">Active Wallet (public key)</div>
+          <div class="mono" id="mwPub">—</div>
+          <div class="small-muted">Need to set or switch your active wallet? Open the full wallet once below, then return here to save your S-key locally.</div>
+        </div>
+        <div class="blox" style="margin-top:10px">
+          <div class="small-muted">Local S-key status</div>
+          <div id="mwSStatus">—</div>
+          <div class="row" style="margin-top:6px">
+            <input class="btn" style="flex:1;min-width:240px;text-align:left" id="mwSInput" placeholder="S... (private key)" autocomplete="off" spellcheck="false" autocapitalize="none">
+            <button class="btn purple" type="button" id="mwSaveBtn">Save S-key</button>
+            <button class="btn" type="button" id="mwForgetBtn">Forget</button>
+          </div>
+          <div class="small-muted">Your S-key is stored locally on this device only.</div>
+        </div>
+        <div class="row" style="margin-top:12px;justify-content:flex-end">
+          <a class="btn gold" href="/token/auth?next=/token/izza">Open Full Wallet</a>
+        </div>
+      </div>
+    </div>
+  </div>
+
 <script>
 (function(){
-  // Read the global PI_SANDBOX
+  // ---------- PI init ----------
   const sandbox = {{ 'true' if PI_SANDBOX else 'false' }};
-  function initPi(){
-    try{ if(window.Pi && Pi.init){ Pi.init({version:'2.0', sandbox:sandbox}); } }catch(e){}
-  }
-  initPi();
+  try{ if(window.Pi && Pi.init){ Pi.init({version:'2.0', sandbox:sandbox}); } }catch(e){}
 
+  // ---------- DOM ----------
   const track = document.getElementById('track');
   const mintBtn = document.getElementById('mintBtn');
   const mintMsg = document.getElementById('mintMsg');
@@ -86,34 +150,131 @@
   const liveHint = document.getElementById('liveHint');
   const openHabitat = document.getElementById('openHabitat');
 
-  const previews = Array.from({length:15}).map((_,i)=>`/nftsvg/EGGDEMO.svg?skin=${i}`);
+  // ---------- Carousel previews (fixes 404 and styling) ----------
+  const previews = Array.from({length:18}).map((_,i)=>`/nftsvg/EGGDEMO.svg?skin=${i}`);
+  function cell(imgSrc){
+    const d=document.createElement('div'); d.className='egg';
+    const img=new Image(); img.loading='lazy'; img.decoding='async';
+    img.src = imgSrc;
+    img.onerror = () => {
+      // Safe inline fallback if any preview ever 404s
+      img.remove();
+      const fallback = document.createElement('div');
+      fallback.innerHTML = '<svg viewBox="0 0 128 128" width="96" height="96" xmlns="http://www.w3.org/2000/svg"><defs><linearGradient id="g" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#b784ff"/><stop offset="1" stop-color="#7a44ff"/></linearGradient></defs><ellipse cx="64" cy="70" rx="40" ry="54" fill="url(#g)" stroke="#2b1e55" stroke-width="3"/><circle cx="64" cy="68" r="6" fill="#fff"/></svg>';
+      d.appendChild(fallback.firstChild);
+    };
+    d.appendChild(img);
+    return d;
+  }
   function fillTrack(){
     track.innerHTML='';
-    for(let i=0;i<previews.length;i++){
-      const cell = document.createElement('div'); cell.className='egg';
-      const img = document.createElement('img'); img.src='/static/assets/egg_preview.svg';
-      cell.appendChild(img); track.appendChild(cell);
-    }
+    // pad both ends for nicer spin
+    const pad = 3;
+    for(let p=0;p<pad;p++) track.appendChild(cell(previews[p % previews.length]));
+    previews.forEach(src=> track.appendChild(cell(src)));
+    for(let p=0;p<pad;p++) track.appendChild(cell(previews[(p+5) % previews.length]));
   }
   fillTrack();
 
-  async function getWallet(){
-    try{
-      const u = await fetch('/api/wallet/active').then(r=>r.json());
-      return { pub: u.pub || null, secret: u.secret || null, username: u.username || null };
-    }catch{ return { pub:null, secret:null }; }
+  function slotCellWidth(){
+    // width + gap ~= computed size used in translate
+    const first = track.querySelector('.egg');
+    if(!first) return 152;
+    const r = first.getBoundingClientRect();
+    // approximate 12px gap from CSS
+    return r.width + 12;
   }
 
   async function spinAndStop(){
     const n = track.children.length;
-    const w = 152;
-    const idx = Math.floor(3 + Math.random()*(n-7));
-    track.style.transform = `translateX(-${idx*w}px)`;
-    return new Promise(res=>setTimeout(()=>res(idx), 900));
+    const w = slotCellWidth();
+    // 2–3 full screens worth of movement plus a random stop
+    const minIdx = 3;
+    const maxIdx = n - 4;
+    const idx = Math.floor(minIdx + Math.random()*(maxIdx - minIdx));
+    // small pre-kick for a bit more juice
+    track.style.transitionTimingFunction = 'cubic-bezier(.18,.9,.22,1)';
+    track.style.transform = `translateX(-${(idx+0.2)*w}px)`;
+    return new Promise(res=>setTimeout(()=>{ track.style.transform = `translateX(-${idx*w}px)`; setTimeout(()=>res(idx), 1200); }, 50));
   }
 
-  let lastCode = null, lastIssuer = null;
+  // ---------- Local wallet vault, identical behavior to merchant page ----------
+  function __readVault(){ try{ const s=localStorage.getItem('izza_test_wallet'); return s?JSON.parse(s):null; }catch{return null} }
+  function __writeVault(j){ try{ localStorage.setItem('izza_test_wallet', JSON.stringify(j||{})); }catch{} }
+  function __forgetSecret(pub){ try{ const v=__readVault()||{}; if(v && v.pub===pub){ delete v.sec; __writeVault(v); } }catch{} }
+  function getLocalSecret(pub){ try{ const v=__readVault(); if(!v) return ''; if(pub && v.pub!==pub) return ''; return v.sec||''; }catch{return ''} }
+  function isLocalWallet(pub){ const v=__readVault(); return !!(v && v.pub===pub && /^S[A-Z0-9]{55}$/.test(v.sec||'')); }
 
+  async function fetchActiveWallet(username){
+    const qs = username ? ('?u='+encodeURIComponent(username)) : '';
+    const r = await fetch('/api/wallet/active'+qs, {credentials:'include'});
+    if(!r.ok) return null;
+    return r.json().catch(()=>null);
+  }
+  async function linkActiveWallet(username, pub, secret){
+    const qs = username ? ('?u='+encodeURIComponent(username)) : '';
+    const body = { pub: String(pub||'').trim().toUpperCase() };
+    if(secret && /^S[A-Z0-9]{55}$/.test(secret)) body.secret = secret.trim();
+    const r = await fetch('/api/wallet/link'+qs, { method:'POST', headers:{'content-type':'application/json'}, body:JSON.stringify(body), credentials:'include' });
+    const j = await r.json().catch(()=>null);
+    return { ok:r.ok, status:r.status, json:j };
+  }
+
+  // Username canonicalization from session/local
+  const SRV_USER = {{ (username or '') | tojson }};
+  function stripAt(s){ return (s||'').toString().trim().replace(/^@+/, ''); }
+  const USER_CANON = stripAt(SRV_USER);
+
+  // ---------- Wallet modal wiring ----------
+  function openMyWallet(){ document.getElementById('myWalletModal').removeAttribute('hidden'); refreshMyWalletModal(); }
+  function closeMyWallet(){ document.getElementById('myWalletModal').setAttribute('hidden',''); }
+  document.getElementById('openWallet').addEventListener('click', openMyWallet);
+  document.getElementById('closeMyWalletBtn').addEventListener('click', closeMyWallet);
+
+  async function refreshMyWalletModal(){
+    document.getElementById('mwUser').textContent = USER_CANON ? '@'+USER_CANON : '—';
+    const active = await fetchActiveWallet(USER_CANON);
+    const pub = active && active.pub || '';
+    document.getElementById('mwPub').textContent = pub || '—';
+    const has = pub && isLocalWallet(pub);
+    document.getElementById('mwSStatus').innerHTML = has ? '<span class="success">Saved locally</span>' : '<span class="warn">Not saved</span>';
+  }
+  document.getElementById('mwSaveBtn').addEventListener('click', async ()=>{
+    const active = await fetchActiveWallet(USER_CANON);
+    const pub = active && active.pub || '';
+    if(!/^G[A-Z0-9]{55}$/.test(pub)){ alert('No active wallet is set yet, open the full wallet once, then return.'); return; }
+    const secret = (document.getElementById('mwSInput').value||'').trim();
+    if(!/^S[A-Z0-9]{55}$/.test(secret)){ alert('Enter a valid S-key'); return; }
+    const v = __readVault() || {}; v.pub = pub; v.sec = secret; __writeVault(v);
+    const res = await linkActiveWallet(USER_CANON, pub, secret);
+    if(!res.ok){ alert('Server link failed: ' + (res.json && res.json.error || res.status)); }
+    document.getElementById('mwSInput').value = '';
+    refreshMyWalletModal();
+    alert('S-key saved locally and linked.');
+  });
+  document.getElementById('mwForgetBtn').addEventListener('click', async ()=>{
+    const active = await fetchActiveWallet(USER_CANON);
+    const pub = active && active.pub || '';
+    if(pub) __forgetSecret(pub);
+    refreshMyWalletModal();
+  });
+
+  // ---------- Gate used by mint/feed ----------
+  async function ensureUserAndWalletGate(){
+    const active = await fetchActiveWallet(USER_CANON);
+    const pub = active && active.pub || '';
+    if(!USER_CANON){ alert('Sign in with Pi first.'); return null; }
+    if(!pub){ alert('Open your IZZA wallet once to set an active wallet, then return.'); return null; }
+    if(!isLocalWallet(pub)){
+      openMyWallet();
+      alert('Save your S-key locally first.');
+      return null;
+    }
+    return { user:USER_CANON, pub, sec:getLocalSecret(pub) };
+  }
+
+  // ---------- Live preview ----------
+  let lastCode = null, lastIssuer = null;
   async function refreshLive(){
     if(!lastCode){ liveHint.textContent='Mint an egg to see it here'; return; }
     try{
@@ -122,50 +283,42 @@
       liveSvg.src = (j.image || '') + '&pulse=' + Date.now();
       openHabitat.href = j.external_url || '#';
       liveHint.textContent = 'SVG refreshes every few seconds automatically';
-    }catch(e){
-      /* noop */
-    }
+    }catch(e){}
   }
-
   setInterval(refreshLive, 3000);
 
-  mintBtn.addEventListener('click', async ()=>{
+  // ---------- Mint flow ----------
+  document.getElementById('mintBtn').addEventListener('click', async ()=>{
     mintMsg.textContent = '';
-    const w = await getWallet();
-    if(!w.pub || !w.secret){
-      mintMsg.textContent = 'Link your IZZA wallet first, then try again';
-      return;
-    }
+    const gate = await ensureUserAndWalletGate();
+    if(!gate){ return; }
     await spinAndStop();
-
     try{
       const q = await fetch('/api/creatures/quote', {method:'POST'}).then(r=>r.json());
-      if(!(q && q.ok)){ throw new Error('quote_failed'); }
+      if(!(q && q.ok)) throw new Error('quote_failed');
       const res = await fetch('/api/creatures/mint', {
-        method:'POST', headers:{'Content-Type':'application/json'},
-        body: JSON.stringify({ buyer_pub:w.pub, buyer_sec:w.secret })
+        method:'POST',
+        headers:{'Content-Type':'application/json'},
+        body: JSON.stringify({ buyer_pub:gate.pub, buyer_sec:gate.sec })
       }).then(r=>r.json());
       if(!(res && res.ok)) throw new Error(res && res.error || 'mint_failed');
-
       lastCode = res.asset.code; lastIssuer = res.asset.issuer;
       mintMsg.textContent = `Egg minted: ${lastCode}. Go to Claims to deliver it to your wallet.`;
       refreshLive();
     }catch(e){
-      mintMsg.textContent = 'Mint failed, please try again';
       console.error(e);
+      mintMsg.textContent = 'Mint failed, please try again';
     }
   });
 
-  document.getElementById('openWallet')?.addEventListener('click', ()=> location.href='/token/auth?next=/token/izza');
-  document.getElementById('openClaims')?.addEventListener('click', ()=> location.href='/token/auth?next=/token/izza');
-
-  document.getElementById('feedBtn')?.addEventListener('click', async ()=>{
+  // ---------- Claims and Feed ----------
+  document.getElementById('openClaims').addEventListener('click', ()=> location.href='/token/auth?next=/token/izza');
+  document.getElementById('feedBtn').addEventListener('click', async ()=>{
     if(!lastCode){ mintMsg.textContent='Mint or select a creature first'; return; }
-    const w = await getWallet();
-    if(!w.pub){ mintMsg.textContent='Link wallet first'; return; }
+    const gate = await ensureUserAndWalletGate(); if(!gate){ return; }
     await fetch('/api/creatures/feed', {
       method:'POST', headers:{'Content-Type':'application/json'},
-      body: JSON.stringify({ code:lastCode, owner_pub:w.pub })
+      body: JSON.stringify({ code:lastCode, owner_pub:gate.pub })
     });
     refreshLive();
   });
