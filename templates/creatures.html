@@ -28,21 +28,10 @@
     .col{flex:1 1 320px;max-width:520px}
     .box h3{margin:4px 0 10px}
 
-    /* SLOT (simple) */
+    /* SIMPLE EGG PREVIEW */
     .slot{position:relative;overflow:hidden;border-radius:16px;border:1px solid #2a3550;background:var(--card);
-          height:clamp(110px,22vw,160px)}
-    .slot .track{display:flex;gap:12px;align-items:center;padding:12px;will-change:transform}
-    .slot .track.shuffling{animation: shuffle 0.8s cubic-bezier(.18,.9,.22,1)}
-    @keyframes shuffle { from { transform: translateX(0) } to { transform: translateX(var(--dx, -320px)) } }
-    .slot::before{content:"";position:absolute;inset:0;pointer-events:none;background:
-      linear-gradient(90deg, rgba(0,0,0,.7), transparent 20%, transparent 80%, rgba(0,0,0,.7));z-index:1}
-    .slot .egg{
-      position:relative; z-index:0;
-      width:clamp(92px, 20vw, 140px);height:clamp(92px, 20vw, 140px);
-      display:flex;align-items:center;justify-content:center;background:#0e1422;border-radius:14px;border:1px solid #223056;
-      box-shadow:0 2px 8px rgba(0,0,0,.25)
-    }
-    .egg img{display:block;width:75%;height:75%;object-fit:contain;filter:drop-shadow(0 2px 4px rgba(0,0,0,.35))}
+          height:clamp(110px,22vw,160px);display:flex;align-items:center;justify-content:center}
+    #eggPreview{display:block;width:120px;height:120px;object-fit:contain;filter:drop-shadow(0 2px 6px rgba(0,0,0,.35))}
     .hint{font-size:12px;color:#9fb0d6;margin-top:6px;text-align:center}
 
     #liveSvg{ width:220px; height:220px; object-fit:contain;border-radius:12px;border:1px solid #223056;background:#0e1422 }
@@ -59,6 +48,11 @@
     .mono{font-family:ui-monospace,Menlo,Consolas,monospace}
     .success{color:#5ad49e}
     .warn{color:#ffb86b}
+
+    /* Thumb grid */
+    .thumb{display:inline-flex;flex-direction:column;align-items:center;gap:6px;margin:6px;padding:8px;border:1px solid #223056;border-radius:12px;background:#0e1422}
+    .thumb img{width:88px;height:88px;object-fit:contain}
+    .thumb .cap{font-size:12px;color:#9fb0d6}
   </style>
   <script src="https://sdk.minepi.com/pi-sdk.js"></script>
 </head>
@@ -67,7 +61,7 @@
     <div class="topbar">
       <a class="btn" href="/">BACK HOME</a>
       <button class="btn purple upper" id="openWallet">IZZA WALLET</button>
-      <a class="btn gold upper" id="openClaims" href="/token/auth?next=/token/izza">CLAIMS LIST</a>
+      <!-- Claims button removed per request -->
       <button class="btn" id="btnMyCreatures">MY CREATURES</button>
     </div>
 
@@ -77,9 +71,9 @@
     <div class="grid">
       <div class="col box">
         <h3>Mint Egg</h3>
-        <div class="slot"><div class="track" id="track"></div></div>
+        <div class="slot"><img id="eggPreview" alt="egg"></div>
         <div class="row"><button class="btn purple" id="mintBtn">MINT EGG, 5 IZZA</button></div>
-        <div class="hint">The strip shuffles and stops on your egg</div>
+        <div class="hint">Egg “spins” through a few looks and lands on yours</div>
         <div id="mintMsg" class="hint"></div>
       </div>
 
@@ -152,52 +146,27 @@
   try{ if(window.Pi && Pi.init){ Pi.init({version:'2.0', sandbox:sandbox}); } }catch(e){}
 
   // ---------- DOM ----------
-  const track = document.getElementById('track');
   const mintBtn = document.getElementById('mintBtn');
   const mintMsg = document.getElementById('mintMsg');
   const liveSvg = document.getElementById('liveSvg');
   const liveHint = document.getElementById('liveHint');
   const openHabitat = document.getElementById('openHabitat');
+  const eggPreview = document.getElementById('eggPreview');
 
-  // ---------- Previews (varied skins) ----------
-  const previews = Array.from({length:18}).map((_,i)=>`/nftsvg/EGGDEMO.svg?skin=${i}`);
-  function cell(imgSrc){
-    const d=document.createElement('div'); d.className='egg';
-    const img=new Image(); img.decoding='async'; img.loading='eager';
-    img.src = imgSrc;
-    img.onerror = () => {
-      img.remove();
-      const svg = document.createElementNS('http://www.w3.org/2000/svg','svg');
-      svg.setAttribute('viewBox','0 0 128 128'); svg.setAttribute('width','96'); svg.setAttribute('height','96');
-      svg.innerHTML = '<defs><linearGradient id="g" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#b784ff"/><stop offset="1" stop-color="#7a44ff"/></linearGradient></defs><ellipse cx="64" cy="70" rx="40" ry="54" fill="url(#g)" stroke="#2b1e55" stroke-width="3"/>';
-      d.appendChild(svg);
-    };
-    d.appendChild(img);
-    return d;
+  // egg preview seeds (no carousel, just swap a few skins quickly)
+  const previewSkins = Array.from({length:8}).map((_,i)=>String(i+1));
+  function loadEggSkin(seed){
+    eggPreview.src = `/nftsvg/EGGDEMO.svg?skin=${encodeURIComponent(seed)}&nc=${Date.now()}`;
   }
-  function fillTrack(){
-    track.innerHTML='';
-    const pad = 3;
-    for(let p=0;p<pad;p++) track.appendChild(cell(previews[p % previews.length]));
-    previews.forEach(src=> track.appendChild(cell(src)));
-    for(let p=0;p<pad;p++) track.appendChild(cell(previews[(p+5) % previews.length]));
-  }
-  fillTrack();
+  loadEggSkin(previewSkins[0]);
 
-  function shuffleOnce(){
-    const dx = -(200 + Math.floor(Math.random()*600)); // -200..-800px
-    track.style.setProperty('--dx', dx + 'px');
-    track.classList.add('shuffling');
-    return new Promise(res=>{
-      track.addEventListener('animationend', ()=>{
-        track.classList.remove('shuffling');
-        const firstEgg = track.querySelector('.egg');
-        const w = firstEgg ? firstEgg.getBoundingClientRect().width + 12 : 140;
-        const moves = Math.max(1, Math.round(Math.abs(dx)/w));
-        for(let i=0;i<moves;i++){ if(track.firstElementChild) track.appendChild(track.firstElementChild); }
-        res();
-      }, {once:true});
-    });
+  async function spinEggs(finalSeed){
+    // spin 10 frames then land
+    for(let i=0;i<9;i++){
+      loadEggSkin(previewSkins[i % previewSkins.length]);
+      await new Promise(r=>setTimeout(r,120));
+    }
+    loadEggSkin(finalSeed);
   }
 
   // ---------- Local wallet helpers ----------
@@ -320,7 +289,7 @@
       const j = await fetch(meta).then(r=>r.json());
       liveSvg.src = (j.image || '') + '&pulse=' + Date.now();
       openHabitat.href = j.external_url || '#';
-      liveHint.textContent = 'SVG refreshes every few seconds automatically';
+      liveHint.textContent = 'Hunger starts at baby. 1 day = 60s for testing.';
     }catch(e){}
   }
   setInterval(refreshLive, 3000);
@@ -344,7 +313,9 @@
     const gate = await ensureUserAndWalletGate();
     if(!gate){ return; }
 
-    await shuffleOnce();
+    // pick a pretend final skin for the spin
+    const finalSkin = previewSkins[Math.floor(Math.random()*previewSkins.length)];
+    await spinEggs(finalSkin);
 
     try{
       const res = await fetch('/api/creatures/mint', {
@@ -366,9 +337,9 @@
       if(ac && ac.ok && ac.delivered){
         mintMsg.innerHTML = `Egg minted and <span class="success">delivered</span> to your IZZA wallet: <strong>${lastCode}</strong>`;
       }else if(ac && ac.ok){
-        mintMsg.innerHTML = `Egg minted: <strong>${lastCode}</strong>. A claim was created — <a href="/token/auth?next=/token/izza" id="goClaims">Open Claims</a>.`;
+        mintMsg.innerHTML = `Egg minted: <strong>${lastCode}</strong>. A claim was created — open the wallet to accept.`;
       }else{
-        mintMsg.innerHTML = `Egg minted: <strong>${lastCode}</strong>. <a href="/token/auth?next=/token/izza" id="goClaims">Open Claims</a> to deliver it.`;
+        mintMsg.innerHTML = `Egg minted: <strong>${lastCode}</strong>. Open your wallet to deliver it.`;
       }
 
       await refreshLive();
@@ -395,16 +366,25 @@
   const myList = document.getElementById('myCreaturesList');
   document.getElementById('btnMyCreatures').addEventListener('click', async ()=>{
     myList.innerHTML = '';
-    // include ?u= so server can fall back to active wallet when no user_id
     const qs = USER_CANON ? ('?u='+encodeURIComponent(USER_CANON)) : '';
     const j = await fetch('/api/creatures/mine'+qs, {credentials:'include'}).then(r=>r.json()).catch(()=>({items:[]}));
     (j.items||[]).forEach(it=>{
+      const wrap = document.createElement('div');
+      wrap.className = 'thumb';
+      const img = document.createElement('img');
+      img.alt = it.code;
+      img.src = `/nftsvg/${it.code}.svg?nc=${Date.now()}`;
       const a = document.createElement('a');
       a.href = `/creature/${it.code}`;
       a.className = 'btn';
-      a.style.margin='6px';
-      a.textContent = it.code + (it.stage ? ` — ${it.stage}` : '');
-      myList.appendChild(a);
+      a.textContent = 'OPEN';
+      const cap = document.createElement('div');
+      cap.className = 'cap';
+      cap.textContent = it.code + (it.stage ? ` — ${it.stage}` : '');
+      wrap.appendChild(img);
+      wrap.appendChild(cap);
+      wrap.appendChild(a);
+      myList.appendChild(wrap);
     });
     myBox.style.display = 'block';
     window.scrollTo({top: myBox.offsetTop - 12, behavior:'smooth'});
