@@ -1,19 +1,18 @@
 # creatures_api.py
-import os, json, time, random, sqlite3
+import os, json, time, random, sqlite3, math
 from decimal import Decimal
 from flask import Blueprint, request, jsonify, abort, make_response, url_for, g, session
 from stellar_sdk import (
-    Asset, Keypair, Server, Claimant, ClaimPredicate, TransactionBuilder, exceptions as sx
+    Asset, Keypair, Claimant, ClaimPredicate, TransactionBuilder
 )
 from db import conn as _conn
 
-# Uses shared Horizon helpers from your nft_api module
+# Shared Horizon helpers
 from nft_api import (
-    server, PP,  # server: Horizon Server, PP: NETWORK_PASSPHRASE
+    server, PP,
     _account_has_trustline, _change_trust, _pay_asset, _ensure_distributor_holds_one
 )
 
-# Optional: linked secret from wallet API for direct delivery
 try:
     from wallet_api import get_linked_secret as _get_linked_secret
 except Exception:
@@ -28,15 +27,29 @@ CREATURE_ISSUER_G = os.getenv("NFT_ISSUER_PUBLIC", "").strip()
 DISTR_S  = os.getenv("NFT_DISTR_SECRET", "").strip()
 DISTR_G  = os.getenv("NFT_DISTR_PUBLIC", "").strip()
 
-# Fast test lifecycles (HALVED)
-TEST_TOTAL_SECONDS = 90
-TEST_CRACK_START   = 15
-TEST_HATCH_DONE    = 30
-TEST_TEENAGE       = 60
-TEST_PRIME         = 90
-TICK_STEP_SECONDS  = 3  # keep tick stable for UI pacing
+# Test timeline: 1 day = 60 seconds
+DAY_SECS          = 60
+TEST_CRACK_START  = 1 * DAY_SECS // 4   # 15s
+TEST_HATCH_DONE   = 1 * DAY_SECS // 2   # 30s
+TEST_TEENAGE      = 1 * DAY_SECS        # 60s
+TEST_PRIME        = 1 * DAY_SECS + 30   # 90s total “life” until prime
+TICK_STEP_SECONDS = 3
 
-EGG_PRICE_IZZA = Decimal("5")  # user pays once here; delivery is free
+# Hunger growth per “day” (percent of bar per day) by stage
+HUNGER_PER_DAY = {
+    "egg":       0,
+    "cracking":  0,
+    "baby":     25,
+    "teen":     35,
+    "prime":    50,
+    "dead":      0,
+}
+
+# Death after 3 missed days of feeding; revival requires 3 consecutive daily feeds
+MISSED_DAYS_TO_DIE   = 3
+REVIVE_DAYS_REQUIRED = 3
+
+EGG_PRICE_IZZA = Decimal("5")
 
 # ---------- db helpers ----------
 def _db():
@@ -66,12 +79,22 @@ def _ensure_tables():
           pattern TEXT,
           hatch_start INTEGER,
           last_feed_at INTEGER,
+          last_hunger_at INTEGER,
           hunger INTEGER DEFAULT 0,
           stage TEXT,
           meta_version INTEGER DEFAULT 1,
           user_id INTEGER,
+          revive_progress INTEGER DEFAULT 0,
           UNIQUE(code, issuer)
         )""")
+        # add columns if missing (safe migrations)
+        for colstmt in [
+            ("last_hunger_at",  "ALTER TABLE nft_creatures ADD COLUMN last_hunger_at INTEGER"),
+            ("revive_progress", "ALTER TABLE nft_creatures ADD COLUMN revive_progress INTEGER DEFAULT 0")
+        ]:
+            col, stmt = colstmt
+            if not _has_column(cx, "nft_creatures", col):
+                cx.execute(stmt)
         # indices
         cx.execute("CREATE INDEX IF NOT EXISTS idx_creat_owner ON nft_creatures(owner_pub)")
         cx.execute("CREATE INDEX IF NOT EXISTS idx_creat_stage ON nft_creatures(stage)")
@@ -89,7 +112,7 @@ def _ensure_tables():
           UNIQUE(code, issuer)
         )""")
 
-# ---------- username/pub fallback (so "My Creatures" works without g.user_id) ----------
+# ---------- username/pub fallback ----------
 def _norm_username(u: str | None) -> str | None:
     if not u: return None
     u = str(u).strip().lstrip("@").lower()
@@ -107,19 +130,18 @@ def _resolve_username() -> str | None:
     return _norm_username(row["pi_username"] if row else None)
 
 def _active_pub_for_request() -> str | None:
-    """
-    Best-effort: grab the active wallet pub from user_wallets via username/session.
-    """
     u = _resolve_username()
     if not u: return None
     with _db() as cx:
         row = cx.execute("SELECT pub FROM user_wallets WHERE username=?", (u,)).fetchone()
         return (row["pub"] if row and row["pub"] else None)
 
-# ---------- utils ----------
+# ---------- lifecycle helpers ----------
 def _clamp(v, lo, hi): return max(lo, min(hi, v))
 
-def _stage_from_elapsed(elapsed: int, _hunger: int) -> str:
+def _stage_from_elapsed(elapsed: int, hunger: int, existing_stage: str | None) -> str:
+    if existing_stage == "dead":
+        return "dead"
     if elapsed < TEST_CRACK_START: return "egg"
     if elapsed < TEST_HATCH_DONE:  return "cracking"
     if elapsed < TEST_TEENAGE:     return "baby"
@@ -130,8 +152,53 @@ def _choose_palette(seed: str):
     rnd = random.Random(seed)
     return rnd.choice(["gold","violet","turquoise","rose","lime"]), rnd.choice(["speckle","stripe","swirl","mosaic","metallic"])
 
+def _apply_hunger_progress(row: sqlite3.Row) -> tuple[int, str, int, int, int]:
+    """
+    Move hunger forward based on time passed since last_hunger_at (or hatch_start).
+    Also handles death (3 missed days) and returns updated fields.
+
+    returns: (hunger, stage, last_feed_at, last_hunger_at, revive_progress)
+    """
+    now = _now_i()
+    hatch_start = int(row["hatch_start"] or now)
+    last_feed_at = int(row["last_feed_at"] or hatch_start)
+    last_hunger_at = int(row["last_hunger_at"] or hatch_start)
+    hunger = int(row["hunger"] or 0)
+    stage_current = (row["stage"] or "egg")
+    revive_progress = int(row["revive_progress"] or 0)
+
+    elapsed_total = max(0, now - hatch_start)
+    stage = _stage_from_elapsed(elapsed_total, hunger, stage_current)
+
+    if stage == "dead":
+        # dead doesn't get hungrier; stays dead
+        return hunger, "dead", last_feed_at, last_hunger_at, revive_progress
+
+    # advance hunger by days since last_hunger_at
+    delta = max(0, now - last_hunger_at)
+    days = delta / float(DAY_SECS)
+    inc = HUNGER_PER_DAY.get(stage, 0) * days
+    hunger = _clamp(int(round(hunger + inc)), 0, 100)
+    last_hunger_at = now
+
+    # If not fed for 3 days total -> dead
+    missed_secs = max(0, now - last_feed_at)
+    if missed_secs >= MISSED_DAYS_TO_DIE * DAY_SECS:
+        stage = "dead"
+
+    return hunger, stage, last_feed_at, last_hunger_at, revive_progress
+
+def _persist_progress_if_changed(code: str, hunger: int, stage: str, last_feed_at: int, last_hunger_at: int, revive_progress: int):
+    with _db() as cx:
+        cx.execute("""UPDATE nft_creatures
+                      SET hunger=?, stage=?, last_feed_at=?, last_hunger_at=?, revive_progress=?
+                      WHERE code=? AND issuer=?""",
+                   (hunger, stage, last_feed_at, last_hunger_at, revive_progress, code, CREATURE_ISSUER_G))
+        cx.commit()
+
+# ---------- state compute ----------
 def _compute_state_dict(code: str) -> dict:
-    # Demo that supports ?skin=<seed> to vary appearance (used by shuffle previews)
+    # Demo egg supports ?skin for the preview
     if code.upper() == "EGGDEMO":
         skin = (request.args.get("skin") or "demo").strip()
         base, pat = _choose_palette(skin)
@@ -148,16 +215,17 @@ def _compute_state_dict(code: str) -> dict:
     if not r:
         abort(404, "not_found")
 
-    hatch_start = int(r["hatch_start"] or 0)
-    elapsed = max(0, _now_i() - hatch_start)
-    hunger = _clamp(int(r["hunger"] or 0) + max(0, elapsed // 5), 0, 100)
-    stage = _stage_from_elapsed(elapsed, hunger)
+    # progress hunger & stage, then persist
+    hunger, stage, last_feed_at, last_hunger_at, revive_progress = _apply_hunger_progress(r)
+    if (hunger != int(r["hunger"] or 0)) or (stage != (r["stage"] or "")) or (last_hunger_at != int(r["last_hunger_at"] or 0)):
+        _persist_progress_if_changed(r["code"], hunger, stage, last_feed_at, last_hunger_at, revive_progress)
 
     return {
         "code":r["code"],"issuer":r["issuer"],"owner_pub":r["owner_pub"],
-        "elapsed":elapsed,"tick_seconds":TICK_STEP_SECONDS,"hunger":int(hunger),
+        "elapsed":max(0, _now_i() - int(r["hatch_start"] or _now_i())),
+        "tick_seconds":TICK_STEP_SECONDS,"hunger":int(hunger),
         "stage":stage,"palette":r["palette"],"pattern":r["pattern"],
-        "hatch_start":hatch_start
+        "hatch_start":int(r["hatch_start"] or _now_i())
     }
 
 def _svg_headers(resp):
@@ -169,16 +237,10 @@ def _svg_headers(resp):
 # ---------- API ----------
 @bp_creatures.post("/api/creatures/quote")
 def creatures_quote():
-    return jsonify({"ok": True, "price_izza": str(EGG_PRICE_IZZA), "tick_seconds": TICK_STEP_SECONDS})
+    return jsonify({"ok": True, "price_izza": str(EGG_PRICE_IZZA), "tick_seconds": TICK_STEP_SECONDS, "day_seconds": DAY_SECS})
 
 @bp_creatures.post("/api/creatures/mint")
 def creatures_mint():
-    """
-    Body: { buyer_pub, buyer_sec }
-    1) charge 5 IZZA from buyer to distributor
-    2) mint 1 unit of a new asset code to distributor
-    3) insert the creature row (bind to user if available)
-    """
     _ensure_tables()
     j = request.get_json(silent=True) or {}
     buyer_pub = (j.get("buyer_pub") or "").strip()
@@ -191,7 +253,6 @@ def creatures_mint():
         _change_trust(DISTR_S, izza, limit="100000000")
     except Exception:
         pass
-
     try:
         _pay_asset(buyer_sec, DISTR_G, str(EGG_PRICE_IZZA), izza, memo="IZZA CREATURE EGG")
     except Exception as e:
@@ -215,9 +276,9 @@ def creatures_mint():
     with _db() as cx:
         cx.execute("""
           INSERT INTO nft_creatures(code, issuer, owner_pub, egg_seed, palette, pattern,
-                                    hatch_start, last_feed_at, hunger, stage, meta_version, user_id)
-          VALUES(?,?,?,?,?,?,?,?,?,?,1,?)
-        """, (code, CREATURE_ISSUER_G, None, seed, base, pat, ts, ts, 0, "egg", uid))
+                                    hatch_start, last_feed_at, last_hunger_at, hunger, stage, meta_version, user_id, revive_progress)
+          VALUES(?,?,?,?,?,?, ?,?,?,?,?,1,?, 0)
+        """, (code, CREATURE_ISSUER_G, None, seed, base, pat, ts, ts, ts, 0, "egg", uid))
         cx.execute("""
           INSERT INTO nft_collections(code, issuer, total_supply, decimals, status, created_at, updated_at)
           VALUES(?,?,?,?, 'draft', ?, ?)
@@ -242,10 +303,6 @@ def creatures_latest():
 
 @bp_creatures.get("/api/creatures/mine")
 def creatures_mine():
-    """
-    Returns the caller's creatures. If session user_id is missing,
-    falls back to active wallet pub (via user_wallets) using ?u= or session username.
-    """
     _ensure_tables()
     uid = getattr(g, "user_id", None)
     with _db() as cx:
@@ -291,11 +348,6 @@ def creatures_mark_owned():
 
 @bp_creatures.post("/api/creatures/auto-claim")
 def creatures_auto_claim():
-    """
-    Body: { code, owner_pub }
-    If we have an S-key linked for owner_pub -> ensure trustline and send 1 unit directly.
-    Else -> create a claimable balance of 1.
-    """
     j = request.get_json(silent=True) or {}
     code = (j.get("code") or "").strip().upper()
     owner_pub = (j.get("owner_pub") or "").strip().upper()
@@ -362,7 +414,8 @@ def creatures_auto_claim():
 @bp_creatures.post("/api/creatures/feed")
 def creatures_feed():
     """
-    Decreases hunger by 30 (clamped at 0), updates last_feed_at. Owner pub is required.
+    Normal: reduce hunger and refresh timers.
+    If dead: feeding counts toward revival. Must feed once per “day” for 3 days in a row.
     """
     j = request.get_json(silent=True) or {}
     code = (j.get("code") or "").strip()
@@ -370,21 +423,50 @@ def creatures_feed():
     if not code or not owner:
         abort(400, "code_and_owner_required")
     _ensure_tables()
+    now = _now_i()
+
     with _db() as cx:
         row = cx.execute(
-            "SELECT hunger FROM nft_creatures WHERE code=? AND issuer=?",
+            "SELECT hunger, stage, last_feed_at, last_hunger_at, revive_progress, hatch_start FROM nft_creatures WHERE code=? AND issuer=?",
             (code, CREATURE_ISSUER_G)
         ).fetchone()
         if not row:
             abort(404, "not_found")
-        hunger = _clamp(int(row["hunger"] or 0) - 30, 0, 100)
-        now = _now_i()
+
+        # apply passive progress before feeding
+        hunger, stage, last_feed_at, last_hunger_at, revive_progress = _apply_hunger_progress(row)
+
+        if stage == "dead":
+            # must feed once per day for 3 days consecutively
+            last_feed = int(last_feed_at or row["hatch_start"] or now)
+            # if more than a day since last feed, advance the streak by 1; if less than a day, ignore duplicate same-day feeds
+            days_since_last = (now - last_feed) / float(DAY_SECS)
+            if days_since_last >= 1.0:
+                revive_progress += 1
+                last_feed_at = now
+            else:
+                # same "day" feed doesn't count a new step; keep progress
+                pass
+
+            if revive_progress >= REVIVE_DAYS_REQUIRED:
+                stage = "baby"
+                hunger = 50
+                revive_progress = 0
+                last_feed_at = now
+                last_hunger_at = now
+        else:
+            # alive: feeding lowers hunger
+            hunger = _clamp(hunger - 50, 0, 100)
+            last_feed_at = now
+            last_hunger_at = now
+
         cx.execute(
-            "UPDATE nft_creatures SET hunger=?, last_feed_at=? WHERE code=? AND issuer=?",
-            (hunger, now, code, CREATURE_ISSUER_G)
+            "UPDATE nft_creatures SET hunger=?, stage=?, last_feed_at=?, last_hunger_at=?, revive_progress=? WHERE code=? AND issuer=?",
+            (hunger, stage, last_feed_at, last_hunger_at, revive_progress, code, CREATURE_ISSUER_G)
         )
         cx.commit()
-    return jsonify({"ok": True, "hunger": hunger})
+
+    return jsonify({"ok": True, "hunger": hunger, "stage": stage})
 
 @bp_creatures.get("/api/creatures/state/<code>.json")
 def creatures_state(code):
@@ -420,22 +502,106 @@ def creature_svg(code):
     stage   = st["stage"]
     hunger  = int(st["hunger"])
     base    = st["palette"]
+    pattern = st["pattern"] or "speckle"
     elapsed = int(st["elapsed"])
 
+    # colors
     bg = {
         "gold":"#130e00","violet":"#0e061a","turquoise":"#02151a","rose":"#1a0710","lime":"#0c1a06"
     }.get(base, "#0b0b10")
     glow = {
         "gold":"#ffcd60","violet":"#b784ff","turquoise":"#48d4ff","rose":"#ff7aa2","lime":"#89ff7a"
     }.get(base, "#b784ff")
+    body = {
+        "gold":"#ffe39a","violet":"#d7c0ff","turquoise":"#7fe6ff","rose":"#ffb6c8","lime":"#b4ffaf"
+    }.get(base, "#e8f1ff")
 
+    # scale by stage
     if stage == "egg":       egg_scale = "1.0"
     elif stage == "cracking": egg_scale = "1.02"
     elif stage == "baby":     egg_scale = "0.9"
     elif stage == "teen":     egg_scale = "1.0"
-    else:                     egg_scale = "1.06"
+    elif stage == "prime":    egg_scale = "1.06"
+    else:                     egg_scale = "1.0"
 
-    wither = "1" if (elapsed >= TEST_PRIME and hunger >= 90) else "0"
+    # “wither” blackout for starving prime OR dead
+    wither = "1" if (stage == "dead" or (elapsed >= TEST_PRIME and hunger >= 90)) else "0"
+
+    # RARITY (higher odds for testing): crown 1/3, flames 1/4, lasers 1/5
+    rnd = random.Random(st["code"])
+    crown  = (rnd.randint(1,3) == 1)
+    flames = (rnd.randint(1,4) == 1)
+    lasers = (rnd.randint(1,5) == 1)
+
+    # Pattern fragments
+    pattern_svg = ""
+    if pattern == "speckle":
+        dots = []
+        rnd2 = random.Random(st["code"] + ":p0")
+        for _ in range(20):
+            x = rnd2.randint(-60, 60); y = rnd2.randint(-40, 40); r = rnd2.randint(2,4)
+            dots.append(f'<circle cx="{x}" cy="{y}" r="{r}" fill="{glow}" opacity=".25"/>')
+        pattern_svg = "\n".join(dots)
+    elif pattern == "stripe":
+        pattern_svg = '<g opacity=".25" stroke="{0}" stroke-width="6">'.format(glow) + \
+                      ''.join([f'<line x1="{x}" y1="-60" x2="{x+40}" y2="60"/>' for x in range(-70,60,14)]) + '</g>'
+    elif pattern == "swirl":
+        pattern_svg = f'<path d="M-60,0 C-20,-40,20,-40,60,0 C20,40,-20,40,-60,0" fill="none" stroke="{glow}" stroke-width="6" opacity=".25"/>'
+    elif pattern == "mosaic":
+        tiles = []
+        rnd3 = random.Random(st["code"] + ":p1")
+        for _ in range(18):
+            x = rnd3.randint(-70, 50); y = rnd3.randint(-40, 30); w = rnd3.randint(8,16); h = rnd3.randint(8,14)
+            tiles.append(f'<rect x="{x}" y="{y}" width="{w}" height="{h}" fill="{glow}" opacity=".18"/>')
+        pattern_svg = "\n".join(tiles)
+    elif pattern == "metallic":
+        pattern_svg = '<ellipse rx="95" ry="70" fill="url(#metal)"/>'
+
+    # special cosmetics
+    crown_svg = ''
+    if crown and stage in ('baby','teen','prime'):
+        crown_svg = f'''
+          <g transform="translate(0,-110)">
+            <polygon points="-28,0 0,-20 28,0 18,0 0,-10 -18,0" fill="{glow}" stroke="#000" stroke-width="3"/>
+          </g>'''
+
+    flames_svg = ''
+    if flames and stage in ('teen','prime'):
+        flames_svg = f'''
+          <g opacity=".8">
+            <path d="M-70,80 C-60,40,-40,10,-20,-10 C-10,10,-5,30,0,50 C10,30,30,5,50,-10 C60,10,70,40,80,80 Z" fill="{glow}">
+              <animate attributeName="opacity" values="0.5;1;0.5" dur="1.2s" repeatCount="indefinite"/>
+            </path>
+          </g>'''
+
+    lasers_svg = ''
+    if lasers and stage in ('teen','prime'):
+        lasers_svg = f'''
+          <g stroke="#ff3355" stroke-width="5" opacity=".85">
+            <line x1="-18" y1="-8" x2="-180" y2="-120">
+              <animate attributeName="opacity" values="0.2;1;0.2" dur="0.9s" repeatCount="indefinite"/>
+            </line>
+            <line x1="18" y1="-8" x2="180" y2="-120">
+              <animate attributeName="opacity" values="0.2;1;0.2" dur="0.9s" repeatCount="indefinite"/>
+            </line>
+          </g>'''
+
+    # hunger label only after baby
+    show_hunger = (stage in ('baby','teen','prime'))
+
+    # dead look
+    dead_overlay = ''
+    if stage == "dead":
+        dead_overlay = '''
+          <g>
+            <rect x="-160" y="-200" width="320" height="360" fill="#2a2a2a" opacity=".9"/>
+            <g stroke="#ff4d4d" stroke-width="6">
+              <line x1="-30" y1="-20" x2="-10" y2="0"/>
+              <line x1="-30" y1="0" x2="-10" y2="-20"/>
+              <line x1="10" y1="-20" x2="30" y2="0"/>
+              <line x1="10" y1="0" x2="30" y2="-20"/>
+            </g>
+          </g>'''
 
     svg = f"""<svg viewBox="0 0 512 512"
   xmlns="http://www.w3.org/2000/svg"
@@ -443,25 +609,38 @@ def creature_svg(code):
   <defs>
     <radialGradient id="g0"><stop offset="0" stop-color="{glow}"/><stop offset="1" stop-color="{bg}"/></radialGradient>
     <linearGradient id="egg"><stop offset="0" stop-color="#fff"/><stop offset="1" stop-color="{glow}"/></linearGradient>
+    <linearGradient id="metal"><stop offset="0" stop-color="#fff" stop-opacity=".8"/><stop offset="1" stop-color="{body}" stop-opacity=".9"/></linearGradient>
     <filter id="soft"><feGaussianBlur stdDeviation="6"/></filter>
   </defs>
   <rect width="512" height="512" fill="{bg}"/>
   <circle cx="256" cy="360" r="160" fill="url(#g0)" opacity=".14" filter="url(#soft)"/>
   <g transform="translate(256,300) scale({egg_scale})">
+    <!-- egg shell -->
     <ellipse rx="120" ry="160" fill="url(#egg)" opacity="{ '1' if stage in ('egg','cracking') else '0'}"/>
     <path d="M-60,0 L-20,-20 L0,10 L20,-15 L60,5" stroke="#2a2a2a" stroke-width="4" fill="none"
           opacity="{ '0.85' if stage=='cracking' else '0'}"/>
-    <g opacity="{ '1' if stage in ('baby','teen','prime') else '0'}">
-      <ellipse rx="90" ry="66" fill="{glow}" opacity=".85"/>
-      <circle cx="-18" cy="-8" r="6" fill="#180d00"/>
-      <circle cx="18" cy="-8" r="6" fill="#180d00"/>
+    <!-- creature body -->
+    <g opacity="{ '1' if stage in ('baby','teen','prime','dead') else '0'}">
+      <ellipse rx="95" ry="70" fill="{body}" opacity=".95"/>
+      {pattern_svg}
+      <!-- eyes (swap to X when dead) -->
+      {"".join([
+        '<g opacity="1">' if stage != "dead" else '<g opacity="0">'
+      ])}
+        <circle cx="-18" cy="-8" r="6" fill="#180d00"/>
+        <circle cx="18" cy="-8" r="6" fill="#180d00"/>
+      </g>
+      {dead_overlay}
+      {crown_svg}
+      {flames_svg}
+      {lasers_svg}
     </g>
     <rect x="-160" y="-200" width="320" height="360" fill="#000" opacity="{wither}"/>
   </g>
   <g font-family="ui-monospace, Menlo, monospace" font-size="14" fill="#fff" opacity=".95">
     <text x="16" y="28">Stage: {stage}</text>
-    <text x="16" y="48">Hunger: {hunger}%</text>
-    <text x="16" y="68">Tick: {TICK_STEP_SECONDS}s</text>
+    <text x="16" y="48" opacity="{ '1' if show_hunger else '0'}">Hunger: {hunger}%</text>
+    <text x="16" y="68">Tick: {TICK_STEP_SECONDS}s  •  1d={DAY_SECS}s</text>
   </g>
   <a xlink:href="{url_for('creatures.habitat_page', code=st['code'], _external=True)}">
     <rect x="0" y="0" width="512" height="512" fill="transparent"/>
