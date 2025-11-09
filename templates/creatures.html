@@ -28,9 +28,16 @@
     .col{flex:1 1 320px;max-width:520px}
     .box h3{margin:4px 0 10px}
 
-    /* SIMPLE EGG PREVIEW */
-    .slot{position:relative;overflow:hidden;border-radius:16px;border:1px solid #2a3550;background:var(--card);
-          height:clamp(110px,22vw,160px);display:flex;align-items:center;justify-content:center}
+    /* Egg preview area, remove background panel look so only the egg shows */
+    .slot{
+      position:relative;
+      overflow:visible; /* let glow breathe */
+      border-radius:16px;
+      border:0;                 /* remove frame */
+      background:transparent;   /* no background behind the egg */
+      height:clamp(110px,22vw,160px);
+      display:flex;align-items:center;justify-content:center
+    }
     #eggPreview{display:block;width:120px;height:120px;object-fit:contain;filter:drop-shadow(0 2px 6px rgba(0,0,0,.35))}
     .hint{font-size:12px;color:#9fb0d6;margin-top:6px;text-align:center}
 
@@ -61,7 +68,6 @@
     <div class="topbar">
       <a class="btn" href="/">BACK HOME</a>
       <button class="btn purple upper" id="openWallet">IZZA WALLET</button>
-      <!-- Claims button removed per request -->
       <button class="btn" id="btnMyCreatures">MY CREATURES</button>
     </div>
 
@@ -73,7 +79,7 @@
         <h3>Mint Egg</h3>
         <div class="slot"><img id="eggPreview" alt="egg"></div>
         <div class="row"><button class="btn purple" id="mintBtn">MINT EGG, 5 IZZA</button></div>
-        <div class="hint">Egg “spins” through a few looks and lands on yours</div>
+        <div class="hint">Egg “spins” through a few looks, then lands on yours</div>
         <div id="mintMsg" class="hint"></div>
       </div>
 
@@ -116,7 +122,7 @@
         </div>
 
         <div class="blox" style="margin-top:10px">
-          <div class="small-muted">Balances (Testnet)</div>
+          <div class="small-muted">Balances, Testnet</div>
           <div>Test Pi: <strong id="balPi">—</strong></div>
           <div>IZZA: <strong id="balIzza">—</strong></div>
         </div>
@@ -153,20 +159,34 @@
   const openHabitat = document.getElementById('openHabitat');
   const eggPreview = document.getElementById('eggPreview');
 
-  // egg preview seeds (no carousel, just swap a few skins quickly)
-  const previewSkins = Array.from({length:8}).map((_,i)=>String(i+1));
-  function loadEggSkin(seed){
-    eggPreview.src = `/nftsvg/EGGDEMO.svg?skin=${encodeURIComponent(seed)}&nc=${Date.now()}`;
+  // Define preview skins, map them to concrete visuals, keep it small here,
+  // backend expands to hundreds of palettes and patterns
+  const SKIN_MAP = {
+    "1": { base:"turquoise", accent:"rose",     pattern:"laser",   material:"pearl"    },
+    "2": { base:"violet",    accent:"gold",     pattern:"stripe",  material:"metallic" },
+    "3": { base:"gold",      accent:"turquoise",pattern:"speckle", material:"matte"    },
+    "4": { base:"lime",      accent:"violet",   pattern:"mosaic",  material:"glass"    },
+    "5": { base:"rose",      accent:"turquoise",pattern:"swirl",   material:"metallic" },
+    "6": { base:"turquoise", accent:"gold",     pattern:"laser",   material:"metallic" },
+    "7": { base:"violet",    accent:"lime",     pattern:"stripe",  material:"pearl"    },
+    "8": { base:"gold",      accent:"rose",     pattern:"mosaic",  material:"matte"    }
+  };
+  const previewSkins = Object.keys(SKIN_MAP);
+
+  function loadEggSkin(skinKey){
+    // ask the SVG to hide its background, we only want the egg visible in the slot
+    eggPreview.src = `/nftsvg/EGGDEMO.svg?skin=${encodeURIComponent(skinKey)}&nobg=1&nc=${Date.now()}`;
   }
   loadEggSkin(previewSkins[0]);
 
-  async function spinEggs(finalSeed){
+  async function spinEggs(finalKey){
     // spin 10 frames then land
     for(let i=0;i<9;i++){
-      loadEggSkin(previewSkins[i % previewSkins.length]);
+      const key = previewSkins[i % previewSkins.length];
+      loadEggSkin(key);
       await new Promise(r=>setTimeout(r,120));
     }
-    loadEggSkin(finalSeed);
+    loadEggSkin(finalKey);
   }
 
   // ---------- Local wallet helpers ----------
@@ -236,7 +256,6 @@
     const has = pub && isLocalWallet(pub);
     document.getElementById('mwSStatus').innerHTML = has ? '<span class="success">Saved locally</span>' : '<span class="warn">Not saved</span>';
 
-    // balances
     try{
       const b = await fetchBalances(USER_CANON);
       document.getElementById('balPi').textContent = b && b.pi || '—';
@@ -289,7 +308,7 @@
       const j = await fetch(meta).then(r=>r.json());
       liveSvg.src = (j.image || '') + '&pulse=' + Date.now();
       openHabitat.href = j.external_url || '#';
-      liveHint.textContent = 'Hunger starts at baby. 1 day = 60s for testing.';
+      liveHint.textContent = 'Hunger starts at baby, 1 day equals 60 seconds for testing.';
     }catch(e){}
   }
   setInterval(refreshLive, 3000);
@@ -308,44 +327,67 @@
   })();
 
   // ---------- Mint flow (with auto-claim) ----------
+  let mintAnimTimer = null;
+  function startMintStatus(){
+    let dots = 0;
+    mintMsg.innerHTML = '⛏️ Your creature is being fabricated by the hands of IZZA gods';
+    mintAnimTimer = setInterval(()=>{
+      dots = (dots+1)%4;
+      const tail = '.'.repeat(dots);
+      mintMsg.innerHTML = '⛏️ Your creature is being fabricated by the hands of IZZA gods' + tail;
+    }, 450);
+  }
+  function stopMintStatus(){
+    if(mintAnimTimer){ clearInterval(mintAnimTimer); mintAnimTimer = null; }
+  }
+
   mintBtn.addEventListener('click', async ()=>{
     mintMsg.textContent = '';
     const gate = await ensureUserAndWalletGate();
     if(!gate){ return; }
 
-    // pick a pretend final skin for the spin
+    // pick a final skin, show the spin, lock this in for the mint call
     const finalSkin = previewSkins[Math.floor(Math.random()*previewSkins.length)];
     await spinEggs(finalSkin);
+
+    // live status while the backend mints, pays, and possibly creates claimable
+    startMintStatus();
 
     try{
       const res = await fetch('/api/creatures/mint', {
         method:'POST',
         headers:{'Content-Type':'application/json'},
-        body: JSON.stringify({ buyer_pub:gate.pub, buyer_sec:gate.sec })
+        body: JSON.stringify({
+          buyer_pub:gate.pub,
+          buyer_sec:gate.sec,
+          egg_skin: finalSkin      // <- ensure minted egg matches preview landing
+        })
       }).then(r=>r.json());
       if(!(res && res.ok)) throw new Error(res && res.error || 'mint_failed');
 
       lastCode = res.asset.code; lastIssuer = res.asset.issuer;
 
-      // deliver to wallet (trustline+pay1 if possible, else claimable)
       const ac = await fetch('/api/creatures/auto-claim', {
         method:'POST',
         headers:{'Content-Type':'application/json'},
         body: JSON.stringify({ code:lastCode, owner_pub:gate.pub })
       }).then(r=>r.json()).catch(()=>null);
 
+      stopMintStatus();
+
       if(ac && ac.ok && ac.delivered){
         mintMsg.innerHTML = `Egg minted and <span class="success">delivered</span> to your IZZA wallet: <strong>${lastCode}</strong>`;
       }else if(ac && ac.ok){
-        mintMsg.innerHTML = `Egg minted: <strong>${lastCode}</strong>. A claim was created — open the wallet to accept.`;
+        mintMsg.innerHTML = `Egg minted: <strong>${lastCode}</strong>, a claim was created, open the wallet to accept.`;
       }else{
-        mintMsg.innerHTML = `Egg minted: <strong>${lastCode}</strong>. Open your wallet to deliver it.`;
+        mintMsg.innerHTML = `Egg minted: <strong>${lastCode}</strong>, open your wallet to deliver it.`;
       }
 
       await refreshLive();
       await refreshMyWalletModal();
     }catch(e){
       console.error(e);
+      stopMintStatus();
       mintMsg.textContent = 'Mint failed, please try again';
     }
   });
