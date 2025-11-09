@@ -177,7 +177,6 @@ def _change_trust(secret: str, asset: Asset, limit="1"):
     try:
         return server.submit_transaction(tx)
     except sx.BadResponseError as e:
-        # ignore if already trusted (common), only bubble low reserve
         msg = (getattr(e, "message", "") or str(e) or "").lower()
         if "op_low_reserve" in msg: raise
         return {"ok": True}
@@ -457,6 +456,20 @@ def claim():
             # do not fail claim if DB write has a constraint race
             log.warning("NFT_DB_ASSIGN_FAIL code=%s err=%s", code, e)
 
+    # ---------- notify creatures about ownership ----------
+    try:
+        for code in delivered_codes:
+            try:
+                requests.post(
+                    url=f"{request.url_root.rstrip('/')}/api/creatures/mark-owned",
+                    json={"code": code, "owner_pub": buyer},
+                    timeout=3
+                )
+            except Exception:
+                pass
+    except Exception:
+        pass
+
     # Mark pending claims as claimed
     try:
         with _db() as cx:
@@ -469,7 +482,7 @@ def claim():
                 )
                 changed = cx.total_changes
             else:
-                # Fallback: mark any pending rows for this buyer that contain any of the delivered asset codes
+                # Fallback, mark any pending rows for this buyer that contain any of the delivered asset codes
                 for code in delivered_codes:
                     cx.execute("""
                         UPDATE nft_pending_claims
@@ -480,8 +493,8 @@ def claim():
                     """, (
                         now,
                         buyer,
-                        f'%"{code}"%',   # appears in array
-                        f'%:{code}%',    # just-in-case formats
+                        f'%"{code}"%',
+                        f'%:{code}%',
                         f'%{code}%'
                     ))
                     changed += cx.total_changes
