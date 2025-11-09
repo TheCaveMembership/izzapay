@@ -23,7 +23,7 @@ from payments import split_amounts
 from staking import bp_stake
 from nft_api import bp_nft
 from creatures_api import bp_creatures
-
+from friends_api import bp as friends_bp
 # 🟢 Wallet API blueprint import (needs to be at top-level)
 from wallet_api import bp as wallet_api_bp
 
@@ -154,6 +154,7 @@ app.register_blueprint(wallet_api_bp)
 app.register_blueprint(bp_stake)
 app.register_blueprint(bp_nft)
 app.register_blueprint(bp_creatures) 
+app.register_blueprint(friends_bp)
 
 app.config.update(
     SESSION_COOKIE_SAMESITE="None",
