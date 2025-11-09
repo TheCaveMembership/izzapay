@@ -10,10 +10,10 @@ from nft_api import (
     _account_has_trustline, _change_trust, _pay_asset, _ensure_distributor_holds_one
 )
 
-# try to access a linked secret if wallet_api exposes it; otherwise no-op
+# optional: linked secret from wallet API if available (kept no-op safe)
 try:
     from wallet_api import get_linked_secret as _get_linked_secret
-except Exception:  # keep everything working if not present
+except Exception:
     _get_linked_secret = lambda _pub: None
 
 bp_creatures = Blueprint("creatures", __name__)
@@ -49,8 +49,14 @@ def _db():
 def _now_i() -> int:
     return int(time.time())
 
+def _table_has_col(cx, table: str, col: str) -> bool:
+    rows = cx.execute(f"PRAGMA table_info({table})").fetchall()
+    names = { (r["name"] if isinstance(r, dict) else r[1]) for r in rows }
+    return col in names
+
 def _ensure_tables():
     with _db() as cx:
+        # base table (works for fresh installs)
         cx.execute("""
         CREATE TABLE IF NOT EXISTS nft_creatures(
           id INTEGER PRIMARY KEY,
@@ -70,7 +76,12 @@ def _ensure_tables():
         )""")
         cx.execute("CREATE INDEX IF NOT EXISTS idx_creat_owner ON nft_creatures(owner_pub)")
         cx.execute("CREATE INDEX IF NOT EXISTS idx_creat_stage ON nft_creatures(stage)")
+
+        # migrate older DBs that lack user_id, then create index (ORDER MATTERS)
+        if not _table_has_col(cx, "nft_creatures", "user_id"):
+            cx.execute("ALTER TABLE nft_creatures ADD COLUMN user_id INTEGER")
         cx.execute("CREATE INDEX IF NOT EXISTS idx_creat_user ON nft_creatures(user_id)")
+
         cx.execute("""
         CREATE TABLE IF NOT EXISTS nft_collections(
           id INTEGER PRIMARY KEY,
@@ -83,15 +94,10 @@ def _ensure_tables():
           updated_at INTEGER,
           UNIQUE(code, issuer)
         )""")
-        # if older installs lack user_id, add it (idempotent)
-        try:
-            cols = cx.execute("PRAGMA table_info(nft_creatures)").fetchall()
-            names = {c["name"] if isinstance(c, dict) else c[1] for c in cols}
-            if "user_id" not in names:
-                cx.execute("ALTER TABLE nft_creatures ADD COLUMN user_id INTEGER")
-                cx.execute("CREATE INDEX IF NOT EXISTS idx_creat_user ON nft_creatures(user_id)")
-        except Exception:
-            pass
+
+def _has_user_id() -> bool:
+    with _db() as cx:
+        return _table_has_col(cx, "nft_creatures", "user_id")
 
 # ---------- small utils ----------
 def _clamp(v, lo, hi): return max(lo, min(hi, v))
@@ -175,7 +181,7 @@ def creatures_mint():
     Body: { "buyer_pub":"G...", "buyer_sec":"S..." }
       1) charge 5 IZZA from buyer to distributor
       2) mint 1 unit of new asset code to distributor
-      3) insert nft_creatures row with hatch_start=now (bound to user_id if available)
+      3) insert nft_creatures row with hatch_start=now (bind to user_id if the column exists)
       4) return asset identity
     """
     _ensure_tables()
@@ -214,13 +220,21 @@ def creatures_mint():
     seed = f"{code}:{ts}"
     base, pat = _choose_palette(seed)
     uid = getattr(g, "user_id", None)
+    has_user = _has_user_id()
 
     with _db() as cx:
-        cx.execute("""
-          INSERT INTO nft_creatures(code, issuer, owner_pub, egg_seed, palette, pattern,
-                                    hatch_start, last_feed_at, hunger, stage, meta_version, user_id)
-          VALUES(?,?,?,?,?,?,?,?,?,?,1,?)
-        """, (code, CREATURE_ISSUER_G, None, seed, base, pat, ts, ts, 0, "egg", uid))
+        if has_user:
+            cx.execute("""
+              INSERT INTO nft_creatures(code, issuer, owner_pub, egg_seed, palette, pattern,
+                                        hatch_start, last_feed_at, hunger, stage, meta_version, user_id)
+              VALUES(?,?,?,?,?,?,?,?,?,?,1,?)
+            """, (code, CREATURE_ISSUER_G, None, seed, base, pat, ts, ts, 0, "egg", uid))
+        else:
+            cx.execute("""
+              INSERT INTO nft_creatures(code, issuer, owner_pub, egg_seed, palette, pattern,
+                                        hatch_start, last_feed_at, hunger, stage, meta_version)
+              VALUES(?,?,?,?,?,?,?,?,?,?,1)
+            """, (code, CREATURE_ISSUER_G, None, seed, base, pat, ts, ts, 0, "egg"))
         cx.execute("""
           INSERT INTO nft_collections(code, issuer, total_supply, decimals, status, created_at, updated_at)
           VALUES(?,?,?,?, 'draft', ?, ?)
@@ -235,13 +249,22 @@ def creatures_mint():
 def creatures_latest():
     _ensure_tables()
     uid = getattr(g, "user_id", None)
-    if uid is None:
-        return jsonify({"latest": None})
+    has_user = _has_user_id()
+    if uid is None or not has_user:
+        # If no userId column or not signed in, just return the newest row for tolerance
+        with _db() as cx:
+            r = cx.execute("""
+              SELECT code, issuer, owner_pub, stage, palette, pattern, hatch_start
+              FROM nft_creatures
+              ORDER BY id DESC LIMIT 1
+            """).fetchone()
+        return jsonify({"latest": dict(r) if r else None})
+
     with _db() as cx:
         r = cx.execute("""
           SELECT code, issuer, owner_pub, stage, palette, pattern, hatch_start
           FROM nft_creatures
-          WHERE user_id IS NULL OR user_id=?  -- tolerate earlier rows
+          WHERE user_id IS NULL OR user_id=?
           ORDER BY id DESC LIMIT 1
         """, (uid,)).fetchone()
     return jsonify({"latest": dict(r) if r else None})
@@ -250,7 +273,8 @@ def creatures_latest():
 def creatures_mine():
     _ensure_tables()
     uid = getattr(g, "user_id", None)
-    if uid is None:
+    has_user = _has_user_id()
+    if uid is None or not has_user:
         return jsonify({"items": []})
     with _db() as cx:
         rows = cx.execute("""
@@ -271,15 +295,22 @@ def creatures_mark_owned():
         abort(400, "code_and_owner_required")
     _ensure_tables()
     uid = getattr(g, "user_id", None)
+    has_user = _has_user_id()
     with _db() as cx:
-        cx.execute(
-            "UPDATE nft_creatures SET owner_pub=?, user_id=COALESCE(user_id, ?) WHERE code=? AND issuer=?",
-            (owner, uid, code, CREATURE_ISSUER_G)
-        )
+        if has_user:
+            cx.execute(
+                "UPDATE nft_creatures SET owner_pub=?, user_id=COALESCE(user_id, ?) WHERE code=? AND issuer=?",
+                (owner, uid, code, CREATURE_ISSUER_G)
+            )
+        else:
+            cx.execute(
+                "UPDATE nft_creatures SET owner_pub=? WHERE code=? AND issuer=?",
+                (owner, code, CREATURE_ISSUER_G)
+            )
         cx.commit()
     return jsonify({"ok": True})
 
-# ---------- API: auto-claim (push NFT; prefer direct delivery if possible) ----------
+# ---------- API: auto-claim ----------
 @bp_creatures.post("/api/creatures/auto-claim")
 def creatures_auto_claim():
     """
@@ -307,6 +338,7 @@ def creatures_auto_claim():
         return jsonify({"ok": True, "note": "already owned", "code": code})
 
     uid = getattr(g, "user_id", None)
+    has_user = _has_user_id()
     asset = Asset(code, CREATURE_ISSUER_G)
 
     # Try direct delivery if we have the user's secret
@@ -351,10 +383,16 @@ def creatures_auto_claim():
             abort(400, f"auto_claim_failed:{e}")
 
     with _db() as cx:
-        cx.execute(
-            "UPDATE nft_creatures SET owner_pub=?, user_id=COALESCE(user_id, ?) WHERE code=? AND issuer=?",
-            (owner_pub, uid, code, CREATURE_ISSUER_G)
-        )
+        if has_user:
+            cx.execute(
+                "UPDATE nft_creatures SET owner_pub=?, user_id=COALESCE(user_id, ?) WHERE code=? AND issuer=?",
+                (owner_pub, uid, code, CREATURE_ISSUER_G)
+            )
+        else:
+            cx.execute(
+                "UPDATE nft_creatures SET owner_pub=? WHERE code=? AND issuer=?",
+                (owner_pub, code, CREATURE_ISSUER_G)
+            )
         cx.commit()
 
     if delivered:
