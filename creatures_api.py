@@ -141,7 +141,6 @@ def _active_pub_for_request() -> str | None:
         return (row["pub"] if row and row["pub"] else None)
 
 # ---------- visuals dictionary ----------
-# Large families, backend can generate hundreds by mixing bases with contrasting accents
 BASES = ["turquoise","violet","gold","rose","lime","cobalt","amber","mint","crimson","indigo"]
 ACCENTS = {
     "turquoise": ["rose","gold","violet","amber"],
@@ -172,7 +171,6 @@ def _choose_palette(seed: str):
     return base, pattern, accent, material
 
 def _skin_to_palettepattern(skin_key: str):
-    # Mirror the SKIN_MAP from the front end for deterministic “landed egg”
     presets = {
         "1": ("turquoise","laser","rose","pearl"),
         "2": ("violet","stripe","gold","metallic"),
@@ -235,7 +233,6 @@ def _persist_progress_if_changed(code: str, hunger: int, stage: str, last_feed_a
 # ---------- state compute ----------
 def _compute_state_dict(code: str) -> dict:
     if code.upper() == "EGGDEMO":
-        # For preview, allow explicit skin key
         skin = (request.args.get("skin") or "1").strip()
         preset = _skin_to_palettepattern(skin)
         if preset:
@@ -285,7 +282,7 @@ def creatures_mint():
     j = request.get_json(silent=True) or {}
     buyer_pub = (j.get("buyer_pub") or "").strip()
     buyer_sec = (j.get("buyer_sec") or "").strip()
-    skin_key  = (j.get("egg_skin") or "").strip()  # from UI landing choice
+    skin_key  = (j.get("egg_skin") or "").strip()
     if not buyer_pub or not buyer_sec:
         abort(400, "wallet_required")
 
@@ -310,7 +307,6 @@ def creatures_mint():
     except Exception as e:
         abort(400, f"mint_failed:{e}")
 
-    # Pick visuals, prioritizing landed skin from UI
     preset = _skin_to_palettepattern(skin_key) if skin_key else None
     if preset:
         base, pat, accent, material = preset
@@ -493,8 +489,8 @@ def creatures_feed():
                 stage = "baby"
                 hunger = 50
                 revive_progress = 0
-                last_feed_at = now
                 last_hunger_at = now
+                last_feed_at = now
         else:
             hunger = _clamp(hunger - 50, 0, 100)
             last_feed_at = now
@@ -551,10 +547,8 @@ def creature_svg(code):
     material = st.get("material") or "matte"
     elapsed  = int(st["elapsed"])
 
-    # allow preview to hide background entirely
     nobg = request.args.get("nobg", "0").strip() in ("1","true","yes")
 
-    # color families
     bg_map = {
         "gold":"#130e00","violet":"#0e061a","turquoise":"#02151a","rose":"#1a0710","lime":"#0c1a06",
         "cobalt":"#060a1a","amber":"#1a1004","mint":"#041a10","crimson":"#1a0406","indigo":"#0a061a"
@@ -567,19 +561,17 @@ def creature_svg(code):
         "gold":"#ffe39a","violet":"#d7c0ff","turquoise":"#7fe6ff","rose":"#ffb6c8","lime":"#b4ffaf",
         "cobalt":"#b6c9ff","amber":"#ffe0a8","mint":"#c0ffe6","crimson":"#ffb0b7","indigo":"#c9c2ff"
     }
-    accent_map = glow_map  # accents use glow family
+    accent_map = glow_map
 
     bg = bg_map.get(base, "#0b0b10")
     glow = glow_map.get(base, "#b784ff")
     body_color_alive = body_map.get(base, "#e8f1ff")
     accent_color = accent_map.get(accent, "#ffcd60")
 
-    # dead visuals, no blackout square, just grey body and red X eyes
     body_color_dead = "#9aa0a6"
     eye_alive = "#180d00"
     eye_dead  = "#ff3347"
 
-    # scale by stage
     if stage == "egg":       egg_scale = "1.0"
     elif stage == "cracking": egg_scale = "1.02"
     elif stage == "baby":     egg_scale = "0.9"
@@ -587,15 +579,13 @@ def creature_svg(code):
     elif stage == "prime":    egg_scale = "1.06"
     else:                     egg_scale = "1.0"
 
-    # no blackout on death anymore
     wither = "0"
 
-    # cosmetic rarity now derived from pattern, accent
     crown  = (pattern in ("mosaic","stripe")) and (stage in ('baby','teen','prime'))
     flames = (pattern in ("swirl","mosaic")) and (stage in ('teen','prime'))
     lasers = (pattern == "laser") and (stage in ('teen','prime'))
 
-    # pattern fragments in creature body, use accent for contrast
+    # pattern fragments (accent)
     pattern_svg = ""
     if pattern == "speckle":
         dots = []
@@ -617,12 +607,11 @@ def creature_svg(code):
             tiles.append(f'<rect x="{x}" y="{y}" width="{w}" height="{h}" fill="{accent_color}" opacity=".18"/>')
         pattern_svg = "\n".join(tiles)
     elif pattern == "metallic":
+        # FIX: match old behavior and ensure the id exists
         pattern_svg = '<ellipse rx="95" ry="70" fill="url(#metal)"/>'
     elif pattern == "laser":
-        # handled in lasers_svg and egg shell lines, still echo some subtle accent
         pattern_svg = f'<ellipse rx="90" ry="65" fill="{body_color_alive}" opacity=".02"/>'
 
-    # special cosmetics
     crown_svg = ''
     if crown:
         crown_svg = f'''
@@ -651,15 +640,12 @@ def creature_svg(code):
             </line>
           </g>'''
 
-    # hunger label only after baby
     show_hunger = (stage in ('baby','teen','prime'))
 
-    # dead overlay, remove blackout square, show red X eyes and grey body
     dead_overlay = ''
     if stage == "dead":
         dead_overlay = f'''
           <g>
-            <!-- red X eyes -->
             <g stroke="{eye_dead}" stroke-width="6">
               <line x1="-30" y1="-20" x2="-10" y2="0"/>
               <line x1="-30" y1="0" x2="-10" y2="-20"/>
@@ -668,32 +654,42 @@ def creature_svg(code):
             </g>
           </g>'''
 
-    # materials for egg and creature sheen
     metal_grad = "url(#metal_pearl)" if material in ("pearl","metallic") else "url(#metal_matte)"
 
-    # build SVG
     svg_parts = []
 
-    # defs
+    # --- DEFS (includes restored id="metal") ---
     defs = f"""
     <radialGradient id="g0"><stop offset="0" stop-color="{glow}"/><stop offset="1" stop-color="{bg}"/></radialGradient>
     <linearGradient id="egg_base"><stop offset="0" stop-color="#fff"/><stop offset="1" stop-color="{glow}"/></linearGradient>
-    <linearGradient id="metal_matte"><stop offset="0" stop-color="#fff" stop-opacity=".35"/><stop offset="1" stop-color="{body_color_alive}" stop-opacity=".7"/></linearGradient>
-    <linearGradient id="metal_pearl"><stop offset="0" stop-color="#fff" stop-opacity=".85"/><stop offset="1" stop-color="{body_color_alive}" stop-opacity=".95"/></linearGradient>
+
+    <!-- Restored 'metal' for backward compatibility (old working file) -->
+    <linearGradient id="metal">
+      <stop offset="0" stop-color="#fff" stop-opacity=".8"/>
+      <stop offset="1" stop-color="{body_color_alive}" stop-opacity=".9"/>
+    </linearGradient>
+
+    <!-- New variants kept -->
+    <linearGradient id="metal_matte">
+      <stop offset="0" stop-color="#fff" stop-opacity=".35"/>
+      <stop offset="1" stop-color="{body_color_alive}" stop-opacity=".7"/>
+    </linearGradient>
+    <linearGradient id="metal_pearl">
+      <stop offset="0" stop-color="#fff" stop-opacity=".85"/>
+      <stop offset="1" stop-color="{body_color_alive}" stop-opacity=".95"/>
+    </linearGradient>
+
     <filter id="soft"><feGaussianBlur stdDeviation="6"/></filter>
     """
     svg_parts.append(f'<svg viewBox="0 0 512 512" xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" width="512" height="512">')
     svg_parts.append(f'<defs>{defs}</defs>')
 
-    # optional background
     if not nobg:
         svg_parts.append(f'<rect width="512" height="512" fill="{bg}"/>')
         svg_parts.append(f'<circle cx="256" cy="360" r="160" fill="url(#g0)" opacity=".14" filter="url(#soft)"/>')
 
-    # main group
     svg_parts.append(f'<g transform="translate(256,300) scale({egg_scale})">')
 
-    # egg shell visuals, include accent hints when pattern is laser or stripe
     egg_shell = f'<ellipse rx="120" ry="160" fill="url(#egg_base)" opacity="{ "1" if stage in ("egg","cracking") else "0"}"/>'
     egg_lines = ''
     if pattern in ("laser","stripe") and stage in ("egg","cracking"):
@@ -702,7 +698,6 @@ def creature_svg(code):
     crack = '<path d="M-60,0 L-20,-20 L0,10 L20,-15 L60,5" stroke="#2a2a2a" stroke-width="4" fill="none" opacity="{}"/>'.format("0.85" if stage=="cracking" else "0")
     svg_parts.append(egg_shell + egg_lines + crack)
 
-    # creature body
     body_fill = body_color_dead if stage == "dead" else body_color_alive
     creature_g_open = f'<g opacity="{ "1" if stage in ("baby","teen","prime","dead") else "0"}">'
     creature_body = f'<ellipse rx="95" ry="70" fill="{body_fill}" opacity=".95"/>'
@@ -713,7 +708,6 @@ def creature_svg(code):
     svg_parts.append(creature_body)
     svg_parts.append(pattern_svg)
 
-    # eyes
     if stage != "dead":
         svg_parts.append(f'''
           <g opacity="1">
@@ -723,15 +717,12 @@ def creature_svg(code):
     else:
         svg_parts.append(dead_overlay)
 
-    # cosmetics
     svg_parts.append(crown_svg)
     svg_parts.append(flames_svg)
     svg_parts.append(lasers_svg)
 
-    svg_parts.append('</g>')  # end creature group
+    svg_parts.append('</g>')
 
-    # no wither blackout anymore
-    # labels
     svg_parts.append(f'''
       <g font-family="ui-monospace, Menlo, monospace" font-size="14" fill="#fff" opacity=".95">
         <text x="16" y="28">Stage: {stage}</text>
@@ -739,7 +730,6 @@ def creature_svg(code):
         <text x="16" y="68">Tick: {TICK_STEP_SECONDS}s, 1d={DAY_SECS}s</text>
       </g>''')
 
-    # clickable
     svg_parts.append(f'''
       <a xlink:href="{url_for('creatures.habitat_page', code=st['code'], _external=True)}">
         <rect x="0" y="0" width="512" height="512" fill="transparent"/>
