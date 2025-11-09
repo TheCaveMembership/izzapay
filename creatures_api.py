@@ -1,11 +1,13 @@
 # creatures_api.py
 import os, json, time, random
 from decimal import Decimal
-from flask import Blueprint, request, jsonify, abort, make_response, url_for
-from stellar_sdk import Asset
+from flask import Blueprint, request, jsonify, abort, make_response, url_for, g
+from stellar_sdk import (
+    Asset, Keypair, Server, Claimant, ClaimPredicate, TransactionBuilder, exceptions as sx
+)
 from db import conn as _conn
 from nft_api import (
-    server, PP,
+    server, PP,  # server: Horizon Server, PP: NETWORK_PASSPHRASE
     _account_has_trustline, _change_trust, _pay_asset, _ensure_distributor_holds_one
 )
 
@@ -14,14 +16,20 @@ bp_creatures = Blueprint("creatures", __name__)
 # ---------- config ----------
 IZZA_CODE = os.getenv("IZZA_TOKEN_CODE", "IZZA").strip()
 IZZA_ISS  = os.getenv("IZZA_TOKEN_ISSUER", "").strip()
-CREATURE_ISSUER_G = os.getenv("NFT_ISSUER_PUBLIC", "").strip()   # same issuer as other NFTs
+
+# same issuer as other NFTs
+CREATURE_ISSUER_G = os.getenv("NFT_ISSUER_PUBLIC", "").strip()
+
+# distributor that receives egg payments and creates claimables
 DISTR_S  = os.getenv("NFT_DISTR_SECRET", "").strip()
 DISTR_G  = os.getenv("NFT_DISTR_PUBLIC", "").strip()
-HOME_DOMAIN = os.getenv("NFT_HOME_DOMAIN", "izzapay.onrender.com").strip()
 
-# fast test cycle knobs, total 3 minutes
+HOME_DOMAIN = os.getenv("NFT_HOME_DOMAIN", "izzapay.onrender.com").strip()
+HORIZON_URL = os.getenv("HORIZON_URL", "https://api.testnet.minepi.com").strip()
+
+# fast test cycle knobs (3 minutes total)
 TEST_TOTAL_SECONDS = 180
-TEST_CRACK_START   = 30
+TEST_CRACK_START   = 30     # seconds
 TEST_HATCH_DONE    = 60
 TEST_TEENAGE       = 120
 TEST_PRIME         = 180
@@ -56,15 +64,14 @@ def _ensure_tables():
         )""")
         cx.execute("CREATE INDEX IF NOT EXISTS idx_creat_owner ON nft_creatures(owner_pub)")
         cx.execute("CREATE INDEX IF NOT EXISTS idx_creat_stage ON nft_creatures(stage)")
-        # collection shell, shared with other NFT code paths
         cx.execute("""
         CREATE TABLE IF NOT EXISTS nft_collections(
           id INTEGER PRIMARY KEY,
           code TEXT NOT NULL,
           issuer TEXT NOT NULL,
-          total_supply INTEGER DEFAULT 1,
-          decimals INTEGER DEFAULT 0,
-          status TEXT DEFAULT 'draft',
+          total_supply INTEGER,
+          decimals INTEGER,
+          status TEXT,
           created_at INTEGER,
           updated_at INTEGER,
           UNIQUE(code, issuer)
@@ -87,6 +94,23 @@ def _choose_palette(seed: str):
     return base, pat
 
 def _compute_state_dict(code: str) -> dict:
+    # Allow a demo code for the carousel and skeletons so we never 404
+    if code.upper() == "EGGDEMO":
+        seed = "demo"
+        base, pat = _choose_palette(seed)
+        return {
+            "code": "EGGDEMO",
+            "issuer": CREATURE_ISSUER_G or "GDEMOISSUER",
+            "owner_pub": None,
+            "elapsed": 0,
+            "tick_seconds": TICK_STEP_SECONDS,
+            "hunger": 0,
+            "stage": "egg",
+            "palette": base,
+            "pattern": pat,
+            "hatch_start": _now_i(),
+        }
+
     _ensure_tables()
     with _db() as cx:
         r = cx.execute(
@@ -98,8 +122,10 @@ def _compute_state_dict(code: str) -> dict:
 
     hatch_start = int(r["hatch_start"] or 0)
     elapsed = max(0, _now_i() - hatch_start)
+
     hunger_base = int(r["hunger"] or 0)
     hunger = _clamp(hunger_base + max(0, elapsed // 5), 0, 100)
+
     stage = _stage_from_elapsed(elapsed, hunger)
 
     return {
@@ -115,17 +141,22 @@ def _compute_state_dict(code: str) -> dict:
         "hatch_start": hatch_start,
     }
 
+def _svg_headers(resp):
+    resp.headers["Content-Type"] = "image/svg+xml"
+    resp.headers["Cache-Control"] = "no-store, max-age=0"
+    resp.headers["X-Content-Type-Options"] = "nosniff"
+    return resp
+
 # ---------- API: quote ----------
 @bp_creatures.post("/api/creatures/quote")
 def creatures_quote():
     return jsonify({"ok": True, "price_izza": str(EGG_PRICE_IZZA), "tick_seconds": TICK_STEP_SECONDS})
 
-# ---------- API: mint egg, pay 5 IZZA ----------
+# ---------- API: mint egg (pay 5 IZZA) ----------
 @bp_creatures.post("/api/creatures/mint")
 def creatures_mint():
     """
     Body: { "buyer_pub":"G...", "buyer_sec":"S..." }
-    Steps:
       1) charge 5 IZZA from buyer to distributor
       2) mint 1 unit of new asset code to distributor
       3) insert nft_creatures row with hatch_start=now
@@ -133,14 +164,14 @@ def creatures_mint():
     """
     _ensure_tables()
     j = request.get_json(silent=True) or {}
-    buyer_pub = (j.get("buyer_pub") or "").strip().upper()
+    buyer_pub = (j.get("buyer_pub") or "").strip()
     buyer_sec = (j.get("buyer_sec") or "").strip()
     if not buyer_pub or not buyer_sec:
         abort(400, "wallet_required")
 
     izza = Asset(IZZA_CODE, IZZA_ISS)
 
-    # Distributor IZZA trustline
+    # Distributor IZZA trustline (idempotent)
     try:
         _change_trust(DISTR_S, izza, limit="100000000")
     except Exception:
@@ -155,7 +186,7 @@ def creatures_mint():
     # new egg asset code
     ts = _now_i()
     short = hex(ts)[2:].upper()[-6:]
-    suffix = random.choice(list("ABCDEFG"))
+    suffix = random.choice(["A","B","C","D","E","F","G"])
     code = f"EGG{short}{suffix}"[:12]
 
     asset = Asset(code, CREATURE_ISSUER_G)
@@ -182,60 +213,43 @@ def creatures_mint():
 
     return jsonify({"ok": True, "asset": {"code": code, "issuer": CREATURE_ISSUER_G}, "hatch_start": ts})
 
-# ---------- API: auto-claim into wallet ----------
-@bp_creatures.post("/api/creatures/auto-claim")
-def creatures_auto_claim():
-    """
-    Body: { "code":"EGGxxxx", "owner_pub":"G...", "owner_sec":"S..." }
-    Creates trustline if needed then sends 1 unit from distributor to owner.
-    Records owner_pub on the row.
-    """
+# ---------- API: latest + mine ----------
+@bp_creatures.get("/api/creatures/latest")
+def creatures_latest():
     _ensure_tables()
-    j = request.get_json(silent=True) or {}
-    code  = (j.get("code") or "").strip().upper()
-    owner = (j.get("owner_pub") or "").strip().upper()
-    sec   = (j.get("owner_sec") or "").strip()
-    if not code or not owner or not sec:
-        abort(400, "code_owner_and_secret_required")
-
+    uid = getattr(g, "user_id", None)
+    if uid is None:
+        return jsonify({"latest": None})
     with _db() as cx:
-        row = cx.execute(
-            "SELECT code FROM nft_creatures WHERE code=? AND issuer=?",
-            (code, CREATURE_ISSUER_G)
-        ).fetchone()
-        if not row:
-            abort(404, "not_found")
+        r = cx.execute("""
+          SELECT code, issuer, owner_pub, stage, palette, pattern, hatch_start
+          FROM nft_creatures
+          WHERE user_id IS NULL OR user_id=?  -- tolerate earlier rows
+          ORDER BY id DESC LIMIT 1
+        """, (uid,)).fetchone()
+    return jsonify({"latest": dict(r) if r else None})
 
-    asset = Asset(code, CREATURE_ISSUER_G)
-
-    # trustline
-    try:
-        if not _account_has_trustline(owner, asset):
-            _change_trust(sec, asset, limit="1")
-    except Exception as e:
-        abort(400, f"trustline_failed:{e}")
-
-    # deliver the NFT
-    try:
-        _pay_asset(DISTR_S, owner, "1", asset, memo="IZZA CREATURE")
-    except Exception as e:
-        abort(400, f"deliver_failed:{e}")
-
+@bp_creatures.get("/api/creatures/mine")
+def creatures_mine():
+    _ensure_tables()
+    uid = getattr(g, "user_id", None)
+    if uid is None:
+        return jsonify({"items": []})
     with _db() as cx:
-        cx.execute(
-            "UPDATE nft_creatures SET owner_pub=? WHERE code=? AND issuer=?",
-            (owner, code, CREATURE_ISSUER_G)
-        )
-        cx.commit()
+        rows = cx.execute("""
+          SELECT code, issuer, owner_pub, stage, palette, pattern, hatch_start
+          FROM nft_creatures
+          WHERE user_id IS NULL OR user_id=?
+          ORDER BY id DESC LIMIT 200
+        """, (uid,)).fetchall()
+    return jsonify({"items": [dict(r) for r in rows]})
 
-    return jsonify({"ok": True})
-
-# ---------- API: record owner after manual claim, still useful ----------
+# ---------- API: mark owned ----------
 @bp_creatures.post("/api/creatures/mark-owned")
 def creatures_mark_owned():
     j = request.get_json(silent=True) or {}
-    code = (j.get("code") or "").strip().upper()
-    owner = (j.get("owner_pub") or "").strip().upper()
+    code = (j.get("code") or "").strip()
+    owner = (j.get("owner_pub") or "").strip()
     if not code or not owner:
         abort(400, "code_and_owner_required")
     _ensure_tables()
@@ -247,12 +261,64 @@ def creatures_mark_owned():
         cx.commit()
     return jsonify({"ok": True})
 
+# ---------- API: auto-claim (push NFT to user's wallet via claimable balance) ----------
+@bp_creatures.post("/api/creatures/auto-claim")
+def creatures_auto_claim():
+    """
+    Body: { code, owner_pub }
+    Creates a claimable balance of 1 unit of the creature asset to owner_pub.
+    No user secret is required and the UI can stay on the creatures page.
+    """
+    j = request.get_json(silent=True) or {}
+    code = (j.get("code") or "").strip().upper()
+    owner_pub = (j.get("owner_pub") or "").strip().upper()
+    if not code or not owner_pub:
+        abort(400, "missing code/owner_pub")
+
+    _ensure_tables()
+    with _db() as cx:
+        r = cx.execute(
+            "SELECT owner_pub FROM nft_creatures WHERE code=? AND issuer=?",
+            (code, CREATURE_ISSUER_G)
+        ).fetchone()
+    if not r:
+        abort(404, "unknown_code")
+    if r["owner_pub"]:
+        return jsonify({"ok": True, "note": "already owned", "code": code})
+
+    asset = Asset(code, CREATURE_ISSUER_G)
+    base_fee = server.fetch_base_fee()
+    dist_acct = server.load_account(DISTR_G)
+
+    claimant = Claimant(destination=owner_pub, predicate=ClaimPredicate.predicate_unconditional())
+    tx = (
+        TransactionBuilder(
+            source_account=dist_acct,
+            network_passphrase=PP,
+            base_fee=base_fee,
+        )
+        .append_create_claimable_balance_op(asset=asset, amount="1", claimants=[claimant])
+        .set_timeout(120)
+        .build()
+    )
+    tx.sign(Keypair.from_secret(DISTR_S))
+    try:
+        resp = server.submit_transaction(tx)
+    except sx.BaseHorizonError as e:
+        abort(400, f"auto_claim_failed:{e}")
+
+    with _db() as cx:
+        cx.execute("UPDATE nft_creatures SET owner_pub=? WHERE code=? AND issuer=?",
+                   (owner_pub, code, CREATURE_ISSUER_G))
+        cx.commit()
+    return jsonify({"ok": True, "code": code, "hash": resp.get("hash")})
+
 # ---------- API: feed ----------
 @bp_creatures.post("/api/creatures/feed")
 def creatures_feed():
     j = request.get_json(silent=True) or {}
-    code = (j.get("code") or "").strip().upper()
-    owner = (j.get("owner_pub") or "").strip().upper()
+    code = (j.get("code") or "").strip()
+    owner = (j.get("owner_pub") or "").strip()
     if not code or not owner:
         abort(400, "code_and_owner_required")
 
@@ -275,39 +341,10 @@ def creatures_feed():
 
     return jsonify({"ok": True, "hunger": hunger})
 
-# ---------- API: list and latest by owner ----------
-@bp_creatures.get("/api/creatures/list")
-def creatures_list():
-    pub = (request.args.get("pub") or "").strip().upper()
-    if not pub:
-        abort(400, "pub_required")
-    _ensure_tables()
-    with _db() as cx:
-        rows = cx.execute(
-            "SELECT code, issuer, hatch_start FROM nft_creatures WHERE owner_pub=? AND issuer=? ORDER BY hatch_start DESC",
-            (pub, CREATURE_ISSUER_G)
-        ).fetchall()
-    return jsonify({"ok": True, "items": [dict(r) for r in rows]})
-
-@bp_creatures.get("/api/creatures/latest")
-def creatures_latest():
-    pub = (request.args.get("pub") or "").strip().upper()
-    if not pub:
-        abort(400, "pub_required")
-    _ensure_tables()
-    with _db() as cx:
-        r = cx.execute(
-            "SELECT code, issuer FROM nft_creatures WHERE owner_pub=? AND issuer=? ORDER BY hatch_start DESC LIMIT 1",
-            (pub, CREATURE_ISSUER_G)
-        ).fetchone()
-    if not r:
-        return jsonify({"ok": True, "asset": None})
-    return jsonify({"ok": True, "asset": {"code": r["code"], "issuer": r["issuer"]}})
-
-# ---------- API: state JSON ----------
+# ---------- State JSON ----------
 @bp_creatures.get("/api/creatures/state/<code>.json")
 def creatures_state(code):
-    st = _compute_state_dict(code.upper())
+    st = _compute_state_dict(code)
     resp = make_response(json.dumps(st), 200)
     resp.headers["Content-Type"] = "application/json; charset=utf-8"
     resp.headers["Cache-Control"] = "no-store"
@@ -316,7 +353,6 @@ def creatures_state(code):
 # ---------- Metadata JSON ----------
 @bp_creatures.get("/nftmeta/<code>.json")
 def creatures_metadata(code):
-    code = code.upper()
     img_url = url_for("creatures.creature_svg", code=code, _external=True) + f"?nc={_now_i()}"
     ext_url = url_for("creatures.habitat_page", code=code, _external=True)
     meta = {
@@ -335,11 +371,10 @@ def creatures_metadata(code):
     resp.headers["Cache-Control"] = "no-store"
     return resp
 
-# ---------- Dynamic SVG renderer ----------
+# ---------- Dynamic SVG renderer (valid for Safari) ----------
 @bp_creatures.get("/nftsvg/<code>.svg")
 def creature_svg(code):
-    st = _compute_state_dict(code.upper())
-
+    st = _compute_state_dict(code)
     stage   = st["stage"]
     hunger  = int(st["hunger"])
     base    = st["palette"]
@@ -362,7 +397,9 @@ def creature_svg(code):
 
     wither = "1" if (elapsed >= TEST_PRIME and hunger >= 90) else "0"
 
-    svg = f"""<svg viewBox="0 0 512 512" xmlns="http://www.w3.org/2000/svg">
+    svg = f"""<svg viewBox="0 0 512 512"
+  xmlns="http://www.w3.org/2000/svg"
+  xmlns:xlink="http://www.w3.org/1999/xlink" width="512" height="512">
   <defs>
     <radialGradient id="g0"><stop offset="0" stop-color="{glow}"/><stop offset="1" stop-color="{bg}"/></radialGradient>
     <linearGradient id="egg"><stop offset="0" stop-color="#fff"/><stop offset="1" stop-color="{glow}"/></linearGradient>
@@ -381,62 +418,28 @@ def creature_svg(code):
     </g>
     <rect x="-160" y="-200" width="320" height="360" fill="#000" opacity="{wither}"/>
   </g>
-  <g font-family="ui-monospace, Menlo" font-size="14" fill="#fff" opacity=".95">
+  <g font-family="ui-monospace, Menlo, monospace" font-size="14" fill="#fff" opacity=".95">
     <text x="16" y="28">Stage: {stage}</text>
     <text x="16" y="48">Hunger: {hunger}%</text>
     <text x="16" y="68">Tick: {TICK_STEP_SECONDS}s</text>
   </g>
-  <a xlink:href="{url_for('creatures.habitat_page', code=code.upper(), _external=True)}">
+  <a xlink:href="{url_for('creatures.habitat_page', code=st['code'], _external=True)}">
     <rect x="0" y="0" width="512" height="512" fill="transparent"/>
   </a>
 </svg>"""
-    resp = make_response(svg, 200)
-    resp.headers["Content-Type"] = "image/svg+xml"
-    resp.headers["Cache-Control"] = "no-store"
-    return resp
+    return _svg_headers(make_response(svg, 200))
 
-# ---------- Demo egg SVG for carousel previews ----------
-@bp_creatures.get("/nftsvg/EGGDEMO.svg")
-def creature_svg_demo():
-    try:
-        skin = int(request.args.get("skin", "0"))
-    except Exception:
-        skin = 0
-    palettes = [
-        ("#130e00","#ffcd60"),  # gold
-        ("#0e061a","#b784ff"),  # violet
-        ("#02151a","#48d4ff"),  # turquoise
-        ("#1a0710","#ff7aa2"),  # rose
-        ("#0c1a06","#89ff7a"),  # lime
-    ]
-    bg, glow = palettes[skin % len(palettes)]
-    svg = f"""<svg viewBox="0 0 128 128" xmlns="http://www.w3.org/2000/svg">
-  <defs>
-    <radialGradient id="g0"><stop offset="0" stop-color="{glow}"/><stop offset="1" stop-color="{bg}"/></radialGradient>
-    <linearGradient id="egg"><stop offset="0" stop-color="#fff"/><stop offset="1" stop-color="{glow}"/></linearGradient>
-    <filter id="soft"><feGaussianBlur stdDeviation="4"/></filter>
-  </defs>
-  <rect width="128" height="128" fill="{bg}"/>
-  <circle cx="64" cy="86" r="46" fill="url(#g0)" opacity=".24" filter="url(#soft)"/>
-  <ellipse cx="64" cy="70" rx="40" ry="54" fill="url(#egg)"/>
-  <path d="M40,70 L52,62 L64,72 L76,60 L88,72" stroke="#2a2a2a" stroke-width="3" fill="none" opacity=".85"/>
-</svg>"""
-    resp = make_response(svg, 200)
-    resp.headers["Content-Type"] = "image/svg+xml"
-    resp.headers["Cache-Control"] = "no-store"
-    return resp
-
-# ---------- Habitat page ----------
+# ---------- Habitat page (HTML shell) ----------
 @bp_creatures.get("/creature/<code>")
 def habitat_page(code):
-    state_url   = url_for("creatures.creatures_state", code=code.upper(), _external=True)
-    svg_url     = url_for("creatures.creature_svg",   code=code.upper(), _external=True)
+    state_url   = url_for("creatures.creatures_state", code=code, _external=True)
+    svg_url     = url_for("creatures.creature_svg",   code=code, _external=True)
     feed_api    = url_for("creatures.creatures_feed", _external=True)
     tick_ms     = str(TICK_STEP_SECONDS * 1000)
 
     html = f"""<!doctype html><html><head>
 <meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
-<title>IZZA Creature {code.upper()}</title>
+<title>IZZA Creature {code}</title>
 <style>
   body{{background:#000;color:#e8f1ff;font-family:Inter,Arial,sans-serif;margin:0;text-align:center}}
   .wrap{{max-width:960px;margin:0 auto;padding:20px}}
@@ -446,7 +449,7 @@ def habitat_page(code):
   pre{{text-align:left;background:#0b0f1f;border:1px solid #2a3550;border-radius:12px;padding:12px;overflow:auto}}
 </style>
 </head><body><div class="wrap">
-  <h1>IZZA Creature {code.upper()}</h1>
+  <h1>IZZA Creature {code}</h1>
   <img id="img" alt="creature" src="{svg_url}?nc={_now_i()}">
   <div style="margin:12px 0"><button class="btn" id="feedBtn">Feed</button></div>
   <pre id="state"></pre>
@@ -466,7 +469,7 @@ def habitat_page(code):
     await fetch(FEED_URL, {{
       method:'POST',
       headers:{{'Content-Type':'application/json'}},
-      body: JSON.stringify({{ code: {json.dumps(code.upper())}, owner_pub: st.owner_pub || '' }})
+      body: JSON.stringify({{ code: {json.dumps(code)}, owner_pub: st.owner_pub || '' }})
     }});
     refresh();
   }});
