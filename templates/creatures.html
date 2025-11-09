@@ -24,12 +24,10 @@
     .row{display:flex;gap:12px;justify-content:center;flex-wrap:wrap;margin:10px 0 18px}
     .grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(280px,1fr));gap:12px;margin-top:12px}
 
-    /* Cards */
     .box{border:1px solid #2a3550;border-radius:16px;background:var(--panel);padding:14px}
     .col{flex:1 1 320px;max-width:520px}
     .box h3{margin:4px 0 10px}
 
-    /* Slot carousel */
     .slot{position:relative;overflow:hidden;border-radius:16px;border:1px solid #2a3550;background:var(--card)}
     .slot::before,
     .slot::after{
@@ -46,12 +44,10 @@
     .egg img{width:75%;height:75%;object-fit:contain;filter:drop-shadow(0 2px 4px rgba(0,0,0,.35))}
     .hint{font-size:12px;color:#9fb0d6;margin-top:6px;text-align:center}
 
-    /* Live preview */
     #liveSvg{
       width:220px;height:220px;object-fit:contain;border-radius:12px;border:1px solid #223056;background:#0e1422
     }
 
-    /* Minimal modal (wallet) */
     .modal{position:fixed;inset:0;background:rgba(0,0,0,.5);display:flex;align-items:center;justify-content:center}
     .modal[hidden]{display:none}
     .modal-card{background:var(--panel);border:1px solid var(--line);border-radius:14px;max-width:560px;width:94%;padding:14px}
@@ -70,7 +66,6 @@
   <div class="wrap">
     <div class="topbar">
       <a class="btn" href="/">BACK HOME</a>
-      <!-- opens local wallet modal instead of forcing token page -->
       <button class="btn purple upper" id="openWallet">IZZA WALLET</button>
       <button class="btn gold upper" id="openClaims">CLAIMS LIST</button>
     </div>
@@ -99,7 +94,7 @@
     </div>
   </div>
 
-  <!-- Minimal IZZA Wallet modal -->
+  <!-- Wallet modal -->
   <div class="modal" id="myWalletModal" role="dialog" aria-modal="true" aria-labelledby="myWalletTitle" hidden>
     <div class="modal-card">
       <div class="modal-header">
@@ -138,7 +133,7 @@
 
 <script>
 (function(){
-  // ---------- PI init ----------
+  // ---------- Pi init ----------
   const sandbox = {{ 'true' if PI_SANDBOX else 'false' }};
   try{ if(window.Pi && Pi.init){ Pi.init({version:'2.0', sandbox:sandbox}); } }catch(e){}
 
@@ -150,14 +145,13 @@
   const liveHint = document.getElementById('liveHint');
   const openHabitat = document.getElementById('openHabitat');
 
-  // ---------- Carousel previews (fixes 404 and styling) ----------
+  // ---------- Carousel previews with safe fallback ----------
   const previews = Array.from({length:18}).map((_,i)=>`/nftsvg/EGGDEMO.svg?skin=${i}`);
   function cell(imgSrc){
     const d=document.createElement('div'); d.className='egg';
     const img=new Image(); img.loading='lazy'; img.decoding='async';
     img.src = imgSrc;
     img.onerror = () => {
-      // Safe inline fallback if any preview ever 404s
       img.remove();
       const fallback = document.createElement('div');
       fallback.innerHTML = '<svg viewBox="0 0 128 128" width="96" height="96" xmlns="http://www.w3.org/2000/svg"><defs><linearGradient id="g" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#b784ff"/><stop offset="1" stop-color="#7a44ff"/></linearGradient></defs><ellipse cx="64" cy="70" rx="40" ry="54" fill="url(#g)" stroke="#2b1e55" stroke-width="3"/><circle cx="64" cy="68" r="6" fill="#fff"/></svg>';
@@ -168,37 +162,30 @@
   }
   function fillTrack(){
     track.innerHTML='';
-    // pad both ends for nicer spin
     const pad = 3;
     for(let p=0;p<pad;p++) track.appendChild(cell(previews[p % previews.length]));
     previews.forEach(src=> track.appendChild(cell(src)));
     for(let p=0;p<pad;p++) track.appendChild(cell(previews[(p+5) % previews.length]));
   }
   fillTrack();
-
   function slotCellWidth(){
-    // width + gap ~= computed size used in translate
     const first = track.querySelector('.egg');
     if(!first) return 152;
     const r = first.getBoundingClientRect();
-    // approximate 12px gap from CSS
     return r.width + 12;
   }
-
   async function spinAndStop(){
     const n = track.children.length;
     const w = slotCellWidth();
-    // 2–3 full screens worth of movement plus a random stop
     const minIdx = 3;
     const maxIdx = n - 4;
     const idx = Math.floor(minIdx + Math.random()*(maxIdx - minIdx));
-    // small pre-kick for a bit more juice
     track.style.transitionTimingFunction = 'cubic-bezier(.18,.9,.22,1)';
     track.style.transform = `translateX(-${(idx+0.2)*w}px)`;
     return new Promise(res=>setTimeout(()=>{ track.style.transform = `translateX(-${idx*w}px)`; setTimeout(()=>res(idx), 1200); }, 50));
   }
 
-  // ---------- Local wallet vault, identical behavior to merchant page ----------
+  // ---------- Local wallet helpers (same as merchant) ----------
   function __readVault(){ try{ const s=localStorage.getItem('izza_test_wallet'); return s?JSON.parse(s):null; }catch{return null} }
   function __writeVault(j){ try{ localStorage.setItem('izza_test_wallet', JSON.stringify(j||{})); }catch{} }
   function __forgetSecret(pub){ try{ const v=__readVault()||{}; if(v && v.pub===pub){ delete v.sec; __writeVault(v); } }catch{} }
@@ -220,10 +207,31 @@
     return { ok:r.ok, status:r.status, json:j };
   }
 
-  // Username canonicalization from session/local
+  // ---------- Username canonization (ported from merchant) ----------
   const SRV_USER = {{ (username or '') | tojson }};
   function stripAt(s){ return (s||'').toString().trim().replace(/^@+/, ''); }
-  const USER_CANON = stripAt(SRV_USER);
+  const USER_CANON = (()=>{
+    const fromSrv = stripAt(SRV_USER);
+    if(fromSrv) return fromSrv;
+    try{
+      const raw = localStorage.getItem('piAuthUser');
+      if(raw){ const j=JSON.parse(raw); if(j && j.username) return stripAt(j.username); }
+    }catch{}
+    try{
+      const uCanon = localStorage.getItem('izzaUserCanon');
+      if(uCanon) return stripAt(uCanon);
+      const u = localStorage.getItem('izzaUserU');
+      if(u) return stripAt(u);
+    }catch{}
+    return '';
+  })();
+  // persist for future pages
+  try{
+    if(USER_CANON){
+      localStorage.setItem('izzaUserCanon', USER_CANON);
+      localStorage.setItem('izzaUserU', USER_CANON.toLowerCase());
+    }
+  }catch{}
 
   // ---------- Wallet modal wiring ----------
   function openMyWallet(){ document.getElementById('myWalletModal').removeAttribute('hidden'); refreshMyWalletModal(); }
@@ -259,7 +267,7 @@
     refreshMyWalletModal();
   });
 
-  // ---------- Gate used by mint/feed ----------
+  // ---------- Gate for mint/feed ----------
   async function ensureUserAndWalletGate(){
     const active = await fetchActiveWallet(USER_CANON);
     const pub = active && active.pub || '';
@@ -311,8 +319,8 @@
     }
   });
 
-  // ---------- Claims and Feed ----------
-  document.getElementById('openClaims').addEventListener('click', ()=> location.href='/token/auth?next=/token/izza');
+  // ---------- Claims + Feed ----------
+  document.getElementById('openClaims').addEventListener('click', ()=> location.href='/token/auth?next=/token/izza'));
   document.getElementById('feedBtn').addEventListener('click', async ()=>{
     if(!lastCode){ mintMsg.textContent='Mint or select a creature first'; return; }
     const gate = await ensureUserAndWalletGate(); if(!gate){ return; }
@@ -322,6 +330,9 @@
     });
     refreshLive();
   });
+
+  // ---------- Auto-populate wallet pub on load (match merchant) ----------
+  (async ()=>{ try{ await refreshMyWalletModal(); }catch{} })();
 
 })();
 </script>
