@@ -156,8 +156,6 @@ def _apply_hunger_progress(row: sqlite3.Row) -> tuple[int, str, int, int, int]:
     """
     Move hunger forward based on time passed since last_hunger_at (or hatch_start).
     Also handles death (3 missed days) and returns updated fields.
-
-    returns: (hunger, stage, last_feed_at, last_hunger_at, revive_progress)
     """
     now = _now_i()
     hatch_start = int(row["hatch_start"] or now)
@@ -437,7 +435,6 @@ def creatures_feed():
         hunger, stage, last_feed_at, last_hunger_at, revive_progress = _apply_hunger_progress(row)
 
         if stage == "dead":
-            # must feed once per day for 3 days consecutively
             last_feed = int(last_feed_at or row["hatch_start"] or now)
             days_since_last = (now - last_feed) / float(DAY_SECS)
             if days_since_last >= 1.0:
@@ -450,7 +447,6 @@ def creatures_feed():
                 last_feed_at = now
                 last_hunger_at = now
         else:
-            # alive: feeding lowers hunger
             hunger = _clamp(hunger - 50, 0, 100)
             last_feed_at = now
             last_hunger_at = now
@@ -519,11 +515,10 @@ def creature_svg(code):
     elif stage == "prime":    egg_scale = "1.06"
     else:                     egg_scale = "1.0"
 
-    # “wither” blackout for starving prime OR dead
-    # — remove black box when dead
+    # “wither” blackout for starving prime OR dead — do not apply when dead
     wither = "1" if ((elapsed >= TEST_PRIME and hunger >= 90) and stage != "dead") else "0"
 
-    # RARITY (higher odds for testing): crown 1/3, flames 1/4, lasers 1/5
+    # RARITY
     rnd = random.Random(st["code"])
     crown  = (rnd.randint(1,3) == 1)
     flames = (rnd.randint(1,4) == 1)
@@ -553,7 +548,7 @@ def creature_svg(code):
     elif pattern == "metallic":
         pattern_svg = '<ellipse rx="95" ry="70" fill="url(#metal)"/>'
 
-    # special cosmetics
+    # specials
     crown_svg = ''
     if crown and stage in ('baby','teen','prime'):
         crown_svg = f'''
@@ -585,13 +580,19 @@ def creature_svg(code):
     # hunger label only after baby
     show_hunger = (stage in ('baby','teen','prime'))
 
-    # dead look (remove box overlay entirely)
+    # dead look
     dead_overlay = ''
 
-    # Hide background for shuffle-only preview: EGGDEMO with ?nobg=1
+    # Shuffle-preview only: hide background and status text when &nobg=1 on EGGDEMO
     hide_bg = (str(code).upper() == "EGGDEMO") and (str(request.args.get("nobg", "")).lower() not in ("", "0", "false", "no"))
     bg_rect = "" if hide_bg else f'<rect width="512" height="512" fill="{bg}"/>'
     glow_circ = "" if hide_bg else f'<circle cx="256" cy="360" r="160" fill="url(#g0)" opacity=".14" filter="url(#soft)"/>'
+    status_block = "" if hide_bg else f'''
+  <g font-family="ui-monospace, Menlo, monospace" font-size="14" fill="#fff" opacity=".95">
+    <text x="16" y="28">Stage: {stage}</text>
+    <text x="16" y="48" opacity="{ '1' if show_hunger else '0'}">Hunger: {hunger}%</text>
+    <text x="16" y="68">Tick: {TICK_STEP_SECONDS}s  •  1d={DAY_SECS}s</text>
+  </g>'''
 
     svg = f"""<svg viewBox="0 0 512 512"
   xmlns="http://www.w3.org/2000/svg"
@@ -627,11 +628,7 @@ def creature_svg(code):
     </g>
     <rect x="-160" y="-200" width="320" height="360" fill="#000" opacity="{wither}"/>
   </g>
-  <g font-family="ui-monospace, Menlo, monospace" font-size="14" fill="#fff" opacity=".95">
-    <text x="16" y="28">Stage: {stage}</text>
-    <text x="16" y="48" opacity="{ '1' if show_hunger else '0'}">Hunger: {hunger}%</text>
-    <text x="16" y="68">Tick: {TICK_STEP_SECONDS}s  •  1d={DAY_SECS}s</text>
-  </g>
+{status_block}
   <a xlink:href="{url_for('creatures.habitat_page', code=st['code'], _external=True)}">
     <rect x="0" y="0" width="512" height="512" fill="transparent"/>
   </a>
