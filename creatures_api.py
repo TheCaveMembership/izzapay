@@ -27,15 +27,15 @@ CREATURE_ISSUER_G = os.getenv("NFT_ISSUER_PUBLIC", "").strip()
 DISTR_S  = os.getenv("NFT_DISTR_SECRET", "").strip()
 DISTR_G  = os.getenv("NFT_DISTR_PUBLIC", "").strip()
 
-# Test timeline: 1 day = 60 seconds
+# Test timeline: 1 day = 60 seconds (minutes-as-days)
 DAY_SECS          = 60
 TEST_CRACK_START  = 1 * DAY_SECS // 4   # 15s
 TEST_HATCH_DONE   = 1 * DAY_SECS // 2   # 30s
 TEST_TEENAGE      = 1 * DAY_SECS        # 60s
-TEST_PRIME        = 1 * DAY_SECS + 30   # 90s total “life” until prime
+TEST_PRIME        = 1 * DAY_SECS + 30   # 90s total to reach prime
 TICK_STEP_SECONDS = 3
 
-# Hunger growth per “day” (percent of bar per day) by stage
+# Hunger growth per “day” (% bar per day) by stage
 HUNGER_PER_DAY = {
     "egg":       0,
     "cracking":  0,
@@ -45,7 +45,7 @@ HUNGER_PER_DAY = {
     "dead":      0,
 }
 
-# Death after 3 missed days of feeding; revival requires 3 consecutive daily feeds
+# Death after 3 missed days; revival requires 3 consecutive daily feeds
 MISSED_DAYS_TO_DIE   = 3
 REVIVE_DAYS_REQUIRED = 3
 
@@ -134,7 +134,7 @@ def _active_pub_for_request() -> str | None:
         row = cx.execute("SELECT pub FROM user_wallets WHERE username=?", (u,)).fetchone()
         return (row["pub"] if row and row["pub"] else None)
 
-# ---------- lifecycle helpers ----------
+# ---------- lifecycle & rarity ----------
 def _clamp(v, lo, hi): return max(lo, min(hi, v))
 
 def _stage_from_elapsed(elapsed: int, hunger: int, existing_stage: str | None) -> str:
@@ -150,19 +150,12 @@ def _stage_from_elapsed(elapsed: int, hunger: int, existing_stage: str | None) -
 def _choose_palette(seed: str):
     s = (seed or "").lower()
     rnd = random.Random(seed)
-
-    # Supported palettes
     palettes = ["gold","violet","turquoise","rose","lime","sapphire","ember","obsidian","mint"]
-
-    # Optional explicit base via seed hints
     hinted = next((p for p in palettes if p in s), None)
     base = hinted or rnd.choice(palettes)
-
-    # Supported patterns (keep only the ones we render)
     pats = ["speckle","stripe","swirl","mosaic","metallic"]
     pat_hint = next((p for p in pats if p in s), None)
     pattern = pat_hint or rnd.choice(pats)
-
     return base, pattern
 
 def _apply_hunger_progress(row: sqlite3.Row) -> tuple[int, str, int, int, int]:
@@ -200,17 +193,128 @@ def _persist_progress_if_changed(code: str, hunger: int, stage: str, last_feed_a
                    (hunger, stage, last_feed_at, last_hunger_at, revive_progress, code, CREATURE_ISSUER_G))
         cx.commit()
 
+# ---------- rarity & combat math (no DB columns; computed live) ----------
+def _rarity_from(code_seed: str, hint: str = "") -> str:
+    h = (hint or "").lower()
+    if "leg" in h: return "legendary"
+    if "ep"  in h: return "epic"
+    if "rare" in h: return "rare"
+    if "un" in h: return "uncommon"
+    if "com" in h: return "common"
+    r = random.Random(code_seed + ":rar").random()
+    if r < 0.01:  return "legendary"
+    if r < 0.05:  return "epic"
+    if r < 0.14:  return "rare"
+    if r < 0.36:  return "uncommon"
+    return "common"
+
+def _stage_multiplier(stage: str) -> float:
+    return {
+        "egg": 0.2,
+        "cracking": 0.3,
+        "baby": 0.6,
+        "teen": 0.85,
+        "prime": 1.0,
+        "dead": 0.0
+    }.get(stage, 1.0)
+
+def _care_factor(now_i: int, last_feed_at: int) -> float:
+    # Fed within 1 day => best growth; within 2 days => medium; else lower
+    delta = max(0, now_i - int(last_feed_at or now_i))
+    days = delta / float(DAY_SECS)
+    if days <= 1.0:  return 1.0
+    if days <= 2.0:  return 0.8
+    return 0.6
+
+def _hunger_mod(hunger: int) -> float:
+    # More hunger reduces output; floor 0.5 so stats never collapse
+    return max(0.5, 1.0 - (int(hunger or 0) / 120.0))
+
+def _rarity_bases(rarity: str) -> tuple[int, int]:
+    # Base ranges by rarity (attack/defense start band, before growth)
+    # Keeps numbers readable on a 0..99 scale
+    table = {
+        "common":    (6,  10),
+        "uncommon":  (8,  12),
+        "rare":      (10, 14),
+        "epic":      (12, 16),
+        "legendary": (14, 18),
+    }
+    return table.get(rarity, (8, 12))
+
+def _rarity_cap_boost(rarity: str) -> int:
+    # Extra cap headroom by rarity (how high stats can climb with perfect care)
+    table = {
+        "common":    0,
+        "uncommon":  4,
+        "rare":      8,
+        "epic":      12,
+        "legendary": 16,
+    }
+    return table.get(rarity, 0)
+
+def _compute_stats_dict(st_row_like: dict, last_feed_at: int, rarity: str) -> dict:
+    """
+    Deterministic base by code + rarity.
+    Age growth increases for the first ~5 "days" (minutes), then caps.
+    Care factor (recent daily feed) and hunger mod adjust live output.
+    Stage caps output via a stage multiplier. No DB writes needed.
+    """
+    code   = st_row_like["code"]
+    stage  = st_row_like["stage"]
+    hunger = int(st_row_like["hunger"] or 0)
+    elapsed = int(st_row_like["elapsed"] or 0)
+    now_i = _now_i()
+
+    # Rarity-driven base band
+    lo, hi = _rarity_bases(rarity)
+    rnd = random.Random(code + ":stats")
+    base_atk = rnd.randint(lo, hi)
+    base_def = rnd.randint(lo, hi)
+
+    # Age growth, cap ~ 5 virtual “days”
+    age_days = elapsed / float(DAY_SECS)
+    growth = min(age_days / 5.0, 1.0)  # 0..1
+
+    # Rarity extends headroom
+    cap_bonus = _rarity_cap_boost(rarity)  # 0..16
+    # Max possible before stage/care/hunger multipliers
+    atk_raw_max = base_atk + int(round((base_atk + cap_bonus) * 0.8))
+    def_raw_max = base_def + int(round((base_def + cap_bonus) * 0.8))
+
+    # Interpolate toward max based on growth
+    atk_grown = base_atk + int(round((atk_raw_max - base_atk) * growth))
+    def_grown = base_def + int(round((def_raw_max - base_def) * growth))
+
+    # Multipliers
+    s_mult = _stage_multiplier(stage)     # stage cap
+    c_mult = _care_factor(now_i, last_feed_at)  # recent feeding
+    h_mult = _hunger_mod(hunger)          # hunger penalty
+
+    atk = int(math.floor(atk_grown * s_mult * c_mult * h_mult))
+    dfn = int(math.floor(def_grown * s_mult * c_mult * h_mult))
+
+    # Pleasant final bound
+    atk = int(_clamp(atk, 0, 99))
+    dfn = int(_clamp(dfn, 0, 99))
+    return {"attack": atk, "defense": dfn}
+
 # ---------- state compute ----------
 def _compute_state_dict(code: str) -> dict:
     # Demo egg supports ?skin for the preview
     if code.upper() == "EGGDEMO":
         skin = (request.args.get("skin") or "demo").strip()
         base, pat = _choose_palette(skin)
-        return {
+        # rarity for preview sparkles via hint
+        rarity = _rarity_from("EGGDEMO", skin)
+        st = {
             "code":"EGGDEMO","issuer":CREATURE_ISSUER_G or "GDEMOISS","owner_pub":None,
             "elapsed":0,"tick_seconds":TICK_STEP_SECONDS,"hunger":0,"stage":"egg",
-            "palette":base,"pattern":pat,"hatch_start":_now_i()
+            "palette":base,"pattern":pat,"hatch_start":_now_i(), "rarity": rarity
         }
+        stats = _compute_stats_dict(st, last_feed_at=_now_i(), rarity=rarity)
+        st.update(stats)
+        return st
 
     _ensure_tables()
     with _db() as cx:
@@ -223,13 +327,22 @@ def _compute_state_dict(code: str) -> dict:
     if (hunger != int(r["hunger"] or 0)) or (stage != (r["stage"] or "")) or (last_hunger_at != int(r["last_hunger_at"] or 0)):
         _persist_progress_if_changed(r["code"], hunger, stage, last_feed_at, last_hunger_at, revive_progress)
 
-    return {
+    st = {
         "code":r["code"],"issuer":r["issuer"],"owner_pub":r["owner_pub"],
         "elapsed":max(0, _now_i() - int(r["hatch_start"] or _now_i())),
         "tick_seconds":TICK_STEP_SECONDS,"hunger":int(hunger),
         "stage":stage,"palette":r["palette"],"pattern":r["pattern"],
         "hatch_start":int(r["hatch_start"] or _now_i())
     }
+
+    # rarity (no DB column) + live combat stats
+    skin_hint = ""  # only used for EGGDEMO previews
+    rarity = _rarity_from(st["code"], skin_hint)
+    st["rarity"] = rarity
+    stats = _compute_stats_dict(st, last_feed_at, rarity)
+    st.update(stats)
+
+    return st
 
 def _svg_headers(resp):
     resp.headers["Content-Type"] = "image/svg+xml"
@@ -248,7 +361,7 @@ def creatures_mint():
     j = request.get_json(silent=True) or {}
     buyer_pub = (j.get("buyer_pub") or "").strip()
     buyer_sec = (j.get("buyer_sec") or "").strip()
-    # NEW: optional client-selected skin to sync shuffle->mint
+    # optional client-selected skin to sync shuffle->mint
     client_skin = (j.get("skin") or "").strip()
 
     if not buyer_pub or not buyer_sec:
@@ -275,7 +388,6 @@ def creatures_mint():
     except Exception as e:
         abort(400, f"mint_failed:{e}")
 
-    # If client provided a skin, use it to pick palette/pattern (sync with preview)
     seed = client_skin if client_skin else f"{code}:{ts}"
     base, pat = _choose_palette(seed)
     uid = getattr(g, "user_id", None)
@@ -499,11 +611,12 @@ def creature_svg(code):
     base    = st["palette"]
     pattern = st["pattern"] or "speckle"
     elapsed = int(st["elapsed"])
+    rarity  = st.get("rarity", "common")
 
     # Optional preview seed hint for EGGDEMO (affects rarity showcase)
     skin_hint = (request.args.get("skin") or "") if str(code).upper() == "EGGDEMO" else ""
 
-    # colors (extended)
+    # colors
     bg = {
         "gold":"#130e00","violet":"#0e061a","turquoise":"#02151a","rose":"#1a0710","lime":"#0c1a06",
         "sapphire":"#06101e","ember":"#1a0b06","obsidian":"#0b0b10","mint":"#04130d"
@@ -517,7 +630,6 @@ def creature_svg(code):
         "sapphire":"#b9d9ff","ember":"#ffd2b8","obsidian":"#cfd6e4","mint":"#c5ffeb"
     }.get(base, "#e8f1ff")
 
-    # High-contrast ink for patterns
     def _pattern_contrast(b):
         return {
             "gold":"#48d4ff", "violet":"#89ff7a", "turquoise":"#ff7aa2", "rose":"#48d4ff", "lime":"#b784ff",
@@ -533,29 +645,13 @@ def creature_svg(code):
     elif stage == "prime":    egg_scale = "1.06"
     else:                     egg_scale = "1.0"
 
-    # Rarity helper (deterministic). Preview can force via seed hints.
-    def _rarity_from(code_seed: str, hint: str) -> str:
-        h = hint.lower()
-        if "leg" in h: return "legendary"
-        if "ep"  in h: return "epic"
-        if "rare" in h: return "rare"
-        if "un" in h: return "uncommon"
-        if "com" in h: return "common"
-        r = random.Random(code_seed + ":rar").random()
-        if r < 0.01:  return "legendary"
-        if r < 0.05:  return "epic"
-        if r < 0.14:  return "rare"
-        if r < 0.36:  return "uncommon"
-        return "common"
-
-    rarity = _rarity_from(st["code"], skin_hint)
-
+    # Add-on cosmetics
     rnd = random.Random(st["code"])
     crown  = (rnd.randint(1,3) == 1)
     flames = (rnd.randint(1,4) == 1)
     lasers = (rnd.randint(1,5) == 1)
 
-    # Pattern fragments (use pcol)
+    # Patterns
     pattern_svg = ""
     if pattern == "speckle":
         dots = []
@@ -579,7 +675,6 @@ def creature_svg(code):
     elif pattern == "metallic":
         pattern_svg = '<ellipse rx="95" ry="70" fill="url(#metal)"/>'
 
-    # Cosmetic add-ons
     crown_svg = ''
     if crown and stage in ('baby','teen','prime'):
         crown_svg = f'''
@@ -608,7 +703,7 @@ def creature_svg(code):
             </line>
           </g>'''
 
-    # Rarity-driven sparkles/shine (no DB changes; purely visual)
+    # Rarity-driven sparkle & halo layers (no DB)
     shine_defs = f'''
       <symbol id="twinkle">
         <polygon points="0,-3 0.8,-0.8 3,0 0.8,0.8 0,3 -0.8,0.8 -3,0 -0.8,-0.8" />
@@ -622,17 +717,16 @@ def creature_svg(code):
         <stop offset="0" stop-color="{glow}" stop-opacity=".35"/>
         <stop offset="1" stop-color="{bg}" stop-opacity="0"/>
       </radialGradient>
+      <filter id="haloBlur"><feGaussianBlur stdDeviation="3"/></filter>
     '''
 
-    # Build sparkle layers by rarity
     sparkle_svg = ''
     if rarity in ('uncommon','rare','epic','legendary'):
-        # base twinkles
         t = []
         rndt = random.Random(st["code"] + ":twk")
         n = 6 if rarity == 'uncommon' else 10 if rarity == 'rare' else 14 if rarity == 'epic' else 18
         for i in range(n):
-            x = rndt.randint(-70, 70); y = rndt.randint(-50, 50); d = rndt.randint(6,10)
+            x = rndt.randint(-70, 70); y = rndt.randint(-50, 50)
             dur = 1.0 + (i % 5) * 0.2
             t.append(f'''
               <g transform="translate({x},{y})">
@@ -643,29 +737,32 @@ def creature_svg(code):
         sparkle_svg += ''.join(t)
 
     if rarity in ('rare','epic','legendary'):
-        # rotating star ring
         sparkle_svg += f'''
           <g opacity=".35">
+            <circle r="120" fill="none" stroke="{glow}" stroke-width="2" opacity=".25"/>
             <g>
-              <circle r="120" fill="none" stroke="{glow}" stroke-width="2" opacity=".25"/>
-              <g>
-                <g>
-                  <use href="#twinkle" fill="{glow}">
-                    <animateTransform attributeName="transform" attributeType="XML" type="rotate"
-                      from="0 0 0" to="360 0 0" dur="6s" repeatCount="indefinite"/>
-                  </use>
-                </g>
-              </g>
+              <use href="#twinkle" fill="{glow}">
+                <animateTransform attributeName="transform" attributeType="XML" type="rotate"
+                  from="0 0 0" to="360 0 0" dur="6s" repeatCount="indefinite"/>
+              </use>
             </g>
           </g>'''
 
+    # HALO layer for EPIC and LEGENDARY only (requested)
+    halo_svg = ''
     if rarity in ('epic','legendary'):
-        # aurora behind egg
-        sparkle_svg += f'''
-          <ellipse rx="170" ry="120" fill="url(#aurora)" opacity=".45" filter="url(#soft)"/>'''
+        halo_svg = f'''
+          <g opacity="0.95">
+            <circle r="110" fill="none" stroke="{glow}" stroke-width="6" filter="url(#haloBlur)"/>
+            <circle r="110" fill="none" stroke="#ffffff" stroke-opacity=".35" stroke-width="2"/>
+            <path d="M-120,0 Q0,-30 120,0" fill="none" stroke="{glow}" stroke-width="3" opacity=".85">
+              <animate attributeName="opacity" values=".4;1;.4" dur="1.8s" repeatCount="indefinite"/>
+            </path>
+          </g>'''
 
+    if rarity in ('epic','legendary'):
+        sparkle_svg += f'<ellipse rx="170" ry="120" fill="url(#aurora)" opacity=".45" filter="url(#soft)"/>'
     if rarity == 'legendary':
-        # prism sweep across body
         sparkle_svg += f'''
           <rect x="-100" y="-80" width="200" height="160" fill="url(#sweep)" opacity=".7">
             <animate attributeName="x" from="-160" to="160" dur="2.2s" repeatCount="indefinite"/>
@@ -679,9 +776,9 @@ def creature_svg(code):
     glow_circ = "" if hide_bg else f'<circle cx="256" cy="360" r="160" fill="url(#g0)" opacity=".14" filter="url(#soft)"/>'
     status_block = "" if hide_bg else f'''
   <g font-family="ui-monospace, Menlo, monospace" font-size="14" fill="#fff" opacity=".95">
-    <text x="16" y="28">Stage: {stage}</text>
+    <text x="16" y="28">Stage: {stage} • Rarity: {rarity}</text>
     <text x="16" y="48" opacity="{ '1' if show_hunger else '0'}">Hunger: {hunger}%</text>
-    <text x="16" y="68">Tick: {TICK_STEP_SECONDS}s  •  1d={DAY_SECS}s</text>
+    <text x="16" y="68">ATK {st.get('attack',0)}  DEF {st.get('defense',0)}  •  1d={DAY_SECS}s</text>
   </g>'''
 
     svg = f"""<svg viewBox="0 0 512 512"
@@ -701,6 +798,7 @@ def creature_svg(code):
     <path d="M-60,0 L-20,-20 L0,10 L20,-15 L60,5" stroke="#2a2a2a" stroke-width="4" fill="none"
           opacity="{ '0.85' if stage=='cracking' else '0'}"/>
     <g opacity="{ '1' if stage in ('baby','teen','prime','dead') else '0'}">
+      {halo_svg}
       <ellipse rx="95" ry="70" fill="{body}" opacity=".95"/>
       {pattern_svg}
       {"".join([
