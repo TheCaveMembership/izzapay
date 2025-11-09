@@ -27,6 +27,20 @@ is_asset_anchored = false
 display_decimals = 7
 
 # ---------------------------------------------------------------------
+# IZZA CREATURES (dynamic NFT eggs / living NFTs)
+# ---------------------------------------------------------------------
+[[CURRENCIES]]
+code = "EGG12ABCD"
+issuer = "GDKS3KFAM5RBBTSYTFUEHHN7GYRPHV7A6K2BI44LL3QQKXCA6ODBCS57"
+name = "IZZA Creature Egg"
+desc = "Dynamic living NFT — evolves from egg to prime creature, powered by AI-SVG rendering."
+image = "https://izzapay.onrender.com/nftsvg/EGG12ABCD.svg"
+conditions = "NFT collection on Pi Testnet — each egg hatches and grows visually over time."
+status = "live"
+is_asset_anchored = false
+display_decimals = 0
+
+# ---------------------------------------------------------------------
 # ORGANIZATION INFO
 # ---------------------------------------------------------------------
 [DOCUMENTATION]
