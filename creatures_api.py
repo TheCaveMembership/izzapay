@@ -87,7 +87,6 @@ def _ensure_tables():
           revive_progress INTEGER DEFAULT 0,
           UNIQUE(code, issuer)
         )""")
-        # add columns if missing (safe migrations)
         for colstmt in [
             ("last_hunger_at",  "ALTER TABLE nft_creatures ADD COLUMN last_hunger_at INTEGER"),
             ("revive_progress", "ALTER TABLE nft_creatures ADD COLUMN revive_progress INTEGER DEFAULT 0")
@@ -95,7 +94,6 @@ def _ensure_tables():
             col, stmt = colstmt
             if not _has_column(cx, "nft_creatures", col):
                 cx.execute(stmt)
-        # indices
         cx.execute("CREATE INDEX IF NOT EXISTS idx_creat_owner ON nft_creatures(owner_pub)")
         cx.execute("CREATE INDEX IF NOT EXISTS idx_creat_stage ON nft_creatures(stage)")
         cx.execute("CREATE INDEX IF NOT EXISTS idx_creat_user  ON nft_creatures(user_id)")
@@ -153,10 +151,6 @@ def _choose_palette(seed: str):
     return rnd.choice(["gold","violet","turquoise","rose","lime"]), rnd.choice(["speckle","stripe","swirl","mosaic","metallic"])
 
 def _apply_hunger_progress(row: sqlite3.Row) -> tuple[int, str, int, int, int]:
-    """
-    Move hunger forward based on time passed since last_hunger_at (or hatch_start).
-    Also handles death (3 missed days) and returns updated fields.
-    """
     now = _now_i()
     hatch_start = int(row["hatch_start"] or now)
     last_feed_at = int(row["last_feed_at"] or hatch_start)
@@ -169,17 +163,14 @@ def _apply_hunger_progress(row: sqlite3.Row) -> tuple[int, str, int, int, int]:
     stage = _stage_from_elapsed(elapsed_total, hunger, stage_current)
 
     if stage == "dead":
-        # dead doesn't get hungrier; stays dead
         return hunger, "dead", last_feed_at, last_hunger_at, revive_progress
 
-    # advance hunger by days since last_hunger_at
     delta = max(0, now - last_hunger_at)
     days = delta / float(DAY_SECS)
     inc = HUNGER_PER_DAY.get(stage, 0) * days
     hunger = _clamp(int(round(hunger + inc)), 0, 100)
     last_hunger_at = now
 
-    # If not fed for 3 days total -> dead
     missed_secs = max(0, now - last_feed_at)
     if missed_secs >= MISSED_DAYS_TO_DIE * DAY_SECS:
         stage = "dead"
@@ -213,7 +204,6 @@ def _compute_state_dict(code: str) -> dict:
     if not r:
         abort(404, "not_found")
 
-    # progress hunger & stage, then persist
     hunger, stage, last_feed_at, last_hunger_at, revive_progress = _apply_hunger_progress(r)
     if (hunger != int(r["hunger"] or 0)) or (stage != (r["stage"] or "")) or (last_hunger_at != int(r["last_hunger_at"] or 0)):
         _persist_progress_if_changed(r["code"], hunger, stage, last_feed_at, last_hunger_at, revive_progress)
@@ -243,6 +233,9 @@ def creatures_mint():
     j = request.get_json(silent=True) or {}
     buyer_pub = (j.get("buyer_pub") or "").strip()
     buyer_sec = (j.get("buyer_sec") or "").strip()
+    # NEW: optional client-selected skin to sync shuffle->mint
+    client_skin = (j.get("skin") or "").strip()
+
     if not buyer_pub or not buyer_sec:
         abort(400, "wallet_required")
 
@@ -267,7 +260,8 @@ def creatures_mint():
     except Exception as e:
         abort(400, f"mint_failed:{e}")
 
-    seed = f"{code}:{ts}"
+    # If client provided a skin, use it to pick palette/pattern (sync with preview)
+    seed = client_skin if client_skin else f"{code}:{ts}"
     base, pat = _choose_palette(seed)
     uid = getattr(g, "user_id", None)
 
@@ -411,10 +405,6 @@ def creatures_auto_claim():
 
 @bp_creatures.post("/api/creatures/feed")
 def creatures_feed():
-    """
-    Normal: reduce hunger and refresh timers.
-    If dead: feeding counts toward revival. Must feed once per “day” for 3 days in a row.
-    """
     j = request.get_json(silent=True) or {}
     code = (j.get("code") or "").strip()
     owner = (j.get("owner_pub") or "").strip()
@@ -431,7 +421,6 @@ def creatures_feed():
         if not row:
             abort(404, "not_found")
 
-        # apply passive progress before feeding
         hunger, stage, last_feed_at, last_hunger_at, revive_progress = _apply_hunger_progress(row)
 
         if stage == "dead":
@@ -507,6 +496,17 @@ def creature_svg(code):
         "gold":"#ffe39a","violet":"#d7c0ff","turquoise":"#7fe6ff","rose":"#ffb6c8","lime":"#b4ffaf"
     }.get(base, "#e8f1ff")
 
+    # NEW: contrasting ink just for pattern strokes/fills
+    def _pattern_contrast(b):
+        return {
+            "gold":      "#48d4ff",  # turquoise
+            "violet":    "#89ff7a",  # lime
+            "turquoise": "#ff7aa2",  # rose
+            "rose":      "#48d4ff",  # turquoise
+            "lime":      "#b784ff",  # violet
+        }.get(b, "#e8f1ff")
+    pcol = _pattern_contrast(base)
+
     # scale by stage
     if stage == "egg":       egg_scale = "1.0"
     elif stage == "cracking": egg_scale = "1.02"
@@ -515,40 +515,38 @@ def creature_svg(code):
     elif stage == "prime":    egg_scale = "1.06"
     else:                     egg_scale = "1.0"
 
-    # “wither” blackout for starving prime OR dead — do not apply when dead
+    # wither masks only when starving in prime (not when dead)
     wither = "1" if ((elapsed >= TEST_PRIME and hunger >= 90) and stage != "dead") else "0"
 
-    # RARITY
     rnd = random.Random(st["code"])
     crown  = (rnd.randint(1,3) == 1)
     flames = (rnd.randint(1,4) == 1)
     lasers = (rnd.randint(1,5) == 1)
 
-    # Pattern fragments
+    # Pattern fragments (use pcol instead of glow)
     pattern_svg = ""
     if pattern == "speckle":
         dots = []
         rnd2 = random.Random(st["code"] + ":p0")
         for _ in range(20):
             x = rnd2.randint(-60, 60); y = rnd2.randint(-40, 40); r = rnd2.randint(2,4)
-            dots.append(f'<circle cx="{x}" cy="{y}" r="{r}" fill="{glow}" opacity=".25"/>')
+            dots.append(f'<circle cx="{x}" cy="{y}" r="{r}" fill="{pcol}" opacity=".25"/>')
         pattern_svg = "\n".join(dots)
     elif pattern == "stripe":
-        pattern_svg = '<g opacity=".25" stroke="{0}" stroke-width="6">'.format(glow) + \
+        pattern_svg = '<g opacity=".25" stroke="{0}" stroke-width="6">'.format(pcol) + \
                       ''.join([f'<line x1="{x}" y1="-60" x2="{x+40}" y2="60"/>' for x in range(-70,60,14)]) + '</g>'
     elif pattern == "swirl":
-        pattern_svg = f'<path d="M-60,0 C-20,-40,20,-40,60,0 C20,40,-20,40,-60,0" fill="none" stroke="{glow}" stroke-width="6" opacity=".25"/>'
+        pattern_svg = f'<path d="M-60,0 C-20,-40,20,-40,60,0 C20,40,-20,40,-60,0" fill="none" stroke="{pcol}" stroke-width="6" opacity=".25"/>'
     elif pattern == "mosaic":
         tiles = []
         rnd3 = random.Random(st["code"] + ":p1")
         for _ in range(18):
             x = rnd3.randint(-70, 50); y = rnd3.randint(-40, 30); w = rnd3.randint(8,16); h = rnd3.randint(8,14)
-            tiles.append(f'<rect x="{x}" y="{y}" width="{w}" height="{h}" fill="{glow}" opacity=".18"/>')
+            tiles.append(f'<rect x="{x}" y="{y}" width="{w}" height="{h}" fill="{pcol}" opacity=".18"/>')
         pattern_svg = "\n".join(tiles)
     elif pattern == "metallic":
         pattern_svg = '<ellipse rx="95" ry="70" fill="url(#metal)"/>'
 
-    # specials
     crown_svg = ''
     if crown and stage in ('baby','teen','prime'):
         crown_svg = f'''
@@ -577,13 +575,9 @@ def creature_svg(code):
             </line>
           </g>'''
 
-    # hunger label only after baby
     show_hunger = (stage in ('baby','teen','prime'))
 
-    # dead look
-    dead_overlay = ''
-
-    # Shuffle-preview only: hide background and status text when &nobg=1 on EGGDEMO
+    # Shuffle-preview only: hide bg/status when &nobg=1 on EGGDEMO (already added earlier)
     hide_bg = (str(code).upper() == "EGGDEMO") and (str(request.args.get("nobg", "")).lower() not in ("", "0", "false", "no"))
     bg_rect = "" if hide_bg else f'<rect width="512" height="512" fill="{bg}"/>'
     glow_circ = "" if hide_bg else f'<circle cx="256" cy="360" r="160" fill="url(#g0)" opacity=".14" filter="url(#soft)"/>'
@@ -606,22 +600,18 @@ def creature_svg(code):
   {bg_rect}
   {glow_circ}
   <g transform="translate(256,300) scale({egg_scale})">
-    <!-- egg shell -->
     <ellipse rx="120" ry="160" fill="url(#egg)" opacity="{ '1' if stage in ('egg','cracking') else '0'}"/>
     <path d="M-60,0 L-20,-20 L0,10 L20,-15 L60,5" stroke="#2a2a2a" stroke-width="4" fill="none"
           opacity="{ '0.85' if stage=='cracking' else '0'}"/>
-    <!-- creature body -->
     <g opacity="{ '1' if stage in ('baby','teen','prime','dead') else '0'}">
       <ellipse rx="95" ry="70" fill="{body}" opacity=".95"/>
       {pattern_svg}
-      <!-- eyes (swap to X when dead) -->
       {"".join([
         '<g opacity="1">' if stage != "dead" else '<g opacity="0">'
       ])}
         <circle cx="-18" cy="-8" r="6" fill="#180d00"/>
         <circle cx="18" cy="-8" r="6" fill="#180d00"/>
       </g>
-      {dead_overlay}
       {crown_svg}
       {flames_svg}
       {lasers_svg}
