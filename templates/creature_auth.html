@@ -1,0 +1,46 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>Authenticate — IZZA CREATURES</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <link rel="stylesheet" href="/static/themes.css">
+  <style>
+    body{background:#000;color:#e8f1ff;font-family:Inter,Arial,sans-serif;margin:0;text-align:center}
+    .wrap{max-width:1100px;margin:0 auto;padding:16px 16px 120px}
+    .topbar{display:flex;align-items:center;justify-content:center;padding:12px 0;border-bottom:1px solid #1d2540}
+    .btn{display:inline-flex;align-items:center;justify-content:center;padding:14px 18px;border-radius:14px;font-weight:700;text-decoration:none;
+         background:linear-gradient(180deg,#7a44ff,#b784ff);color:#fff;border:none}
+    h1{margin:16px 0 6px;font-size:clamp(26px,8.5vw,56px)}
+    p{color:#9fb0d6}
+  </style>
+  <script src="https://sdk.minepi.com/pi-sdk.js"></script>
+</head>
+<body>
+  <div class="wrap">
+    <div class="topbar"><a class="btn" href="/">BACK HOME</a></div>
+    <h1>SIGN IN WITH PI</h1>
+    <p>Authenticate to access IZZA CREATURES</p>
+    <div><button id="authBtn" class="btn">Authenticate with Pi</button></div>
+    <p id="msg" style="color:#9fb0d6"></p><div id="err" style="color:#ff9aa2;white-space:pre-wrap"></div>
+  </div>
+<script>
+(function(){
+  const sandbox = {{ 'true' if sandbox else 'false' }};
+  function init(){ try{ Pi.init({version:'2.0', sandbox:sandbox}); }catch(e){} }
+  init();
+  const msg=document.getElementById('msg'), err=document.getElementById('err');
+  document.getElementById('authBtn').addEventListener('click', async ()=>{
+    try{
+      const auth = await Pi.authenticate(['username'], function(){});
+      const form=document.createElement('form'); form.method='POST'; form.action='/auth/exchange';
+      const payload=document.createElement('input'); payload.type='hidden'; payload.name='payload';
+      payload.value=JSON.stringify({accessToken:auth.accessToken, user:auth.user}); form.appendChild(payload);
+      const next=document.createElement('input'); next.type='hidden'; next.name='next'; next.value='/creatures';
+      form.appendChild(next); document.body.appendChild(form); form.submit();
+    }catch(e){ err.textContent=e?.message||String(e); msg.textContent='Try again'; }
+  });
+})();
+</script>
+</body>
+</html>
