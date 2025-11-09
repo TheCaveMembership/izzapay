@@ -45,7 +45,7 @@
     .hint{font-size:12px;color:#9fb0d6;margin-top:6px;text-align:center}
 
     #liveSvg{
-      width:220px;height:220px;object-fit:contain;border-radius:12px;border:1px solid #223056;background:#0e1422
+      width:220px,height:220px;object-fit:contain;border-radius:12px;border:1px solid #223056;background:#0e1422
     }
 
     .modal{position:fixed;inset:0;background:rgba(0,0,0,.5);display:flex;align-items:center;justify-content:center}
@@ -54,7 +54,7 @@
     .modal-header{display:flex;align-items:center;justify-content:space-between;gap:10px}
     .modal-title{display:flex;align-items:center;gap:8px;font-weight:800}
     .close-btn{border:1px solid var(--line);border-radius:10px;background:#0b0f1f;padding:8px 10px;color:#fff;cursor:pointer}
-    .small-muted{font-size:12px;color:var(--muted")}
+    .small-muted{font-size:12px;color:var(--muted)}
     .blox{display:flex;flex-direction:column;gap:6px}
     .mono{font-family:ui-monospace,Menlo,Consolas,monospace}
     .success{color:#5ad49e}
@@ -67,7 +67,7 @@
     <div class="topbar">
       <a class="btn" href="/">BACK HOME</a>
       <button class="btn purple upper" id="openWallet">IZZA WALLET</button>
-      <!-- make Claims a link so it works without JS -->
+      <!-- You can hide this if you like; keep for fallback -->
       <a class="btn gold upper" id="openClaims" href="/token/auth?next=/token/izza">CLAIMS LIST</a>
     </div>
 
@@ -208,7 +208,7 @@
     return { ok:r.ok, status:r.status, json:j };
   }
 
-  // ---------- Username canonization ----------
+  // ---------- Username canonization (filled by server template) ----------
   const SRV_USER = {{ (username or '') | tojson }};
   function stripAt(s){ return (s||'').toString().trim().replace(/^@+/, ''); }
   const USER_CANON = (()=>{
@@ -250,7 +250,7 @@
   document.getElementById('mwSaveBtn').addEventListener('click', async ()=>{
     const active = await fetchActiveWallet(USER_CANON);
     const pub = active && active.pub || '';
-    if(!/^G[A-Z0-9]{55}$/.test(pub)){ alert('No active wallet is set yet, open the full wallet once, then return.'); return; }
+    if(!/^G[A-Z0-9]{55}$/.test(pub)){ alert('Open your IZZA wallet once to set an active wallet, then return.'); return; }
     const secret = (document.getElementById('mwSInput').value||'').trim();
     if(!/^S[A-Z0-9]{55}$/.test(secret)){ alert('Enter a valid S-key'); return; }
     const v = __readVault() || {}; v.pub = pub; v.sec = secret; __writeVault(v);
@@ -267,7 +267,7 @@
     refreshMyWalletModal();
   });
 
-  // ---------- Gate for mint, feed ----------
+  // ---------- Gate for mint / feed ----------
   async function ensureUserAndWalletGate(){
     const active = await fetchActiveWallet(USER_CANON);
     const pub = active && active.pub || '';
@@ -295,24 +295,67 @@
   }
   setInterval(refreshLive, 3000);
 
-  // ---------- Mint flow ----------
+  // ---------- Load latest on enter ----------
+  (async ()=>{
+    try{
+      const j = await fetch('/api/creatures/latest', {credentials:'include'}).then(r=>r.json());
+      if(j && j.latest && j.latest.code){
+        lastCode = j.latest.code;
+        lastIssuer = j.latest.issuer;
+        await refreshLive();
+      }
+    }catch(e){}
+    try{ await refreshMyWalletModal(); }catch{}
+  })();
+
+  // ---------- Carousel ----------
+  function fillTrack(){
+    track.innerHTML='';
+    const pad = 3;
+    for(let p=0;p<pad;p++) track.appendChild(cell(previews[p % previews.length]));
+    previews.forEach(src=> track.appendChild(cell(src)));
+    for(let p=0;p<pad;p++) track.appendChild(cell(previews[(p+5) % previews.length]));
+  }
+  fillTrack();
+
+  // ---------- Mint flow (with auto-claim) ----------
   mintBtn.addEventListener('click', async ()=>{
     mintMsg.textContent = '';
     const gate = await ensureUserAndWalletGate();
     if(!gate){ return; }
+
     await spinAndStop();
+
     try{
       const q = await fetch('/api/creatures/quote', {method:'POST'}).then(r=>r.json());
       if(!(q && q.ok)) throw new Error('quote_failed');
+
       const res = await fetch('/api/creatures/mint', {
         method:'POST',
         headers:{'Content-Type':'application/json'},
         body: JSON.stringify({ buyer_pub:gate.pub, buyer_sec:gate.sec })
       }).then(r=>r.json());
       if(!(res && res.ok)) throw new Error(res && res.error || 'mint_failed');
+
       lastCode = res.asset.code; lastIssuer = res.asset.issuer;
-      mintMsg.textContent = `Egg minted: ${lastCode}. Go to Claims to deliver it to your wallet.`;
-      refreshLive();
+
+      // auto-claim into IZZA wallet (no-op if route fails)
+      try{
+        const ac = await fetch('/api/creatures/auto-claim', {
+          method:'POST',
+          headers:{'Content-Type':'application/json'},
+          body: JSON.stringify({ code:lastCode, owner_pub:gate.pub })
+        }).then(r=>r.json());
+        if(ac && ac.ok){
+          mintMsg.textContent = `Egg minted and delivered to your IZZA wallet: ${lastCode}`;
+        }else{
+          mintMsg.textContent = `Egg minted: ${lastCode}. Open Claims to deliver to your wallet.`;
+        }
+      }catch{
+        mintMsg.textContent = `Egg minted: ${lastCode}. Open Claims to deliver to your wallet.`;
+      }
+
+      await refreshLive();
     }catch(e){
       console.error(e);
       mintMsg.textContent = 'Mint failed, please try again';
@@ -329,9 +372,6 @@
     });
     refreshLive();
   });
-
-  // ---------- Auto-populate wallet pub on load ----------
-  (async ()=>{ try{ await refreshMyWalletModal(); }catch{} })();
 
 })();
 </script>
