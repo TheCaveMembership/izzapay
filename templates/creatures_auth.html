@@ -6,41 +6,112 @@
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
   <link rel="stylesheet" href="/static/themes.css">
   <style>
-    body{background:#000;color:#e8f1ff;font-family:Inter,Arial,sans-serif;margin:0;text-align:center}
+    html,body{max-width:100%;overflow-x:hidden}
+    :root{
+      --bg:#000; --txt:#e8f1ff; --muted:#9fb0d6; --line:#1d2540;
+      --piPurple1:#7a44ff; --piPurple2:#b784ff; --ring:0 0 0 2px rgba(183,132,255,.28);
+      --gold1:#ffcf4d;
+    }
+    body{
+      background:#000;color:var(--txt);font-family:Inter,Arial,Helvetica,sans-serif;margin:0;text-align:center
+    }
     .wrap{max-width:1100px;margin:0 auto;padding:16px 16px 120px}
-    .topbar{display:flex;align-items:center;justify-content:center;padding:12px 0;border-bottom:1px solid #1d2540}
-    .btn{display:inline-flex;align-items:center;justify-content:center;padding:14px 18px;border-radius:14px;font-weight:700;text-decoration:none;
-         background:linear-gradient(180deg,#7a44ff,#b784ff);color:#fff;border:none}
-    h1{margin:16px 0 6px;font-size:clamp(26px,8.5vw,56px)}
-    p{color:#9fb0d6}
+    .topbar{
+      display:flex;align-items:center;justify-content:center;
+      padding:12px 0;position:sticky;top:0;z-index:50;
+      background:rgba(0,0,0,.9);backdrop-filter:blur(10px);
+      border-bottom:1px solid var(--line)
+    }
+    .btn{
+      display:inline-flex;align-items:center;justify-content:center;gap:8px;
+      padding:14px 18px;border-radius:14px;font-weight:700;letter-spacing:.2px;
+      cursor:pointer;text-decoration:none;border:1px solid transparent;
+      transition:.15s;font-size:clamp(14px,3.7vw,18px);white-space:nowrap
+    }
+    .btn.purple{background:linear-gradient(180deg,var(--piPurple1),var(--piPurple2));color:#fff}
+    .btn.ghost{background:transparent;color:#cfe0ff;border-color:#2a3550}
+    .btn:focus-visible{outline:none;box-shadow:var(--ring)}
+    h1{margin:16px 0 6px;font-size:clamp(26px,8.5vw,56px);line-height:1.05}
+    p{color:var(--muted);margin:8px 0 16px}
+    .cta-row{display:flex;justify-content:center;gap:12px;flex-wrap:wrap}
+    .err{color:#ff9aa2;white-space:pre-wrap}
   </style>
   <script src="https://sdk.minepi.com/pi-sdk.js"></script>
 </head>
 <body>
   <div class="wrap">
-    <div class="topbar"><a class="btn" href="/">BACK HOME</a></div>
-    <h1>SIGN IN WITH PI</h1>
-    <p>Authenticate to access IZZA CREATURES</p>
-    <div><button id="authBtn" class="btn">Authenticate with Pi</button></div>
-    <p id="msg" style="color:#9fb0d6"></p><div id="err" style="color:#ff9aa2;white-space:pre-wrap"></div>
+    <div class="topbar">
+      <a class="btn ghost upper" href="/">BACK HOME</a>
+    </div>
+
+    <section class="section" id="s-auth">
+      <h1 class="reveal">SIGN IN WITH PI</h1>
+
+      <p class="reveal">Authenticate to access <strong>IZZA CREATURES</strong>.</p>
+
+      <div class="cta-row reveal">
+        <button id="piCreaturesAuthBtn" class="btn purple">Authenticate with Pi</button>
+        <a class="btn ghost" href="/">Cancel</a>
+      </div>
+
+      <p id="msg" style="margin-top:10px;color:var(--muted)"></p>
+      <div id="err" class="err"></div>
+    </section>
   </div>
-<script>
-(function(){
-  const sandbox = {{ 'true' if sandbox else 'false' }};
-  function init(){ try{ Pi.init({version:'2.0', sandbox:sandbox}); }catch(e){} }
-  init();
-  const msg=document.getElementById('msg'), err=document.getElementById('err');
-  document.getElementById('authBtn').addEventListener('click', async ()=>{
-    try{
-      const auth = await Pi.authenticate(['username'], function(){});
-      const form=document.createElement('form'); form.method='POST'; form.action='/auth/exchange';
-      const payload=document.createElement('input'); payload.type='hidden'; payload.name='payload';
-      payload.value=JSON.stringify({accessToken:auth.accessToken, user:auth.user}); form.appendChild(payload);
-      const next=document.createElement('input'); next.type='hidden'; next.name='next'; next.value='/creatures';
-      form.appendChild(next); document.body.appendChild(form); form.submit();
-    }catch(e){ err.textContent=e?.message||String(e); msg.textContent='Try again'; }
-  });
-})();
-</script>
+
+  <script>
+  (function(){
+    const sandbox = {{ 'true' if sandbox else 'false' }};
+    const btn = document.getElementById('piCreaturesAuthBtn');
+    const msg = document.getElementById('msg');
+    const err = document.getElementById('err');
+
+    function setMsg(t){ if(msg) msg.textContent = t || ''; }
+    function setErr(t){ if(err) err.textContent = t || ''; }
+
+    function initPi(){
+      if (!window.Pi || !Pi.init) return false;
+      try { Pi.init({ version: "2.0", sandbox: sandbox }); return true; }
+      catch(e){ console.error("Pi.init failed", e); setErr("Pi.init failed: " + (e?.message || e)); return false; }
+    }
+    if (!initPi()) setMsg("Open in Pi Browser or refresh. Pi SDK is initializing.");
+
+    btn?.addEventListener('click', async function(){
+      setErr('');
+      if (!window.Pi || !Pi.authenticate) {
+        setMsg("Open this page inside Pi Browser so the Pi SDK can run.");
+        return;
+      }
+      setMsg("Requesting authorization…");
+
+      try{
+        const auth = await Pi.authenticate(['username'], function onIncompletePaymentFound(){});
+        try{ localStorage.setItem('piAuthUser', JSON.stringify(auth.user||null)); }catch{}
+        try{ localStorage.setItem('piAccessToken', auth.accessToken || ''); }catch{}
+
+        const form = document.createElement('form');
+        form.method = 'POST';
+        form.action = '/auth/exchange';
+
+        const payload = document.createElement('input');
+        payload.type='hidden'; payload.name='payload';
+        payload.value = JSON.stringify({ accessToken: auth.accessToken, user: auth.user });
+        form.appendChild(payload);
+
+        const next = document.createElement('input');
+        next.type='hidden'; next.name='next';
+        next.value = '/creatures';
+        form.appendChild(next);
+
+        document.body.appendChild(form);
+        form.submit();
+      }catch(e){
+        console.error(e);
+        setMsg("Authorization failed. Please try again.");
+        setErr(e?.message || String(e));
+      }
+    });
+  })();
+  </script>
 </body>
 </html>
