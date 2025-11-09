@@ -22,6 +22,7 @@ from emailer import send_email
 from payments import split_amounts
 from staking import bp_stake
 from nft_api import bp_nft
+from creatures_api import bp_creatures
 
 # 🟢 Wallet API blueprint import (needs to be at top-level)
 from wallet_api import bp as wallet_api_bp
@@ -152,6 +153,7 @@ app.register_blueprint(bp_faucet)
 app.register_blueprint(wallet_api_bp)
 app.register_blueprint(bp_stake)
 app.register_blueprint(bp_nft)
+app.register_blueprint(bp_creatures) 
 
 app.config.update(
     SESSION_COOKIE_SAMESITE="None",
@@ -347,7 +349,22 @@ def token_showcase():
         DEEP_LINK=deep_link,
         APP_BASE_URL=APP_BASE_URL
     )
+# ----------------- IZZA CREATURES PAGES -----------------
+@app.get("/creatures/auth")
+def creatures_auth_page():
+    """Pi auth gate for IZZA CREATURES."""
+    return render_template(
+        "creatures_auth.html",
+        sandbox=current_app.config.get("PI_SANDBOX", True)
+    )
 
+@app.get("/creatures")
+def creatures_main():
+    """Main IZZA CREATURES page (mint, view, feed, battle)."""
+    return render_template(
+        "creatures.html",
+        sandbox=current_app.config.get("PI_SANDBOX", True)
+    )
 # ----------------- PERSISTENT DATA ROOT -----------------
 DATA_ROOT   = os.getenv("DATA_ROOT", "/var/data/izzapay")
 os.makedirs(DATA_ROOT, exist_ok=True)
