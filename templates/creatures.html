@@ -36,7 +36,10 @@
       background:linear-gradient(90deg, rgba(0,0,0,.7), transparent 18%, transparent 82%, rgba(0,0,0,.7));
       z-index:2
     }
-    .slot .track{display:flex;gap:12px;align-items:center;transition:transform 1.2s cubic-bezier(.18,.9,.22,1);padding:12px}
+    .slot .track{display:flex;gap:12px;align-items:center;padding:12px;will-change:transform}
+    .slot .track.shuffling{animation: shuffle 0.8s cubic-bezier(.18,.9,.22,1)}
+    @keyframes shuffle { from { transform: translateX(0) } to { transform: translateX(var(--dx, -320px)) } }
+
     .slot .egg{
       width:clamp(92px, 20vw, 140px);height:clamp(92px, 20vw, 140px);
       display:flex;align-items:center;justify-content:center;background:#0e1422;border-radius:14px;border:1px solid #223056;
@@ -45,9 +48,7 @@
     .egg img{display:block;width:75%;height:75%;object-fit:contain;filter:drop-shadow(0 2px 4px rgba(0,0,0,.35))}
     .hint{font-size:12px;color:#9fb0d6;margin-top:6px;text-align:center}
 
-    #liveSvg{
-      width:220px; height:220px; object-fit:contain;border-radius:12px;border:1px solid #223056;background:#0e1422
-    }
+    #liveSvg{ width:220px; height:220px; object-fit:contain;border-radius:12px;border:1px solid #223056;background:#0e1422 }
 
     .modal{position:fixed;inset:0;background:rgba(0,0,0,.5);display:flex;align-items:center;justify-content:center}
     .modal[hidden]{display:none}
@@ -68,7 +69,6 @@
     <div class="topbar">
       <a class="btn" href="/">BACK HOME</a>
       <button class="btn purple upper" id="openWallet">IZZA WALLET</button>
-      <!-- You can hide this if you like; keep for fallback -->
       <a class="btn gold upper" id="openClaims" href="/token/auth?next=/token/izza">CLAIMS LIST</a>
     </div>
 
@@ -80,7 +80,7 @@
         <h3>Mint Egg</h3>
         <div class="slot"><div class="track" id="track"></div></div>
         <div class="row"><button class="btn purple" id="mintBtn">MINT EGG, 5 IZZA</button></div>
-        <div class="hint">The carousel spins like a slot, and stops on your egg</div>
+        <div class="hint">The carousel shuffles and stops on your egg</div>
         <div id="mintMsg" class="hint"></div>
       </div>
 
@@ -151,9 +151,7 @@
   const previews = Array.from({length:18}).map((_,i)=>`/nftsvg/EGGDEMO.svg?skin=${i}`);
   function cell(imgSrc){
     const d=document.createElement('div'); d.className='egg';
-    const img=new Image(); /* eager load fixes Safari paint with overflow:hidden */
-    img.decoding='async';
-    img.src = imgSrc;
+    const img=new Image(); img.decoding='async'; img.src = imgSrc;
     img.onerror = () => {
       img.remove();
       const fallback = document.createElement('div');
@@ -171,21 +169,23 @@
     for(let p=0;p<pad;p++) track.appendChild(cell(previews[(p+5) % previews.length]));
   }
   fillTrack();
-  function slotCellWidth(){
-    const first = track.querySelector('.egg');
-    if(!first) return 152;
-    const r = first.getBoundingClientRect();
-    return r.width + 12;
-  }
-  async function spinAndStop(){
-    const n = track.children.length;
-    const w = slotCellWidth();
-    const minIdx = 3;
-    const maxIdx = n - 4;
-    const idx = Math.floor(minIdx + Math.random()*(maxIdx - minIdx));
-    track.style.transitionTimingFunction = 'cubic-bezier(.18,.9,.22,1)';
-    track.style.transform = `translateX(-${(idx+0.2)*w}px)`;
-    return new Promise(res=>setTimeout(()=>{ track.style.transform = `translateX(-${idx*w}px)`; setTimeout(()=>res(idx), 1200); }, 50));
+
+  // super-simple shuffle animation that always "moves" a bit
+  function shuffleOnce(){
+    const dx = -(200 + Math.floor(Math.random()*600)); // -200..-800px
+    track.style.setProperty('--dx', dx + 'px');
+    track.classList.add('shuffling');
+    return new Promise(res=>{
+      track.addEventListener('animationend', ()=>{
+        track.classList.remove('shuffling');
+        // rotate children so it feels like a stop on new eggs
+        const firstEgg = track.querySelector('.egg');
+        const w = firstEgg ? firstEgg.getBoundingClientRect().width + 12 : 140;
+        const moves = Math.max(1, Math.round(Math.abs(dx)/w));
+        for(let i=0;i<moves;i++){ if(track.firstElementChild) track.appendChild(track.firstElementChild); }
+        res();
+      }, {once:true});
+    });
   }
 
   // ---------- Local wallet helpers ----------
@@ -210,7 +210,7 @@
     return { ok:r.ok, status:r.status, json:j };
   }
 
-  // ---------- Username canonization (filled by server template) ----------
+  // ---------- Username canonization (server-filled) ----------
   const SRV_USER = {{ (username or '') | tojson }};
   function stripAt(s){ return (s||'').toString().trim().replace(/^@+/, ''); }
   const USER_CANON = (()=>{
@@ -297,7 +297,7 @@
   }
   setInterval(refreshLive, 3000);
 
-  // ---------- Load latest on enter ----------
+  // ---------- Load latest on enter (tolerant of 404/empty) ----------
   (async ()=>{
     try{
       const j = await fetch('/api/creatures/latest', {credentials:'include'}).then(r=>r.json());
@@ -310,23 +310,13 @@
     try{ await refreshMyWalletModal(); }catch{}
   })();
 
-  // ---------- Carousel ----------
-  function fillTrack(){
-    track.innerHTML='';
-    const pad = 3;
-    for(let p=0;p<pad;p++) track.appendChild(cell(previews[p % previews.length]));
-    previews.forEach(src=> track.appendChild(cell(src)));
-    for(let p=0;p<pad;p++) track.appendChild(cell(previews[(p+5) % previews.length]));
-  }
-  fillTrack();
-
   // ---------- Mint flow (with auto-claim) ----------
   mintBtn.addEventListener('click', async ()=>{
     mintMsg.textContent = '';
     const gate = await ensureUserAndWalletGate();
     if(!gate){ return; }
 
-    await spinAndStop();
+    await shuffleOnce();
 
     try{
       const q = await fetch('/api/creatures/quote', {method:'POST'}).then(r=>r.json());
@@ -341,7 +331,7 @@
 
       lastCode = res.asset.code; lastIssuer = res.asset.issuer;
 
-      // auto-claim into IZZA wallet (no-op if route falls back)
+      // auto-claim into IZZA wallet (direct if possible, else claimable)
       try{
         const ac = await fetch('/api/creatures/auto-claim', {
           method:'POST',
