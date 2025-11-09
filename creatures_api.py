@@ -45,7 +45,7 @@ HUNGER_PER_DAY = {
     "dead":      0,
 }
 
-# Death after 3 missed days of feeding, revival requires 3 consecutive daily feeds
+# Death after 3 missed days of feeding; revival requires 3 consecutive daily feeds
 MISSED_DAYS_TO_DIE   = 3
 REVIVE_DAYS_REQUIRED = 3
 
@@ -77,8 +77,6 @@ def _ensure_tables():
           egg_seed TEXT,
           palette TEXT,
           pattern TEXT,
-          accent  TEXT,
-          material TEXT,
           hatch_start INTEGER,
           last_feed_at INTEGER,
           last_hunger_at INTEGER,
@@ -92,9 +90,7 @@ def _ensure_tables():
         # add columns if missing (safe migrations)
         for colstmt in [
             ("last_hunger_at",  "ALTER TABLE nft_creatures ADD COLUMN last_hunger_at INTEGER"),
-            ("revive_progress", "ALTER TABLE nft_creatures ADD COLUMN revive_progress INTEGER DEFAULT 0"),
-            ("accent",          "ALTER TABLE nft_creatures ADD COLUMN accent TEXT"),
-            ("material",        "ALTER TABLE nft_creatures ADD COLUMN material TEXT")
+            ("revive_progress", "ALTER TABLE nft_creatures ADD COLUMN revive_progress INTEGER DEFAULT 0")
         ]:
             col, stmt = colstmt
             if not _has_column(cx, "nft_creatures", col):
@@ -140,49 +136,6 @@ def _active_pub_for_request() -> str | None:
         row = cx.execute("SELECT pub FROM user_wallets WHERE username=?", (u,)).fetchone()
         return (row["pub"] if row and row["pub"] else None)
 
-# ---------- visuals dictionary ----------
-BASES = ["turquoise","violet","gold","rose","lime","cobalt","amber","mint","crimson","indigo"]
-ACCENTS = {
-    "turquoise": ["rose","gold","violet","amber"],
-    "violet":    ["lime","gold","turquoise","mint"],
-    "gold":      ["turquoise","rose","indigo","mint"],
-    "rose":      ["turquoise","gold","indigo","lime"],
-    "lime":      ["violet","crimson","indigo","rose"],
-    "cobalt":    ["amber","mint","rose","gold"],
-    "amber":     ["cobalt","turquoise","indigo","mint"],
-    "mint":      ["violet","crimson","gold","indigo"],
-    "crimson":   ["mint","turquoise","gold","lime"],
-    "indigo":    ["gold","rose","mint","turquoise"]
-}
-PATTERNS = ["speckle","stripe","swirl","mosaic","laser","metallic"]
-MATERIALS = ["matte","metallic","pearl","glass"]
-
-def _contrast_accent_for(base: str, seed=""):
-    choices = ACCENTS.get(base, [c for c in BASES if c != base])
-    rnd = random.Random(str(seed) + ":accent")
-    return rnd.choice(choices)
-
-def _choose_palette(seed: str):
-    rnd = random.Random(seed)
-    base = rnd.choice(BASES)
-    accent = _contrast_accent_for(base, seed)
-    pattern = rnd.choice(PATTERNS)
-    material = rnd.choice(MATERIALS)
-    return base, pattern, accent, material
-
-def _skin_to_palettepattern(skin_key: str):
-    presets = {
-        "1": ("turquoise","laser","rose","pearl"),
-        "2": ("violet","stripe","gold","metallic"),
-        "3": ("gold","speckle","turquoise","matte"),
-        "4": ("lime","mosaic","violet","glass"),
-        "5": ("rose","swirl","turquoise","metallic"),
-        "6": ("turquoise","laser","gold","metallic"),
-        "7": ("violet","stripe","lime","pearl"),
-        "8": ("gold","mosaic","rose","matte")
-    }
-    return presets.get(str(skin_key))
-
 # ---------- lifecycle helpers ----------
 def _clamp(v, lo, hi): return max(lo, min(hi, v))
 
@@ -195,7 +148,17 @@ def _stage_from_elapsed(elapsed: int, hunger: int, existing_stage: str | None) -
     if elapsed < TEST_PRIME:       return "teen"
     return "prime"
 
+def _choose_palette(seed: str):
+    rnd = random.Random(seed)
+    return rnd.choice(["gold","violet","turquoise","rose","lime"]), rnd.choice(["speckle","stripe","swirl","mosaic","metallic"])
+
 def _apply_hunger_progress(row: sqlite3.Row) -> tuple[int, str, int, int, int]:
+    """
+    Move hunger forward based on time passed since last_hunger_at (or hatch_start).
+    Also handles death (3 missed days) and returns updated fields.
+
+    returns: (hunger, stage, last_feed_at, last_hunger_at, revive_progress)
+    """
     now = _now_i()
     hatch_start = int(row["hatch_start"] or now)
     last_feed_at = int(row["last_feed_at"] or hatch_start)
@@ -208,14 +171,17 @@ def _apply_hunger_progress(row: sqlite3.Row) -> tuple[int, str, int, int, int]:
     stage = _stage_from_elapsed(elapsed_total, hunger, stage_current)
 
     if stage == "dead":
+        # dead doesn't get hungrier; stays dead
         return hunger, "dead", last_feed_at, last_hunger_at, revive_progress
 
+    # advance hunger by days since last_hunger_at
     delta = max(0, now - last_hunger_at)
     days = delta / float(DAY_SECS)
     inc = HUNGER_PER_DAY.get(stage, 0) * days
     hunger = _clamp(int(round(hunger + inc)), 0, 100)
     last_hunger_at = now
 
+    # If not fed for 3 days total -> dead
     missed_secs = max(0, now - last_feed_at)
     if missed_secs >= MISSED_DAYS_TO_DIE * DAY_SECS:
         stage = "dead"
@@ -232,17 +198,14 @@ def _persist_progress_if_changed(code: str, hunger: int, stage: str, last_feed_a
 
 # ---------- state compute ----------
 def _compute_state_dict(code: str) -> dict:
+    # Demo egg supports ?skin for the preview
     if code.upper() == "EGGDEMO":
-        skin = (request.args.get("skin") or "1").strip()
-        preset = _skin_to_palettepattern(skin)
-        if preset:
-            base, pat, accent, material = preset
-        else:
-            base, pat, accent, material = _choose_palette(skin)
+        skin = (request.args.get("skin") or "demo").strip()
+        base, pat = _choose_palette(skin)
         return {
             "code":"EGGDEMO","issuer":CREATURE_ISSUER_G or "GDEMOISS","owner_pub":None,
             "elapsed":0,"tick_seconds":TICK_STEP_SECONDS,"hunger":0,"stage":"egg",
-            "palette":base,"pattern":pat,"accent":accent,"material":material,"hatch_start":_now_i()
+            "palette":base,"pattern":pat,"hatch_start":_now_i()
         }
 
     _ensure_tables()
@@ -252,6 +215,7 @@ def _compute_state_dict(code: str) -> dict:
     if not r:
         abort(404, "not_found")
 
+    # progress hunger & stage, then persist
     hunger, stage, last_feed_at, last_hunger_at, revive_progress = _apply_hunger_progress(r)
     if (hunger != int(r["hunger"] or 0)) or (stage != (r["stage"] or "")) or (last_hunger_at != int(r["last_hunger_at"] or 0)):
         _persist_progress_if_changed(r["code"], hunger, stage, last_feed_at, last_hunger_at, revive_progress)
@@ -261,7 +225,6 @@ def _compute_state_dict(code: str) -> dict:
         "elapsed":max(0, _now_i() - int(r["hatch_start"] or _now_i())),
         "tick_seconds":TICK_STEP_SECONDS,"hunger":int(hunger),
         "stage":stage,"palette":r["palette"],"pattern":r["pattern"],
-        "accent":r["accent"],"material":r["material"],
         "hatch_start":int(r["hatch_start"] or _now_i())
     }
 
@@ -282,7 +245,6 @@ def creatures_mint():
     j = request.get_json(silent=True) or {}
     buyer_pub = (j.get("buyer_pub") or "").strip()
     buyer_sec = (j.get("buyer_sec") or "").strip()
-    skin_key  = (j.get("egg_skin") or "").strip()
     if not buyer_pub or not buyer_sec:
         abort(400, "wallet_required")
 
@@ -307,22 +269,16 @@ def creatures_mint():
     except Exception as e:
         abort(400, f"mint_failed:{e}")
 
-    preset = _skin_to_palettepattern(skin_key) if skin_key else None
-    if preset:
-        base, pat, accent, material = preset
-    else:
-        base, pat, accent, material = _choose_palette(f"{code}:{ts}")
-
+    seed = f"{code}:{ts}"
+    base, pat = _choose_palette(seed)
     uid = getattr(g, "user_id", None)
 
     with _db() as cx:
         cx.execute("""
-          INSERT INTO nft_creatures(code, issuer, owner_pub, egg_seed, palette, pattern, accent, material,
+          INSERT INTO nft_creatures(code, issuer, owner_pub, egg_seed, palette, pattern,
                                     hatch_start, last_feed_at, last_hunger_at, hunger, stage, meta_version, user_id, revive_progress)
-          VALUES(?,?,?,?,?,?, ?,?,
-                 ?,?,?,?, 'egg', 1, ?, 0)
-        """, (code, CREATURE_ISSUER_G, None, f"{code}:{ts}", base, pat, accent, material,
-              ts, ts, ts, 0, uid))
+          VALUES(?,?,?,?,?,?, ?,?,?,?,?,1,?, 0)
+        """, (code, CREATURE_ISSUER_G, None, seed, base, pat, ts, ts, ts, 0, "egg", uid))
         cx.execute("""
           INSERT INTO nft_collections(code, issuer, total_supply, decimals, status, created_at, updated_at)
           VALUES(?,?,?,?, 'draft', ?, ?)
@@ -477,21 +433,29 @@ def creatures_feed():
         if not row:
             abort(404, "not_found")
 
+        # apply passive progress before feeding
         hunger, stage, last_feed_at, last_hunger_at, revive_progress = _apply_hunger_progress(row)
 
         if stage == "dead":
+            # must feed once per day for 3 days consecutively
             last_feed = int(last_feed_at or row["hatch_start"] or now)
+            # if more than a day since last feed, advance the streak by 1; if less than a day, ignore duplicate same-day feeds
             days_since_last = (now - last_feed) / float(DAY_SECS)
             if days_since_last >= 1.0:
                 revive_progress += 1
                 last_feed_at = now
+            else:
+                # same "day" feed doesn't count a new step; keep progress
+                pass
+
             if revive_progress >= REVIVE_DAYS_REQUIRED:
                 stage = "baby"
                 hunger = 50
                 revive_progress = 0
-                last_hunger_at = now
                 last_feed_at = now
+                last_hunger_at = now
         else:
+            # alive: feeding lowers hunger
             hunger = _clamp(hunger - 50, 0, 100)
             last_feed_at = now
             last_hunger_at = now
@@ -514,7 +478,6 @@ def creatures_state(code):
 
 @bp_creatures.get("/nftmeta/<code>.json")
 def creatures_metadata(code):
-    st = _compute_state_dict(code)  # include palette, pattern, accent, material
     img_url = url_for("creatures.creature_svg", code=code, _external=True) + f"?nc={_now_i()}"
     ext_url = url_for("creatures.habitat_page", code=code, _external=True)
     meta = {
@@ -525,10 +488,7 @@ def creatures_metadata(code):
         "attributes": [
             {"trait_type": "Collection", "value": "IZZA CREATURES"},
             {"trait_type": "Stage", "value": "dynamic"},
-            {"trait_type": "Palette", "value": st.get("palette")},
-            {"trait_type": "Accent", "value": st.get("accent")},
-            {"trait_type": "Pattern", "value": st.get("pattern")},
-            {"trait_type": "Material", "value": st.get("material")}
+            {"trait_type": "Palette", "value": "dynamic"},
         ],
     }
     resp = make_response(json.dumps(meta), 200)
@@ -539,39 +499,24 @@ def creatures_metadata(code):
 @bp_creatures.get("/nftsvg/<code>.svg")
 def creature_svg(code):
     st = _compute_state_dict(code)
-    stage    = st["stage"]
-    hunger   = int(st["hunger"])
-    base     = st["palette"]
-    pattern  = st.get("pattern") or "speckle"
-    accent   = st.get("accent") or "gold"
-    material = st.get("material") or "matte"
-    elapsed  = int(st["elapsed"])
+    stage   = st["stage"]
+    hunger  = int(st["hunger"])
+    base    = st["palette"]
+    pattern = st["pattern"] or "speckle"
+    elapsed = int(st["elapsed"])
 
-    nobg = request.args.get("nobg", "0").strip() in ("1","true","yes")
+    # colors
+    bg = {
+        "gold":"#130e00","violet":"#0e061a","turquoise":"#02151a","rose":"#1a0710","lime":"#0c1a06"
+    }.get(base, "#0b0b10")
+    glow = {
+        "gold":"#ffcd60","violet":"#b784ff","turquoise":"#48d4ff","rose":"#ff7aa2","lime":"#89ff7a"
+    }.get(base, "#b784ff")
+    body = {
+        "gold":"#ffe39a","violet":"#d7c0ff","turquoise":"#7fe6ff","rose":"#ffb6c8","lime":"#b4ffaf"
+    }.get(base, "#e8f1ff")
 
-    bg_map = {
-        "gold":"#130e00","violet":"#0e061a","turquoise":"#02151a","rose":"#1a0710","lime":"#0c1a06",
-        "cobalt":"#060a1a","amber":"#1a1004","mint":"#041a10","crimson":"#1a0406","indigo":"#0a061a"
-    }
-    glow_map = {
-        "gold":"#ffcd60","violet":"#b784ff","turquoise":"#48d4ff","rose":"#ff7aa2","lime":"#89ff7a",
-        "cobalt":"#72a2ff","amber":"#ffc272","mint":"#7fffc2","crimson":"#ff6b7a","indigo":"#9d8bff"
-    }
-    body_map = {
-        "gold":"#ffe39a","violet":"#d7c0ff","turquoise":"#7fe6ff","rose":"#ffb6c8","lime":"#b4ffaf",
-        "cobalt":"#b6c9ff","amber":"#ffe0a8","mint":"#c0ffe6","crimson":"#ffb0b7","indigo":"#c9c2ff"
-    }
-    accent_map = glow_map
-
-    bg = bg_map.get(base, "#0b0b10")
-    glow = glow_map.get(base, "#b784ff")
-    body_color_alive = body_map.get(base, "#e8f1ff")
-    accent_color = accent_map.get(accent, "#ffcd60")
-
-    body_color_dead = "#9aa0a6"
-    eye_alive = "#180d00"
-    eye_dead  = "#ff3347"
-
+    # scale by stage
     if stage == "egg":       egg_scale = "1.0"
     elif stage == "cracking": egg_scale = "1.02"
     elif stage == "baby":     egg_scale = "0.9"
@@ -579,59 +524,60 @@ def creature_svg(code):
     elif stage == "prime":    egg_scale = "1.06"
     else:                     egg_scale = "1.0"
 
-    wither = "0"
+    # “wither” blackout for starving prime OR dead
+    wither = "1" if (stage == "dead" or (elapsed >= TEST_PRIME and hunger >= 90)) else "0"
 
-    crown  = (pattern in ("mosaic","stripe")) and (stage in ('baby','teen','prime'))
-    flames = (pattern in ("swirl","mosaic")) and (stage in ('teen','prime'))
-    lasers = (pattern == "laser") and (stage in ('teen','prime'))
+    # RARITY (higher odds for testing): crown 1/3, flames 1/4, lasers 1/5
+    rnd = random.Random(st["code"])
+    crown  = (rnd.randint(1,3) == 1)
+    flames = (rnd.randint(1,4) == 1)
+    lasers = (rnd.randint(1,5) == 1)
 
-    # pattern fragments (accent)
+    # Pattern fragments
     pattern_svg = ""
     if pattern == "speckle":
         dots = []
         rnd2 = random.Random(st["code"] + ":p0")
-        for _ in range(28):
+        for _ in range(20):
             x = rnd2.randint(-60, 60); y = rnd2.randint(-40, 40); r = rnd2.randint(2,4)
-            dots.append(f'<circle cx="{x}" cy="{y}" r="{r}" fill="{accent_color}" opacity=".25"/>')
+            dots.append(f'<circle cx="{x}" cy="{y}" r="{r}" fill="{glow}" opacity=".25"/>')
         pattern_svg = "\n".join(dots)
     elif pattern == "stripe":
-        pattern_svg = f'<g opacity=".25" stroke="{accent_color}" stroke-width="6">' + \
+        pattern_svg = '<g opacity=".25" stroke="{0}" stroke-width="6">'.format(glow) + \
                       ''.join([f'<line x1="{x}" y1="-60" x2="{x+40}" y2="60"/>' for x in range(-70,60,14)]) + '</g>'
     elif pattern == "swirl":
-        pattern_svg = f'<path d="M-60,0 C-20,-40,20,-40,60,0 C20,40,-20,40,-60,0" fill="none" stroke="{accent_color}" stroke-width="6" opacity=".25"/>'
+        pattern_svg = f'<path d="M-60,0 C-20,-40,20,-40,60,0 C20,40,-20,40,-60,0" fill="none" stroke="{glow}" stroke-width="6" opacity=".25"/>'
     elif pattern == "mosaic":
         tiles = []
         rnd3 = random.Random(st["code"] + ":p1")
-        for _ in range(22):
+        for _ in range(18):
             x = rnd3.randint(-70, 50); y = rnd3.randint(-40, 30); w = rnd3.randint(8,16); h = rnd3.randint(8,14)
-            tiles.append(f'<rect x="{x}" y="{y}" width="{w}" height="{h}" fill="{accent_color}" opacity=".18"/>')
+            tiles.append(f'<rect x="{x}" y="{y}" width="{w}" height="{h}" fill="{glow}" opacity=".18"/>')
         pattern_svg = "\n".join(tiles)
     elif pattern == "metallic":
-        # FIX: match old behavior and ensure the id exists
         pattern_svg = '<ellipse rx="95" ry="70" fill="url(#metal)"/>'
-    elif pattern == "laser":
-        pattern_svg = f'<ellipse rx="90" ry="65" fill="{body_color_alive}" opacity=".02"/>'
 
+    # special cosmetics
     crown_svg = ''
-    if crown:
+    if crown and stage in ('baby','teen','prime'):
         crown_svg = f'''
           <g transform="translate(0,-110)">
-            <polygon points="-28,0 0,-20 28,0 18,0 0,-10 -18,0" fill="{accent_color}" stroke="#000" stroke-width="3"/>
+            <polygon points="-28,0 0,-20 28,0 18,0 0,-10 -18,0" fill="{glow}" stroke="#000" stroke-width="3"/>
           </g>'''
 
     flames_svg = ''
-    if flames:
+    if flames and stage in ('teen','prime'):
         flames_svg = f'''
           <g opacity=".8">
-            <path d="M-70,80 C-60,40,-40,10,-20,-10 C-10,10,-5,30,0,50 C10,30,30,5,50,-10 C60,10,70,40,80,80 Z" fill="{accent_color}">
+            <path d="M-70,80 C-60,40,-40,10,-20,-10 C-10,10,-5,30,0,50 C10,30,30,5,50,-10 C60,10,70,40,80,80 Z" fill="{glow}">
               <animate attributeName="opacity" values="0.5;1;0.5" dur="1.2s" repeatCount="indefinite"/>
             </path>
           </g>'''
 
     lasers_svg = ''
-    if lasers:
+    if lasers and stage in ('teen','prime'):
         lasers_svg = f'''
-          <g stroke="{accent_color}" stroke-width="5" opacity=".85">
+          <g stroke="#ff3355" stroke-width="5" opacity=".85">
             <line x1="-18" y1="-8" x2="-180" y2="-120">
               <animate attributeName="opacity" values="0.2;1;0.2" dur="0.9s" repeatCount="indefinite"/>
             </line>
@@ -640,13 +586,16 @@ def creature_svg(code):
             </line>
           </g>'''
 
+    # hunger label only after baby
     show_hunger = (stage in ('baby','teen','prime'))
 
+    # dead look
     dead_overlay = ''
     if stage == "dead":
-        dead_overlay = f'''
+        dead_overlay = '''
           <g>
-            <g stroke="{eye_dead}" stroke-width="6">
+            <rect x="-160" y="-200" width="320" height="360" fill="#2a2a2a" opacity=".9"/>
+            <g stroke="#ff4d4d" stroke-width="6">
               <line x1="-30" y1="-20" x2="-10" y2="0"/>
               <line x1="-30" y1="0" x2="-10" y2="-20"/>
               <line x1="10" y1="-20" x2="30" y2="0"/>
@@ -654,90 +603,49 @@ def creature_svg(code):
             </g>
           </g>'''
 
-    metal_grad = "url(#metal_pearl)" if material in ("pearl","metallic") else "url(#metal_matte)"
-
-    svg_parts = []
-
-    # --- DEFS (includes restored id="metal") ---
-    defs = f"""
+    svg = f"""<svg viewBox="0 0 512 512"
+  xmlns="http://www.w3.org/2000/svg"
+  xmlns:xlink="http://www.w3.org/1999/xlink" width="512" height="512">
+  <defs>
     <radialGradient id="g0"><stop offset="0" stop-color="{glow}"/><stop offset="1" stop-color="{bg}"/></radialGradient>
-    <linearGradient id="egg_base"><stop offset="0" stop-color="#fff"/><stop offset="1" stop-color="{glow}"/></linearGradient>
-
-    <!-- Restored 'metal' for backward compatibility (old working file) -->
-    <linearGradient id="metal">
-      <stop offset="0" stop-color="#fff" stop-opacity=".8"/>
-      <stop offset="1" stop-color="{body_color_alive}" stop-opacity=".9"/>
-    </linearGradient>
-
-    <!-- New variants kept -->
-    <linearGradient id="metal_matte">
-      <stop offset="0" stop-color="#fff" stop-opacity=".35"/>
-      <stop offset="1" stop-color="{body_color_alive}" stop-opacity=".7"/>
-    </linearGradient>
-    <linearGradient id="metal_pearl">
-      <stop offset="0" stop-color="#fff" stop-opacity=".85"/>
-      <stop offset="1" stop-color="{body_color_alive}" stop-opacity=".95"/>
-    </linearGradient>
-
+    <linearGradient id="egg"><stop offset="0" stop-color="#fff"/><stop offset="1" stop-color="{glow}"/></linearGradient>
+    <linearGradient id="metal"><stop offset="0" stop-color="#fff" stop-opacity=".8"/><stop offset="1" stop-color="{body}" stop-opacity=".9"/></linearGradient>
     <filter id="soft"><feGaussianBlur stdDeviation="6"/></filter>
-    """
-    svg_parts.append(f'<svg viewBox="0 0 512 512" xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" width="512" height="512">')
-    svg_parts.append(f'<defs>{defs}</defs>')
-
-    if not nobg:
-        svg_parts.append(f'<rect width="512" height="512" fill="{bg}"/>')
-        svg_parts.append(f'<circle cx="256" cy="360" r="160" fill="url(#g0)" opacity=".14" filter="url(#soft)"/>')
-
-    svg_parts.append(f'<g transform="translate(256,300) scale({egg_scale})">')
-
-    egg_shell = f'<ellipse rx="120" ry="160" fill="url(#egg_base)" opacity="{ "1" if stage in ("egg","cracking") else "0"}"/>'
-    egg_lines = ''
-    if pattern in ("laser","stripe") and stage in ("egg","cracking"):
-        egg_lines = f'<g stroke="{accent_color}" opacity=".7" stroke-width="5">' \
-                    f'<line x1="-70" y1="-60" x2="70" y2="60"/><line x1="-70" y1="60" x2="70" y2="-60"/></g>'
-    crack = '<path d="M-60,0 L-20,-20 L0,10 L20,-15 L60,5" stroke="#2a2a2a" stroke-width="4" fill="none" opacity="{}"/>'.format("0.85" if stage=="cracking" else "0")
-    svg_parts.append(egg_shell + egg_lines + crack)
-
-    body_fill = body_color_dead if stage == "dead" else body_color_alive
-    creature_g_open = f'<g opacity="{ "1" if stage in ("baby","teen","prime","dead") else "0"}">'
-    creature_body = f'<ellipse rx="95" ry="70" fill="{body_fill}" opacity=".95"/>'
-    if material in ("metallic","pearl"):
-        creature_body = f'<ellipse rx="95" ry="70" fill="{metal_grad}" opacity=".98"/>'
-
-    svg_parts.append(creature_g_open)
-    svg_parts.append(creature_body)
-    svg_parts.append(pattern_svg)
-
-    if stage != "dead":
-        svg_parts.append(f'''
-          <g opacity="1">
-            <circle cx="-18" cy="-8" r="6" fill="{eye_alive}"/>
-            <circle cx="18" cy="-8" r="6" fill="{eye_alive}"/>
-          </g>''')
-    else:
-        svg_parts.append(dead_overlay)
-
-    svg_parts.append(crown_svg)
-    svg_parts.append(flames_svg)
-    svg_parts.append(lasers_svg)
-
-    svg_parts.append('</g>')
-
-    svg_parts.append(f'''
-      <g font-family="ui-monospace, Menlo, monospace" font-size="14" fill="#fff" opacity=".95">
-        <text x="16" y="28">Stage: {stage}</text>
-        <text x="16" y="48" opacity="{ '1' if show_hunger else '0'}">Hunger: {hunger}%</text>
-        <text x="16" y="68">Tick: {TICK_STEP_SECONDS}s, 1d={DAY_SECS}s</text>
-      </g>''')
-
-    svg_parts.append(f'''
-      <a xlink:href="{url_for('creatures.habitat_page', code=st['code'], _external=True)}">
-        <rect x="0" y="0" width="512" height="512" fill="transparent"/>
-      </a>
-    ''')
-
-    svg_parts.append('</svg>')
-    svg = "".join(svg_parts)
+  </defs>
+  <rect width="512" height="512" fill="{bg}"/>
+  <circle cx="256" cy="360" r="160" fill="url(#g0)" opacity=".14" filter="url(#soft)"/>
+  <g transform="translate(256,300) scale({egg_scale})">
+    <!-- egg shell -->
+    <ellipse rx="120" ry="160" fill="url(#egg)" opacity="{ '1' if stage in ('egg','cracking') else '0'}"/>
+    <path d="M-60,0 L-20,-20 L0,10 L20,-15 L60,5" stroke="#2a2a2a" stroke-width="4" fill="none"
+          opacity="{ '0.85' if stage=='cracking' else '0'}"/>
+    <!-- creature body -->
+    <g opacity="{ '1' if stage in ('baby','teen','prime','dead') else '0'}">
+      <ellipse rx="95" ry="70" fill="{body}" opacity=".95"/>
+      {pattern_svg}
+      <!-- eyes (swap to X when dead) -->
+      {"".join([
+        '<g opacity="1">' if stage != "dead" else '<g opacity="0">'
+      ])}
+        <circle cx="-18" cy="-8" r="6" fill="#180d00"/>
+        <circle cx="18" cy="-8" r="6" fill="#180d00"/>
+      </g>
+      {dead_overlay}
+      {crown_svg}
+      {flames_svg}
+      {lasers_svg}
+    </g>
+    <rect x="-160" y="-200" width="320" height="360" fill="#000" opacity="{wither}"/>
+  </g>
+  <g font-family="ui-monospace, Menlo, monospace" font-size="14" fill="#fff" opacity=".95">
+    <text x="16" y="28">Stage: {stage}</text>
+    <text x="16" y="48" opacity="{ '1' if show_hunger else '0'}">Hunger: {hunger}%</text>
+    <text x="16" y="68">Tick: {TICK_STEP_SECONDS}s  •  1d={DAY_SECS}s</text>
+  </g>
+  <a xlink:href="{url_for('creatures.habitat_page', code=st['code'], _external=True)}">
+    <rect x="0" y="0" width="512" height="512" fill="transparent"/>
+  </a>
+</svg>"""
     return _svg_headers(make_response(svg, 200))
 
 @bp_creatures.get("/creature/<code>")
