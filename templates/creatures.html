@@ -28,35 +28,36 @@
     .col{flex:1 1 320px;max-width:520px}
     .box h3{margin:4px 0 10px}
 
-    .slot{position:relative;overflow:hidden;border-radius:16px;border:1px solid #2a3550;background:var(--card)}
+    .slot{position:relative;overflow:hidden;border-radius:16px;border:1px solid #2a3550;background:var(--card);height:140px}
     .slot::before,
     .slot::after{
       content:"";position:absolute;inset:0;pointer-events:none;
-      background:linear-gradient(90deg, rgba(0,0,0,.7), transparent 18%, transparent 82%, rgba(0,0,0,.7));
-      z-index:2
+      background:linear-gradient(90deg, rgba(0,0,0,.7), transparent 18%, transparent 82%, rgba(0,0,0,.7));z-index:2
     }
-    .slot .track{display:flex;gap:12px;transition:transform 1.2s cubic-bezier(.18,.9,.22,1);padding:12px;will-change:transform}
-    .slot .egg{
-      width:clamp(92px, 20vw, 140px);height:clamp(92px, 20vw, 140px);
-      display:flex;align-items:center;justify-content:center;background:#0e1422;border-radius:14px;border:1px solid #223056;
-      box-shadow:0 2px 8px rgba(0,0,0,.25)
-    }
+    .slot .track{display:flex;gap:12px;transition:transform 1.2s cubic-bezier(.18,.9,.22,1);padding:12px}
+    .slot .egg{width:140px;height:140px;display:flex;align-items:center;justify-content:center;background:#0e1422;border-radius:14px;border:1px solid #223056;box-shadow:0 2px 8px rgba(0,0,0,.25)}
     .egg img{width:75%;height:75%;object-fit:contain;filter:drop-shadow(0 2px 4px rgba(0,0,0,.35))}
     .hint{font-size:12px;color:#9fb0d6;margin-top:6px;text-align:center}
 
-    #liveSvg{ width:220px; height:220px; object-fit:contain; border-radius:12px; border:1px solid #223056; background:#0e1422 }
+    #liveSvg{width:100%;aspect-ratio:16/12;object-fit:contain;border-radius:12px;border:1px solid #223056;background:#0e1422}
 
     .modal{position:fixed;inset:0;background:rgba(0,0,0,.5);display:flex;align-items:center;justify-content:center}
     .modal[hidden]{display:none}
-    .modal-card{background:var(--panel);border:1px solid var(--line);border-radius:14px;max-width:560px;width:94%;padding:14px}
+    .modal-card{background:var(--panel);border:1px solid var(--line);border-radius:14px;max-width:720px;width:94%;padding:14px}
     .modal-header{display:flex;align-items:center;justify-content:space-between;gap:10px}
     .modal-title{display:flex;align-items:center;gap:8px;font-weight:800}
     .close-btn{border:1px solid var(--line);border-radius:10px;background:#0b0f1f;padding:8px 10px;color:#fff;cursor:pointer}
-    .small-muted{font-size:12px;color:var(--muted)}
+    .small-muted{font-size:12px;color:var(--muted")}
     .blox{display:flex;flex-direction:column;gap:6px}
     .mono{font-family:ui-monospace,Menlo,Consolas,monospace}
     .success{color:#5ad49e}
     .warn{color:#ffb86b}
+
+    /* list grid */
+    #listGrid{display:grid;grid-template-columns:repeat(auto-fit,minmax(140px,1fr));gap:10px;margin-top:10px}
+    .cell{border:1px solid #223056;border-radius:12px;background:#0e1422;padding:8px;text-align:center}
+    .cell img{width:100%;aspect-ratio:1;object-fit:contain}
+    .cell small{display:block;color:#9fb0d6;margin-top:4px}
   </style>
   <script src="https://sdk.minepi.com/pi-sdk.js"></script>
 </head>
@@ -65,9 +66,7 @@
     <div class="topbar">
       <a class="btn" href="/">BACK HOME</a>
       <button class="btn purple upper" id="openWallet">IZZA WALLET</button>
-      <a class="btn" id="myCreaturesBtn" href="#" style="display:none">MY CREATURES</a>
-      <!-- Fallback claims link, still useful -->
-      <a class="btn gold upper" id="openClaims" href="/token/auth?next=/token/izza">CLAIMS LIST</a>
+      <button class="btn gold upper" id="openList">MY CREATURES</button>
     </div>
 
     <h1>IZZA CREATURES</h1>
@@ -84,12 +83,12 @@
 
       <div class="col box">
         <h3>My Latest Creature</h3>
-        <div id="liveWrap"><img id="liveSvg" alt="creature"></div>
+        <img id="liveSvg" alt="creature">
         <div class="row">
           <button class="btn" id="feedBtn">FEED</button>
           <a class="btn" id="openHabitat" target="_blank" rel="noopener">OPEN HABITAT</a>
         </div>
-        <div id="liveHint" class="hint"></div>
+        <div id="liveHint" class="hint">Mint an egg to see it here</div>
       </div>
     </div>
   </div>
@@ -112,21 +111,31 @@
         <div class="blox" style="margin-top:10px">
           <div class="small-muted">Active Wallet, public key</div>
           <div class="mono" id="mwPub">—</div>
-          <div class="small-muted">Need to set or switch your active wallet? Open the full wallet once below, then return here to save your S-key locally.</div>
+          <div class="small-muted">Save your S key locally on this device to mint and auto claim.</div>
         </div>
         <div class="blox" style="margin-top:10px">
-          <div class="small-muted">Local S-key status</div>
+          <div class="small-muted">Local S key status</div>
           <div id="mwSStatus">—</div>
-          <div class="row" style="margin-top:6px">
-            <input class="btn" style="flex:1;min-width:240px;text-align:left" id="mwSInput" placeholder="S... private key" autocomplete="off" spellcheck="false" autocapitalize="none">
-            <button class="btn purple" type="button" id="mwSaveBtn">Save S-key</button>
-            <button class="btn" type="button" id="mwForgetBtn">Forget</button>
-          </div>
-          <div class="small-muted">Your S-key is stored locally on this device only.</div>
         </div>
-        <div class="row" style="margin-top:12px;justify-content:flex-end">
+        <div class="row" style="margin-top:6px;justify-content:flex-end">
           <a class="btn gold" href="/token/auth?next=/token/izza">Open Full Wallet</a>
         </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- My creatures list modal -->
+  <div class="modal" id="listModal" role="dialog" aria-modal="true" aria-labelledby="listTitle" hidden>
+    <div class="modal-card">
+      <div class="modal-header">
+        <div class="modal-title">
+          <img src="/static/izzapay-mark.svg" alt="" style="width:22px;height:22px">
+          <span id="listTitle">My IZZA Creatures</span>
+        </div>
+        <button class="close-btn" type="button" id="closeListBtn">Close</button>
+      </div>
+      <div class="modal-body">
+        <div id="listGrid"></div>
       </div>
     </div>
   </div>
@@ -145,69 +154,49 @@
   const liveHint = document.getElementById('liveHint');
   const openHabitat = document.getElementById('openHabitat');
 
-  // ---------- Carousel previews (always render via EGGDEMO) ----------
+  // ---------- Carousel previews, now backed by a real route ----------
   const previews = Array.from({length:18}).map((_,i)=>`/nftsvg/EGGDEMO.svg?skin=${i}`);
   function cell(imgSrc){
     const d=document.createElement('div'); d.className='egg';
     const img=new Image(); img.loading='lazy'; img.decoding='async'; img.src = imgSrc;
-    img.onerror = () => {
-      img.remove();
-      const fallback = document.createElement('div');
-      fallback.innerHTML = '<svg viewBox="0 0 128 128" width="96" height="96" xmlns="http://www.w3.org/2000/svg"><defs><linearGradient id="g" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#b784ff"/><stop offset="1" stop-color="#7a44ff"/></linearGradient></defs><ellipse cx="64" cy="70" rx="40" ry="54" fill="url(#g)" stroke="#2b1e55" stroke-width="3"/><circle cx="64" cy="68" r="6" fill="#fff"/></svg>';
-      d.appendChild(fallback.firstChild);
-    };
-    d.appendChild(img);
-    return d;
+    d.appendChild(img); return d;
   }
   function fillTrack(){
-  track.innerHTML = '';
-  const pad = 3;
-
-  // left padding
-  for (let p = 0; p < pad; p++) {
-    track.appendChild(cell(previews[p % previews.length]));
+    track.innerHTML='';
+    const pad = 4;
+    for(let p=0;p<pad;p++) track.appendChild(cell(previews[p % previews.length]));
+    previews.forEach(src=> track.appendChild(cell(src)));
+    for(let p=0;p<pad;p++) track.appendChild(cell(previews[(p+5) % previews.length]));
   }
-
-  // main run
-  previews.forEach(src => {
-    track.appendChild(cell(src));
-  });
-
-  // right padding (FIX: use p < pad, not p < pad + p)
-  for (let p = 0; p < pad; p++) {
-    track.appendChild(cell(previews[(p + 5) % previews.length]));
-  }
-}
-fillTrack();
+  fillTrack();
   function slotCellWidth(){
     const first = track.querySelector('.egg');
     if(!first) return 152;
     const r = first.getBoundingClientRect();
     return r.width + 12;
   }
+  // simple ease, start slow, speed up, final brake
   async function spinAndStop(){
     const n = track.children.length;
     const w = slotCellWidth();
-    const minIdx = 3, maxIdx = n - 4;
+    const minIdx = 4, maxIdx = n - 5;
     const idx = Math.floor(minIdx + Math.random()*(maxIdx - minIdx));
-
-    // slow start then accelerate, then snap
-    track.style.transitionTimingFunction = 'cubic-bezier(.4,.0,.2,1)';
-    track.style.transitionDuration = '700ms';
-    track.style.transform = `translateX(-${(idx-1)*w}px)`;
-    await new Promise(r=>setTimeout(r, 300));
-    track.style.transitionDuration = '350ms';
-    track.style.transform = `translateX(-${(idx+0.2)*w}px)`;
-    await new Promise(r=>setTimeout(r, 360));
-    track.style.transitionDuration = '240ms';
+    // warm up
+    track.style.transition = 'transform .9s cubic-bezier(.45,.05,.55,.95)';
+    track.style.transform = `translateX(-${(idx-2)*w}px)`;
+    await new Promise(r=>setTimeout(r, 900));
+    // speed
+    track.style.transition = 'transform .5s linear';
+    track.style.transform = `translateX(-${(idx+3)*w}px)`;
+    await new Promise(r=>setTimeout(r, 500));
+    // brake to final
+    track.style.transition = 'transform 1.2s cubic-bezier(.18,.9,.22,1)';
     track.style.transform = `translateX(-${idx*w}px)`;
-    return new Promise(res=>setTimeout(()=>res(idx), 260));
+    return new Promise(res=>setTimeout(()=>res(idx), 1200));
   }
 
-  // ---------- Local wallet helpers ----------
+  // ---------- local vault ----------
   function __readVault(){ try{ const s=localStorage.getItem('izza_test_wallet'); return s?JSON.parse(s):null; }catch{return null} }
-  function __writeVault(j){ try{ localStorage.setItem('izza_test_wallet', JSON.stringify(j||{})); }catch{} }
-  function __forgetSecret(pub){ try{ const v=__readVault()||{}; if(v && v.pub===pub){ delete v.sec; __writeVault(v); } }catch{} }
   function getLocalSecret(pub){ try{ const v=__readVault(); if(!v) return ''; if(pub && v.pub!==pub) return ''; return v.sec||''; }catch{return ''} }
   function isLocalWallet(pub){ const v=__readVault(); return !!(v && v.pub===pub && /^S[A-Z0-9]{55}$/.test(v.sec||'')); }
 
@@ -217,41 +206,13 @@ fillTrack();
     if(!r.ok) return null;
     return r.json().catch(()=>null);
   }
-  async function linkActiveWallet(username, pub, secret){
-    const qs = username ? ('?u='+encodeURIComponent(username)) : '';
-    const body = { pub: String(pub||'').trim().toUpperCase() };
-    if(secret && /^S[A-Z0-9]{55}$/.test(secret)) body.secret = secret.trim();
-    const r = await fetch('/api/wallet/link'+qs, { method:'POST', headers:{'content-type':'application/json'}, body:JSON.stringify(body), credentials:'include' });
-    const j = await r.json().catch(()=>null);
-    return { ok:r.ok, status:r.status, json:j };
-  }
 
-  // ---------- Username canonization ----------
+  // ---------- username ----------
   const SRV_USER = {{ (username or '') | tojson }};
   function stripAt(s){ return (s||'').toString().trim().replace(/^@+/, ''); }
-  const USER_CANON = (()=>{
-    const fromSrv = stripAt(SRV_USER);
-    if(fromSrv) return fromSrv;
-    try{
-      const raw = localStorage.getItem('piAuthUser');
-      if(raw){ const j=JSON.parse(raw); if(j && j.username) return stripAt(j.username); }
-    }catch{}
-    try{
-      const uCanon = localStorage.getItem('izzaUserCanon');
-      if(uCanon) return stripAt(uCanon);
-      const u = localStorage.getItem('izzaUserU');
-      if(u) return stripAt(u);
-    }catch{}
-    return '';
-  })();
-  try{
-    if(USER_CANON){
-      localStorage.setItem('izzaUserCanon', USER_CANON);
-      localStorage.setItem('izzaUserU', USER_CANON.toLowerCase());
-    }
-  }catch{}
+  const USER_CANON = (()=>{ const s = stripAt(SRV_USER); return s || ''; })();
 
-  // ---------- Wallet modal wiring ----------
+  // ---------- wallet modal ----------
   function openMyWallet(){ document.getElementById('myWalletModal').removeAttribute('hidden'); refreshMyWalletModal(); }
   function closeMyWallet(){ document.getElementById('myWalletModal').setAttribute('hidden',''); }
   document.getElementById('openWallet').addEventListener('click', openMyWallet);
@@ -264,131 +225,130 @@ fillTrack();
     document.getElementById('mwPub').textContent = pub || '—';
     const has = pub && isLocalWallet(pub);
     document.getElementById('mwSStatus').innerHTML = has ? '<span class="success">Saved locally</span>' : '<span class="warn">Not saved</span>';
+  }
 
-    // wire "My Creatures" link once we know the pub
-    const myBtn = document.getElementById('myCreaturesBtn');
-    if(pub){
-      myBtn.href = '/creatures/mine?owner_pub=' + encodeURIComponent(pub);
-      myBtn.style.display = '';
+  // ---------- list modal ----------
+  function openList(){ document.getElementById('listModal').removeAttribute('hidden'); refreshList(); }
+  function closeList(){ document.getElementById('listModal').setAttribute('hidden',''); }
+  document.getElementById('openList').addEventListener('click', openList);
+  document.getElementById('closeListBtn').addEventListener('click', closeList);
+
+  async function refreshList(){
+    const active = await fetchActiveWallet(USER_CANON);
+    const pub = active && active.pub || '';
+    const grid = document.getElementById('listGrid');
+    grid.innerHTML = '';
+    if(!pub){ grid.textContent = 'Open wallet first.'; return; }
+    const j = await fetch('/api/creatures/list?pub='+encodeURIComponent(pub)).then(r=>r.json()).catch(()=>null);
+    if(!(j && j.ok)){ grid.textContent = 'No data.'; return; }
+    if(!j.items.length){ grid.textContent = 'You do not own any creatures yet.'; return; }
+    for(const it of j.items){
+      const url = `/nftmeta/${it.code}.json`;
+      try{
+        const meta = await fetch(url).then(r=>r.json());
+        const cell = document.createElement('div'); cell.className='cell';
+        const img = new Image(); img.src = (meta.image || '') + '&pulse=' + Date.now();
+        const a = document.createElement('a'); a.href = meta.external_url || '#'; a.target='_blank'; a.rel='noopener';
+        a.appendChild(img); cell.appendChild(a);
+        const sm = document.createElement('small'); sm.textContent = it.code;
+        cell.appendChild(sm);
+        grid.appendChild(cell);
+      }catch{}
     }
   }
 
-  document.getElementById('mwSaveBtn').addEventListener('click', async ()=>{
-    const active = await fetchActiveWallet(USER_CANON);
-    const pub = active && active.pub || '';
-    if(!/^G[A-Z0-9]{55}$/.test(pub)){ alert('Open your IZZA wallet once to set an active wallet, then return.'); return; }
-    const secret = (document.getElementById('mwSInput').value||'').trim();
-    if(!/^S[A-Z0-9]{55}$/.test(secret)){ alert('Enter a valid S-key'); return; }
-    const v = __readVault() || {}; v.pub = pub; v.sec = secret; __writeVault(v);
-    const res = await linkActiveWallet(USER_CANON, pub, secret);
-    if(!res.ok){ alert('Server link failed: ' + (res.json && res.json.error || res.status)); }
-    document.getElementById('mwSInput').value = '';
-    refreshMyWalletModal();
-    alert('S-key saved locally and linked.');
-  });
-  document.getElementById('mwForgetBtn').addEventListener('click', async ()=>{
-    const active = await fetchActiveWallet(USER_CANON);
-    const pub = active && active.pub || '';
-    if(pub) __forgetSecret(pub);
-    refreshMyWalletModal();
-  });
-
-  // ---------- Gate for mint / feed ----------
-  async function ensureUserAndWalletGate(){
-    const active = await fetchActiveWallet(USER_CANON);
-    const pub = active && active.pub || '';
-    if(!USER_CANON){ alert('Sign in with Pi first.'); return null; }
-    if(!pub){ alert('Open your IZZA wallet once to set an active wallet, then return.'); return null; }
-    if(!isLocalWallet(pub)){
-      openMyWallet();
-      alert('Save your S-key locally first.');
-      return null;
-    }
-    return { user:USER_CANON, pub, sec:getLocalSecret(pub) };
-  }
-
-  // ---------- Live preview ----------
+  // ---------- load latest on entry ----------
   let lastCode = null, lastIssuer = null;
-  async function refreshLive(){
-    if(!lastCode){ liveHint.textContent='Mint an egg to see it here'; return; }
+  async function loadLatest(){
+    const active = await fetchActiveWallet(USER_CANON);
+    const pub = active && active.pub || '';
+    if(!pub){ liveHint.textContent='Open your wallet once, then save S key locally.'; return; }
     try{
-      const meta = `/nftmeta/${lastCode}.json?nc=${Date.now()}`;
-      const j = await fetch(meta).then(r=>r.json());
-      liveSvg.src = (j.image || '') + '&pulse=' + Date.now();
-      openHabitat.href = j.external_url || '#';
-      liveHint.textContent = 'SVG refreshes every few seconds automatically';
-    }catch(e){}
-  }
-  setInterval(refreshLive, 3000);
-
-  // ---------- Load latest on enter ----------
-  (async ()=>{
-    try{
-      const j = await fetch('/api/creatures/latest', {credentials:'include'}).then(r=>r.json());
-      if(j && j.latest && j.latest.code){
-        lastCode = j.latest.code;
-        lastIssuer = j.latest.issuer;
-        await refreshLive();
+      const j = await fetch('/api/creatures/latest?pub='+encodeURIComponent(pub)).then(r=>r.json());
+      if(j && j.ok && j.asset){
+        lastCode = j.asset.code; lastIssuer = j.asset.issuer;
+        const meta = await fetch(`/nftmeta/${lastCode}.json?nc=${Date.now()}`).then(r=>r.json());
+        liveSvg.src = (meta.image || '') + '&pulse=' + Date.now();
+        openHabitat.href = meta.external_url || '#';
+        liveHint.textContent = 'SVG refreshes automatically';
+      }else{
+        liveHint.textContent = 'Mint an egg to see it here';
       }
-    }catch(e){}
-    try{ await refreshMyWalletModal(); }catch{}
-  })();
+    }catch{ liveHint.textContent = 'Mint an egg to see it here'; }
+  }
 
-  // ---------- Mint flow (with auto-claim) ----------
+  // ---------- live refresher ----------
+  function refreshLiveTick(){
+    if(!lastCode) return;
+    liveSvg.src = `/nftmeta/${lastCode}.json?nc=${Date.now()}`;  // this triggers fetch in onload below
+  }
+  setInterval(async ()=>{
+    if(!lastCode) return;
+    try{
+      const meta = await fetch(`/nftmeta/${lastCode}.json?nc=${Date.now()}`).then(r=>r.json());
+      liveSvg.src = (meta.image || '') + '&pulse=' + Date.now();
+    }catch{}
+  }, 3000);
+
+  // ---------- mint flow with auto claim ----------
+  async function ensureGate(){
+    const active = await fetchActiveWallet(USER_CANON);
+    const pub = active && active.pub || '';
+    if(!USER_CANON){ alert('Sign in with Pi first'); return null; }
+    if(!pub){ alert('Open your IZZA wallet once to set active wallet, then return'); return null; }
+    if(!isLocalWallet(pub)){ openMyWallet(); alert('Save your S key locally first'); return null; }
+    return { pub, sec: getLocalSecret(pub) };
+  }
+
   mintBtn.addEventListener('click', async ()=>{
     mintMsg.textContent = '';
-    const gate = await ensureUserAndWalletGate();
-    if(!gate){ return; }
-
+    const gate = await ensureGate(); if(!gate) return;
     await spinAndStop();
-
     try{
       const q = await fetch('/api/creatures/quote', {method:'POST'}).then(r=>r.json());
       if(!(q && q.ok)) throw new Error('quote_failed');
-
       const res = await fetch('/api/creatures/mint', {
-        method:'POST',
-        headers:{'Content-Type':'application/json'},
+        method:'POST', headers:{'Content-Type':'application/json'},
         body: JSON.stringify({ buyer_pub:gate.pub, buyer_sec:gate.sec })
       }).then(r=>r.json());
       if(!(res && res.ok)) throw new Error(res && res.error || 'mint_failed');
 
+      // auto claim into wallet
+      const ac = await fetch('/api/creatures/auto-claim', {
+        method:'POST', headers:{'Content-Type':'application/json'},
+        body: JSON.stringify({ code:res.asset.code, owner_pub:gate.pub, owner_sec:gate.sec })
+      }).then(r=>r.json());
+
       lastCode = res.asset.code; lastIssuer = res.asset.issuer;
 
-      // create a claimable balance to the active wallet and record ownership
-      try{
-        const ac = await fetch('/api/creatures/auto-claim', {
-          method:'POST',
-          headers:{'Content-Type':'application/json'},
-          body: JSON.stringify({ code:lastCode, owner_pub:gate.pub })
-        }).then(r=>r.json());
-        if(ac && ac.ok){
-          mintMsg.textContent = `Egg minted and delivered to your IZZA wallet: ${lastCode}`;
-        }else{
-          mintMsg.textContent = `Egg minted: ${lastCode}. Open Claims to deliver to your wallet.`;
-        }
-      }catch{
-        mintMsg.textContent = `Egg minted: ${lastCode}. Open Claims to deliver to your wallet.`;
-      }
-
-      await refreshLive();
+      // update UI
+      const meta = await fetch(`/nftmeta/${lastCode}.json?nc=${Date.now()}`).then(r=>r.json());
+      liveSvg.src = (meta.image || '') + '&pulse=' + Date.now();
+      openHabitat.href = meta.external_url || '#';
+      liveHint.textContent = 'Delivered to your IZZA wallet, visible in your NFTs';
+      mintMsg.textContent = `Egg minted and delivered to your IZZA wallet: ${lastCode}`;
+      refreshList();
     }catch(e){
       console.error(e);
       mintMsg.textContent = 'Mint failed, please try again';
     }
   });
 
-  // ---------- Feed ----------
+  // ---------- feed ----------
   document.getElementById('feedBtn').addEventListener('click', async ()=>{
     if(!lastCode){ mintMsg.textContent='Mint or select a creature first'; return; }
-    const gate = await ensureUserAndWalletGate(); if(!gate){ return; }
+    const gate = await ensureGate(); if(!gate) return;
     await fetch('/api/creatures/feed', {
       method:'POST', headers:{'Content-Type':'application/json'},
       body: JSON.stringify({ code:lastCode, owner_pub:gate.pub })
     });
-    refreshLive();
   });
 
+  // ---------- entry ----------
+  document.getElementById('openHabitat').href = '#';
+  document.getElementById('openWallet').addEventListener('click', refreshMyWalletModal);
+
+  (async ()=>{ try{ await refreshMyWalletModal(); await loadLatest(); }catch{} })();
 })();
 </script>
 </body>
