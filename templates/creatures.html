@@ -53,6 +53,17 @@
     .thumb{display:inline-flex;flex-direction:column;align-items:center;gap:6px;margin:6px;padding:8px;border:1px solid #223056;border-radius:12px;background:#0e1422}
     .thumb img{width:88px;height:88px;object-fit:contain}
     .thumb .cap{font-size:12px;color:#9fb0d6}
+
+    /* Minimal styling for tiny action buttons used by friends/notifications */
+    .mp-small{font:600 12px/1 Inter,Arial,sans-serif;padding:6px 8px;border-radius:10px;border:1px solid #2a3550;background:#162134;color:#cfe0ff;cursor:pointer}
+    .mp-small.ghost{background:#0f1522}
+    .mp-small.outline{background:#0f1522;border:1px solid #3a4a78}
+    .friend{display:flex;align-items:center;justify-content:space-between;gap:8px;padding:8px;border:1px solid #223056;border-radius:10px;background:#0e1422}
+    .friend .meta{font-size:12px;opacity:.85}
+    .friend .meta.active{color:#86f2c3}
+    .friend .meta.offline{color:#9fb0d6}
+    .searchbar{display:flex;gap:8px}
+    .searchbar input{flex:1;min-width:140px;padding:8px 10px;border-radius:10px;border:1px solid #2a3550;background:#0f1522;color:#e8f1ff}
   </style>
   <script src="https://sdk.minepi.com/pi-sdk.js"></script>
 </head>
@@ -152,7 +163,7 @@
   const openHabitat = document.getElementById('openHabitat');
   const eggPreview = document.getElementById('eggPreview');
 
-  // Curated preview seeds to ensure variety (rarity, palette, pattern)
+  // Curated preview seeds to ensure variety
   const previewSkins = [
     "LEG-sapphire-stripe",
     "EP-ember-metallic",
@@ -165,7 +176,6 @@
   ];
 
   function loadEggSkin(seed){
-    // Preview without background/status, but WITH rarity sparkles via seed hints
     eggPreview.src = `/nftsvg/EGGDEMO.svg?skin=${encodeURIComponent(seed)}&nobg=1&nc=${Date.now()}`;
   }
   loadEggSkin(previewSkins[0]);
@@ -396,6 +406,424 @@
     window.scrollTo({top: myBox.offsetTop - 12, behavior:'smooth'});
   });
 
+})();
+</script>
+
+<!-- ========= Global Friends + Notifications overlay (city-style, battles removed) ========= -->
+<script>
+(function(){
+  // Config matches your MP client
+  const CFG = {
+    base: (window.__MP_BASE__ || '/izza-game/api/mp'),
+    ws:   (window.__MP_WS__   || '/izza-game/api/mp/ws'),
+    searchDebounceMs: 250,
+  };
+  const TOK = (window.__IZZA_T__ || '').toString();
+  const withTok = (p) => TOK ? p + (p.includes('?') ? '&' : '?') + 't=' + encodeURIComponent(TOK) : p;
+
+  // helpers
+  async function jget(p){
+    const r = await fetch(withTok(CFG.base+p), {credentials:'include'});
+    if(!r.ok) throw new Error(r.status+' '+r.statusText);
+    return r.json();
+  }
+  async function jpost(p,b){
+    const r = await fetch(withTok(CFG.base+p),{
+      method:'POST', credentials:'include',
+      headers:{'Content-Type':'application/json'},
+      body:JSON.stringify(b||{})
+    });
+    if(!r.ok) throw new Error(r.status+' '+r.statusText);
+    return r.json();
+  }
+  const debounced=(fn,ms)=>{ let t=null,a=null; return (...args)=>{a=args; clearTimeout(t); t=setTimeout(()=>fn(...a),ms);}};
+
+  // state
+  let me=null, friends=[], ws=null, wsReady=false;
+  let ui = { bell:null, badge:null, dd:null, friendsBtn:null, friendsPop:null, friendsBody:null,
+             searchInput:null, searchBtn:null, searchStatus:null };
+  let notifications = { unread:0, items:[] };
+
+  // presence normalization, same rules
+  const ACTIVE_WINDOW_MS = 30_000;
+  const ACTIVE_WORLDS    = new Set(['1','2','3','4']);
+  function normalizeActive(v,lastSeen,world){
+    if (world != null && !ACTIVE_WORLDS.has(String(world))) return false;
+    if (v===true || v===1){
+      if (typeof lastSeen==='number' && isFinite(lastSeen)){
+        return (Date.now()-lastSeen) <= ACTIVE_WINDOW_MS;
+      }
+      return true;
+    }
+    if (typeof lastSeen==='number' && isFinite(lastSeen)){
+      return (Date.now()-lastSeen) <= ACTIVE_WINDOW_MS;
+    }
+    return false;
+  }
+
+  const isFriend = (name)=> !!friends.find(f=> (f.username||'').toLowerCase() === (name||'').toLowerCase());
+
+  async function loadMe(){ me = await jget('/me').catch(()=>null); return me; }
+  async function loadFriends(){
+    const res = await jget('/friends/list').catch(()=>({friends:[]}));
+    friends = (res.friends||[]).map(f => ({
+      ...f,
+      active: normalizeActive(f.active ?? f.status ?? f.online, f.lastSeen ?? f.last_seen, f.world ?? f.w)
+    }));
+    renderFriends();
+  }
+
+  async function searchPlayers(q){
+    const res = await jget('/players/search?q='+encodeURIComponent(q||'')).catch(()=>({users:[]}));
+    return (res.users||[]).map(u => ({
+      username:u.username,
+      active: normalizeActive(u.active ?? u.status ?? u.online, u.lastSeen ?? u.last_seen, u.world ?? u.w)
+    }));
+  }
+
+  // ---------- UI (bell + dropdown) ----------
+  function ensureBell(){
+    if(ui.bell && ui.badge && ui.dd) return;
+
+    const bell = document.createElement('button');
+    bell.id = 'mpNotifBell';
+    bell.title = 'Notifications';
+    bell.textContent = '🔔';
+    Object.assign(bell.style, {
+      position:'fixed', right:'14px', top:'56px', zIndex:1011,
+      width:'28px', height:'28px', borderRadius:'16px',
+      background:'#162134', color:'#cfe0ff',
+      border:'1px solid #2a3550', display:'flex', alignItems:'center', justifyContent:'center',
+      boxShadow:'0 2px 8px rgba(0,0,0,.25)'
+    });
+    bell.addEventListener('click', toggleNotifDropdown);
+    document.body.appendChild(bell);
+
+    const badge = document.createElement('span');
+    badge.id='mpNotifBadge';
+    Object.assign(badge.style, {
+      position:'fixed', right:'6px', top:'48px', zIndex:1012,
+      minWidth:'14px', height:'14px', borderRadius:'7px',
+      background:'#e11d48', color:'#fff', fontSize:'10px',
+      display:'none', alignItems:'center', justifyContent:'center',
+      padding:'0 4px', lineHeight:'14px'
+    });
+    document.body.appendChild(badge);
+
+    const dd = document.createElement('div');
+    dd.id='mpNotifDropdown';
+    Object.assign(dd.style, {
+      position:'fixed', right:'10px', top:'90px', zIndex:1012,
+      background:'#0f1522', color:'#e8eef7',
+      border:'1px solid #2a3550', borderRadius:'12px',
+      minWidth:'280px', maxWidth:'92vw', maxHeight:'300px', overflow:'auto',
+      display:'none', boxShadow:'0 10px 24px rgba(0,0,0,.45)'
+    });
+    document.body.appendChild(dd);
+
+    ui.bell=bell; ui.badge=badge; ui.dd=dd;
+  }
+  function setUnread(n){
+    notifications.unread = Math.max(0, n|0);
+    ensureBell();
+    if(notifications.unread>0){
+      ui.badge.style.display='flex';
+      ui.badge.textContent = String(notifications.unread);
+      ui.bell.style.background = '#2b1720';
+      ui.bell.style.borderColor = '#7d223a';
+      ui.bell.style.color = '#ffd7df';
+    }else{
+      ui.badge.style.display='none';
+      ui.bell.style.background = '#162134';
+      ui.bell.style.borderColor = '#2a3550';
+      ui.bell.style.color = '#cfe0ff';
+    }
+  }
+  function addNotification(n){
+    notifications.items.unshift(n);
+    setUnread(notifications.unread+1);
+    if(ui.dd && ui.dd.style.display!=='none'){ renderNotifDropdown(); markAllNotificationsRead(); }
+  }
+  function removeNotification(id){
+    notifications.items = notifications.items.filter(x=>x.id!==id);
+    renderNotifDropdown();
+  }
+  function markAllNotificationsRead(){ setUnread(0); }
+  function toggleNotifDropdown(){
+    ensureBell();
+    const vis = (ui.dd.style.display!=='none');
+    ui.dd.style.display = vis ? 'none' : 'block';
+    if(!vis){ renderNotifDropdown(); markAllNotificationsRead(); }
+  }
+  function renderNotifDropdown(){
+    const host = ui.dd; if(!host) return;
+    host.innerHTML = '';
+    const header = document.createElement('div');
+    header.textContent='Notifications';
+    header.style.cssText='padding:10px 12px;font-weight:700;border-bottom:1px solid #24324e';
+    host.appendChild(header);
+
+    if(!notifications.items.length){
+      const empty=document.createElement('div');
+      empty.style.cssText='padding:10px;opacity:.8;';
+      empty.textContent='No notifications';
+      host.appendChild(empty);
+      return;
+    }
+
+    notifications.items.forEach(n=>{
+      const row = document.createElement('div');
+      row.style.cssText='display:flex;align-items:center;justify-content:space-between;gap:8px;padding:10px 12px;border-bottom:1px solid #18233a;';
+      const label=document.createElement('div');
+      label.style.cssText='font-size:13px;line-height:1.3;';
+
+      if(n.type==='friend'){
+        label.textContent = `${n.from} sent you a friend request`;
+        const actions=document.createElement('div'); actions.style.cssText='display:flex;gap:6px;';
+        const accept=document.createElement('button'); accept.className='mp-small'; accept.textContent='Accept';
+        accept.addEventListener('click', async ()=>{
+          try{
+            await jpost('/friends/accept', { requestId:n.id, from:n.from, username:n.from });
+            await loadFriends();
+            removeNotification(n.id);
+          }catch(e){}
+        });
+        const decline=document.createElement('button'); decline.className='mp-small ghost'; decline.textContent='Decline';
+        decline.addEventListener('click', async ()=>{
+          try{ await jpost('/friends/decline', { requestId:n.id, from:n.from, username:n.from }); }catch(e){}
+          removeNotification(n.id);
+        });
+        actions.appendChild(accept); actions.appendChild(decline);
+        row.appendChild(label); row.appendChild(actions);
+      }else if(n.type==='battle'){
+        label.textContent = `${n.from} invited you${n.mode?(' ('+n.mode+')'):''}`;
+        const actions=document.createElement('div'); actions.style.cssText='display:flex;gap:6px;';
+        const accept=document.createElement('button'); accept.className='mp-small'; accept.textContent='Accept';
+        accept.addEventListener('click', async ()=>{
+          try{ await jpost('/lobby/accept', { inviteId:n.id, from:n.from }); }catch(e){}
+          removeNotification(n.id);
+        });
+        const decline=document.createElement('button'); decline.className='mp-small ghost'; decline.textContent='Decline';
+        decline.addEventListener('click', async ()=>{
+          try{ await jpost('/lobby/decline', { inviteId:n.id, from:n.from }); }catch(e){}
+          removeNotification(n.id);
+        });
+        actions.appendChild(accept); actions.appendChild(decline);
+        row.appendChild(label); row.appendChild(actions);
+      }else if(n.type==='creature'){
+        // future creature battle invites
+        label.textContent = `${n.from} challenged you to a Creature battle`;
+        const actions=document.createElement('div'); actions.style.cssText='display:flex;gap:6px;';
+        const accept=document.createElement('button'); accept.className='mp-small'; accept.textContent='Accept';
+        accept.addEventListener('click', async ()=>{
+          // wire this when the creatures battle endpoint is ready
+          // await jpost('/creatures/battle/accept', { inviteId:n.id, from:n.from });
+          removeNotification(n.id);
+        });
+        const decline=document.createElement('button'); decline.className='mp-small ghost'; decline.textContent='Decline';
+        decline.addEventListener('click', async ()=>{
+          // await jpost('/creatures/battle/decline', { inviteId:n.id, from:n.from });
+          removeNotification(n.id);
+        });
+        actions.appendChild(accept); actions.appendChild(decline);
+        row.appendChild(label); row.appendChild(actions);
+      }else{
+        label.textContent='Notification';
+        row.appendChild(label);
+      }
+
+      host.appendChild(row);
+    });
+  }
+
+  // ---------- Friends button + popup (with Search All Players) ----------
+  function ensureFriendsBtn(){
+    if(ui.friendsBtn) return;
+    const btn = document.createElement('button');
+    btn.id='mpFriendsToggleGlobal';
+    btn.title='Friends';
+    btn.textContent='Friends';
+    Object.assign(btn.style, {
+      position:'fixed', right:'14px', top:'96px', zIndex:1011,
+      height:'34px', padding:'0 12px', borderRadius:'18px',
+      background:'#162134', color:'#cfe0ff',
+      border:'1px solid #2a3550', display:'flex', alignItems:'center', justifyContent:'center',
+      boxShadow:'0 2px 8px rgba(0,0,0,.25)'
+    });
+    btn.addEventListener('click', toggleFriendsPopup);
+    document.body.appendChild(btn);
+    ui.friendsBtn = btn;
+  }
+
+  function ensureFriendsPopup(){
+    if(ui.friendsPop) return;
+    const pop = document.createElement('div');
+    pop.id='mpFriendsPopup';
+    Object.assign(pop.style, {
+      position:'fixed', right:'14px', top:'140px', zIndex:1012,
+      background:'#0f1522', border:'1px solid #2a3550', borderRadius:'12px',
+      width:'340px', maxWidth:'92vw', maxHeight:'60vh', overflow:'auto', display:'none',
+      boxShadow:'0 10px 28px rgba(0,0,0,.35)', padding:'10px'
+    });
+
+    // header
+    const head=document.createElement('div');
+    head.style.cssText='display:flex;align-items:center;justify-content:space-between;gap:8px;margin-bottom:8px;';
+    const ttl=document.createElement('div'); ttl.textContent='Friends'; ttl.style.cssText='font-weight:800';
+    const x=document.createElement('button'); x.className='mp-small ghost'; x.textContent='Close'; x.addEventListener('click', ()=> pop.style.display='none');
+    head.appendChild(ttl); head.appendChild(x); pop.appendChild(head);
+
+    // search bar
+    const sb=document.createElement('div'); sb.className='searchbar';
+    const input=document.createElement('input'); input.placeholder='Search All Players';
+    const sbtn=document.createElement('button'); sbtn.className='mp-small'; sbtn.textContent='Search';
+    const status=document.createElement('div'); status.style.cssText='font-size:12px;color:#9fb0d6;margin:6px 2px;';
+    sb.appendChild(input); sb.appendChild(sbtn); pop.appendChild(sb); pop.appendChild(status);
+
+    // results / friends list body
+    const body = document.createElement('div'); body.id='mpFriendsListBody'; body.style.cssText='display:flex;flex-direction:column;gap:6px;';
+    pop.appendChild(body);
+
+    document.body.appendChild(pop);
+    ui.friendsPop=pop; ui.friendsBody=body; ui.searchInput=input; ui.searchBtn=sbtn; ui.searchStatus=status;
+
+    const runSearch = async (immediate=false)=>{
+      const q = (ui.searchInput.value||'').trim();
+      if(!q){ ui.searchStatus.textContent=''; renderFriends(); return; }
+      if(!immediate && q.length<2){ ui.searchStatus.textContent='Type at least 2 characters'; return; }
+      ui.searchStatus.textContent='Searching…';
+      try{
+        const list = await searchPlayers(q);
+        paintList(list);
+        ui.searchStatus.textContent = list.length ? `Found ${list.length} result${list.length===1?'':'s'}` : 'No players found';
+      }catch(e){ ui.searchStatus.textContent='Search failed'; }
+    };
+    const deb = debounced(()=>runSearch(false), CFG.searchDebounceMs);
+    input.addEventListener('input', deb);
+    input.addEventListener('keydown', (e)=>{ if((e.key||'').toLowerCase()==='enter'){ e.preventDefault(); runSearch(true);} });
+    sbtn.addEventListener('click', ()=> runSearch(true));
+  }
+
+  function toggleFriendsPopup(){
+    ensureFriendsPopup();
+    const vis = (ui.friendsPop.style.display!=='none');
+    ui.friendsPop.style.display = vis ? 'none' : 'block';
+    if(!vis){ renderFriends(); }
+  }
+
+  function makeRow(u){
+    const row=document.createElement('div'); row.className='friend';
+    const alreadyFriend = isFriend(u.username);
+    const activeLabel   = u.active ? 'Active' : 'Offline';
+    row.innerHTML = `
+      <div>
+        <div>${u.username}</div>
+        <div class="meta ${u.active?'active':'offline'}">${activeLabel}</div>
+      </div>
+      <div style="display:flex; gap:8px; align-items:center">
+        ${alreadyFriend ? '' : `<button class="mp-small ghost" data-add="${u.username}">Add Friend</button>`}
+        <button class="mp-small" data-invite="${u.username}">Invite</button>
+      </div>
+    `;
+    row.querySelector('[data-add]')?.addEventListener('click', async ()=>{
+      try{
+        await jpost('/friends/request',{ toUsername:u.username, username:u.username });
+        const b=row.querySelector('[data-add]'); if(b){ b.disabled=true; b.textContent='Requested'; }
+      }catch(e){}
+    });
+    row.querySelector('[data-invite]')?.addEventListener('click', async ()=>{
+      try{
+        // General invite (city). For creatures, we’ll add a dedicated endpoint later.
+        await jpost('/lobby/invite',{ toUsername:u.username, mode:'creature' });
+      }catch(e){}
+    });
+    return row;
+  }
+
+  function paintList(list){
+    if(!ui.friendsBody) return;
+    ui.friendsBody.innerHTML='';
+    (list||[]).forEach(u=> ui.friendsBody.appendChild(makeRow(u)));
+    if(!list || !list.length){
+      const none=document.createElement('div'); none.className='friend';
+      none.innerHTML=`<div><div>No results</div><div class="meta">Try another name</div></div>`;
+      ui.friendsBody.appendChild(none);
+    }
+  }
+
+  function renderFriends(){
+    if(!ui.friendsBody) return;
+    ui.searchStatus && (ui.searchStatus.textContent='');
+    paintList(friends);
+  }
+
+  // ---------- WS + notifications poll ----------
+  function connectWS(){
+    try{
+      const proto = location.protocol==='https:'?'wss:':'ws:'; const url = proto+'//'+location.host+CFG.ws;
+      ws=new WebSocket(url);
+    }catch(e){ return; }
+    ws.addEventListener('open', ()=>{ wsReady=true; });
+    ws.addEventListener('close', ()=>{ wsReady=false; ws=null; setTimeout(connectWS,1500); });
+    ws.addEventListener('message',(evt)=>{
+      let msg=null; try{ msg=JSON.parse(evt.data);}catch{}
+      if(!msg) return;
+
+      if (msg.type === 'presence'){
+        const f = friends.find(x=>x.username=== (msg.user || msg.username));
+        if (f){
+          f.active = normalizeActive(msg.active ?? msg.status ?? msg.online, msg.lastSeen ?? msg.last_seen, msg.world ?? msg.w);
+          if(ui.friendsPop && ui.friendsPop.style.display!=='none') renderFriends();
+        }
+      } else if (msg.type === 'friend.request'){
+        addNotification({ id: msg.id || ('fr_'+Date.now()), type:'friend', from: msg.from });
+      } else if (msg.type === 'invite'){
+        addNotification({ id: msg.id || ('inv_'+Date.now()), type:'battle', from: msg.from, mode: msg.mode });
+      } else if (msg.type === 'creature.invite'){
+        // future: creatures battle invites
+        addNotification({ id: msg.id || ('cinv_'+Date.now()), type:'creature', from: msg.from });
+      }
+    });
+  }
+
+  async function pullNotifications(){
+    try{
+      const n = await jget('/notifications');
+
+      // friend requests
+      const reqs = (n && (n.friendRequests || n.requests)) || [];
+      if(Array.isArray(reqs)){
+        reqs.forEach(fr=>{
+          const id = fr.id || fr.requestId || ('fr_'+(fr.from||'')+'_'+Date.now());
+          if(!notifications.items.find(x=>x.id===id)){
+            addNotification({ id, type:'friend', from: fr.from || fr.username || 'player' });
+          }
+        });
+      }
+      // generic invites
+      if(n && Array.isArray(n.invites)){
+        n.invites.forEach(inv=>{
+          const id = inv.id || ('inv_'+(inv.from||'')+'_'+Date.now());
+          if(!notifications.items.find(x=>x.id===id)){
+            addNotification({ id, type:(inv.mode==='creature'?'creature':'battle'), from:inv.from, mode:inv.mode });
+          }
+        });
+      }
+    }catch{}
+  }
+
+  // ---------- boot ----------
+  async function start(){
+    ensureBell(); ensureFriendsBtn(); ensureFriendsPopup();
+    try{ await loadMe(); }catch{}
+    try{ await loadFriends(); }catch{}
+    connectWS();
+    pullNotifications();
+    setInterval(pullNotifications, 5000);
+  }
+
+  if(document.readyState==='complete' || document.readyState==='interactive') start();
+  else addEventListener('DOMContentLoaded', start, {once:true});
 })();
 </script>
 </body>
