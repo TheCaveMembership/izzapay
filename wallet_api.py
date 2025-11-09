@@ -2,6 +2,11 @@ from flask import Blueprint, request, jsonify, session
 from time import time
 from db import conn
 
+# >>> NEW: minimal imports for balances + env
+import os
+from stellar_sdk import Server
+# <<<
+
 bp = Blueprint("wallet_api", __name__)
 
 # ---------- helpers ----------
@@ -141,3 +146,60 @@ def wallet_link():
         """, (u, pub, (secret or None), ts, ts))
 
     return jsonify({"ok": True, "username": u, "pub": pub}), 200
+
+
+# =========================
+# NEW: helpers + endpoints
+# =========================
+
+# Horizon client and env for balances
+HORIZON_URL = os.getenv("HORIZON_URL", "https://api.testnet.minepi.com").strip()
+IZZA_CODE   = os.getenv("IZZA_TOKEN_CODE", "IZZA").strip()
+IZZA_ISS    = os.getenv("IZZA_TOKEN_ISSUER", "").strip()
+_srv = Server(horizon_url=HORIZON_URL)
+
+def get_linked_secret(pub: str | None):
+    """
+    Return the stored S-key for a given public key if present and well-formed.
+    Used by creatures API to attempt direct delivery.
+    """
+    if not pub:
+        return None
+    with conn() as cx:
+        row = cx.execute("SELECT secret FROM user_wallets WHERE pub=?", (pub.strip().upper(),)).fetchone()
+    sec = (row["secret"] if row else None)
+    if sec and sec.startswith("S") and len(sec) == 56:
+        return sec
+    return None
+
+@bp.get("/api/wallet/balances")
+def wallet_balances():
+    """
+    Returns { pi: '123.456', izza: '7.0000000' } for the resolved user.
+    Works with ?u=<username> or session.
+    """
+    _ensure_table()
+    u = _resolve_username()
+    if not u:
+        return jsonify({"pi": None, "izza": None, "why": _why_no_user()}), 200
+
+    with conn() as cx:
+        row = cx.execute("SELECT pub FROM user_wallets WHERE username=?", (u,)).fetchone()
+    pub = row["pub"] if row else None
+    if not pub:
+        return jsonify({"pi": None, "izza": None, "why": "no active wallet set"}), 200
+
+    try:
+        acct = _srv.accounts().account_id(pub).call()
+    except Exception:
+        return jsonify({"pi": None, "izza": None, "why": "account not found"}), 200
+
+    pi = "0"
+    izza = "0"
+    for b in acct.get("balances", []):
+        if b.get("asset_type") == "native":
+            pi = b.get("balance", "0")
+        elif b.get("asset_code") == IZZA_CODE and b.get("asset_issuer") == IZZA_ISS:
+            izza = b.get("balance", "0")
+
+    return jsonify({"pi": pi, "izza": izza}), 200
