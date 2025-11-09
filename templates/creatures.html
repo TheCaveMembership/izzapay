@@ -43,7 +43,7 @@
     .modal-header{display:flex;align-items:center;justify-content:space-between;gap:10px}
     .modal-title{display:flex;align-items:center;gap:8px;font-weight:800}
     .close-btn{border:1px solid var(--line);border-radius:10px;background:#0b0f1f;padding:8px 10px;color:#fff;cursor:pointer}
-    .small-muted{font-size:12px;color:var(--muted)}
+    .small-muted{font-size:12px;color:#muted}
     .blox{display:flex;flex-direction:column;gap:6px}
     .mono{font-family:ui-monospace,Menlo,Consolas,monospace}
     .success{color:#5ad49e}
@@ -156,7 +156,8 @@
   // egg preview seeds (no carousel, just swap a few skins quickly)
   const previewSkins = Array.from({length:8}).map((_,i)=>String(i+1));
   function loadEggSkin(seed){
-    eggPreview.src = `/nftsvg/EGGDEMO.svg?skin=${encodeURIComponent(seed)}&nc=${Date.now()}`;
+    // no background on shuffle preview
+    eggPreview.src = `/nftsvg/EGGDEMO.svg?skin=${encodeURIComponent(seed)}&nobg=1&nc=${Date.now()}`;
   }
   loadEggSkin(previewSkins[0]);
 
