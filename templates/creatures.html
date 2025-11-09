@@ -28,7 +28,7 @@
     .col{flex:1 1 320px;max-width:520px}
     .box h3{margin:4px 0 10px}
 
-    /* SLOT CAROUSEL */
+    /* SLOT (simple) */
     .slot{position:relative;overflow:hidden;border-radius:16px;border:1px solid #2a3550;background:var(--card);
           height:clamp(110px,22vw,160px)}
     .slot .track{display:flex;gap:12px;align-items:center;padding:12px;will-change:transform}
@@ -72,14 +72,14 @@
     </div>
 
     <h1>IZZA CREATURES</h1>
-    <p>Pay 5 IZZA to mint an IZZA CREATURE EGG, watch it hatch live as the SVG evolves, then grow and battle.</p>
+    <p>Pay 5 IZZA to mint an IZZA CREATURE EGG, watch it hatch live, then grow and battle.</p>
 
     <div class="grid">
       <div class="col box">
         <h3>Mint Egg</h3>
         <div class="slot"><div class="track" id="track"></div></div>
         <div class="row"><button class="btn purple" id="mintBtn">MINT EGG, 5 IZZA</button></div>
-        <div class="hint">The carousel shuffles and stops on your egg</div>
+        <div class="hint">The strip shuffles and stops on your egg</div>
         <div id="mintMsg" class="hint"></div>
       </div>
 
@@ -159,11 +159,12 @@
   const liveHint = document.getElementById('liveHint');
   const openHabitat = document.getElementById('openHabitat');
 
-  // ---------- Carousel previews with safe fallback ----------
+  // ---------- Previews (varied skins) ----------
   const previews = Array.from({length:18}).map((_,i)=>`/nftsvg/EGGDEMO.svg?skin=${i}`);
   function cell(imgSrc){
     const d=document.createElement('div'); d.className='egg';
-    const img=new Image(); img.decoding='async'; img.src = imgSrc;
+    const img=new Image(); img.decoding='async'; img.loading='eager';
+    img.src = imgSrc;
     img.onerror = () => {
       img.remove();
       const svg = document.createElementNS('http://www.w3.org/2000/svg','svg');
@@ -183,7 +184,6 @@
   }
   fillTrack();
 
-  // simple shuffle animation
   function shuffleOnce(){
     const dx = -(200 + Math.floor(Math.random()*600)); // -200..-800px
     track.style.setProperty('--dx', dx + 'px');
@@ -191,7 +191,6 @@
     return new Promise(res=>{
       track.addEventListener('animationend', ()=>{
         track.classList.remove('shuffling');
-        // rotate children so it feels like it stopped on a new egg
         const firstEgg = track.querySelector('.egg');
         const w = firstEgg ? firstEgg.getBoundingClientRect().width + 12 : 140;
         const moves = Math.max(1, Math.round(Math.abs(dx)/w));
@@ -365,11 +364,11 @@
       }).then(r=>r.json()).catch(()=>null);
 
       if(ac && ac.ok && ac.delivered){
-        mintMsg.textContent = `Egg minted and delivered to your IZZA wallet: ${lastCode}`;
+        mintMsg.innerHTML = `Egg minted and <span class="success">delivered</span> to your IZZA wallet: <strong>${lastCode}</strong>`;
       }else if(ac && ac.ok){
-        mintMsg.textContent = `Egg minted: ${lastCode}. A claim was created — open Claims to accept.`;
+        mintMsg.innerHTML = `Egg minted: <strong>${lastCode}</strong>. A claim was created — <a href="/token/auth?next=/token/izza" id="goClaims">Open Claims</a>.`;
       }else{
-        mintMsg.textContent = `Egg minted: ${lastCode}. Open Claims to deliver to your wallet.`;
+        mintMsg.innerHTML = `Egg minted: <strong>${lastCode}</strong>. <a href="/token/auth?next=/token/izza" id="goClaims">Open Claims</a> to deliver it.`;
       }
 
       await refreshLive();
@@ -396,7 +395,9 @@
   const myList = document.getElementById('myCreaturesList');
   document.getElementById('btnMyCreatures').addEventListener('click', async ()=>{
     myList.innerHTML = '';
-    const j = await fetch('/api/creatures/mine', {credentials:'include'}).then(r=>r.json()).catch(()=>({items:[]}));
+    // include ?u= so server can fall back to active wallet when no user_id
+    const qs = USER_CANON ? ('?u='+encodeURIComponent(USER_CANON)) : '';
+    const j = await fetch('/api/creatures/mine'+qs, {credentials:'include'}).then(r=>r.json()).catch(()=>({items:[]}));
     (j.items||[]).forEach(it=>{
       const a = document.createElement('a');
       a.href = `/creature/${it.code}`;
