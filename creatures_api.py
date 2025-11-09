@@ -335,10 +335,12 @@ def _compute_state_dict(code: str) -> dict:
         "hatch_start":int(r["hatch_start"] or _now_i())
     }
 
-    # rarity (no DB column) + live combat stats
-    skin_hint = ""  # only used for EGGDEMO previews
+    # NEW: use the minted egg_seed to derive rarity tier from its hint (LEG/EP/RARE/UN/COM, palette/pattern)
+    skin_hint = (r["egg_seed"] or "").strip()
     rarity = _rarity_from(st["code"], skin_hint)
     st["rarity"] = rarity
+
+    # live combat stats from rarity
     stats = _compute_stats_dict(st, last_feed_at, rarity)
     st.update(stats)
 
