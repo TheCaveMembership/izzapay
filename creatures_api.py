@@ -1,4 +1,3 @@
-# creatures_api.py
 import os, json, time, random
 from decimal import Decimal
 from flask import Blueprint, request, jsonify, abort, make_response, url_for, g
@@ -10,6 +9,12 @@ from nft_api import (
     server, PP,  # server: Horizon Server, PP: NETWORK_PASSPHRASE
     _account_has_trustline, _change_trust, _pay_asset, _ensure_distributor_holds_one
 )
+
+# try to access a linked secret if wallet_api exposes it; otherwise no-op
+try:
+    from wallet_api import get_linked_secret as _get_linked_secret
+except Exception:  # keep everything working if not present
+    _get_linked_secret = lambda _pub: None
 
 bp_creatures = Blueprint("creatures", __name__)
 
@@ -60,10 +65,12 @@ def _ensure_tables():
           hunger INTEGER DEFAULT 0,
           stage TEXT,
           meta_version INTEGER DEFAULT 1,
+          user_id INTEGER,
           UNIQUE(code, issuer)
         )""")
         cx.execute("CREATE INDEX IF NOT EXISTS idx_creat_owner ON nft_creatures(owner_pub)")
         cx.execute("CREATE INDEX IF NOT EXISTS idx_creat_stage ON nft_creatures(stage)")
+        cx.execute("CREATE INDEX IF NOT EXISTS idx_creat_user ON nft_creatures(user_id)")
         cx.execute("""
         CREATE TABLE IF NOT EXISTS nft_collections(
           id INTEGER PRIMARY KEY,
@@ -76,6 +83,15 @@ def _ensure_tables():
           updated_at INTEGER,
           UNIQUE(code, issuer)
         )""")
+        # if older installs lack user_id, add it (idempotent)
+        try:
+            cols = cx.execute("PRAGMA table_info(nft_creatures)").fetchall()
+            names = {c["name"] if isinstance(c, dict) else c[1] for c in cols}
+            if "user_id" not in names:
+                cx.execute("ALTER TABLE nft_creatures ADD COLUMN user_id INTEGER")
+                cx.execute("CREATE INDEX IF NOT EXISTS idx_creat_user ON nft_creatures(user_id)")
+        except Exception:
+            pass
 
 # ---------- small utils ----------
 def _clamp(v, lo, hi): return max(lo, min(hi, v))
@@ -159,7 +175,7 @@ def creatures_mint():
     Body: { "buyer_pub":"G...", "buyer_sec":"S..." }
       1) charge 5 IZZA from buyer to distributor
       2) mint 1 unit of new asset code to distributor
-      3) insert nft_creatures row with hatch_start=now
+      3) insert nft_creatures row with hatch_start=now (bound to user_id if available)
       4) return asset identity
     """
     _ensure_tables()
@@ -197,13 +213,14 @@ def creatures_mint():
 
     seed = f"{code}:{ts}"
     base, pat = _choose_palette(seed)
+    uid = getattr(g, "user_id", None)
 
     with _db() as cx:
         cx.execute("""
           INSERT INTO nft_creatures(code, issuer, owner_pub, egg_seed, palette, pattern,
-                                    hatch_start, last_feed_at, hunger, stage, meta_version)
-          VALUES(?,?,?,?,?,?,?,?,?,?,1)
-        """, (code, CREATURE_ISSUER_G, None, seed, base, pat, ts, ts, 0, "egg"))
+                                    hatch_start, last_feed_at, hunger, stage, meta_version, user_id)
+          VALUES(?,?,?,?,?,?,?,?,?,?,1,?)
+        """, (code, CREATURE_ISSUER_G, None, seed, base, pat, ts, ts, 0, "egg", uid))
         cx.execute("""
           INSERT INTO nft_collections(code, issuer, total_supply, decimals, status, created_at, updated_at)
           VALUES(?,?,?,?, 'draft', ?, ?)
@@ -253,21 +270,24 @@ def creatures_mark_owned():
     if not code or not owner:
         abort(400, "code_and_owner_required")
     _ensure_tables()
+    uid = getattr(g, "user_id", None)
     with _db() as cx:
         cx.execute(
-            "UPDATE nft_creatures SET owner_pub=? WHERE code=? AND issuer=?",
-            (owner, code, CREATURE_ISSUER_G)
+            "UPDATE nft_creatures SET owner_pub=?, user_id=COALESCE(user_id, ?) WHERE code=? AND issuer=?",
+            (owner, uid, code, CREATURE_ISSUER_G)
         )
         cx.commit()
     return jsonify({"ok": True})
 
-# ---------- API: auto-claim (push NFT to user's wallet via claimable balance) ----------
+# ---------- API: auto-claim (push NFT; prefer direct delivery if possible) ----------
 @bp_creatures.post("/api/creatures/auto-claim")
 def creatures_auto_claim():
     """
     Body: { code, owner_pub }
-    Creates a claimable balance of 1 unit of the creature asset to owner_pub.
-    No user secret is required and the UI can stay on the creatures page.
+    If the server has a linked S-key for owner_pub:
+      - ensure trustline and send 1 unit directly (appears immediately).
+    Else:
+      - create a claimable balance of 1 to owner_pub.
     """
     j = request.get_json(silent=True) or {}
     code = (j.get("code") or "").strip().upper()
@@ -286,32 +306,61 @@ def creatures_auto_claim():
     if r["owner_pub"]:
         return jsonify({"ok": True, "note": "already owned", "code": code})
 
+    uid = getattr(g, "user_id", None)
     asset = Asset(code, CREATURE_ISSUER_G)
-    base_fee = server.fetch_base_fee()
-    dist_acct = server.load_account(DISTR_G)
 
-    claimant = Claimant(destination=owner_pub, predicate=ClaimPredicate.predicate_unconditional())
-    tx = (
-        TransactionBuilder(
-            source_account=dist_acct,
-            network_passphrase=PP,
-            base_fee=base_fee,
-        )
-        .append_create_claimable_balance_op(asset=asset, amount="1", claimants=[claimant])
-        .set_timeout(120)
-        .build()
-    )
-    tx.sign(Keypair.from_secret(DISTR_S))
+    # Try direct delivery if we have the user's secret
+    delivered = False
+    err_msg = None
     try:
-        resp = server.submit_transaction(tx)
-    except sx.BaseHorizonError as e:
-        abort(400, f"auto_claim_failed:{e}")
+        owner_sec = _get_linked_secret(owner_pub)
+    except Exception:
+        owner_sec = None
+
+    if owner_sec:
+        try:
+            if not _account_has_trustline(owner_pub, asset):
+                _change_trust(owner_sec, asset, limit="1")
+            _pay_asset(DISTR_S, owner_pub, "1", asset, memo=f"IZZA CREATURE {code}")
+            delivered = True
+        except Exception as e:
+            delivered = False
+            err_msg = f"direct_delivery_failed:{e}"
+
+    # Fallback to claimable balance
+    tx_hash = None
+    if not delivered:
+        base_fee = server.fetch_base_fee()
+        dist_acct = server.load_account(DISTR_G)
+        claimant = Claimant(destination=owner_pub, predicate=ClaimPredicate.predicate_unconditional())
+        tx = (
+            TransactionBuilder(
+                source_account=dist_acct,
+                network_passphrase=PP,
+                base_fee=base_fee,
+            )
+            .append_create_claimable_balance_op(asset=asset, amount="1", claimants=[claimant])
+            .set_timeout(120)
+            .build()
+        )
+        tx.sign(Keypair.from_secret(DISTR_S))
+        try:
+            resp = server.submit_transaction(tx)
+            tx_hash = resp.get("hash")
+        except sx.BaseHorizonError as e:
+            abort(400, f"auto_claim_failed:{e}")
 
     with _db() as cx:
-        cx.execute("UPDATE nft_creatures SET owner_pub=? WHERE code=? AND issuer=?",
-                   (owner_pub, code, CREATURE_ISSUER_G))
+        cx.execute(
+            "UPDATE nft_creatures SET owner_pub=?, user_id=COALESCE(user_id, ?) WHERE code=? AND issuer=?",
+            (owner_pub, uid, code, CREATURE_ISSUER_G)
+        )
         cx.commit()
-    return jsonify({"ok": True, "code": code, "hash": resp.get("hash")})
+
+    if delivered:
+        return jsonify({"ok": True, "code": code, "delivered": True})
+    note = "claim_created" if tx_hash else (err_msg or "claim_created")
+    return jsonify({"ok": True, "code": code, "hash": tx_hash, "note": note})
 
 # ---------- API: feed ----------
 @bp_creatures.post("/api/creatures/feed")
