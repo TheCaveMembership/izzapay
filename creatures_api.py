@@ -836,13 +836,14 @@ def habitat_page(code):
   .btn{{display:inline-flex;align-items:center;justify-content:center;padding:12px 16px;border-radius:12px;
        border:1px solid #2a3550;color:#cfe0ff;background:#0b0f1f;cursor:pointer;font-weight:700}}
   img{{width:256px;height:256px;object-fit:contain}}
-  pre{{text-align:left;background:#0b0f1f;border:1px solid #2a3550;border-radius:12px;padding:12px;overflow:auto}}
+  pre{{ text-align:left;background:#0b0f1f;border:1px solid #2a3550;border-radius:12px;padding:12px;overflow:auto }}
+  .monoWrap{{ word-break:break-all; overflow-wrap:anywhere }}
 </style>
 </head><body><div class="wrap">
   <h1>IZZA Creature {code}</h1>
   <img id="img" alt="creature" src="{svg_url}?nc={_now_i()}">
   <div style="margin:12px 0"><button class="btn" id="feedBtn">Feed</button></div>
-  <pre id="state"></pre>
+  <pre id="state" class="monoWrap"></pre>
 </div>
 <script>
   const STATE_URL = {json.dumps(state_url)};
