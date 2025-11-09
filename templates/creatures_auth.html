@@ -2,10 +2,9 @@
 <html lang="en">
 <head>
   <meta charset="utf-8">
-  <title>Authenticate — IZZA CREATURES</title>
+  <title>Authenticate, IZZA CREATURES</title>
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
   <link rel="stylesheet" href="/static/themes.css">
-  <!-- Always include the SDK and let it load after HTML -->
   <script src="https://sdk.minepi.com/pi-sdk.js" defer></script>
   <style>
     body{background:#000;color:#e8f1ff;font-family:Inter,Arial,Helvetica,sans-serif;margin:0;text-align:center}
@@ -29,7 +28,6 @@
     <p>Authenticate to enter <strong>IZZA Creatures</strong>.</p>
 
     <div style="display:flex;gap:12px;justify-content:center;flex-wrap:wrap">
-      <!-- Use the SAME id pattern as the working page or update the JS below -->
       <button id="piCreaturesAuthBtn" class="btn purple">Authenticate with Pi</button>
       <a class="btn ghost" href="/">Cancel</a>
     </div>
@@ -39,9 +37,9 @@
   </div>
 
   <script>
-  // Wait for DOM so the button exists when we bind
   document.addEventListener('DOMContentLoaded', function(){
-    const sandbox = {{ 'true' if sandbox else 'false' }};
+    // Read the global PI_SANDBOX injected by app.context_processor
+    const sandbox = {{ 'true' if PI_SANDBOX else 'false' }};
     const btn = document.getElementById('piCreaturesAuthBtn');
     const msg = document.getElementById('msg');
     const err = document.getElementById('err');
@@ -49,22 +47,20 @@
     function setMsg(t){ if(msg) msg.textContent = t || ''; }
     function setErr(t){ if(err) err.textContent = t || ''; }
 
-    // Defensive: init Pi after SDK is loaded
     function initPi(){
       if (!window.Pi || !Pi.init) return false;
       try { Pi.init({ version: "2.0", sandbox: sandbox }); return true; }
       catch(e){ console.error("Pi.init failed", e); setErr("Pi.init failed: " + (e?.message || e)); return false; }
     }
 
-    // Try to init now, but also re-check on click in case SDK was late
+    // Try once now
     initPi();
 
     btn?.addEventListener('click', async function(){
       setErr('');
-      // Visibility ping to your /_log so you’ll SEE the click on Render
       try{ fetch('/_log', {method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({t:Date.now(),evt:'creatures.auth.click'})}); }catch(_){}
 
-      // Ensure SDK is ready (covers race where SDK finished after DOMContentLoaded)
+      // Cover the race where SDK finished loading after DOMContentLoaded
       if (!window.Pi || !Pi.authenticate) {
         if (!initPi()) {
           setMsg("Open this page inside Pi Browser so the Pi SDK can run.");
@@ -75,11 +71,10 @@
       setMsg("Requesting authorization…");
       try{
         const auth = await Pi.authenticate(['username'], function onIncompletePaymentFound(){});
-        // mirror the working flow: stash locally for convenience
         try{ localStorage.setItem('piAuthUser', JSON.stringify(auth.user||null)); }catch{}
         try{ localStorage.setItem('piAccessToken', auth.accessToken || ''); }catch{}
 
-        // Submit to the SAME server endpoint that prints AUTH_EXCHANGE_* logs
+        // Same server flow as token page
         const form = document.createElement('form');
         form.method = 'POST';
         form.action = '/auth/exchange';
@@ -91,14 +86,14 @@
 
         const next = document.createElement('input');
         next.type='hidden'; next.name='next';
-        next.value = '/creatures';           // <- destination after server verifies
+        next.value = '/creatures';
         form.appendChild(next);
 
         document.body.appendChild(form);
         form.submit();
       }catch(e){
         console.error(e);
-        setMsg("Authorization failed. Please try again.");
+        setMsg("Authorization failed, please try again.");
         setErr(e?.message || String(e));
       }
     });
