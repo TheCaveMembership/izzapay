@@ -153,7 +153,6 @@
   const eggPreview = document.getElementById('eggPreview');
 
   // Curated preview seeds to ensure variety (rarity, palette, pattern)
-  // Hints decoded server-side by _choose_palette() and rarity helper.
   const previewSkins = [
     "LEG-sapphire-stripe",
     "EP-ember-metallic",
@@ -298,7 +297,7 @@
       const j = await fetch(meta).then(r=>r.json());
       liveSvg.src = (j.image || '') + '&pulse=' + Date.now();
       openHabitat.href = j.external_url || '#';
-      liveHint.textContent = 'Hunger starts at baby. 1 day = 60s for testing.';
+      liveHint.textContent = 'Stats grow if fed daily. 1 day = 60s (test).';
     }catch(e){}
   }
   setInterval(refreshLive, 3000);
@@ -322,7 +321,6 @@
     const gate = await ensureUserAndWalletGate();
     if(!gate){ return; }
 
-    // choose final skin and show it, then send same 'skin' to server
     const finalSkin = previewSkins[Math.floor(Math.random()*previewSkins.length)];
     await spinEggs(finalSkin);
 
@@ -369,7 +367,7 @@
     refreshLive();
   });
 
-  // ---------- My Creatures (list -> habitat) ----------
+  // ---------- My Creatures ----------
   const myBox  = document.getElementById('myCreaturesBox');
   const myList = document.getElementById('myCreaturesList');
   document.getElementById('btnMyCreatures').addEventListener('click', async ()=>{
