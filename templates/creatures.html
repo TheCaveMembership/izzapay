@@ -28,24 +28,25 @@
     .col{flex:1 1 320px;max-width:520px}
     .box h3{margin:4px 0 10px}
 
-    .slot{position:relative;overflow:hidden;border-radius:16px;border:1px solid #2a3550;background:var(--card)}
+    .slot{position:relative;overflow:hidden;border-radius:16px;border:1px solid #2a3550;background:var(--card);
+          height:clamp(110px,22vw,160px)}
     .slot::before,
     .slot::after{
       content:"";position:absolute;inset:0;pointer-events:none;
       background:linear-gradient(90deg, rgba(0,0,0,.7), transparent 18%, transparent 82%, rgba(0,0,0,.7));
       z-index:2
     }
-    .slot .track{display:flex;gap:12px;transition:transform 1.2s cubic-bezier(.18,.9,.22,1);padding:12px}
+    .slot .track{display:flex;gap:12px;align-items:center;transition:transform 1.2s cubic-bezier(.18,.9,.22,1);padding:12px}
     .slot .egg{
       width:clamp(92px, 20vw, 140px);height:clamp(92px, 20vw, 140px);
       display:flex;align-items:center;justify-content:center;background:#0e1422;border-radius:14px;border:1px solid #223056;
       box-shadow:0 2px 8px rgba(0,0,0,.25)
     }
-    .egg img{width:75%;height:75%;object-fit:contain;filter:drop-shadow(0 2px 4px rgba(0,0,0,.35))}
+    .egg img{display:block;width:75%;height:75%;object-fit:contain;filter:drop-shadow(0 2px 4px rgba(0,0,0,.35))}
     .hint{font-size:12px;color:#9fb0d6;margin-top:6px;text-align:center}
 
     #liveSvg{
-      width:220px,height:220px;object-fit:contain;border-radius:12px;border:1px solid #223056;background:#0e1422
+      width:220px; height:220px; object-fit:contain;border-radius:12px;border:1px solid #223056;background:#0e1422
     }
 
     .modal{position:fixed;inset:0;background:rgba(0,0,0,.5);display:flex;align-items:center;justify-content:center}
@@ -150,7 +151,8 @@
   const previews = Array.from({length:18}).map((_,i)=>`/nftsvg/EGGDEMO.svg?skin=${i}`);
   function cell(imgSrc){
     const d=document.createElement('div'); d.className='egg';
-    const img=new Image(); img.loading='lazy'; img.decoding='async';
+    const img=new Image(); /* eager load fixes Safari paint with overflow:hidden */
+    img.decoding='async';
     img.src = imgSrc;
     img.onerror = () => {
       img.remove();
@@ -339,15 +341,17 @@
 
       lastCode = res.asset.code; lastIssuer = res.asset.issuer;
 
-      // auto-claim into IZZA wallet (no-op if route fails)
+      // auto-claim into IZZA wallet (no-op if route falls back)
       try{
         const ac = await fetch('/api/creatures/auto-claim', {
           method:'POST',
           headers:{'Content-Type':'application/json'},
           body: JSON.stringify({ code:lastCode, owner_pub:gate.pub })
         }).then(r=>r.json());
-        if(ac && ac.ok){
+        if(ac && ac.ok && ac.delivered){
           mintMsg.textContent = `Egg minted and delivered to your IZZA wallet: ${lastCode}`;
+        }else if(ac && ac.ok){
+          mintMsg.textContent = `Egg minted: ${lastCode}. A claim was created — open Claims to accept.`;
         }else{
           mintMsg.textContent = `Egg minted: ${lastCode}. Open Claims to deliver to your wallet.`;
         }
