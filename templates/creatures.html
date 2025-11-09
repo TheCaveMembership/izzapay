@@ -43,7 +43,7 @@
     .modal-header{display:flex;align-items:center;justify-content:space-between;gap:10px}
     .modal-title{display:flex;align-items:center;gap:8px;font-weight:800}
     .close-btn{border:1px solid var(--line);border-radius:10px;background:#0b0f1f;padding:8px 10px;color:#fff;cursor:pointer}
-    .small-muted{font-size:12px;color:#muted}
+    .small-muted{font-size:12px;color:#9fb0d6}
     .blox{display:flex;flex-direction:column;gap:6px}
     .mono{font-family:ui-monospace,Menlo,Consolas,monospace}
     .success{color:#5ad49e}
@@ -61,7 +61,6 @@
     <div class="topbar">
       <a class="btn" href="/">BACK HOME</a>
       <button class="btn purple upper" id="openWallet">IZZA WALLET</button>
-      <!-- Claims button removed per request -->
       <button class="btn" id="btnMyCreatures">MY CREATURES</button>
     </div>
 
@@ -153,16 +152,15 @@
   const openHabitat = document.getElementById('openHabitat');
   const eggPreview = document.getElementById('eggPreview');
 
-  // egg preview seeds (no carousel, just swap a few skins quickly)
+  // egg preview seeds
   const previewSkins = Array.from({length:8}).map((_,i)=>String(i+1));
   function loadEggSkin(seed){
-    // no background AND no status text on shuffle preview
+    // preview sans background + status text
     eggPreview.src = `/nftsvg/EGGDEMO.svg?skin=${encodeURIComponent(seed)}&nobg=1&nc=${Date.now()}`;
   }
   loadEggSkin(previewSkins[0]);
 
   async function spinEggs(finalSeed){
-    // spin 10 frames then land
     for(let i=0;i<9;i++){
       loadEggSkin(previewSkins[i % previewSkins.length]);
       await new Promise(r=>setTimeout(r,120));
@@ -198,7 +196,7 @@
     return r.json().catch(()=>null);
   }
 
-  // ---------- Username canonization (server-filled) ----------
+  // ---------- Username canonization ----------
   const SRV_USER = {{ (username or '') | tojson }};
   function stripAt(s){ return (s||'').toString().trim().replace(/^@+/, ''); }
   const USER_CANON = (()=>{
@@ -237,7 +235,6 @@
     const has = pub && isLocalWallet(pub);
     document.getElementById('mwSStatus').innerHTML = has ? '<span class="success">Saved locally</span>' : '<span class="warn">Not saved</span>';
 
-    // balances
     try{
       const b = await fetchBalances(USER_CANON);
       document.getElementById('balPi').textContent = b && b.pi || '—';
@@ -310,26 +307,24 @@
 
   // ---------- Mint flow (with auto-claim) ----------
   mintBtn.addEventListener('click', async ()=>{
-    // show fabrication message immediately during spin
     mintMsg.textContent = 'Your creature is being fabricated by the hands of IZZA gods';
     const gate = await ensureUserAndWalletGate();
     if(!gate){ return; }
 
-    // pick a pretend final skin for the spin
+    // choose final skin and show it, then send same 'skin' to server
     const finalSkin = previewSkins[Math.floor(Math.random()*previewSkins.length)];
-    await spinEggs(finalSeed = finalSkin);
+    await spinEggs(finalSkin);
 
     try{
       const res = await fetch('/api/creatures/mint', {
         method:'POST',
         headers:{'Content-Type':'application/json'},
-        body: JSON.stringify({ buyer_pub:gate.pub, buyer_sec:gate.sec })
+        body: JSON.stringify({ buyer_pub:gate.pub, buyer_sec:gate.sec, skin: finalSkin })
       }).then(r=>r.json());
       if(!(res && res.ok)) throw new Error(res && res.error || 'mint_failed');
 
       lastCode = res.asset.code; lastIssuer = res.asset.issuer;
 
-      // deliver to wallet (trustline+pay1 if possible, else claimable)
       const ac = await fetch('/api/creatures/auto-claim', {
         method:'POST',
         headers:{'Content-Type':'application/json'},
