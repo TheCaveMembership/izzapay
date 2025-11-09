@@ -1,7 +1,7 @@
 # creatures_api.py
 import os, json, time, random, sqlite3
 from decimal import Decimal
-from flask import Blueprint, request, jsonify, abort, make_response, url_for, g
+from flask import Blueprint, request, jsonify, abort, make_response, url_for, g, session
 from stellar_sdk import (
     Asset, Keypair, Server, Claimant, ClaimPredicate, TransactionBuilder, exceptions as sx
 )
@@ -28,13 +28,13 @@ CREATURE_ISSUER_G = os.getenv("NFT_ISSUER_PUBLIC", "").strip()
 DISTR_S  = os.getenv("NFT_DISTR_SECRET", "").strip()
 DISTR_G  = os.getenv("NFT_DISTR_PUBLIC", "").strip()
 
-# Fast test lifecycles
-TEST_TOTAL_SECONDS = 180
-TEST_CRACK_START   = 30
-TEST_HATCH_DONE    = 60
-TEST_TEENAGE       = 120
-TEST_PRIME         = 180
-TICK_STEP_SECONDS  = 3
+# Fast test lifecycles (HALVED)
+TEST_TOTAL_SECONDS = 90
+TEST_CRACK_START   = 15
+TEST_HATCH_DONE    = 30
+TEST_TEENAGE       = 60
+TEST_PRIME         = 90
+TICK_STEP_SECONDS  = 3  # keep tick stable for UI pacing
 
 EGG_PRICE_IZZA = Decimal("5")  # user pays once here; delivery is free
 
@@ -69,11 +69,10 @@ def _ensure_tables():
           hunger INTEGER DEFAULT 0,
           stage TEXT,
           meta_version INTEGER DEFAULT 1,
+          user_id INTEGER,
           UNIQUE(code, issuer)
         )""")
-        # migrate/add user_id if missing (index AFTER column exists)
-        if not _has_column(cx, "nft_creatures", "user_id"):
-            cx.execute("ALTER TABLE nft_creatures ADD COLUMN user_id INTEGER")
+        # indices
         cx.execute("CREATE INDEX IF NOT EXISTS idx_creat_owner ON nft_creatures(owner_pub)")
         cx.execute("CREATE INDEX IF NOT EXISTS idx_creat_stage ON nft_creatures(stage)")
         cx.execute("CREATE INDEX IF NOT EXISTS idx_creat_user  ON nft_creatures(user_id)")
@@ -90,6 +89,33 @@ def _ensure_tables():
           UNIQUE(code, issuer)
         )""")
 
+# ---------- username/pub fallback (so "My Creatures" works without g.user_id) ----------
+def _norm_username(u: str | None) -> str | None:
+    if not u: return None
+    u = str(u).strip().lstrip("@").lower()
+    return u or None
+
+def _resolve_username() -> str | None:
+    u = _norm_username(request.args.get("u"))
+    if u: return u
+    u = _norm_username(session.get("pi_username"))
+    if u: return u
+    uid = session.get("user_id")
+    if not uid: return None
+    with _db() as cx:
+        row = cx.execute("SELECT pi_username FROM users WHERE id=?", (int(uid),)).fetchone()
+    return _norm_username(row["pi_username"] if row else None)
+
+def _active_pub_for_request() -> str | None:
+    """
+    Best-effort: grab the active wallet pub from user_wallets via username/session.
+    """
+    u = _resolve_username()
+    if not u: return None
+    with _db() as cx:
+        row = cx.execute("SELECT pub FROM user_wallets WHERE username=?", (u,)).fetchone()
+        return (row["pub"] if row and row["pub"] else None)
+
 # ---------- utils ----------
 def _clamp(v, lo, hi): return max(lo, min(hi, v))
 
@@ -105,9 +131,10 @@ def _choose_palette(seed: str):
     return rnd.choice(["gold","violet","turquoise","rose","lime"]), rnd.choice(["speckle","stripe","swirl","mosaic","metallic"])
 
 def _compute_state_dict(code: str) -> dict:
-    # Always-available demo for carousels/skeletons
+    # Demo that supports ?skin=<seed> to vary appearance (used by shuffle previews)
     if code.upper() == "EGGDEMO":
-        base, pat = _choose_palette("demo")
+        skin = (request.args.get("skin") or "demo").strip()
+        base, pat = _choose_palette(skin)
         return {
             "code":"EGGDEMO","issuer":CREATURE_ISSUER_G or "GDEMOISS","owner_pub":None,
             "elapsed":0,"tick_seconds":TICK_STEP_SECONDS,"hunger":0,"stage":"egg",
@@ -215,17 +242,35 @@ def creatures_latest():
 
 @bp_creatures.get("/api/creatures/mine")
 def creatures_mine():
+    """
+    Returns the caller's creatures. If session user_id is missing,
+    falls back to active wallet pub (via user_wallets) using ?u= or session username.
+    """
     _ensure_tables()
     uid = getattr(g, "user_id", None)
-    if uid is None:
-        return jsonify({"items": []})
     with _db() as cx:
-        rows = cx.execute("""
-          SELECT code, issuer, owner_pub, stage, palette, pattern, hatch_start
-          FROM nft_creatures
-          WHERE user_id IS NULL OR user_id=?
-          ORDER BY id DESC LIMIT 200
-        """, (uid,)).fetchall()
+        if uid is not None:
+            rows = cx.execute("""
+              SELECT code, issuer, owner_pub, stage, palette, pattern, hatch_start
+              FROM nft_creatures
+              WHERE user_id=? OR (user_id IS NULL AND owner_pub IS NOT NULL AND owner_pub IN (
+                SELECT pub FROM user_wallets WHERE username IN (
+                  SELECT pi_username FROM users WHERE id=?
+                )
+              ))
+              ORDER BY id DESC LIMIT 200
+            """, (uid, uid)).fetchall()
+        else:
+            active_pub = _active_pub_for_request()
+            if active_pub:
+                rows = cx.execute("""
+                  SELECT code, issuer, owner_pub, stage, palette, pattern, hatch_start
+                  FROM nft_creatures
+                  WHERE owner_pub=?
+                  ORDER BY id DESC LIMIT 200
+                """, (active_pub,)).fetchall()
+            else:
+                rows = []
     return jsonify({"items": [dict(r) for r in rows]})
 
 @bp_creatures.post("/api/creatures/mark-owned")
@@ -316,6 +361,9 @@ def creatures_auto_claim():
 
 @bp_creatures.post("/api/creatures/feed")
 def creatures_feed():
+    """
+    Decreases hunger by 30 (clamped at 0), updates last_feed_at. Owner pub is required.
+    """
     j = request.get_json(silent=True) or {}
     code = (j.get("code") or "").strip()
     owner = (j.get("owner_pub") or "").strip()
