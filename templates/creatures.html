@@ -54,7 +54,7 @@
     .modal-header{display:flex;align-items:center;justify-content:space-between;gap:10px}
     .modal-title{display:flex;align-items:center;gap:8px;font-weight:800}
     .close-btn{border:1px solid var(--line);border-radius:10px;background:#0b0f1f;padding:8px 10px;color:#fff;cursor:pointer}
-    .small-muted{font-size:12px;color:var(--muted)}
+    .small-muted{font-size:12px;color:var(--muted")}
     .blox{display:flex;flex-direction:column;gap:6px}
     .mono{font-family:ui-monospace,Menlo,Consolas,monospace}
     .success{color:#5ad49e}
@@ -67,7 +67,8 @@
     <div class="topbar">
       <a class="btn" href="/">BACK HOME</a>
       <button class="btn purple upper" id="openWallet">IZZA WALLET</button>
-      <button class="btn gold upper" id="openClaims">CLAIMS LIST</button>
+      <!-- make Claims a link so it works without JS -->
+      <a class="btn gold upper" id="openClaims" href="/token/auth?next=/token/izza">CLAIMS LIST</a>
     </div>
 
     <h1>IZZA CREATURES</h1>
@@ -110,7 +111,7 @@
           <div><strong id="mwUser">—</strong></div>
         </div>
         <div class="blox" style="margin-top:10px">
-          <div class="small-muted">Active Wallet (public key)</div>
+          <div class="small-muted">Active Wallet, public key</div>
           <div class="mono" id="mwPub">—</div>
           <div class="small-muted">Need to set or switch your active wallet? Open the full wallet once below, then return here to save your S-key locally.</div>
         </div>
@@ -118,7 +119,7 @@
           <div class="small-muted">Local S-key status</div>
           <div id="mwSStatus">—</div>
           <div class="row" style="margin-top:6px">
-            <input class="btn" style="flex:1;min-width:240px;text-align:left" id="mwSInput" placeholder="S... (private key)" autocomplete="off" spellcheck="false" autocapitalize="none">
+            <input class="btn" style="flex:1;min-width:240px;text-align:left" id="mwSInput" placeholder="S... private key" autocomplete="off" spellcheck="false" autocapitalize="none">
             <button class="btn purple" type="button" id="mwSaveBtn">Save S-key</button>
             <button class="btn" type="button" id="mwForgetBtn">Forget</button>
           </div>
@@ -185,7 +186,7 @@
     return new Promise(res=>setTimeout(()=>{ track.style.transform = `translateX(-${idx*w}px)`; setTimeout(()=>res(idx), 1200); }, 50));
   }
 
-  // ---------- Local wallet helpers (same as merchant) ----------
+  // ---------- Local wallet helpers ----------
   function __readVault(){ try{ const s=localStorage.getItem('izza_test_wallet'); return s?JSON.parse(s):null; }catch{return null} }
   function __writeVault(j){ try{ localStorage.setItem('izza_test_wallet', JSON.stringify(j||{})); }catch{} }
   function __forgetSecret(pub){ try{ const v=__readVault()||{}; if(v && v.pub===pub){ delete v.sec; __writeVault(v); } }catch{} }
@@ -207,7 +208,7 @@
     return { ok:r.ok, status:r.status, json:j };
   }
 
-  // ---------- Username canonization (ported from merchant) ----------
+  // ---------- Username canonization ----------
   const SRV_USER = {{ (username or '') | tojson }};
   function stripAt(s){ return (s||'').toString().trim().replace(/^@+/, ''); }
   const USER_CANON = (()=>{
@@ -225,7 +226,6 @@
     }catch{}
     return '';
   })();
-  // persist for future pages
   try{
     if(USER_CANON){
       localStorage.setItem('izzaUserCanon', USER_CANON);
@@ -267,7 +267,7 @@
     refreshMyWalletModal();
   });
 
-  // ---------- Gate for mint/feed ----------
+  // ---------- Gate for mint, feed ----------
   async function ensureUserAndWalletGate(){
     const active = await fetchActiveWallet(USER_CANON);
     const pub = active && active.pub || '';
@@ -296,7 +296,7 @@
   setInterval(refreshLive, 3000);
 
   // ---------- Mint flow ----------
-  document.getElementById('mintBtn').addEventListener('click', async ()=>{
+  mintBtn.addEventListener('click', async ()=>{
     mintMsg.textContent = '';
     const gate = await ensureUserAndWalletGate();
     if(!gate){ return; }
@@ -319,8 +319,7 @@
     }
   });
 
-  // ---------- Claims + Feed ----------
-  document.getElementById('openClaims').addEventListener('click', ()=> location.href='/token/auth?next=/token/izza'));
+  // ---------- Feed ----------
   document.getElementById('feedBtn').addEventListener('click', async ()=>{
     if(!lastCode){ mintMsg.textContent='Mint or select a creature first'; return; }
     const gate = await ensureUserAndWalletGate(); if(!gate){ return; }
@@ -331,7 +330,7 @@
     refreshLive();
   });
 
-  // ---------- Auto-populate wallet pub on load (match merchant) ----------
+  // ---------- Auto-populate wallet pub on load ----------
   (async ()=>{ try{ await refreshMyWalletModal(); }catch{} })();
 
 })();
