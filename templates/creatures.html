@@ -44,9 +44,7 @@
     .egg img{width:75%;height:75%;object-fit:contain;filter:drop-shadow(0 2px 4px rgba(0,0,0,.35))}
     .hint{font-size:12px;color:#9fb0d6;margin-top:6px;text-align:center}
 
-    #liveSvg{
-      width:220px; height:220px; object-fit:contain; border-radius:12px; border:1px solid #223056; background:#0e1422
-    }
+    #liveSvg{ width:220px; height:220px; object-fit:contain; border-radius:12px; border:1px solid #223056; background:#0e1422 }
 
     .modal{position:fixed;inset:0;background:rgba(0,0,0,.5);display:flex;align-items:center;justify-content:center}
     .modal[hidden]{display:none}
@@ -162,13 +160,25 @@
     return d;
   }
   function fillTrack(){
-    track.innerHTML='';
-    const pad = 3;
-    for(let p=0;p<pad;p++) track.appendChild(cell(previews[p % previews.length]));
-    previews.forEach(src=> track.appendChild(cell(src)));
-    for(let p=0;p<pad+p;p++) track.appendChild(cell(previews[(p+5) % previews.length]));
+  track.innerHTML = '';
+  const pad = 3;
+
+  // left padding
+  for (let p = 0; p < pad; p++) {
+    track.appendChild(cell(previews[p % previews.length]));
   }
-  fillTrack();
+
+  // main run
+  previews.forEach(src => {
+    track.appendChild(cell(src));
+  });
+
+  // right padding (FIX: use p < pad, not p < pad + p)
+  for (let p = 0; p < pad; p++) {
+    track.appendChild(cell(previews[(p + 5) % previews.length]));
+  }
+}
+fillTrack();
   function slotCellWidth(){
     const first = track.querySelector('.egg');
     if(!first) return 152;
