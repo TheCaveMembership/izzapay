@@ -353,18 +353,12 @@ def token_showcase():
 @app.get("/creatures/auth")
 def creatures_auth_page():
     """Pi auth gate for IZZA CREATURES."""
-    return render_template(
-        "creatures_auth.html",
-        sandbox=current_app.config.get("PI_SANDBOX", True)
-    )
+    return render_template("creatures_auth.html")
 
 @app.get("/creatures")
 def creatures_main():
     """Main IZZA CREATURES page (mint, view, feed, battle)."""
-    return render_template(
-        "creatures.html",
-        sandbox=current_app.config.get("PI_SANDBOX", True)
-    )
+    return render_template("creatures.html")
 # ----------------- PERSISTENT DATA ROOT -----------------
 DATA_ROOT   = os.getenv("DATA_ROOT", "/var/data/izzapay")
 os.makedirs(DATA_ROOT, exist_ok=True)
