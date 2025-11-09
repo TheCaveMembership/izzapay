@@ -1,0 +1,175 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>IZZA CREATURES — Mint, Hatch, Battle</title>
+  <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+  <link rel="stylesheet" href="/static/themes.css">
+  <style>
+    :root{
+      --bg:#000; --txt:#e8f1ff; --muted:#9fb0d6; --line:#1d2540;
+      --piPurple1:#7a44ff; --piPurple2:#b784ff; --gold1:#ffcf4d; --gold2:#ffb23a;
+    }
+    body{background:#000;color:var(--txt);font-family:Inter,Arial,sans-serif;margin:0;text-align:center}
+    .wrap{max-width:1100px;margin:0 auto;padding:16px 16px 120px}
+    .topbar{display:flex;align-items:center;justify-content:center;gap:12px;padding:12px 0;border-bottom:1px solid var(--line);
+            position:sticky;top:0;background:rgba(0,0,0,.9);backdrop-filter:blur(10px);z-index:10}
+    .btn{display:inline-flex;align-items:center;justify-content:center;padding:14px 18px;border-radius:14px;font-weight:700;letter-spacing:.2px;
+         border:1px solid #2a3550;color:#cfe0ff;background:#0b0f1f;cursor:pointer;text-decoration:none}
+    .btn.purple{background:linear-gradient(180deg,var(--piPurple1),var(--piPurple2));color:#fff;border-color:transparent}
+    .btn.gold{background:linear-gradient(180deg,var(--gold1),var(--gold2));color:#1a1400;border-color:transparent}
+    h1{font-size:clamp(26px,8.5vw,56px);margin:16px 0 6px}
+    p{color:var(--muted)}
+    .row{display:flex;gap:12px;justify-content:center;flex-wrap:wrap;margin:10px 0 18px}
+    /* carousel */
+    .slot{position:relative;overflow:hidden;border-radius:16px;border:1px solid #2a3550;background:#0b0f1f}
+    .slot .track{display:flex;gap:12px;transition:transform .9s cubic-bezier(.22,.8,.36,1);padding:12px}
+    .slot .egg{width:140px;height:140px;display:flex;align-items:center;justify-content:center;background:#0e1422;border-radius:14px;border:1px solid #223056}
+    .egg img{width:110px;height:110px}
+    .hint{font-size:12px;color:#9fb0d6;margin-top:6px}
+    .box{border:1px solid #2a3550;border-radius:16px;background:#0b0f1f;padding:14px}
+    .col{flex:1 1 320px;max-width:520px}
+    .grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(280px,1fr));gap:12px;margin-top:12px}
+  </style>
+  <script src="https://sdk.minepi.com/pi-sdk.js"></script>
+</head>
+<body>
+  <div class="wrap">
+    <div class="topbar">
+      <a class="btn" href="/">BACK HOME</a>
+      <a class="btn purple upper" id="openWallet">IZZA WALLET</a>
+      <a class="btn gold upper" id="openClaims">CLAIMS LIST</a>
+    </div>
+
+    <h1>IZZA CREATURES</h1>
+    <p>Pay 5 IZZA to mint an IZZA CREATURE EGG, watch it hatch live as the SVG evolves, then grow and battle.</p>
+
+    <div class="grid">
+      <div class="col box">
+        <h3>Mint Egg</h3>
+        <div class="slot" id="slot">
+          <div class="track" id="track"></div>
+        </div>
+        <div class="row">
+          <button class="btn purple" id="mintBtn">MINT EGG — 5 IZZA</button>
+        </div>
+        <div class="hint">The carousel behaves like a slot, it spins then stops on your egg</div>
+        <div id="mintMsg" class="hint"></div>
+      </div>
+
+      <div class="col box">
+        <h3>My Latest Creature</h3>
+        <div id="liveWrap">
+          <img id="liveSvg" alt="creature" style="width:220px;height:220px;object-fit:contain;border-radius:12px;border:1px solid #223056;background:#0e1422">
+        </div>
+        <div class="row">
+          <button class="btn" id="feedBtn">FEED</button>
+          <a class="btn" id="openHabitat" target="_blank">OPEN HABITAT</a>
+        </div>
+        <div id="liveHint" class="hint"></div>
+      </div>
+    </div>
+  </div>
+
+<script>
+(function(){
+  const sandbox = {{ 'true' if sandbox else 'false' }};
+  function initPi(){
+    try{ Pi.init({version:'2.0', sandbox:sandbox}); }catch(e){}
+  }
+  initPi();
+
+  const track = document.getElementById('track');
+  const mintBtn = document.getElementById('mintBtn');
+  const mintMsg = document.getElementById('mintMsg');
+  const liveSvg = document.getElementById('liveSvg');
+  const liveHint = document.getElementById('liveHint');
+  const openHabitat = document.getElementById('openHabitat');
+
+  // prefill track with preview eggs
+  const previews = Array.from({length:15}).map((_,i)=>`/nftsvg/EGGDEMO.svg?skin=${i}`);
+  function fillTrack(){
+    track.innerHTML='';
+    for(let i=0;i<previews.length;i++){
+      const cell = document.createElement('div'); cell.className='egg';
+      const img = document.createElement('img'); img.src='/static/assets/egg_preview.svg';
+      cell.appendChild(img); track.appendChild(cell);
+    }
+  }
+  fillTrack();
+
+  async function getWallet(){
+    try{
+      const u = await fetch('/api/wallet/active').then(r=>r.json());
+      return { pub: u.pub || null, secret: u.secret || null, username: u.username || null };
+    }catch{ return { pub:null, secret:null }; }
+  }
+
+  async function spinAndStop(){
+    const n = track.children.length;
+    const w = 152; // egg width plus gap
+    // spin, then stop on a random index in [3, n-4]
+    const idx = Math.floor(3 + Math.random()*(n-7));
+    track.style.transform = `translateX(-${idx*w}px)`;
+    return new Promise(res=>setTimeout(()=>res(idx), 900));
+  }
+
+  let lastCode = null, lastIssuer = null;
+
+  async function refreshLive(){
+    if(!lastCode){ liveHint.textContent='Mint an egg to see it here'; return; }
+    const meta = `/nftmeta/${lastCode}.json?nc=${Date.now()}`;
+    const j = await fetch(meta).then(r=>r.json());
+    liveSvg.src = (j.image || '') + '&pulse=' + Date.now();
+    openHabitat.href = j.external_url || '#';
+    liveHint.textContent = 'SVG refreshes every few seconds automatically';
+  }
+
+  // auto refresh the live SVG every 3s
+  setInterval(refreshLive, 3000);
+
+  mintBtn.addEventListener('click', async ()=>{
+    mintMsg.textContent = '';
+    const w = await getWallet();
+    if(!w.pub || !w.secret){
+      mintMsg.textContent = 'Link your IZZA wallet first, then try again';
+      return;
+    }
+    await spinAndStop();
+
+    try{
+      const q = await fetch('/api/creatures/quote', {method:'POST'}).then(r=>r.json());
+      if(!(q && q.ok)){ throw new Error('quote_failed'); }
+      const res = await fetch('/api/creatures/mint', {
+        method:'POST', headers:{'Content-Type':'application/json'},
+        body: JSON.stringify({ buyer_pub:w.pub, buyer_sec:w.secret })
+      }).then(r=>r.json());
+      if(!(res && res.ok)) throw new Error(res && res.error || 'mint_failed');
+
+      lastCode = res.asset.code; lastIssuer = res.asset.issuer;
+      mintMsg.textContent = `Egg minted: ${lastCode}. Go to Claims to deliver it to your wallet.`;
+      refreshLive();
+    }catch(e){
+      mintMsg.textContent = 'Mint failed, please try again';
+      console.error(e);
+    }
+  });
+
+  document.getElementById('openWallet')?.addEventListener('click', ()=> location.href='/token/auth?next=/token/izza');
+  document.getElementById('openClaims')?.addEventListener('click', ()=> location.href='/token/auth?next=/token/izza');
+
+  document.getElementById('feedBtn')?.addEventListener('click', async ()=>{
+    if(!lastCode){ mintMsg.textContent='Mint or select a creature first'; return; }
+    const w = await getWallet();
+    if(!w.pub){ mintMsg.textContent='Link wallet first'; return; }
+    await fetch('/api/creatures/feed', {
+      method:'POST', headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({ code:lastCode, owner_pub:w.pub })
+    });
+    refreshLive();
+  });
+
+})();
+</script>
+</body>
+</html>
