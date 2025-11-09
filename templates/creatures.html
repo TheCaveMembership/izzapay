@@ -152,10 +152,21 @@
   const openHabitat = document.getElementById('openHabitat');
   const eggPreview = document.getElementById('eggPreview');
 
-  // egg preview seeds
-  const previewSkins = Array.from({length:8}).map((_,i)=>String(i+1));
+  // Curated preview seeds to ensure variety (rarity, palette, pattern)
+  // Hints decoded server-side by _choose_palette() and rarity helper.
+  const previewSkins = [
+    "LEG-sapphire-stripe",
+    "EP-ember-metallic",
+    "RARE-violet-swirl",
+    "UN-mint-mosaic",
+    "COM-gold-speckle",
+    "RARE-rose-stripe",
+    "EP-obsidian-metallic",
+    "COM-turquoise-speckle"
+  ];
+
   function loadEggSkin(seed){
-    // preview sans background + status text
+    // Preview without background/status, but WITH rarity sparkles via seed hints
     eggPreview.src = `/nftsvg/EGGDEMO.svg?skin=${encodeURIComponent(seed)}&nobg=1&nc=${Date.now()}`;
   }
   loadEggSkin(previewSkins[0]);
