@@ -19,6 +19,7 @@
          border:1px solid #2a3550;color:#cfe0ff;background:var(--panel);cursor:pointer;text-decoration:none}
     .btn.purple{background:linear-gradient(180deg,var(--piPurple1),var(--piPurple2));color:#fff;border-color:transparent}
     .btn.gold{background:linear-gradient(180deg,var(--gold1),var(--gold2));color:#1a1400;border-color:transparent}
+    /* minimal red variant for Burn buttons */
     .btn.red{background:#1b0f12;border-color:#5b2430;color:#ffb6c1}
     h1{font-size:clamp(26px,8.5vw,56px);margin:16px 0 6px;text-align:center}
     p{color:var(--muted);text-align:center}
@@ -48,7 +49,7 @@
     .success{color:#5ad49e}
     .warn{color:#ffb86b}
 
-    .thumb{display:flex;flex-direction:column;align-items:center;gap:6px;margin:0;padding:10px;border:1px solid #223056;border-radius:12px;background:#0e1422;width:100%}
+    .thumb{display:inline-flex;flex-direction:column;align-items:center;gap:6px;margin:6px;padding:8px;border:1px solid #223056;border-radius:12px;background:#0e1422}
     .thumb img{width:88px;height:88px;object-fit:contain}
     .thumb .cap{font-size:12px;color:#9fb0d6}
 
@@ -62,20 +63,17 @@
     .searchbar{display:flex;gap:8px}
     .searchbar input{flex:1;min-width:140px;padding:8px 10px;border-radius:10px;border:1px solid #2a3550;background:#0f1522;color:#e8f1ff}
 
+    /* surgical: minting spinner + green consent note */
     .green-note{color:#86f2c3;font-weight:600;margin-top:6px;text-align:center}
     .loading{display:inline-flex;align-items:center;gap:8px}
     .spin{width:14px;height:14px;border:2px solid #86f2c3;border-top-color:transparent;border-radius:50%;animation:spin 1s linear infinite}
     @keyframes spin{to{transform:rotate(360deg)}}
 
+    /* collection stats panel */
     .stats{border:1px solid #2a3550;border-radius:14px;background:#0e1422;padding:12px;margin-top:12px}
     .stats h4{margin:0 0 8px}
     .stats-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(160px,1fr));gap:8px}
     .stat-pill{border:1px solid #3a4a78;border-radius:12px;padding:8px;text-align:center;background:#0f1522}
-
-    /* Responsive 2-up+ grid for My Creatures */
-    #myCreaturesList{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px;align-items:start}
-    @media (min-width:680px){#myCreaturesList{grid-template-columns:repeat(3,minmax(0,1fr))}}
-    @media (min-width:980px){#myCreaturesList{grid-template-columns:repeat(4,minmax(0,1fr))}}
   </style>
   <script src="https://sdk.minepi.com/pi-sdk.js"></script>
 </head>
@@ -95,16 +93,18 @@
         <h3>Mint Egg</h3>
         <div class="slot"><img id="eggPreview" alt="egg"></div>
         <div class="row"><button class="btn purple" id="mintBtn">MINT EGG, 5 IZZA</button></div>
+        <!-- surgical: consent line under the button -->
         <div class="green-note">* Clicking the above button you agree to spend 5 IZZA</div>
 
         <div class="hint">Shuffle through some eggs, ultimately the IZZA gods will ❕DECIDE YOUR FATE❕</div>
+        <!-- aria-live so progress updates are announced -->
         <div id="mintMsg" class="hint" aria-live="polite"></div>
 
-        <!-- Compact Collection stats -->
+        <!-- NEW: Collection Stats under Mint Egg -->
         <div class="stats" id="colStatsBox" aria-live="polite">
           <h4>IZZA CREATURES V1 — Collection</h4>
           <div class="stats-grid">
-            <div class="stat-pill"><strong>Supply</strong><br><span id="supplyVal" class="small-muted">—</span></div>
+            <div class="stat-pill"><strong id="supplyLine">Supply</strong><br><span class="small-muted">—</span></div>
             <div class="stat-pill"><strong>Hatched</strong><br><span id="hatchedCount" class="small-muted">—</span></div>
             <div class="stat-pill"><strong>Burnt</strong><br><span id="burntCount" class="small-muted">—</span></div>
           </div>
@@ -130,6 +130,7 @@
       </div>
     </div>
 
+    <!-- NEW: User Army Strength summary -->
     <div class="box" id="armyBox" style="display:none;margin-top:14px">
       <h3>Your IZZA Creature Army Strength</h3>
       <div class="stats-grid">
@@ -141,7 +142,7 @@
 
     <div class="box" id="myCreaturesBox" style="display:none;margin-top:14px">
       <h3>My Creatures</h3>
-      <div id="myCreaturesList"></div>
+      <div id="myCreaturesList" class="row" style="justify-content:flex-start;flex-wrap:wrap"></div>
     </div>
   </div>
 
@@ -192,9 +193,11 @@
 
 <script>
 (function(){
+  // ---------- Pi init ----------
   const sandbox = {{ 'true' if PI_SANDBOX else 'false' }};
   try{ if(window.Pi && Pi.init){ Pi.init({version:'2.0', sandbox:sandbox}); } }catch(e){}
 
+  // ---------- DOM ----------
   const mintBtn = document.getElementById('mintBtn');
   const mintMsg = document.getElementById('mintMsg');
   const liveSvg = document.getElementById('liveSvg');
@@ -203,38 +206,58 @@
   const eggPreview = document.getElementById('eggPreview');
 
   // stats elements
-  const supplyVal   = document.getElementById('supplyVal');
-  const hatchedCount= document.getElementById('hatchedCount');
-  const burntCount  = document.getElementById('burntCount');
-  const legCount    = document.getElementById('legCount');
-  const epCount     = document.getElementById('epCount');
-  const rareCount   = document.getElementById('rareCount');
-  const unCount     = document.getElementById('unCount');
-  const comCount    = document.getElementById('comCount');
+  const supplyLine = document.getElementById('supplyLine');
+  const hatchedCount = document.getElementById('hatchedCount');
+  const burntCount = document.getElementById('burntCount');
+  const legCount = document.getElementById('legCount');
+  const epCount = document.getElementById('epCount');
+  const rareCount = document.getElementById('rareCount');
+  const unCount = document.getElementById('unCount');
+  const comCount = document.getElementById('comCount');
 
   const armyBox = document.getElementById('armyBox');
   const armyAtk = document.getElementById('armyAtk');
   const armyDef = document.getElementById('armyDef');
   const armyCnt = document.getElementById('armyCnt');
 
+  // Expanded preview pool: all palettes, patterns, and rarity hints
+  const palettes = ["gold","violet","turquoise","rose","lime","sapphire","ember","obsidian","mint"];
+  const patterns = ["speckle","stripe","swirl","mosaic","metallic"];
+  const rarHints = ["LEG","EP","RARE","UN","COM"];
+
   function buildPreviewSkins(){
-    const palettes = ["gold","violet","turquoise","rose","lime","sapphire","ember","obsidian","mint"];
-    const patterns = ["speckle","stripe","swirl","mosaic","metallic"];
-    const rarHints = ["LEG","EP","RARE","UN","COM"];
-    const seeds=[]; rarHints.forEach(r=>palettes.forEach(p=>patterns.forEach(t=>seeds.push(`${r}-${p}-${t}`))));
-    const picked=[]; for(let i=0;i<seeds.length;i+=3) picked.push(seeds[i]);
+    const seeds = [];
+    for(const r of rarHints){
+      for(const p of palettes){
+        for(const t of patterns){
+          seeds.push(`${r}-${p}-${t}`);
+        }
+      }
+    }
+    const step = 3;
+    const picked = [];
+    for(let i=0;i<seeds.length;i+=step) picked.push(seeds[i]);
     return picked;
   }
   const previewSkins = buildPreviewSkins();
-  function loadEggSkin(seed){ eggPreview.src=`/nftsvg/EGGDEMO.svg?skin=${encodeURIComponent(seed)}&nobg=1&nc=${Date.now()}`; }
+
+  function loadEggSkin(seed){
+    eggPreview.src = `/nftsvg/EGGDEMO.svg?skin=${encodeURIComponent(seed)}&nobg=1&nc=${Date.now()}`;
+  }
   loadEggSkin(previewSkins[0]);
 
+  // Slightly longer shuffle to showcase effects
   async function spinEggs(finalSeed){
-    const spins=27, delay=120;
-    for(let i=0;i<spins;i++){ loadEggSkin(previewSkins[i%previewSkins.length]); await new Promise(r=>setTimeout(r,delay)); }
+    const spins = 27;
+    const delay = 120;
+    for(let i=0;i<spins;i++){
+      loadEggSkin(previewSkins[i % previewSkins.length]);
+      await new Promise(r=>setTimeout(r,delay));
+    }
     loadEggSkin(finalSeed);
   }
 
+  // ---------- Local wallet helpers ----------
   function __readVault(){ try{ const s=localStorage.getItem('izza_test_wallet'); return s?JSON.parse(s):null; }catch{return null} }
   function __writeVault(j){ try{ localStorage.setItem('izza_test_wallet', JSON.stringify(j||{})); }catch{} }
   function __forgetSecret(pub){ try{ const v=__readVault()||{}; if(v && v.pub===pub){ delete v.sec; __writeVault(v); } }catch{} }
@@ -262,6 +285,7 @@
     return r.json().catch(()=>null);
   }
 
+  // ---------- Username canonization ----------
   const SRV_USER = {{ (username or '') | tojson }};
   function stripAt(s){ return (s||'').toString().trim().replace(/^@+/, ''); }
   const USER_CANON = (()=>{
@@ -286,6 +310,7 @@
     }
   }catch{}
 
+  // ---------- Wallet modal wiring ----------
   function openMyWallet(){ document.getElementById('myWalletModal').removeAttribute('hidden'); refreshMyWalletModal(); }
   function closeMyWallet(){ document.getElementById('myWalletModal').setAttribute('hidden',''); }
   document.getElementById('openWallet').addEventListener('click', openMyWallet);
@@ -328,6 +353,7 @@
     refreshMyWalletModal();
   });
 
+  // ---------- Gate for mint / feed / burn ----------
   async function ensureUserAndWalletGate(){
     const active = await fetchActiveWallet(USER_CANON);
     const pub = active && active.pub || '';
@@ -341,6 +367,7 @@
     return { user:USER_CANON, pub, sec:getLocalSecret(pub) };
   }
 
+  // ---------- Live preview ----------
   let lastCode = null, lastIssuer = null;
   async function refreshLive(){
     if(!lastCode){ liveHint.textContent='Mint an egg to see it here'; return; }
@@ -354,38 +381,40 @@
   }
   setInterval(refreshLive, 3000);
 
-  // Collection Stats
+  // ---------- Collection Stats ----------
   async function loadCollectionStats(){
     try{
-      const j = await fetch('/api/creatures/collection-stats').then(r=>r.json());
+      const j = await fetch('/api/creatures/stats').then(r=>r.json());
+      // expected: {cap:1000, minted: N, burnt: M, rarity: {legendary, epic, rare, uncommon, common}}
       if(j && j.ok){
-        supplyVal.textContent   = `${j.circulating} / ${j.cap}`;
-        hatchedCount.textContent= String(j.minted_total);
-        burntCount.textContent  = String(j.burned_total);
-        const alive = j.rarity_alive || {};
-        legCount.textContent    = String(alive.legendary ?? 0);
-        epCount.textContent     = String(alive.epic ?? 0);
-        rareCount.textContent   = String(alive.rare ?? 0);
-        unCount.textContent     = String(alive.uncommon ?? 0);
-        comCount.textContent    = String(alive.common ?? 0);
+        const cap = j.cap || 1000;
+        supplyLine.textContent = `Supply ${j.minted - j.burnt} / ${cap}`;
+        hatchedCount.textContent = String(j.minted);
+        burntCount.textContent = String(j.burnt);
+        legCount.textContent = String((j.rarity||{}).legendary ?? 0);
+        epCount.textContent  = String((j.rarity||{}).epic ?? 0);
+        rareCount.textContent= String((j.rarity||{}).rare ?? 0);
+        unCount.textContent  = String((j.rarity||{}).uncommon ?? 0);
+        comCount.textContent = String((j.rarity||{}).common ?? 0);
       }
     }catch(e){}
   }
 
-  // Army Strength
+  // ---------- Army Strength ----------
   async function loadArmyStrength(){
     try{
       const qs = USER_CANON ? ('?u='+encodeURIComponent(USER_CANON)) : '';
-      const j = await fetch('/api/creatures/army-stats'+qs, {credentials:'include'}).then(r=>r.json());
+      const j = await fetch('/api/creatures/army-power'+qs, {credentials:'include'}).then(r=>r.json());
       if(j && j.ok){
-        armyAtk.textContent = String(j.attack ?? 0);
-        armyDef.textContent = String(j.defense ?? 0);
+        armyAtk.textContent = String(j.total_attack ?? 0);
+        armyDef.textContent = String(j.total_defense ?? 0);
         armyCnt.textContent = String(j.count ?? 0);
         armyBox.style.display = 'block';
       }
     }catch(e){}
   }
 
+  // Load latest & balances & stats on enter
   (async ()=>{
     try{
       const j = await fetch('/api/creatures/latest', {credentials:'include'}).then(r=>r.json());
@@ -400,6 +429,7 @@
     try{ await loadArmyStrength(); }catch{}
   })();
 
+  // ---------- Mint flow (with auto-claim) ----------
   mintBtn.addEventListener('click', async ()=>{
     const gate = await ensureUserAndWalletGate();
     if(!gate){ return; }
@@ -409,9 +439,18 @@
       <div style="margin-top:4px">❕ CRAFTED BY THE HANDS OF IZZA GODS ❕</div>
     `;
 
-    const previewSkins=(()=>{const palettes=["gold","violet","turquoise","rose","lime","sapphire","ember","obsidian","mint"];const patterns=["speckle","stripe","swirl","mosaic","metallic"];const rarHints=["LEG","EP","RARE","UN","COM"];const seeds=[];for(const r of rarHints){for(const p of palettes){for(const t of patterns){seeds.push(`${r}-${p}-${t}`);}}}const picked=[];for(let i=0;i<seeds.length;i+=3)picked.push(seeds[i]);return picked;})();
+    const previewSkins = (function(){
+      const palettes = ["gold","violet","turquoise","rose","lime","sapphire","ember","obsidian","mint"];
+      const patterns = ["speckle","stripe","swirl","mosaic","metallic"];
+      const rarHints = ["LEG","EP","RARE","UN","COM"];
+      const seeds = [];
+      for(const r of rarHints){ for(const p of palettes){ for(const t of patterns){ seeds.push(`${r}-${p}-${t}`); }}}
+      const picked = []; for(let i=0;i<seeds.length;i+=3) picked.push(seeds[i]);
+      return picked;
+    })();
+
     const finalSkin = previewSkins[Math.floor(Math.random()*previewSkins.length)];
-    const spins=27, delay=120;
+    const spins = 27, delay = 120;
     for(let i=0;i<spins;i++){
       eggPreview.src = `/nftsvg/EGGDEMO.svg?skin=${encodeURIComponent(previewSkins[i % previewSkins.length])}&nobg=1&nc=${Date.now()}`;
       await new Promise(r=>setTimeout(r,delay));
@@ -446,6 +485,7 @@
       await refreshMyWalletModal();
       await loadCollectionStats();
       await loadArmyStrength();
+      // refresh list if open
       if (document.getElementById('myCreaturesBox').style.display !== 'none') {
         document.getElementById('btnMyCreatures').click();
       }
@@ -455,6 +495,7 @@
     }
   });
 
+  // ---------- Feed ----------
   document.getElementById('feedBtn').addEventListener('click', async ()=>{
     if(!lastCode){ mintMsg.textContent='Mint or select a creature first'; return; }
     const gate = await ensureUserAndWalletGate(); if(!gate){ return; }
@@ -465,6 +506,7 @@
     refreshLive();
   });
 
+  // ---------- Burn helper ----------
   async function burnCreature(code){
     const gate = await ensureUserAndWalletGate(); if(!gate){ return; }
     const ok = confirm("You are about to Burn this NFT! Are you sure you want to send this IZZA Creature back into the hands of IZZA gods?");
@@ -476,13 +518,16 @@
         body: JSON.stringify({ code, owner_pub: gate.pub })
       }).then(r=>r.json());
       if(!(r && r.ok)){ alert('Burn failed'); return; }
+      // refresh UI
       await loadCollectionStats();
       await loadArmyStrength();
+      // if latest was burned, clear live
       if(lastCode === code){
         lastCode = null;
         liveSvg.src = '';
         liveHint.textContent = 'Select another creature from your collection.';
       }
+      // refresh list
       if (document.getElementById('myCreaturesBox').style.display !== 'none') {
         document.getElementById('btnMyCreatures').click();
       }
@@ -492,6 +537,7 @@
     }
   }
 
+  // ---------- My Creatures ----------
   const myBox  = document.getElementById('myCreaturesBox');
   const myList = document.getElementById('myCreaturesList');
   document.getElementById('btnMyCreatures').addEventListener('click', async ()=>{
@@ -499,13 +545,11 @@
     const qs = USER_CANON ? ('?u='+encodeURIComponent(USER_CANON)) : '';
     const j = await fetch('/api/creatures/mine'+qs, {credentials:'include'}).then(r=>r.json()).catch(()=>({items:[]}));
     (j.items||[]).forEach(it=>{
-      const card = document.createElement('div');
-      card.className = 'thumb';
-
+      const wrap = document.createElement('div');
+      wrap.className = 'thumb';
       const img = document.createElement('img');
       img.alt = it.code;
       img.src = `/nftsvg/${it.code}.svg?nc=${Date.now()}`;
-
       const cap = document.createElement('div');
       cap.className = 'cap';
       cap.textContent = it.code + (it.stage ? ` — ${it.stage}` : '');
@@ -528,10 +572,10 @@
       row.appendChild(openA);
       row.appendChild(burnB);
 
-      card.appendChild(img);
-      card.appendChild(cap);
-      card.appendChild(row);
-      myList.appendChild(card);
+      wrap.appendChild(img);
+      wrap.appendChild(cap);
+      wrap.appendChild(row);
+      myList.appendChild(wrap);
     });
     myBox.style.display = 'block';
     await loadArmyStrength();
@@ -541,7 +585,7 @@
 })();
 </script>
 
-<!-- Friends/notifications overlay script kept as-is -->
+<!-- Global friends and notifications overlay, unchanged -->
 <script>
 /* existing friends and notifications script exactly as before */
 </script>
