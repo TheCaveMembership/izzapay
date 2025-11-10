@@ -26,8 +26,12 @@ CREATURE_ISSUER_G = os.getenv("NFT_ISSUER_PUBLIC", "").strip()
 DISTR_S  = os.getenv("NFT_DISTR_SECRET", "").strip()
 DISTR_G  = os.getenv("NFT_DISTR_PUBLIC", "").strip()
 
+# Optional global cap for total supply (set to integer via env if you want a cap)
+SUPPLY_CAP_ENV = os.getenv("CREATURE_SUPPLY_CAP", "").strip()
+CREATURE_SUPPLY_CAP = int(SUPPLY_CAP_ENV) if SUPPLY_CAP_ENV.isdigit() else None
+
 # ===== REAL LIFECYCLE MODE =====
-DAY_SECS          = 86400   # 1 real day
+DAY_SECS          = 86400
 
 # Egg timings (unchanged)
 TEST_CRACK_START  = 30
@@ -87,11 +91,13 @@ def _ensure_tables():
           meta_version INTEGER DEFAULT 1,
           user_id INTEGER,
           revive_progress INTEGER DEFAULT 0,
+          burned_at INTEGER DEFAULT NULL,
           UNIQUE(code, issuer)
         )""")
         for colstmt in [
             ("last_hunger_at",  "ALTER TABLE nft_creatures ADD COLUMN last_hunger_at INTEGER"),
-            ("revive_progress", "ALTER TABLE nft_creatures ADD COLUMN revive_progress INTEGER DEFAULT 0")
+            ("revive_progress", "ALTER TABLE nft_creatures ADD COLUMN revive_progress INTEGER DEFAULT 0"),
+            ("burned_at",       "ALTER TABLE nft_creatures ADD COLUMN burned_at INTEGER DEFAULT NULL"),
         ]:
             col, stmt = colstmt
             if not _has_column(cx, "nft_creatures", col):
@@ -99,6 +105,7 @@ def _ensure_tables():
         cx.execute("CREATE INDEX IF NOT EXISTS idx_creat_owner ON nft_creatures(owner_pub)")
         cx.execute("CREATE INDEX IF NOT EXISTS idx_creat_stage ON nft_creatures(stage)")
         cx.execute("CREATE INDEX IF NOT EXISTS idx_creat_user  ON nft_creatures(user_id)")
+        cx.execute("CREATE INDEX IF NOT EXISTS idx_creat_burn  ON nft_creatures(burned_at)")
         cx.execute("""
         CREATE TABLE IF NOT EXISTS nft_collections(
           id INTEGER PRIMARY KEY,
@@ -148,7 +155,6 @@ def _stage_from_elapsed(elapsed: int, hunger: int, existing_stage: str | None) -
     if elapsed < TEEN_END:         return "teen"
     return "prime"
 
-# Expanded palettes and patterns (surgical add, backwards compatible)
 _PALETTES = ["gold","violet","turquoise","rose","lime","sapphire","ember","obsidian","mint",
              "amethyst","citrine","arctic","blaze","void"]
 _PATTERNS = ["speckle","stripe","swirl","mosaic","metallic","chevron","grid","starfield"]
@@ -182,7 +188,6 @@ def _apply_hunger_progress(row: sqlite3.Row) -> tuple[int, str, int, int, int]:
     delta = max(0, now - last_hunger_at)
     days = delta / float(DAY_SECS)
     inc = HUNGER_PER_DAY.get(stage, 0) * days
-    # keep rounding behavior; we still advance last_hunger_at here
     hunger = _clamp(int(round(hunger + inc)), 0, 100)
     last_hunger_at = now
 
@@ -202,20 +207,11 @@ def _persist_progress_if_changed(code: str, hunger: int, stage: str, last_feed_a
 
 # ---------- rarity & combat math ----------
 def _rarity_from(code_seed: str, hint: str = "") -> str:
-    """
-    Current per-mint odds (unchanged):
-      legendary 1%
-      epic      4%  (cumulative 5%)
-      rare      9%  (cumulative 14%)
-      uncommon 22%  (cumulative 36%)
-      common    64%  (else)
-    """
-    h = (hint or "").lower()
-    if "leg" in h: return "legendary"
-    if "ep"  in h: return "epic"
-    if "rare" in h: return "rare"
-    if "un" in h: return "uncommon"
-    if "com" in h: return "common"
+    if "leg" in hint.lower(): return "legendary"
+    if "ep"  in hint.lower(): return "epic"
+    if "rare" in hint.lower(): return "rare"
+    if "un" in hint.lower(): return "uncommon"
+    if "com" in hint.lower(): return "common"
     r = random.Random(code_seed + ":rar").random()
     if r < 0.01:  return "legendary"
     if r < 0.05:  return "epic"
@@ -298,7 +294,6 @@ def _compute_stats_dict(st_row_like: dict, last_feed_at: int, rarity: str) -> di
 
 # ---------- state compute ----------
 def _compute_state_dict(code: str) -> dict:
-    # Demo egg supports ?skin for the preview
     if code.upper() == "EGGDEMO":
         skin = (request.args.get("skin") or "demo").strip()
         base, pat = _choose_palette(skin)
@@ -337,7 +332,6 @@ def _compute_state_dict(code: str) -> dict:
 
     stats = _compute_stats_dict(st, last_feed_at, rarity)
     st.update(stats)
-
     return st
 
 def _svg_headers(resp):
@@ -346,7 +340,7 @@ def _svg_headers(resp):
     resp.headers["X-Content-Type-Options"] = "nosniff"
     return resp
 
-# ---------- API (unchanged endpoints) ----------
+# ---------- API ----------
 @bp_creatures.post("/api/creatures/quote")
 def creatures_quote():
     return jsonify({"ok": True, "price_izza": str(EGG_PRICE_IZZA), "tick_seconds": TICK_STEP_SECONDS, "day_seconds": DAY_SECS})
@@ -390,8 +384,8 @@ def creatures_mint():
     with _db() as cx:
         cx.execute("""
           INSERT INTO nft_creatures(code, issuer, owner_pub, egg_seed, palette, pattern,
-                                    hatch_start, last_feed_at, last_hunger_at, hunger, stage, meta_version, user_id, revive_progress)
-          VALUES(?,?,?,?,?,?, ?,?,?,?,?,1,?, 0)
+                                    hatch_start, last_feed_at, last_hunger_at, hunger, stage, meta_version, user_id, revive_progress, burned_at)
+          VALUES(?,?,?,?,?,?, ?,?,?,?,?,1,?, 0, NULL)
         """, (code, CREATURE_ISSUER_G, None, seed, base, pat, ts, ts, ts, 0, "egg", uid))
         cx.execute("""
           INSERT INTO nft_collections(code, issuer, total_supply, decimals, status, created_at, updated_at)
@@ -424,11 +418,13 @@ def creatures_mine():
             rows = cx.execute("""
               SELECT code, issuer, owner_pub, stage, palette, pattern, hatch_start
               FROM nft_creatures
-              WHERE user_id=? OR (user_id IS NULL AND owner_pub IS NOT NULL AND owner_pub IN (
-                SELECT pub FROM user_wallets WHERE username IN (
-                  SELECT pi_username FROM users WHERE id=?
-                )
-              ))
+              WHERE burned_at IS NULL AND (
+                user_id=? OR (user_id IS NULL AND owner_pub IS NOT NULL AND owner_pub IN (
+                  SELECT pub FROM user_wallets WHERE username IN (
+                    SELECT pi_username FROM users WHERE id=?
+                  )
+                ))
+              )
               ORDER BY id DESC LIMIT 200
             """, (uid, uid)).fetchall()
         else:
@@ -437,7 +433,7 @@ def creatures_mine():
                 rows = cx.execute("""
                   SELECT code, issuer, owner_pub, stage, palette, pattern, hatch_start
                   FROM nft_creatures
-                  WHERE owner_pub=?
+                  WHERE burned_at IS NULL AND owner_pub=?
                   ORDER BY id DESC LIMIT 200
                 """, (active_pub,)).fetchall()
             else:
@@ -477,7 +473,7 @@ def creatures_auto_claim():
     if not row:
         abort(404, "unknown_code")
     if row["owner_pub"]:
-        return jsonify({"ok": True, "code": code, "note": "already owned"})
+        return jsonify({"ok": True, "code": code, "note": "already_owned"})
 
     asset = Asset(code, CREATURE_ISSUER_G)
     delivered = False
@@ -572,6 +568,91 @@ def creatures_feed():
 
     return jsonify({"ok": True, "hunger": hunger, "stage": stage})
 
+# ---------- Burn ----------
+@bp_creatures.post("/api/creatures/burn")
+def creatures_burn():
+    """
+    Burn flow:
+      - Verify item exists, not already burned, and owned by owner_pub.
+      - Try to get owner's linked secret from server store.
+      - Send 1 unit of the NFT back to distributor (DISTR_G).
+      - Mark burned_at in DB and clear owner_pub.
+    """
+    j = request.get_json(silent=True) or {}
+    code = (j.get("code") or "").strip().upper()
+    owner_pub = (j.get("owner_pub") or "").strip().upper()
+    if not code or not owner_pub:
+        abort(400, "code_and_owner_required")
+
+    _ensure_tables()
+    with _db() as cx:
+        row = cx.execute(
+            "SELECT owner_pub, burned_at FROM nft_creatures WHERE code=? AND issuer=?",
+            (code, CREATURE_ISSUER_G)
+        ).fetchone()
+    if not row:
+        abort(404, "not_found")
+    if row["burned_at"]:
+        return jsonify({"ok": True, "note": "already_burned"})
+    if (row["owner_pub"] or "").upper() != owner_pub:
+        abort(403, "not_owner")
+
+    # get owner's linked secret from server (user can also link S key via wallet modal)
+    owner_sec = None
+    try:
+        owner_sec = _get_linked_secret(owner_pub)
+    except Exception:
+        owner_sec = None
+    if not owner_sec:
+        abort(400, "owner_secret_missing: save your S key in wallet first")
+
+    asset = Asset(code, CREATURE_ISSUER_G)
+
+    # Ensure trustline exists (it should) and send 1 back to distributor
+    try:
+        if not _account_has_trustline(owner_pub, asset):
+            abort(400, "no_trustline")
+        _pay_asset(owner_sec, DISTR_G, "1", asset, memo=f"IZZA CREATURE BURN {code}")
+    except Exception as e:
+        abort(400, f"burn_transfer_failed:{e}")
+
+    with _db() as cx:
+        cx.execute(
+            "UPDATE nft_creatures SET owner_pub=NULL, burned_at=? WHERE code=? AND issuer=?",
+            (_now_i(), code, CREATURE_ISSUER_G)
+        )
+        cx.commit()
+
+    return jsonify({"ok": True, "code": code})
+
+# ---------- Stats ----------
+@bp_creatures.get("/api/creatures/stats")
+def creatures_stats():
+    """
+    Returns collection-wide stats:
+      - total minted
+      - total burned
+      - counts by rarity (based on egg_seed/hints)
+      - optional cap (from CREATURE_SUPPLY_CAP env)
+    """
+    _ensure_tables()
+    with _db() as cx:
+        rows = cx.execute("SELECT code, egg_seed, burned_at FROM nft_creatures").fetchall()
+    total = len(rows)
+    burned = sum(1 for r in rows if r["burned_at"])
+    counts = {"common":0,"uncommon":0,"rare":0,"epic":0,"legendary":0}
+    for r in rows:
+        seed = (r["egg_seed"] or "").strip()
+        rarity = _rarity_from(r["code"], seed)
+        counts[rarity] = counts.get(rarity, 0) + 1
+    return jsonify({
+        "ok": True,
+        "total": total,
+        "burned": burned,
+        "by_rarity": counts,
+        "cap": CREATURE_SUPPLY_CAP
+    })
+
 @bp_creatures.get("/api/creatures/state/<code>.json")
 def creatures_state(code):
     st = _compute_state_dict(code)
@@ -612,7 +693,7 @@ def creature_svg(code):
 
     skin_hint = (request.args.get("skin") or "") if str(code).upper() == "EGGDEMO" else ""
 
-    # colors (add mappings for new palettes with sensible fallbacks)
+    # colors
     bg = {
         "gold":"#130e00","violet":"#0e061a","turquoise":"#02151a","rose":"#1a0710","lime":"#0c1a06",
         "sapphire":"#06101e","ember":"#1a0b06","obsidian":"#0b0b10","mint":"#04130d",
@@ -637,7 +718,7 @@ def creature_svg(code):
         }.get(b, "#e8f1ff")
     pcol = _pattern_contrast(base)
 
-    # scale by stage (as strings for stable formatting)
+    # scale by stage then uniform zoom
     if stage == "egg":       egg_scale = "1.0"
     elif stage == "cracking": egg_scale = "1.02"
     elif stage == "baby":     egg_scale = "0.9"
@@ -645,17 +726,10 @@ def creature_svg(code):
     elif stage == "prime":    egg_scale = "1.06"
     else:                     egg_scale = "1.0"
 
-    # Overall creature enlargement (requested): multiply existing scale uniformly
     creature_zoom = 1.18
     overall_scale = f"{float(egg_scale) * creature_zoom:.3f}"
 
-    # Cosmetics randomness
-    rnd = random.Random(st["code"])
-    crown  = (rnd.randint(1,3) == 1)
-    flames = (rnd.randint(1,4) == 1)
-    lasers = (rnd.randint(1,5) == 1)
-
-    # Patterns (added chevron, grid, starfield)
+    # Patterns
     pattern_svg = ""
     if pattern == "speckle":
         dots = []
@@ -696,22 +770,16 @@ def creature_svg(code):
             stars.append(f'<circle cx="{x}" cy="{y}" r="{r}" fill="{pcol}" opacity=".28"/>')
         pattern_svg = ''.join(stars)
 
-    # Mouths (increase tongue visibility; pipe bigger with animated smoke rising)
+    # Face & extras
     mr = random.Random(st["code"] + ":mouth").random()
-    mouth_type = "smile"
-    if mr < 0.01:
-        mouth_type = "pipe"
-    elif mr < 0.06:
-        mouth_type = "tongue"
-    elif mr < 0.13:
-        mouth_type = "squiggle"
-    else:
-        mouth_type = "smile"
+    if mr < 0.01: mouth_type = "pipe"
+    elif mr < 0.06: mouth_type = "tongue"
+    elif mr < 0.13: mouth_type = "squiggle"
+    else: mouth_type = "smile"
 
     if mouth_type == "smile":
         mouth_svg = '<path d="M-18,10 Q0,22 18,10" stroke="#180d00" stroke-width="4" fill="none"/>'
     elif mouth_type == "tongue":
-        # bigger, more noticeable tongue
         mouth_svg = (
           '<path d="M-20,6 Q0,12 20,6" stroke="#180d00" stroke-width="4" fill="none"/>'
           '<path d="M-8,6 Q0,28 8,6 Q0,18 -8,6" fill="#ff5577" opacity=".95"/>'
@@ -719,11 +787,10 @@ def creature_svg(code):
         )
     elif mouth_type == "squiggle":
         mouth_svg = '<path d="M-18,10 Q-9,18 0,10 Q9,2 18,10" stroke="#180d00" stroke-width="4" fill="none"/>'
-    else:  # pipe
-        # Larger pipe plus animated smoke that rises and swirls upward
+    else:
         mouth_svg = (
           '<path d="M-10,10 Q0,18 10,10" stroke="#180d00" stroke-width="4" fill="none"/>'
-          '<g transform="translate(14,8)">'  # anchor near mouth corner
+          '<g transform="translate(14,8)">'
           '  <rect x="6" y="-2" width="18" height="10" rx="3" fill="#6b4b2a" stroke="#2a1a0a" stroke-width="2"/>'
           '  <rect x="0" y="-1" width="10" height="6" rx="2" fill="#875b31" stroke="#2a1a0a" stroke-width="2"/>'
           '  <g opacity=".85">'
@@ -751,7 +818,6 @@ def creature_svg(code):
           '</g>'
         )
 
-    # Arms and feet
     arms_svg = ''
     feet_svg = ''
     if stage in ('teen','prime'):
@@ -766,13 +832,16 @@ def creature_svg(code):
       )
 
     crown_svg = ''
+    rnd = random.Random(st["code"])
+    crown  = (rnd.randint(1,3) == 1)
+    flames = (rnd.randint(1,4) == 1)
+    lasers = (rnd.randint(1,5) == 1)
     if crown and stage in ('baby','teen','prime'):
         crown_svg = f'''
           <g transform="translate(0,-110)">
             <polygon points="-28,0 0,-20 28,0 18,0 0,-10 -18,0" fill="{glow}" stroke="#000" stroke-width="3"/>
           </g>'''
 
-    # Bigger fire with livelier animation
     flames_svg = ''
     if flames and stage in ('teen','prime'):
         flames_svg = f'''
@@ -795,7 +864,7 @@ def creature_svg(code):
             </line>
           </g>'''
 
-    # Rarity sparkles & effects — make more noticeable
+    # Rarity sparkles & effects
     shine_defs = f'''
       <symbol id="twinkle">
         <polygon points="0,-3 1.2,-1.2 3,0 1.2,1.2 0,3 -1.2,1.2 -3,0 -1.2,-1.2" />
