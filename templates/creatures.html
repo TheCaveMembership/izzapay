@@ -307,7 +307,8 @@
       const j = await fetch(meta).then(r=>r.json());
       liveSvg.src = (j.image || '') + '&pulse=' + Date.now();
       openHabitat.href = j.external_url || '#';
-      liveHint.textContent = 'Stats grow if fed daily. 1 day = 60s (test).';
+      // Updated hint for real lifecycle
+      liveHint.textContent = 'Feed once per day. Miss 3 days = death. Revive by feeding 3 days in a row.';
     }catch(e){}
   }
   setInterval(refreshLive, 3000);
