@@ -27,15 +27,17 @@ CREATURE_ISSUER_G = os.getenv("NFT_ISSUER_PUBLIC", "").strip()
 DISTR_S  = os.getenv("NFT_DISTR_SECRET", "").strip()
 DISTR_G  = os.getenv("NFT_DISTR_PUBLIC", "").strip()
 
-# Test timeline: 1 day = 60 seconds (minutes-as-days)
-DAY_SECS          = 60
-TEST_CRACK_START  = 1 * DAY_SECS // 4   # 15s
-TEST_HATCH_DONE   = 1 * DAY_SECS // 2   # 30s
-TEST_TEENAGE      = 1 * DAY_SECS        # 60s
-TEST_PRIME        = 1 * DAY_SECS + 30   # 90s total to reach prime
+# Real timeline: 1 day = 86400 seconds
+DAY_SECS          = 86400
+# Egg timings (absolute seconds since mint)
+TEST_CRACK_START  = 30          # starts cracking after 30s
+TEST_HATCH_DONE   = 90          # fully hatched at 90s
+# Longer growth windows
+TEST_TEENAGE      = 3 * DAY_SECS    # baby until day 3
+TEST_PRIME        = 7 * DAY_SECS    # teen until day 7, then prime
 TICK_STEP_SECONDS = 3
 
-# Hunger growth per “day” (% bar per day) by stage
+# Hunger growth per “day” (% bar per day) by stage (unchanged semantics)
 HUNGER_PER_DAY = {
     "egg":       0,
     "cracking":  0,
@@ -173,12 +175,14 @@ def _apply_hunger_progress(row: sqlite3.Row) -> tuple[int, str, int, int, int]:
     if stage == "dead":
         return hunger, "dead", last_feed_at, last_hunger_at, revive_progress
 
+    # accumulate hunger per real day at stage rate
     delta = max(0, now - last_hunger_at)
     days = delta / float(DAY_SECS)
     inc = HUNGER_PER_DAY.get(stage, 0) * days
     hunger = _clamp(int(round(hunger + inc)), 0, 100)
     last_hunger_at = now
 
+    # death check: 3 full days without feeding
     missed_secs = max(0, now - last_feed_at)
     if missed_secs >= MISSED_DAYS_TO_DIE * DAY_SECS:
         stage = "dead"
@@ -256,7 +260,7 @@ def _rarity_cap_boost(rarity: str) -> int:
 def _compute_stats_dict(st_row_like: dict, last_feed_at: int, rarity: str) -> dict:
     """
     Deterministic base by code + rarity.
-    Age growth increases for the first ~5 "days" (minutes), then caps.
+    Age growth increases for the first ~5 days, then caps.
     Care factor (recent daily feed) and hunger mod adjust live output.
     Stage caps output via a stage multiplier. No DB writes needed.
     """
@@ -272,13 +276,12 @@ def _compute_stats_dict(st_row_like: dict, last_feed_at: int, rarity: str) -> di
     base_atk = rnd.randint(lo, hi)
     base_def = rnd.randint(lo, hi)
 
-    # Age growth, cap ~ 5 virtual “days”
+    # Age growth, cap ~ 5 real days
     age_days = elapsed / float(DAY_SECS)
     growth = min(age_days / 5.0, 1.0)  # 0..1
 
     # Rarity extends headroom
-    cap_bonus = _rarity_cap_boost(rarity)  # 0..16
-    # Max possible before stage/care/hunger multipliers
+    cap_bonus = _rarity_cap_boost(rarity)
     atk_raw_max = base_atk + int(round((base_atk + cap_bonus) * 0.8))
     def_raw_max = base_def + int(round((base_def + cap_bonus) * 0.8))
 
@@ -287,9 +290,9 @@ def _compute_stats_dict(st_row_like: dict, last_feed_at: int, rarity: str) -> di
     def_grown = base_def + int(round((def_raw_max - base_def) * growth))
 
     # Multipliers
-    s_mult = _stage_multiplier(stage)     # stage cap
-    c_mult = _care_factor(now_i, last_feed_at)  # recent feeding
-    h_mult = _hunger_mod(hunger)          # hunger penalty
+    s_mult = _stage_multiplier(stage)
+    c_mult = _care_factor(now_i, last_feed_at)
+    h_mult = _hunger_mod(hunger)
 
     atk = int(math.floor(atk_grown * s_mult * c_mult * h_mult))
     dfn = int(math.floor(def_grown * s_mult * c_mult * h_mult))
@@ -552,12 +555,19 @@ def creatures_feed():
 
         hunger, stage, last_feed_at, last_hunger_at, revive_progress = _apply_hunger_progress(row)
 
+        # Enforce once-per-day feeding cadence
+        # Alive: must wait 24h between feeds
+        # Dead: must also respect once-per-day to build revive streak
+        last_feed = int(last_feed_at or row["hatch_start"] or now)
+        days_since_last = (now - last_feed) / float(DAY_SECS)
+        if days_since_last < 1.0:
+            # No state change; inform client it's too soon
+            return jsonify({"ok": True, "hunger": hunger, "stage": stage, "note": "already_fed_today"})
+
         if stage == "dead":
-            last_feed = int(last_feed_at or row["hatch_start"] or now)
-            days_since_last = (now - last_feed) / float(DAY_SECS)
-            if days_since_last >= 1.0:
-                revive_progress += 1
-                last_feed_at = now
+            # Dead: add to consecutive daily revive streak
+            revive_progress += 1
+            last_feed_at = now
             if revive_progress >= REVIVE_DAYS_REQUIRED:
                 stage = "baby"
                 hunger = 50
@@ -565,6 +575,7 @@ def creatures_feed():
                 last_feed_at = now
                 last_hunger_at = now
         else:
+            # Alive: reduce hunger and stamp feed time
             hunger = _clamp(hunger - 50, 0, 100)
             last_feed_at = now
             last_hunger_at = now
