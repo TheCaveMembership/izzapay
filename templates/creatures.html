@@ -79,7 +79,7 @@
         <h3>Mint Egg</h3>
         <div class="slot"><img id="eggPreview" alt="egg"></div>
         <div class="row"><button class="btn purple" id="mintBtn">MINT EGG, 5 IZZA</button></div>
-        <div class="hint">Shuffle through some eggs, ultimately the IZZA gods will decide your fate!</div>
+        <div class="hint">Shuffle through some eggs, ultimately the IZZA gods will ❕DECIDE YOUR FATE❕</div>
         <div id="mintMsg" class="hint"></div>
       </div>
 
@@ -335,7 +335,7 @@
 
   // ---------- Mint flow (with auto-claim) ----------
   mintBtn.addEventListener('click', async ()=>{
-    mintMsg.textContent = 'IZZA creature is being fabricated by the hands of IZZA gods❕';
+    mintMsg.textContent = 'Crafted by the hands of IZZA gods❕';
     const gate = await ensureUserAndWalletGate();
     if(!gate){ return; }
 
