@@ -26,18 +26,17 @@ CREATURE_ISSUER_G = os.getenv("NFT_ISSUER_PUBLIC", "").strip()
 DISTR_S  = os.getenv("NFT_DISTR_SECRET", "").strip()
 DISTR_G  = os.getenv("NFT_DISTR_PUBLIC", "").strip()
 
-# ===== QUICK LIFECYCLE MODE =====
-# 1 day = 60 seconds here so you can verify visuals and feed once per minute.
-# When you are ready to go real time, change DAY_SECS to 86400.
-DAY_SECS          = 60   # <-- set to 86400 for real days
+# ===== REAL LIFECYCLE MODE =====
+# Keep egg crack and hatch timings identical, switch post-hatch to real days.
+DAY_SECS          = 86400   # 1 real day
 
-# Egg timings
+# Egg timings, unchanged
 TEST_CRACK_START  = 30          # starts cracking after 30s
 TEST_HATCH_DONE   = 90          # fully hatched at 90s
 
-# Growth windows (surgical change): post-hatch each stage = 60s
-BABY_END          = TEST_HATCH_DONE + 60    # baby ends at 150s
-TEEN_END          = TEST_HATCH_DONE + 120   # teen ends at 210s
+# Growth windows: post-hatch real days
+BABY_END          = TEST_HATCH_DONE + (1 * DAY_SECS)    # baby lasts 1 day
+TEEN_END          = TEST_HATCH_DONE + (2 * DAY_SECS)    # teen lasts next 1 day
 TICK_STEP_SECONDS = 3
 
 # Hunger growth per “day” by stage
@@ -142,7 +141,6 @@ def _active_pub_for_request() -> str | None:
 def _clamp(v, lo, hi): return max(lo, min(hi, v))
 
 def _stage_from_elapsed(elapsed: int, hunger: int, existing_stage: str | None) -> str:
-    # surgical thresholds with 60s per post-hatch stage
     if existing_stage == "dead":
         return "dead"
     if elapsed < TEST_CRACK_START: return "egg"
@@ -664,13 +662,13 @@ def creature_svg(code):
     mr = random.Random(st["code"] + ":mouth").random()
     mouth_type = "smile"
     if mr < 0.01:
-        mouth_type = "pipe"         # very rare
+        mouth_type = "pipe"
     elif mr < 0.06:
-        mouth_type = "tongue"       # rare
+        mouth_type = "tongue"
     elif mr < 0.13:
-        mouth_type = "squiggle"     # uncommon
+        mouth_type = "squiggle"
     else:
-        mouth_type = "smile"        # common
+        mouth_type = "smile"
 
     if mouth_type == "smile":
         mouth_svg = '<path d="M-16,8 Q0,18 16,8" stroke="#180d00" stroke-width="4" fill="none"/>'
@@ -730,7 +728,7 @@ def creature_svg(code):
             </line>
           </g>'''
 
-    # Rarity sparkles & effects (surgical changes: stronger sparkles + lightning sweep)
+    # Rarity sparkles & effects
     shine_defs = f'''
       <symbol id="twinkle">
         <polygon points="0,-3 0.9,-0.9 3,0 0.9,0.9 0,3 -0.9,0.9 -3,0 -0.9,-0.9" />
@@ -742,7 +740,6 @@ def creature_svg(code):
       </radialGradient>
       <filter id="haloBlur"><feGaussianBlur stdDeviation="3"/></filter>
 
-      <!-- Neon lightning bolt -->
       <filter id="boltGlow"><feGaussianBlur stdDeviation="2"/></filter>
       <linearGradient id="boltGrad" x1="0" x2="1" y1="0" y2="0">
         <stop offset="0" stop-color="{glow}" stop-opacity="0.0"/>
@@ -754,7 +751,6 @@ def creature_svg(code):
             fill="none" stroke="url(#boltGrad)" stroke-width="6" stroke-linejoin="round" stroke-linecap="round"/>
     '''
 
-    # beefier twinkles
     twinkles = ''
     if rarity in ('uncommon','rare','epic','legendary'):
         t = []
@@ -800,9 +796,8 @@ def creature_svg(code):
     if rarity in ('epic','legendary'):
         aurora_svg = f'<ellipse rx="170" ry="120" fill="url(#aurora)" opacity=".45" filter="url(#soft)"/>'
 
-    # lightning bolt sweep (surgical change): replaces block sweep, orbits every 6s
     bolt_svg = ''
-    if rarity in ('legendary',):  # keep exclusive like previous sweep; widen if you want more presence
+    if rarity in ('legendary',):
         bolt_svg = f'''
           <g opacity="0.9">
             <use href="#boltShape" filter="url(#boltGlow)">
@@ -811,10 +806,8 @@ def creature_svg(code):
             </use>
           </g>'''
 
-    # show hunger only for post hatch
     show_hunger = (stage in ('baby','teen','prime'))
 
-    # allow clean preview tile
     hide_bg = (str(code).upper() == "EGGDEMO") and (str(request.args.get("nobg", "")).lower() not in ("", "0", "false", "no"))
     bg_rect = "" if hide_bg else f'<rect width="512" height="512" fill="{bg}"/>'
     glow_circ = "" if hide_bg else f'<circle cx="256" cy="360" r="160" fill="url(#g0)" opacity=".14" filter="url(#soft)"/>'
@@ -825,7 +818,6 @@ def creature_svg(code):
     <text x="16" y="68">ATK {st.get('attack',0)}  DEF {st.get('defense',0)}  •  1d={DAY_SECS}s</text>
   </g>'''
 
-    # For eggs, show rarity sparkle and effects around the egg too
     rarity_layer_for_egg = ''
     if stage in ('egg','cracking'):
         rarity_layer_for_egg = f'''
