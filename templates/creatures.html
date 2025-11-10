@@ -9,60 +9,63 @@
     :root{
       --bg:#000; --txt:#e8f1ff; --muted:#9fb0d6; --line:#1d2540;
       --piPurple1:#7a44ff; --piPurple2:#b784ff; --gold1:#ffcf4d; --gold2:#ffb23a;
-      --panel:#0b0f1f; --card:#0e1422; --ok:#5ad49e; --warn:#ffb86b; --err:#ff6b6b;
+      --panel:#0b0f1f; --card:#0e1422;
     }
-    html,body{background:#000,color:var(--txt),font-family:Inter,Arial,sans-serif,margin:0}
-    .wrap{max-width:1100px,margin:0 auto,padding:16px 16px 140px}
-    .topbar{display:flex,align-items:center,justify-content:center,gap:12px,padding:12px 0,border-bottom:1px solid var(--line),
-            position:sticky,top:0,background:rgba(0,0,0,.9),backdrop-filter:blur(10px),z-index:50}
-    .btn{display:inline-flex,align-items:center,justify-content:center,padding:14px 18px,border-radius:14px,font-weight:700,letter-spacing:.2px,
-         border:1px solid #2a3550,color:#cfe0ff,background:var(--panel),cursor:pointer,text-decoration:none,user-select:none}
-    .btn.purple{background:linear-gradient(180deg,var(--piPurple1),var(--piPurple2)),color:#fff,border-color:transparent}
-    .btn.gold{background:linear-gradient(180deg,var(--gold1),var(--gold2)),color:#1a1400,border-color:transparent}
-    .btn.ghost{background:#0f1522}
-    .btn.red{background:#2a1010,border-color:#552222,color:#ff9a9a}
-    .btn.small{padding:8px 10px,border-radius:10px,font-size:12px}
-    h1{font-size:clamp(26px,8.5vw,56px),margin:16px 0 6px,text-align:center}
-    p{color:var(--muted),text-align:center}
-    .row{display:flex,gap:12px,justify-content:center,flex-wrap:wrap,margin:10px 0 18px}
-    .grid{display:grid,grid-template-columns:repeat(auto-fit,minmax(280px,1fr)),gap:12px,margin-top:12px}
-    .box{border:1px solid #2a3550,border-radius:16px,background:var(--panel),padding:14px}
-    .col{flex:1 1 320px,max-width:520px}
+    html,body{background:#000;color:var(--txt);font-family:Inter,Arial,sans-serif;margin:0}
+    .wrap{max-width:1100px;margin:0 auto;padding:16px 16px 120px}
+    .topbar{display:flex;align-items:center;justify-content:center;gap:12px;padding:12px 0;border-bottom:1px solid var(--line);
+            position:sticky;top:0;background:rgba(0,0,0,.9);backdrop-filter:blur(10px);z-index:50}
+    .btn{display:inline-flex;align-items:center;justify-content:center;padding:14px 18px;border-radius:14px;font-weight:700;letter-spacing:.2px;
+         border:1px solid #2a3550;color:#cfe0ff;background:var(--panel);cursor:pointer;text-decoration:none}
+    .btn.purple{background:linear-gradient(180deg,var(--piPurple1),var(--piPurple2));color:#fff;border-color:transparent}
+    .btn.gold{background:linear-gradient(180deg,var(--gold1),var(--gold2));color:#1a1400;border-color:transparent}
+    h1{font-size:clamp(26px,8.5vw,56px);margin:16px 0 6px;text-align:center}
+    p{color:var(--muted);text-align:center}
+    .row{display:flex;gap:12px;justify-content:center;flex-wrap:wrap;margin:10px 0 18px}
+    .grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(280px,1fr));gap:12px;margin-top:12px}
+
+    .box{border:1px solid #2a3550;border-radius:16px;background:var(--panel);padding:14px}
+    .col{flex:1 1 320px;max-width:520px}
     .box h3{margin:4px 0 10px}
-    .slot{position:relative,overflow:hidden,border-radius:16px,border:1px solid #2a3550,background:var(--card),
-          height:clamp(110px,22vw,160px),display:flex,align-items:center,justify-content:center}
-    #eggPreview{display:block,width:120px,height:120px,object-fit:contain,filter:drop-shadow(0 2px 6px rgba(0,0,0,.35))}
-    .hint{font-size:12px,color:#9fb0d6,margin-top:6px,text-align:center}
-    #liveSvg{ width:220px, height:220px, object-fit:contain,border-radius:12px,border:1px solid #223056,background:#0e1422 }
-    .kv{display:grid,gap:6px,grid-template-columns:repeat(2,minmax(0,1fr))}
-    .kv .item{display:flex,align-items:center,justify-content:space-between,gap:8px,padding:8px 10px,border:1px solid #223056,border-radius:12px,background:#0e1422}
-    .kv .label{color:#9fb0d6,font-size:12px}
-    .kv .val{font-weight:700}
-    .pill{display:inline-block,padding:6px 10px,border-radius:999px,border:1px solid #223056,background:#0e1422,font:600 12px/1 Inter}
-    .pill.ok{color:var(--ok),border-color:#275945}
-    .pill.warn{color:var(--warn),border-color:#6b5a2a}
-    .pill.err{color:var(--err),border-color:#6b2a2a}
-    .thumb{display:flex,flex-direction:column,align-items:center,gap:6px,margin:6px,padding:8px,border:1px solid #223056,border-radius:12px,background:#0e1422,width:140px}
-    .thumb img{width:88px,height:88px,object-fit:contain}
-    .thumb .cap{font-size:12px,color:#9fb0d6,text-align:center}
-    .thumb .row{gap:8px,margin:0}
-    .mp-small{font:600 12px/1 Inter,Arial,sans-serif,padding:6px 8px,border-radius:10px,border:1px solid #2a3550,background:#162134,color:#cfe0ff,cursor:pointer}
-    .mp-small.ghost{background:#0f1522}
-    .searchbar{display:flex,gap:8px}
-    .searchbar input{flex:1,min-width:140px,padding:8px 10px,border-radius:10px,border:1px solid #2a3550,background:#0f1522,color:#e8f1ff}
-    .green-note{color:#86f2c3,font-weight:600,margin-top:6px,text-align:center}
-    .loading{display:inline-flex,align-items:center,gap:8px}
-    .spin{width:14px,height:14px,border:2px solid #86f2c3,border-top-color:transparent,border-radius:50%,animation:spin 1s linear infinite}
-    @keyframes spin{to{transform:rotate(360deg)}}
-    .modal{position:fixed,inset:0,background:rgba(0,0,0,.55),display:flex,align-items:center,justify-content:center,z-index:9999}
+
+    .slot{position:relative;overflow:hidden;border-radius:16px;border:1px solid #2a3550;background:var(--card);
+          height:clamp(110px,22vw,160px);display:flex;align-items:center;justify-content:center}
+    #eggPreview{display:block;width:120px;height:120px;object-fit:contain;filter:drop-shadow(0 2px 6px rgba(0,0,0,.35))}
+    .hint{font-size:12px;color:#9fb0d6;margin-top:6px;text-align:center}
+
+    #liveSvg{ width:220px; height:220px; object-fit:contain;border-radius:12px;border:1px solid #223056;background:#0e1422 }
+
+    .modal{position:fixed;inset:0;background:rgba(0,0,0,.55);display:flex;align-items:center;justify-content:center;z-index:9999}
     .modal[hidden]{display:none}
-    .modal-card{background:var(--panel),border:1px solid var(--line),border-radius:14px,max-width:560px,width:94%,padding:14px}
-    .modal-header{display:flex,align-items:center,justify-content:space-between,gap:10px}
-    .modal-title{display:flex,align-items:center,gap:8px,font-weight:800}
-    .close-btn{border:1px solid var(--line),border-radius:10px,background:#0b0f1f,padding:8px 10px,color:#fff,cursor:pointer}
-    .small-muted{font-size:12px,color:#9fb0d6}
-    .blox{display:flex,flex-direction:column,gap:6px}
+    .modal-card{background:var(--panel);border:1px solid var(--line);border-radius:14px;max-width:560px;width:94%;padding:14px}
+    .modal-header{display:flex;align-items:center;justify-content:space-between;gap:10px}
+    .modal-title{display:flex;align-items:center;gap:8px;font-weight:800}
+    .close-btn{border:1px solid var(--line);border-radius:10px;background:#0b0f1f;padding:8px 10px;color:#fff;cursor:pointer}
+    .small-muted{font-size:12px;color:#9fb0d6}
+    .blox{display:flex;flex-direction:column;gap:6px}
     .mono{font-family:ui-monospace,Menlo,Consolas,monospace}
+    .success{color:#5ad49e}
+    .warn{color:#ffb86b}
+
+    .thumb{display:inline-flex;flex-direction:column;align-items:center;gap:6px;margin:6px;padding:8px;border:1px solid #223056;border-radius:12px;background:#0e1422}
+    .thumb img{width:88px;height:88px;object-fit:contain}
+    .thumb .cap{font-size:12px;color:#9fb0d6}
+
+    .mp-small{font:600 12px/1 Inter,Arial,sans-serif;padding:6px 8px;border-radius:10px;border:1px solid #2a3550;background:#162134;color:#cfe0ff;cursor:pointer}
+    .mp-small.ghost{background:#0f1522}
+    .mp-small.outline{background:#0f1522;border:1px solid #3a4a78}
+    .friend{display:flex;align-items:center;justify-content:space-between;gap:8px;padding:8px;border:1px solid #223056;border-radius:10px;background:#0e1422}
+    .friend .meta{font-size:12px;opacity:.85}
+    .friend .meta.active{color:#86f2c3}
+    .friend .meta.offline{color:#9fb0d6}
+    .searchbar{display:flex;gap:8px}
+    .searchbar input{flex:1;min-width:140px;padding:8px 10px;border-radius:10px;border:1px solid #2a3550;background:#0f1522;color:#e8f1ff}
+
+    /* surgical: minting spinner + green consent note */
+    .green-note{color:#86f2c3;font-weight:600;margin-top:6px;text-align:center}
+    .loading{display:inline-flex;align-items:center;gap:8px}
+    .spin{width:14px;height:14px;border:2px solid #86f2c3;border-top-color:transparent;border-radius:50%;animation:spin 1s linear infinite}
+    @keyframes spin{to{transform:rotate(360deg)}}
   </style>
   <script src="https://sdk.minepi.com/pi-sdk.js"></script>
 </head>
@@ -70,82 +73,56 @@
   <div class="wrap">
     <div class="topbar">
       <a class="btn" href="/">BACK HOME</a>
-      <button class="btn purple" id="openWallet">IZZA WALLET</button>
+      <button class="btn purple upper" id="openWallet">IZZA WALLET</button>
       <button class="btn" id="btnMyCreatures">MY CREATURES</button>
-      <button class="btn ghost" id="btnRefreshStats">REFRESH DASHBOARD</button>
     </div>
 
     <h1>IZZA CREATURES</h1>
     <p>Pay 5 IZZA to mint an IZZA CREATURE EGG, watch it hatch live, then grow and battle.</p>
 
     <div class="grid">
-      <!-- Mint -->
       <div class="col box">
         <h3>Mint Egg</h3>
         <div class="slot"><img id="eggPreview" alt="egg"></div>
         <div class="row"><button class="btn purple" id="mintBtn">MINT EGG, 5 IZZA</button></div>
         <div class="green-note">* Clicking the above button you agree to spend 5 IZZA</div>
+        <div class="hint">Shuffle through some eggs, ultimately the IZZA gods will ❕DECIDE YOUR FATE❕</div>
         <div id="mintMsg" class="hint" aria-live="polite"></div>
+
+        <!-- NEW: collection stats block under mint -->
+        <div class="box" id="collStatsBox" style="margin-top:10px">
+          <h3 style="margin:0 0 6px">Collection Stats</h3>
+          <div id="collStats" class="small-muted">Loading…</div>
+        </div>
+        <!-- /NEW -->
       </div>
 
-      <!-- My Latest + Selected State -->
       <div class="col box">
         <h3>My Latest Creature</h3>
         <div id="liveWrap"><img id="liveSvg" alt="creature"></div>
         <div class="row">
           <button class="btn" id="feedBtn">FEED</button>
+          <!-- NEW: burn button in habitat summary -->
+          <button class="btn" id="burnLiveBtn">BURN</button>
+          <!-- /NEW -->
           <a class="btn" id="openHabitat" target="_blank" rel="noopener">OPEN HABITAT</a>
-          <button class="btn red" id="burnSelectedBtn" title="Burn selected creature">BURN</button>
         </div>
         <div id="liveHint" class="hint"></div>
-
-        <div class="box" style="margin-top:12px">
-          <h3>Selected Creature State</h3>
-          <div id="selectedState" class="kv">
-            <div class="item"><div class="label">Code</div><div class="val" id="stCode">—</div></div>
-            <div class="item"><div class="label">Stage</div><div class="val" id="stStage">—</div></div>
-            <div class="item"><div class="label">Rarity</div><div class="val" id="stRarity">—</div></div>
-            <div class="item"><div class="label">Hunger</div><div class="val" id="stHunger">—</div></div>
-            <div class="item"><div class="label">Attack</div><div class="val" id="stAtk">—</div></div>
-            <div class="item"><div class="label">Defense</div><div class="val" id="stDef">—</div></div>
-            <div class="item"><div class="label">Elapsed, seconds</div><div class="val" id="stElapsed">—</div></div>
-            <div class="item"><div class="label">Owner pub</div><div class="val" id="stOwner">—</div></div>
-          </div>
-          <div class="hint" id="selectedNote"></div>
-        </div>
       </div>
     </div>
 
-    <!-- Collection Dashboard -->
-    <div class="box" id="dashBox" style="margin-top:14px">
-      <h3>Collection Dashboard</h3>
-      <div class="kv" id="dashGrid">
-        <div class="item"><div class="label">Total Minted</div><div class="val" id="dTotal">—</div></div>
-        <div class="item"><div class="label">Total Burned</div><div class="val" id="dBurned">—</div></div>
-        <div class="item"><div class="label">Cap</div><div class="val" id="dCap">—</div></div>
-        <div class="item"><div class="label">Supply, active</div><div class="val" id="dActive">—</div></div>
-        <div class="item"><div class="label">Common</div><div class="val" id="dCommon">—</div></div>
-        <div class="item"><div class="label">Uncommon</div><div class="val" id="dUncommon">—</div></div>
-        <div class="item"><div class="label">Rare</div><div class="val" id="dRare">—</div></div>
-        <div class="item"><div class="label">Epic</div><div class="val" id="dEpic">—</div></div>
-        <div class="item"><div class="label">Legendary</div><div class="val" id="dLegendary">—</div></div>
-      </div>
-      <div class="hint" id="dashHint"></div>
-    </div>
-
-    <!-- My Creatures list -->
-    <div class="box" id="myCreaturesBox" style="display:none,margin-top:14px">
+    <div class="box" id="myCreaturesBox" style="display:none;margin-top:14px">
       <h3>My Creatures</h3>
-      <div id="myCreaturesList" class="row" style="justify-content:flex-start,flex-wrap:wrap"></div>
+      <div id="myCreaturesList" class="row" style="justify-content:flex-start;flex-wrap:wrap"></div>
     </div>
   </div>
 
-  <!-- Wallet modal -->
+  <!-- Wallet modal (unchanged) -->
   <div class="modal" id="myWalletModal" role="dialog" aria-modal="true" aria-labelledby="myWalletTitle" hidden>
     <div class="modal-card">
       <div class="modal-header">
         <div class="modal-title">
-          <img src="/static/izzapay-mark.svg" alt="" style="width:22px,height:22px">
+          <img src="/static/izzapay-mark.svg" alt="" style="width:22px;height:22px">
           <span id="myWalletTitle">My IZZA Wallet</span>
         </div>
         <button class="close-btn" type="button" id="closeMyWalletBtn">Close</button>
@@ -158,24 +135,27 @@
         <div class="blox" style="margin-top:10px">
           <div class="small-muted">Active Wallet, public key</div>
           <div class="mono" id="mwPub">—</div>
-          <div class="small-muted">Need to set or switch your active wallet? Open or create the full wallet once below, after creation go into your full wallet, reveal your S key once and store it somewhere safe, then return here to save your S key locally.</div>
+          <div class="small-muted">Need to set or switch your active wallet? Open or create the full wallet once below. After creation go into your full wallet, reveal your S key once and store it somewhere safe. Then return here to save your S key locally.</div>
         </div>
+
         <div class="blox" style="margin-top:10px">
           <div class="small-muted">Balances, Testnet</div>
-          <div>Test Pi, <strong id="balPi">—</strong></div>
-          <div>Test IZZA, <strong id="balIzza">—</strong></div>
+          <div>Test Pi: <strong id="balPi">—</strong></div>
+          <div>Test IZZA: <strong id="balIzza">—</strong></div>
         </div>
+
         <div class="blox" style="margin-top:10px">
           <div class="small-muted">Local S key status</div>
           <div id="mwSStatus">—</div>
-          <div class="row" style="margin-top:6px,justify-content:flex-start">
-            <input class="btn" style="flex:1,min-width:240px,text-align:left" id="mwSInput" placeholder="S... private key" autocomplete="off" spellcheck="false" autocapitalize="none">
+          <div class="row" style="margin-top:6px">
+            <input class="btn" style="flex:1;min-width:240px;text-align:left" id="mwSInput" placeholder="S... private key" autocomplete="off" spellcheck="false" autocapitalize="none">
             <button class="btn purple" type="button" id="mwSaveBtn">Save S key</button>
             <button class="btn" type="button" id="mwForgetBtn">Forget</button>
           </div>
           <div class="small-muted">Your S key is stored locally on this device only.</div>
         </div>
-        <div class="row" style="margin-top:12px,justify-content:flex-end">
+
+        <div class="row" style="margin-top:12px;justify-content:flex-end">
           <a class="btn gold" href="/token/auth?next=/token/izza">Open Full Wallet</a>
         </div>
       </div>
@@ -191,62 +171,51 @@
   // ---------- DOM ----------
   const mintBtn = document.getElementById('mintBtn');
   const mintMsg = document.getElementById('mintMsg');
-  const eggPreview = document.getElementById('eggPreview');
-
   const liveSvg = document.getElementById('liveSvg');
   const liveHint = document.getElementById('liveHint');
   const openHabitat = document.getElementById('openHabitat');
-  const burnSelectedBtn = document.getElementById('burnSelectedBtn');
+  const eggPreview = document.getElementById('eggPreview');
+  const collStatsBox = document.getElementById('collStatsBox'); // NEW
+  const collStats = document.getElementById('collStats');       // NEW
+  const burnLiveBtn = document.getElementById('burnLiveBtn');   // NEW
 
-  // Selected state fields
-  const stCode = document.getElementById('stCode');
-  const stStage = document.getElementById('stStage');
-  const stRarity = document.getElementById('stRarity');
-  const stHunger = document.getElementById('stHunger');
-  const stAtk = document.getElementById('stAtk');
-  const stDef = document.getElementById('stDef');
-  const stElapsed = document.getElementById('stElapsed');
-  const stOwner = document.getElementById('stOwner');
-  const selectedNote = document.getElementById('selectedNote');
+  // Expanded preview pool…
+  const palettes = ["gold","violet","turquoise","rose","lime","sapphire","ember","obsidian","mint"];
+  const patterns = ["speckle","stripe","swirl","mosaic","metallic"];
+  const rarHints = ["LEG","EP","RARE","UN","COM"];
 
-  // Dashboard fields
-  const dTotal = document.getElementById('dTotal');
-  const dBurned = document.getElementById('dBurned');
-  const dCap = document.getElementById('dCap');
-  const dActive = document.getElementById('dActive');
-  const dCommon = document.getElementById('dCommon');
-  const dUncommon = document.getElementById('dUncommon');
-  const dRare = document.getElementById('dRare');
-  const dEpic = document.getElementById('dEpic');
-  const dLegendary = document.getElementById('dLegendary');
-  const dashHint = document.getElementById('dashHint');
-
-  // Username canonization
-  const SRV_USER = {{ (username or '') | tojson }};
-  function stripAt(s){ return (s||'').toString().trim().replace(/^@+/, ''); }
-  const USER_CANON = (()=>{
-    const fromSrv = stripAt(SRV_USER);
-    if(fromSrv) return fromSrv;
-    try{
-      const raw = localStorage.getItem('piAuthUser');
-      if(raw){ const j=JSON.parse(raw); if(j && j.username) return stripAt(j.username); }
-    }catch{}
-    try{
-      const uCanon = localStorage.getItem('izzaUserCanon');
-      if(uCanon) return stripAt(uCanon);
-      const u = localStorage.getItem('izzaUserU');
-      if(u) return stripAt(u);
-    }catch{}
-    return '';
-  })();
-  try{
-    if(USER_CANON){
-      localStorage.setItem('izzaUserCanon', USER_CANON);
-      localStorage.setItem('izzaUserU', USER_CANON.toLowerCase());
+  function buildPreviewSkins(){
+    const seeds = [];
+    for(const r of rarHints){
+      for(const p of palettes){
+        for(const t of patterns){
+          seeds.push(`${r}-${p}-${t}`);
+        }
+      }
     }
-  }catch{}
+    const step = 3;
+    const picked = [];
+    for(let i=0;i<seeds.length;i+=step) picked.push(seeds[i]);
+    return picked;
+  }
+  const previewSkins = buildPreviewSkins();
 
-  // Local wallet helpers
+  function loadEggSkin(seed){
+    eggPreview.src = `/nftsvg/EGGDEMO.svg?skin=${encodeURIComponent(seed)}&nobg=1&nc=${Date.now()}`;
+  }
+  loadEggSkin(previewSkins[0]);
+
+  async function spinEggs(finalSeed){
+    const spins = 27;
+    const delay = 120;
+    for(let i=0;i<spins;i++){
+      loadEggSkin(previewSkins[i % previewSkins.length]);
+      await new Promise(r=>setTimeout(r,delay));
+    }
+    loadEggSkin(finalSeed);
+  }
+
+  // ---------- Local wallet helpers ----------
   function __readVault(){ try{ const s=localStorage.getItem('izza_test_wallet'); return s?JSON.parse(s):null; }catch{return null} }
   function __writeVault(j){ try{ localStorage.setItem('izza_test_wallet', JSON.stringify(j||{})); }catch{} }
   function __forgetSecret(pub){ try{ const v=__readVault()||{}; if(v && v.pub===pub){ delete v.sec; __writeVault(v); } }catch{} }
@@ -274,7 +243,32 @@
     return r.json().catch(()=>null);
   }
 
-  // Wallet modal wiring
+  // ---------- Username canonization ----------
+  const SRV_USER = {{ (username or '') | tojson }};
+  function stripAt(s){ return (s||'').toString().trim().replace(/^@+/, ''); }
+  const USER_CANON = (()=>{
+    const fromSrv = stripAt(SRV_USER);
+    if(fromSrv) return fromSrv;
+    try{
+      const raw = localStorage.getItem('piAuthUser');
+      if(raw){ const j=JSON.parse(raw); if(j && j.username) return stripAt(j.username); }
+    }catch{}
+    try{
+      const uCanon = localStorage.getItem('izzaUserCanon');
+      if(uCanon) return stripAt(uCanon);
+      const u = localStorage.getItem('izzaUserU');
+      if(u) return stripAt(u);
+    }catch{}
+    return '';
+  })();
+  try{
+    if(USER_CANON){
+      localStorage.setItem('izzaUserCanon', USER_CANON);
+      localStorage.setItem('izzaUserU', USER_CANON.toLowerCase());
+    }
+  }catch{}
+
+  // ---------- Wallet modal wiring ----------
   function openMyWallet(){ document.getElementById('myWalletModal').removeAttribute('hidden'); refreshMyWalletModal(); }
   function closeMyWallet(){ document.getElementById('myWalletModal').setAttribute('hidden',''); }
   document.getElementById('openWallet').addEventListener('click', openMyWallet);
@@ -286,7 +280,8 @@
     const pub = active && active.pub || '';
     document.getElementById('mwPub').textContent = pub || '—';
     const has = pub && isLocalWallet(pub);
-    document.getElementById('mwSStatus').innerHTML = has ? '<span class="pill ok">Saved locally</span>' : '<span class="pill warn">Not saved</span>';
+    document.getElementById('mwSStatus').innerHTML = has ? '<span class="success">Saved locally</span>' : '<span class="warn">Not saved</span>';
+
     try{
       const b = await fetchBalances(USER_CANON);
       document.getElementById('balPi').textContent = b && b.pi || '—';
@@ -304,7 +299,7 @@
     if(!/^S[A-Z0-9]{55}$/.test(secret)){ alert('Enter a valid S key'); return; }
     const v = __readVault() || {}; v.pub = pub; v.sec = secret; __writeVault(v);
     const res = await linkActiveWallet(USER_CANON, pub, secret);
-    if(!res.ok){ alert('Server link failed, ' + (res.json && res.json.error || res.status)); }
+    if(!res.ok){ alert('Server link failed: ' + (res.json && res.json.error || res.status)); }
     document.getElementById('mwSInput').value = '';
     refreshMyWalletModal();
     alert('S key saved locally and linked.');
@@ -316,7 +311,7 @@
     refreshMyWalletModal();
   });
 
-  // Gate
+  // ---------- Gate for mint / feed / burn ----------
   async function ensureUserAndWalletGate(){
     const active = await fetchActiveWallet(USER_CANON);
     const pub = active && active.pub || '';
@@ -330,66 +325,38 @@
     return { user:USER_CANON, pub, sec:getLocalSecret(pub) };
   }
 
-  // Preview skins
-  const palettes = ["gold","violet","turquoise","rose","lime","sapphire","ember","obsidian","mint"];
-  const patterns = ["speckle","stripe","swirl","mosaic","metallic"];
-  const rarHints = ["LEG","EP","RARE","UN","COM"];
-  function buildPreviewSkins(){
-    const seeds = [];
-    for(const r of rarHints){ for(const p of palettes){ for(const t of patterns){ seeds.push(`${r}-${p}-${t}`); } } }
-    const picked = []; for(let i=0;i<seeds.length;i+=3) picked.push(seeds[i]);
-    return picked;
-  }
-  const previewSkins = buildPreviewSkins();
-  function loadEggSkin(seed){
-    eggPreview.src = `/nftsvg/EGGDEMO.svg?skin=${encodeURIComponent(seed)}&nobg=1&nc=${Date.now()}`;
-  }
-  loadEggSkin(previewSkins[0]);
-
-  // Live selection
-  let lastCode = null, lastIssuer = null, lastOwner = null;
-
-  async function refreshSelectedState(){
-    if(!lastCode){ 
-      stCode.textContent='—'; stStage.textContent='—'; stRarity.textContent='—'; stHunger.textContent='—';
-      stAtk.textContent='—'; stDef.textContent='—'; stElapsed.textContent='—'; stOwner.textContent='—';
-      selectedNote.textContent = '';
-      return;
-    }
-    try{
-      const j = await fetch(`/api/creatures/state/${encodeURIComponent(lastCode)}.json?nc=${Date.now()}`).then(r=>r.json());
-      stCode.textContent = j.code || lastCode;
-      stStage.textContent = j.stage || '—';
-      stRarity.textContent = j.rarity || '—';
-      stHunger.textContent = (j.hunger!=null? j.hunger+'%' : '—');
-      stAtk.textContent = j.attack!=null? j.attack : '—';
-      stDef.textContent = j.defense!=null? j.defense : '—';
-      stElapsed.textContent = j.elapsed!=null? j.elapsed : '—';
-      stOwner.textContent = j.owner_pub || '—';
-      lastOwner = j.owner_pub || null;
-      selectedNote.textContent = 'Feed once per day, miss three days, dies, feed three days to revive.';
-    }catch(e){}
-  }
-
+  // ---------- Live preview ----------
+  let lastCode = null, lastIssuer = null;
   async function refreshLive(){
-    if(!lastCode){ 
-      liveHint.textContent='Mint an egg to see it here';
-      liveSvg.removeAttribute('src');
-      await refreshSelectedState();
-      return;
-    }
+    if(!lastCode){ liveHint.textContent='Mint an egg to see it here'; return; }
     try{
       const meta = `/nftmeta/${lastCode}.json?nc=${Date.now()}`;
       const j = await fetch(meta).then(r=>r.json());
       liveSvg.src = (j.image || '') + '&pulse=' + Date.now();
       openHabitat.href = j.external_url || '#';
-      liveHint.textContent = 'Live preview, updates every few seconds.';
+      liveHint.textContent = 'Feed once per day. Miss 3 days and it dies. Revive by feeding 3 days in a row.';
     }catch(e){}
-    await refreshSelectedState();
   }
   setInterval(refreshLive, 3000);
 
-  // Load latest on enter, plus balances and dashboard
+  // NEW: collection stats fetcher
+  async function refreshStats(){
+    try{
+      const j = await fetch('/api/creatures/stats').then(r=>r.json());
+      const total = j.total_minted || 0;
+      const burned = j.total_burned || 0;
+      const alive = Math.max(0, total - burned);
+      const rc = j.rarity_counts || {};
+      collStats.innerHTML =
+        `Hatched: <strong>${total}</strong> &nbsp;•&nbsp; Burned: <strong>${burned}</strong> &nbsp;•&nbsp; Alive: <strong>${alive}</strong><br>` +
+        `Rarities minted — Common: ${rc.common||0}, Uncommon: ${rc.uncommon||0}, Rare: ${rc.rare||0}, Epic: ${rc.epic||0}, Legendary: ${rc.legendary||0}`;
+    }catch(e){
+      collStats.textContent = 'Stats unavailable';
+    }
+  }
+  // /NEW
+
+  // Load latest & balances & stats on enter
   (async ()=>{
     try{
       const j = await fetch('/api/creatures/latest', {credentials:'include'}).then(r=>r.json());
@@ -400,25 +367,39 @@
       }
     }catch(e){}
     try{ await refreshMyWalletModal(); }catch{}
-    try{ await refreshDashboard(); }catch{}
+    try{ await refreshStats(); }catch{}
   })();
 
-  // Mint
+  // Refresh stats periodically
+  setInterval(refreshStats, 10000); // NEW
+
+  // ---------- Mint flow (with auto-claim) ----------
   mintBtn.addEventListener('click', async ()=>{
     const gate = await ensureUserAndWalletGate();
     if(!gate){ return; }
 
-    mintMsg.innerHTML = `<div class="loading"><span class="spin"></span><span>Minting in progress, please wait…</span></div>
-                         <div style="margin-top:4px">❕ CRAFTED BY THE HANDS OF IZZA GODS ❕</div>`;
+    mintMsg.innerHTML = `
+      <div class="loading"><span class="spin"></span><span>Minting in progress, please wait…</span></div>
+      <div style="margin-top:4px">❕ CRAFTED BY THE HANDS OF IZZA GODS ❕</div>
+    `;
 
-    // spin preview
+    const previewSkins = (function(){
+      const palettes = ["gold","violet","turquoise","rose","lime","sapphire","ember","obsidian","mint"];
+      const patterns = ["speckle","stripe","swirl","mosaic","metallic"];
+      const rarHints = ["LEG","EP","RARE","UN","COM"];
+      const seeds = [];
+      for(const r of rarHints){ for(const p of palettes){ for(const t of patterns){ seeds.push(`${r}-${p}-${t}`); }}}
+      const picked = []; for(let i=0;i<seeds.length;i+=3) picked.push(seeds[i]);
+      return picked;
+    })();
+
     const finalSkin = previewSkins[Math.floor(Math.random()*previewSkins.length)];
     const spins = 27, delay = 120;
     for(let i=0;i<spins;i++){
-      loadEggSkin(previewSkins[i % previewSkins.length]);
+      eggPreview.src = `/nftsvg/EGGDEMO.svg?skin=${encodeURIComponent(previewSkins[i % previewSkins.length])}&nobg=1&nc=${Date.now()}`;
       await new Promise(r=>setTimeout(r,delay));
     }
-    loadEggSkin(finalSkin);
+    eggPreview.src = `/nftsvg/EGGDEMO.svg?skin=${encodeURIComponent(finalSkin)}&nobg=1&nc=${Date.now()}`;
 
     try{
       const res = await fetch('/api/creatures/mint', {
@@ -431,30 +412,29 @@
       lastCode = res.asset.code; lastIssuer = res.asset.issuer;
 
       const ac = await fetch('/api/creatures/auto-claim', {
-        method:'POST', headers:{'Content-Type':'application/json'},
+        method:'POST',
+        headers:{'Content-Type':'application/json'},
         body: JSON.stringify({ code:lastCode, owner_pub:gate.pub })
       }).then(r=>r.json()).catch(()=>null);
 
       if(ac && ac.ok && ac.delivered){
-        mintMsg.innerHTML = `Egg minted and <span class="pill ok">delivered</span> to your IZZA wallet, <strong>${lastCode}</strong>`;
+        mintMsg.innerHTML = `Egg minted and <span class="success">delivered</span> to your IZZA wallet: <strong>${lastCode}</strong>`;
       }else if(ac && ac.ok){
-        mintMsg.innerHTML = `Egg minted, <strong>${lastCode}</strong>. Claimable balance created, accept in your wallet.`;
+        mintMsg.innerHTML = `Egg minted: <strong>${lastCode}</strong>. A claim was created, open the wallet to accept.`;
       }else{
-        mintMsg.textContent = `Egg minted, ${lastCode}. Open your wallet to deliver it.`;
+        mintMsg.innerHTML = `Egg minted: <strong>${lastCode}</strong>. Open your wallet to deliver it.`;
       }
 
       await refreshLive();
       await refreshMyWalletModal();
-      await refreshDashboard();
-      // ensure list refresh next time you open it
-      myListLoaded = false;
+      await refreshStats(); // NEW
     }catch(e){
       console.error(e);
       mintMsg.textContent = 'Mint failed, please try again';
     }
   });
 
-  // Feed
+  // ---------- Feed ----------
   document.getElementById('feedBtn').addEventListener('click', async ()=>{
     if(!lastCode){ mintMsg.textContent='Mint or select a creature first'; return; }
     const gate = await ensureUserAndWalletGate(); if(!gate){ return; }
@@ -465,188 +445,95 @@
     refreshLive();
   });
 
-  // Burn, selected
-  burnSelectedBtn.addEventListener('click', async ()=>{
-    if(!lastCode){ alert('Select a creature first.'); return; }
+  // NEW: Burn from live panel
+  burnLiveBtn.addEventListener('click', async ()=>{
+    if(!lastCode){ alert('Mint or select a creature first'); return; }
     const gate = await ensureUserAndWalletGate(); if(!gate){ return; }
-    // require ownership
-    if(lastOwner && lastOwner.toUpperCase() !== gate.pub.toUpperCase()){
-      alert('Only the owner can burn this creature.');
-      return;
-    }
-    if(!confirm(`Burn ${lastCode}? This sends it back to distributor and marks it burned.`)) return;
-    try{
-      const r = await fetch('/api/creatures/burn', {
-        method:'POST', headers:{'Content-Type':'application/json'},
-        body: JSON.stringify({ code:lastCode, owner_pub:gate.pub })
-      });
-      const j = await r.json().catch(()=>null);
-      if(!r.ok){ throw new Error(j && j.error || r.status); }
-      alert(`Burned ${lastCode}`);
+    const ok = confirm('You are about to Burn this NFT! Are you sure you want to send this IZZA Creature back into the hands of IZZA gods?');
+    if(!ok) return;
+    const resp = await fetch('/api/creatures/burn', {
+      method:'POST',
+      headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({ code:lastCode, owner_pub:gate.pub })
+    }).then(r=>r.json()).catch(()=>({ok:false}));
+    if(resp && resp.ok){
+      alert('Burned. Farewell, brave creature.');
       await refreshLive();
-      await refreshDashboard();
-      myListLoaded = false;
-      // if burned, selected owner clears
-      lastOwner = null;
-    }catch(e){
-      alert('Burn failed, ' + e.message);
+      await refreshStats();
+      document.getElementById('btnMyCreatures').click();
+    }else{
+      alert(resp && resp.error ? String(resp.error) : 'Burn failed');
     }
   });
+  // /NEW
 
-  // My Creatures with Burn buttons
+  // ---------- My Creatures ----------
   const myBox  = document.getElementById('myCreaturesBox');
   const myList = document.getElementById('myCreaturesList');
-  let myListLoaded = false;
-
-  async function renderMyCreatures(){
+  document.getElementById('btnMyCreatures').addEventListener('click', async ()=>{
     myList.innerHTML = '';
     const qs = USER_CANON ? ('?u='+encodeURIComponent(USER_CANON)) : '';
     const j = await fetch('/api/creatures/mine'+qs, {credentials:'include'}).then(r=>r.json()).catch(()=>({items:[]}));
-    const active = await fetchActiveWallet(USER_CANON);
-    const pub = active && active.pub || '';
-
     (j.items||[]).forEach(it=>{
       const wrap = document.createElement('div');
       wrap.className = 'thumb';
-
       const img = document.createElement('img');
       img.alt = it.code;
       img.src = `/nftsvg/${it.code}.svg?nc=${Date.now()}`;
-      img.addEventListener('click', ()=>{
-        lastCode = it.code;
-        lastIssuer = it.issuer;
-        refreshLive();
-        window.scrollTo({ top: 0, behavior: 'smooth' });
-      });
 
       const cap = document.createElement('div');
       cap.className = 'cap';
-      cap.textContent = `${it.code} — ${it.stage||'?'}`;
+      cap.textContent = it.code + (it.stage ? ` — ${it.stage}` : '');
 
-      const row = document.createElement('div');
-      row.className = 'row';
+      const openA = document.createElement('a');
+      openA.href = `/creature/${it.code}`;
+      openA.className = 'btn';
+      openA.textContent = 'OPEN';
 
-      const openBtn = document.createElement('a');
-      openBtn.href = `/creature/${it.code}`;
-      openBtn.className = 'btn small';
-      openBtn.textContent = 'OPEN';
-
-      const selBtn = document.createElement('button');
-      selBtn.className = 'btn small ghost';
-      selBtn.textContent = 'SELECT';
-      selBtn.addEventListener('click', ()=>{
-        lastCode = it.code;
-        lastIssuer = it.issuer;
-        refreshLive();
-        window.scrollTo({ top: 0, behavior: 'smooth' });
-      });
-
+      // NEW: Burn button next to OPEN
       const burnBtn = document.createElement('button');
-      burnBtn.className = 'btn small red';
+      burnBtn.className = 'btn';
       burnBtn.textContent = 'BURN';
-      burnBtn.title = 'Burn this creature';
-      const isOwner = !!(it.owner_pub && pub && it.owner_pub.toUpperCase() === pub.toUpperCase());
-      burnBtn.disabled = !isOwner;
       burnBtn.addEventListener('click', async ()=>{
-        const gate = await ensureUserAndWalletGate(); if(!gate){ return; }
-        if(!isOwner){ alert('Only the owner can burn this creature.'); return; }
-        if(!confirm(`Burn ${it.code}? This cannot be undone.`)) return;
-        try{
-          const r = await fetch('/api/creatures/burn', {
-            method:'POST', headers:{'Content-Type':'application/json'},
-            body: JSON.stringify({ code: it.code, owner_pub: gate.pub })
-          });
-          const jj = await r.json().catch(()=>null);
-          if(!r.ok){ throw new Error(jj && jj.error || r.status); }
-          alert(`Burned ${it.code}`);
-          renderMyCreatures();
-          await refreshDashboard();
-          if(lastCode === it.code){ lastOwner = null; refreshLive(); }
-        }catch(e){
-          alert('Burn failed, ' + e.message);
+        const active = await fetchActiveWallet(USER_CANON);
+        const pub = active && active.pub || '';
+        if(!pub){ alert('Open your IZZA wallet once to set an active wallet, then return.'); return; }
+        const ok = confirm('You are about to Burn this NFT! Are you sure you want to send this IZZA Creature back into the hands of IZZA gods?');
+        if(!ok) return;
+        const resp = await fetch('/api/creatures/burn', {
+          method:'POST',
+          headers:{'Content-Type':'application/json'},
+          body: JSON.stringify({ code: it.code, owner_pub: pub })
+        }).then(r=>r.json()).catch(()=>({ok:false}));
+        if(resp && resp.ok){
+          alert('Burned. IZZA gods accept your offering.');
+          // refresh list and stats
+          document.getElementById('btnMyCreatures').click();
+          refreshStats();
+        }else{
+          alert(resp && resp.error ? String(resp.error) : 'Burn failed');
         }
       });
-
-      row.appendChild(openBtn);
-      row.appendChild(selBtn);
-      row.appendChild(burnBtn);
+      // /NEW
 
       wrap.appendChild(img);
       wrap.appendChild(cap);
+      const row = document.createElement('div');
+      row.style.display = 'flex';
+      row.style.gap = '8px';
+      row.appendChild(openA);
+      row.appendChild(burnBtn); // NEW
       wrap.appendChild(row);
       myList.appendChild(wrap);
     });
-  }
-
-  document.getElementById('btnMyCreatures').addEventListener('click', async ()=>{
-    await renderMyCreatures();
     myBox.style.display = 'block';
-    myListLoaded = true;
     window.scrollTo({top: myBox.offsetTop - 12, behavior:'smooth'});
   });
-
-  // Dashboard
-  async function refreshDashboard(){
-    dashHint.textContent = '';
-    try{
-      const j = await fetch('/api/creatures/stats?nc='+Date.now()).then(r=>r.json());
-      if(!(j && j.ok)){ throw new Error('stats_failed'); }
-      const total = j.total||0;
-      const burned = j.burned||0;
-      const cap = j.cap!=null? j.cap : '—';
-      const active = total - burned;
-
-      dTotal.textContent = total;
-      dBurned.textContent = burned;
-      dCap.textContent = cap;
-      dActive.textContent = active;
-
-      const br = j.by_rarity || {};
-      dCommon.textContent = br.common||0;
-      dUncommon.textContent = br.uncommon||0;
-      dRare.textContent = br.rare||0;
-      dEpic.textContent = br.epic||0;
-      dLegendary.textContent = br.legendary||0;
-
-      dashHint.textContent = cap && cap !== '—' ? `Cap enforced by backend, collection supply cannot exceed ${cap}.` : 'No global cap set, collection is uncapped.';
-    }catch(e){
-      dTotal.textContent = '—';
-      dBurned.textContent = '—';
-      dCap.textContent = '—';
-      dActive.textContent = '—';
-      dCommon.textContent = '—';
-      dUncommon.textContent = '—';
-      dRare.textContent = '—';
-      dEpic.textContent = '—';
-      dLegendary.textContent = '—';
-      dashHint.textContent = 'Failed to load dashboard';
-    }
-  }
-  document.getElementById('btnRefreshStats').addEventListener('click', refreshDashboard);
-
-  // Wallet modal defaults
-  document.addEventListener('visibilitychange', ()=>{
-    if(!document.hidden){ refreshMyWalletModal(); if(myListLoaded) renderMyCreatures(); refreshDashboard(); }
-  });
-
-  // Initial egg spin convenience, slow bounce
-  (async ()=>{
-    let i=0;
-    const seeds = previewSkins;
-    const tick = async ()=>{
-      loadEggSkin(seeds[i % seeds.length]);
-      i++;
-    };
-    // quick three previews
-    await tick(); await new Promise(r=>setTimeout(r,200));
-    await tick(); await new Promise(r=>setTimeout(r,200));
-    await tick();
-  })();
 
 })();
 </script>
 
-<!-- Friends and notifications overlay, unchanged -->
+<!-- Global friends and notifications overlay, unchanged -->
 <script>
 /* existing friends and notifications script exactly as before */
 </script>
