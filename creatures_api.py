@@ -27,16 +27,15 @@ DISTR_S  = os.getenv("NFT_DISTR_SECRET", "").strip()
 DISTR_G  = os.getenv("NFT_DISTR_PUBLIC", "").strip()
 
 # ===== REAL LIFECYCLE MODE =====
-# Keep egg crack and hatch timings identical, switch post-hatch to real days.
 DAY_SECS          = 86400   # 1 real day
 
-# Egg timings, unchanged
-TEST_CRACK_START  = 30          # starts cracking after 30s
-TEST_HATCH_DONE   = 90          # fully hatched at 90s
+# Egg timings (unchanged)
+TEST_CRACK_START  = 30
+TEST_HATCH_DONE   = 90
 
 # Growth windows: post-hatch real days
-BABY_END          = TEST_HATCH_DONE + (1 * DAY_SECS)    # baby lasts 1 day
-TEEN_END          = TEST_HATCH_DONE + (2 * DAY_SECS)    # teen lasts next 1 day
+BABY_END          = TEST_HATCH_DONE + (1 * DAY_SECS)
+TEEN_END          = TEST_HATCH_DONE + (2 * DAY_SECS)
 TICK_STEP_SECONDS = 3
 
 # Hunger growth per “day” by stage
@@ -149,13 +148,18 @@ def _stage_from_elapsed(elapsed: int, hunger: int, existing_stage: str | None) -
     if elapsed < TEEN_END:         return "teen"
     return "prime"
 
+# Expanded palettes and patterns (surgical add, backwards compatible)
+_PALETTES = ["gold","violet","turquoise","rose","lime","sapphire","ember","obsidian","mint",
+             "amethyst","citrine","arctic","blaze","void"]
+_PATTERNS = ["speckle","stripe","swirl","mosaic","metallic","chevron","grid","starfield"]
+
 def _choose_palette(seed: str):
     s = (seed or "").lower()
     rnd = random.Random(seed)
-    palettes = ["gold","violet","turquoise","rose","lime","sapphire","ember","obsidian","mint"]
+    palettes = _PALETTES
     hinted = next((p for p in palettes if p in s), None)
     base = hinted or rnd.choice(palettes)
-    pats = ["speckle","stripe","swirl","mosaic","metallic"]
+    pats = _PATTERNS
     pat_hint = next((p for p in pats if p in s), None)
     pattern = pat_hint or rnd.choice(pats)
     return base, pattern
@@ -178,6 +182,7 @@ def _apply_hunger_progress(row: sqlite3.Row) -> tuple[int, str, int, int, int]:
     delta = max(0, now - last_hunger_at)
     days = delta / float(DAY_SECS)
     inc = HUNGER_PER_DAY.get(stage, 0) * days
+    # keep rounding behavior; we still advance last_hunger_at here
     hunger = _clamp(int(round(hunger + inc)), 0, 100)
     last_hunger_at = now
 
@@ -197,6 +202,14 @@ def _persist_progress_if_changed(code: str, hunger: int, stage: str, last_feed_a
 
 # ---------- rarity & combat math ----------
 def _rarity_from(code_seed: str, hint: str = "") -> str:
+    """
+    Current per-mint odds (unchanged):
+      legendary 1%
+      epic      4%  (cumulative 5%)
+      rare      9%  (cumulative 14%)
+      uncommon 22%  (cumulative 36%)
+      common    64%  (else)
+    """
     h = (hint or "").lower()
     if "leg" in h: return "legendary"
     if "ep"  in h: return "epic"
@@ -333,7 +346,7 @@ def _svg_headers(resp):
     resp.headers["X-Content-Type-Options"] = "nosniff"
     return resp
 
-# ---------- API ----------
+# ---------- API (unchanged endpoints) ----------
 @bp_creatures.post("/api/creatures/quote")
 def creatures_quote():
     return jsonify({"ok": True, "price_izza": str(EGG_PRICE_IZZA), "tick_seconds": TICK_STEP_SECONDS, "day_seconds": DAY_SECS})
@@ -599,28 +612,32 @@ def creature_svg(code):
 
     skin_hint = (request.args.get("skin") or "") if str(code).upper() == "EGGDEMO" else ""
 
-    # colors
+    # colors (add mappings for new palettes with sensible fallbacks)
     bg = {
         "gold":"#130e00","violet":"#0e061a","turquoise":"#02151a","rose":"#1a0710","lime":"#0c1a06",
-        "sapphire":"#06101e","ember":"#1a0b06","obsidian":"#0b0b10","mint":"#04130d"
+        "sapphire":"#06101e","ember":"#1a0b06","obsidian":"#0b0b10","mint":"#04130d",
+        "amethyst":"#11081c","citrine":"#1c1305","arctic":"#051018","blaze":"#190803","void":"#050509"
     }.get(base, "#0b0b10")
     glow = {
         "gold":"#ffcd60","violet":"#b784ff","turquoise":"#48d4ff","rose":"#ff7aa2","lime":"#89ff7a",
-        "sapphire":"#5aa8ff","ember":"#ff8a4d","obsidian":"#8a96a8","mint":"#7affc9"
+        "sapphire":"#5aa8ff","ember":"#ff8a4d","obsidian":"#8a96a8","mint":"#7affc9",
+        "amethyst":"#c19bff","citrine":"#ffd86b","arctic":"#7fe9ff","blaze":"#ff6a3a","void":"#c0c4d8"
     }.get(base, "#b784ff")
     body = {
         "gold":"#ffe39a","violet":"#d7c0ff","turquoise":"#7fe6ff","rose":"#ffb6c8","lime":"#b4ffaf",
-        "sapphire":"#b9d9ff","ember":"#ffd2b8","obsidian":"#cfd6e4","mint":"#c5ffeb"
+        "sapphire":"#b9d9ff","ember":"#ffd2b8","obsidian":"#cfd6e4","mint":"#c5ffeb",
+        "amethyst":"#e5d4ff","citrine":"#ffe9a8","arctic":"#c9f2ff","blaze":"#ffd0bd","void":"#e2e6f4"
     }.get(base, "#e8f1ff")
 
     def _pattern_contrast(b):
         return {
             "gold":"#48d4ff", "violet":"#89ff7a", "turquoise":"#ff7aa2", "rose":"#48d4ff", "lime":"#b784ff",
-            "sapphire":"#ffcd60", "ember":"#48d4ff", "obsidian":"#7affc9", "mint":"#b784ff"
+            "sapphire":"#ffcd60", "ember":"#48d4ff", "obsidian":"#7affc9", "mint":"#b784ff",
+            "amethyst":"#7fe6ff","citrine":"#7aa2ff","arctic":"#ff9fd0","blaze":"#7fe6ff","void":"#7affc9"
         }.get(b, "#e8f1ff")
     pcol = _pattern_contrast(base)
 
-    # scale by stage
+    # scale by stage (as strings for stable formatting)
     if stage == "egg":       egg_scale = "1.0"
     elif stage == "cracking": egg_scale = "1.02"
     elif stage == "baby":     egg_scale = "0.9"
@@ -628,19 +645,23 @@ def creature_svg(code):
     elif stage == "prime":    egg_scale = "1.06"
     else:                     egg_scale = "1.0"
 
-    # Add-on cosmetics
+    # Overall creature enlargement (requested): multiply existing scale uniformly
+    creature_zoom = 1.18
+    overall_scale = f"{float(egg_scale) * creature_zoom:.3f}"
+
+    # Cosmetics randomness
     rnd = random.Random(st["code"])
     crown  = (rnd.randint(1,3) == 1)
     flames = (rnd.randint(1,4) == 1)
     lasers = (rnd.randint(1,5) == 1)
 
-    # Patterns
+    # Patterns (added chevron, grid, starfield)
     pattern_svg = ""
     if pattern == "speckle":
         dots = []
         rnd2 = random.Random(st["code"] + ":p0")
-        for _ in range(20):
-            x = rnd2.randint(-60, 60); y = rnd2.randint(-40, 40); r = rnd2.randint(2,4)
+        for _ in range(24):
+            x = rnd2.randint(-60, 60); y = rnd2.randint(-40, 40); r = rnd2.randint(2,5)
             dots.append(f'<circle cx="{x}" cy="{y}" r="{r}" fill="{pcol}" opacity=".25"/>')
         pattern_svg = "\n".join(dots)
     elif pattern == "stripe":
@@ -651,14 +672,31 @@ def creature_svg(code):
     elif pattern == "mosaic":
         tiles = []
         rnd3 = random.Random(st["code"] + ":p1")
-        for _ in range(18):
+        for _ in range(20):
             x = rnd3.randint(-70, 50); y = rnd3.randint(-40, 30); w = rnd3.randint(8,16); h = rnd3.randint(8,14)
             tiles.append(f'<rect x="{x}" y="{y}" width="{w}" height="{h}" fill="{pcol}" opacity=".18"/>')
         pattern_svg = "\n".join(tiles)
     elif pattern == "metallic":
         pattern_svg = '<ellipse rx="95" ry="70" fill="url(#metal)"/>'
+    elif pattern == "chevron":
+        pattern_svg = f'<g opacity=".22" stroke="{pcol}" stroke-width="5">' + ''.join(
+            [f'<path d="M-70,{y} L0,{y-10} L70,{y}" fill="none"/>' for y in range(-40,50,14)]
+        ) + '</g>'
+    elif pattern == "grid":
+        pattern_svg = f'<g opacity=".18" stroke="{pcol}" stroke-width="3">' + ''.join(
+            [f'<line x1="-80" y1="{y}" x2="80" y2="{y}"/>' for y in range(-50,60,12)]
+        ) + ''.join(
+            [f'<line x1="{x}" y1="-50" x2="{x}" y2="60"/>' for x in range(-70,80,12)]
+        ) + '</g>'
+    elif pattern == "starfield":
+        rnds = random.Random(st["code"] + ":pS")
+        stars = []
+        for _ in range(26):
+            x = rnds.randint(-80, 80); y = rnds.randint(-60, 60); r = rnds.choice([1,2,3])
+            stars.append(f'<circle cx="{x}" cy="{y}" r="{r}" fill="{pcol}" opacity=".28"/>')
+        pattern_svg = ''.join(stars)
 
-    # Emoji style mouths with rarity
+    # Mouths (increase tongue visibility; pipe bigger with animated smoke rising)
     mr = random.Random(st["code"] + ":mouth").random()
     mouth_type = "smile"
     if mr < 0.01:
@@ -671,22 +709,49 @@ def creature_svg(code):
         mouth_type = "smile"
 
     if mouth_type == "smile":
-        mouth_svg = '<path d="M-16,8 Q0,18 16,8" stroke="#180d00" stroke-width="4" fill="none"/>'
+        mouth_svg = '<path d="M-18,10 Q0,22 18,10" stroke="#180d00" stroke-width="4" fill="none"/>'
     elif mouth_type == "tongue":
+        # bigger, more noticeable tongue
         mouth_svg = (
-          '<path d="M-16,8 Q0,10 16,8" stroke="#180d00" stroke-width="4" fill="none"/>'
-          '<path d="M-4,8 Q0,18 4,8 Q0,14 -4,8" fill="#ff5577" opacity=".9"/>'
+          '<path d="M-20,6 Q0,12 20,6" stroke="#180d00" stroke-width="4" fill="none"/>'
+          '<path d="M-8,6 Q0,28 8,6 Q0,18 -8,6" fill="#ff5577" opacity=".95"/>'
+          '<path d="M-4,16 Q0,20 4,16" stroke="#ff7890" stroke-width="2" fill="none" opacity=".9"/>'
         )
     elif mouth_type == "squiggle":
-        mouth_svg = '<path d="M-16,8 Q-8,14 0,8 Q8,2 16,8" stroke="#180d00" stroke-width="4" fill="none"/>'
+        mouth_svg = '<path d="M-18,10 Q-9,18 0,10 Q9,2 18,10" stroke="#180d00" stroke-width="4" fill="none"/>'
     else:  # pipe
+        # Larger pipe plus animated smoke that rises and swirls upward
         mouth_svg = (
-          '<path d="M-8,8 Q0,14 8,8" stroke="#180d00" stroke-width="4" fill="none"/>'
-          '<rect x="10" y="6" width="12" height="6" rx="2" fill="#6b4b2a" stroke="#2a1a0a" stroke-width="2"/>'
-          '<path d="M22,9 c10,-6 18,-2 14,6" stroke="#bbb" stroke-width="2" fill="none" opacity=".7"/>'
+          '<path d="M-10,10 Q0,18 10,10" stroke="#180d00" stroke-width="4" fill="none"/>'
+          '<g transform="translate(14,8)">'  # anchor near mouth corner
+          '  <rect x="6" y="-2" width="18" height="10" rx="3" fill="#6b4b2a" stroke="#2a1a0a" stroke-width="2"/>'
+          '  <rect x="0" y="-1" width="10" height="6" rx="2" fill="#875b31" stroke="#2a1a0a" stroke-width="2"/>'
+          '  <g opacity=".85">'
+          '    <path id="smokePath" d="M24,2 C32,-6 36,-24 30,-40" fill="none" stroke="#d5d5d5" stroke-width="2" opacity="0.0"/>'
+          '    <circle r="3" fill="#eaeaea">'
+          '      <animateMotion dur="2.6s" repeatCount="indefinite" keyPoints="0;1" keyTimes="0;1">'
+          '        <mpath xlink:href="#smokePath"/>'
+          '      </animateMotion>'
+          '      <animate attributeName="opacity" values="0;1;0" dur="2.6s" repeatCount="indefinite"/>'
+          '    </circle>'
+          '    <circle r="4" fill="#f2f2f2" opacity="0.6">'
+          '      <animateMotion dur="3.2s" repeatCount="indefinite">'
+          '        <mpath xlink:href="#smokePath"/>'
+          '      </animateMotion>'
+          '      <animate attributeName="opacity" values="0;1;0" dur="3.2s" repeatCount="indefinite"/>'
+          '    </circle>'
+          '    <circle r="2.5" fill="#ffffff" opacity="0.5">'
+          '      <animateMotion dur="2.2s" repeatCount="indefinite">'
+          '        <mpath xlink:href="#smokePath"/>'
+          '      </animateMotion>'
+          '      <animateTransform attributeName="transform" type="rotate" from="-10 0 0" to="10 0 0" dur="2.2s" repeatCount="indefinite"/>'
+          '      <animate attributeName="opacity" values="0;1;0" dur="2.2s" repeatCount="indefinite"/>'
+          '    </circle>'
+          '  </g>'
+          '</g>'
         )
 
-    # Arms and feet like Kirby
+    # Arms and feet
     arms_svg = ''
     feet_svg = ''
     if stage in ('teen','prime'):
@@ -707,43 +772,45 @@ def creature_svg(code):
             <polygon points="-28,0 0,-20 28,0 18,0 0,-10 -18,0" fill="{glow}" stroke="#000" stroke-width="3"/>
           </g>'''
 
+    # Bigger fire with livelier animation
     flames_svg = ''
     if flames and stage in ('teen','prime'):
         flames_svg = f'''
-          <g opacity=".8">
-            <path d="M-70,80 C-60,40,-40,10,-20,-10 C-10,10,-5,30,0,50 C10,30,30,5,50,-10 C60,10,70,40,80,80 Z" fill="{glow}">
-              <animate attributeName="opacity" values="0.5;1;0.5" dur="1.2s" repeatCount="indefinite"/>
+          <g opacity=".9" transform="translate(0,8)">
+            <path d="M-80,82 C-62,34,-36,4,-14,-18 C-2,6,4,28,8,52 C20,30,36,0,56,-20 C70,6,82,38,88,82 Z" fill="{glow}">
+              <animate attributeName="opacity" values="0.6;0.95;0.6" dur="1.0s" repeatCount="indefinite"/>
+              <animateTransform attributeName="transform" type="scale" values="1;1.12;1" dur="0.9s" repeatCount="indefinite"/>
             </path>
           </g>'''
 
     lasers_svg = ''
     if lasers and stage in ('teen','prime'):
         lasers_svg = f'''
-          <g stroke="#ff3355" stroke-width="5" opacity=".85">
+          <g stroke="#ff3355" stroke-width="5" opacity=".9">
             <line x1="-18" y1="-8" x2="-180" y2="-120">
-              <animate attributeName="opacity" values="0.2;1;0.2" dur="0.9s" repeatCount="indefinite"/>
+              <animate attributeName="opacity" values="0.2;1;0.2" dur="0.8s" repeatCount="indefinite"/>
             </line>
             <line x1="18" y1="-8" x2="180" y2="-120">
-              <animate attributeName="opacity" values="0.2;1;0.2" dur="0.9s" repeatCount="indefinite"/>
+              <animate attributeName="opacity" values="0.2;1;0.2" dur="0.8s" repeatCount="indefinite"/>
             </line>
           </g>'''
 
-    # Rarity sparkles & effects
+    # Rarity sparkles & effects — make more noticeable
     shine_defs = f'''
       <symbol id="twinkle">
-        <polygon points="0,-3 0.9,-0.9 3,0 0.9,0.9 0,3 -0.9,0.9 -3,0 -0.9,-0.9" />
+        <polygon points="0,-3 1.2,-1.2 3,0 1.2,1.2 0,3 -1.2,1.2 -3,0 -1.2,-1.2" />
       </symbol>
-      <filter id="twkGlow"><feGaussianBlur stdDeviation="0.8"/><feMerge><feMergeNode/><feMergeNode in="SourceGraphic"/></feMerge></filter>
-      <radialGradient id="aurora" cx="50%" cy="50%" r="65%">
-        <stop offset="0" stop-color="{glow}" stop-opacity=".35"/>
+      <filter id="twkGlow"><feGaussianBlur stdDeviation="1.2"/><feMerge><feMergeNode/><feMergeNode in="SourceGraphic"/></feMerge></filter>
+      <radialGradient id="aurora" cx="50%" cy="50%" r="70%">
+        <stop offset="0" stop-color="{glow}" stop-opacity=".5"/>
         <stop offset="1" stop-color="{bg}" stop-opacity="0"/>
       </radialGradient>
-      <filter id="haloBlur"><feGaussianBlur stdDeviation="3"/></filter>
+      <filter id="haloBlur"><feGaussianBlur stdDeviation="4"/></filter>
 
       <filter id="boltGlow"><feGaussianBlur stdDeviation="2"/></filter>
       <linearGradient id="boltGrad" x1="0" x2="1" y1="0" y2="0">
         <stop offset="0" stop-color="{glow}" stop-opacity="0.0"/>
-        <stop offset="0.25" stop-color="{glow}" stop-opacity="0.8"/>
+        <stop offset="0.25" stop-color="{glow}" stop-opacity="0.9"/>
         <stop offset="0.75" stop-color="#ffffff" stop-opacity="1"/>
         <stop offset="1" stop-color="{glow}" stop-opacity="0.0"/>
       </linearGradient>
@@ -755,14 +822,14 @@ def creature_svg(code):
     if rarity in ('uncommon','rare','epic','legendary'):
         t = []
         rndt = random.Random(st["code"] + ":twk")
-        n = 10 if rarity == 'uncommon' else 16 if rarity == 'rare' else 22 if rarity == 'epic' else 28
-        for i in range(n):
-            x = rndt.randint(-80, 80); y = rndt.randint(-60, 60)
-            dur = 0.8 + (i % 6) * 0.18
-            scale = 1.0 + (i % 4) * 0.25
+        base_n = 14 if rarity == 'uncommon' else 22 if rarity == 'rare' else 32 if rarity == 'epic' else 44
+        for i in range(base_n):
+            x = rndt.randint(-90, 90); y = rndt.randint(-70, 70)
+            dur = 0.7 + (i % 6) * 0.16
+            scale = 1.1 + (i % 4) * 0.3
             t.append(f'''
               <g transform="translate({x},{y}) scale({scale})">
-                <use href="#twinkle" fill="#fff" opacity="0" filter="url(#twkGlow)">
+                <use href="#twinkle" fill="#fff" opacity="0.9" filter="url(#twkGlow)">
                   <animate attributeName="opacity" values="0;1;0" dur="{dur}s" repeatCount="indefinite" />
                 </use>
               </g>''')
@@ -771,12 +838,12 @@ def creature_svg(code):
     orbit_svg = ''
     if rarity in ('rare','epic','legendary'):
         orbit_svg = f'''
-          <g opacity=".35">
-            <circle r="120" fill="none" stroke="{glow}" stroke-width="2" opacity=".25"/>
+          <g opacity=".5">
+            <circle r="130" fill="none" stroke="{glow}" stroke-width="2" opacity=".35"/>
             <g>
               <use href="#twinkle" fill="{glow}">
                 <animateTransform attributeName="transform" attributeType="XML" type="rotate"
-                  from="0 0 0" to="360 0 0" dur="6s" repeatCount="indefinite"/>
+                  from="0 0 0" to="360 0 0" dur="5.2s" repeatCount="indefinite"/>
               </use>
             </g>
           </g>'''
@@ -784,25 +851,25 @@ def creature_svg(code):
     halo_svg = ''
     if rarity in ('epic','legendary'):
         halo_svg = f'''
-          <g opacity="0.95">
-            <circle r="110" fill="none" stroke="{glow}" stroke-width="6" filter="url(#haloBlur)"/>
-            <circle r="110" fill="none" stroke="#ffffff" stroke-opacity=".35" stroke-width="2"/>
-            <path d="M-120,0 Q0,-30 120,0" fill="none" stroke="{glow}" stroke-width="3" opacity=".85">
-              <animate attributeName="opacity" values=".4;1;.4" dur="1.8s" repeatCount="indefinite"/>
+          <g opacity="0.98">
+            <circle r="120" fill="none" stroke="{glow}" stroke-width="7" filter="url(#haloBlur)"/>
+            <circle r="120" fill="none" stroke="#ffffff" stroke-opacity=".5" stroke-width="2"/>
+            <path d="M-130,0 Q0,-32 130,0" fill="none" stroke="{glow}" stroke-width="3" opacity=".95">
+              <animate attributeName="opacity" values=".4;1;.4" dur="1.6s" repeatCount="indefinite"/>
             </path>
           </g>'''
 
     aurora_svg = ''
     if rarity in ('epic','legendary'):
-        aurora_svg = f'<ellipse rx="170" ry="120" fill="url(#aurora)" opacity=".45" filter="url(#soft)"/>'
+        aurora_svg = f'<ellipse rx="190" ry="130" fill="url(#aurora)" opacity=".55" filter="url(#soft)"/>'
 
     bolt_svg = ''
     if rarity in ('legendary',):
         bolt_svg = f'''
-          <g opacity="0.9">
+          <g opacity="0.95">
             <use href="#boltShape" filter="url(#boltGlow)">
               <animateTransform attributeName="transform" attributeType="XML" type="rotate"
-                from="0 0 0" to="360 0 0" dur="6s" repeatCount="indefinite"/>
+                from="0 0 0" to="360 0 0" dur="5.5s" repeatCount="indefinite"/>
             </use>
           </g>'''
 
@@ -810,7 +877,7 @@ def creature_svg(code):
 
     hide_bg = (str(code).upper() == "EGGDEMO") and (str(request.args.get("nobg", "")).lower() not in ("", "0", "false", "no"))
     bg_rect = "" if hide_bg else f'<rect width="512" height="512" fill="{bg}"/>'
-    glow_circ = "" if hide_bg else f'<circle cx="256" cy="360" r="160" fill="url(#g0)" opacity=".14" filter="url(#soft)"/>'
+    glow_circ = "" if hide_bg else f'<circle cx="256" cy="360" r="170" fill="url(#g0)" opacity=".18" filter="url(#soft)"/>'
     status_block = "" if hide_bg else f'''
   <g font-family="ui-monospace, Menlo, monospace" font-size="14" fill="#fff" opacity=".95">
     <text x="16" y="28">Stage: {stage} • Rarity: {rarity}</text>
@@ -841,7 +908,7 @@ def creature_svg(code):
   {bg_rect}
   {glow_circ}
 
-  <g transform="translate(256,300) scale({egg_scale})">
+  <g transform="translate(256,300) scale({overall_scale})">
     {rarity_layer_for_egg}
     <ellipse rx="120" ry="160" fill="url(#egg)" opacity="{ '1' if stage in ('egg','cracking') else '0'}"/>
     <path d="M-60,0 L-20,-20 L0,10 L20,-15 L60,5" stroke="#2a2a2a" stroke-width="4" fill="none"
