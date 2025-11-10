@@ -150,6 +150,11 @@
   font-size: 11px !important;
   letter-spacing: 0;
 }
+    /* shrink ONLY the long headers */
+#colStatsBox .stat-pill.smallhdr strong{
+  font-size: 11px !important;
+  letter-spacing: 0;
+}
 
 /* ---------- MY LATEST CREATURE: keep centered ---------- */
 #liveWrap{display:flex;align-items:center;justify-content:center}
@@ -206,10 +211,10 @@
             <div class="stat-pill"><strong>Burnt</strong><br><span id="burntCount" class="small-muted">—</span></div>
           </div>
           <div class="stats-grid" style="margin-top:8px">
-            <div class="stat-pill"><strong>Legendary</strong><br><span id="legCount" class="small-muted">—</span></div>
+            <div class="stat-pill smallhdr"><strong>Legendary</strong><br><span id="legCount" class="small-muted">—</span></div>
             <div class="stat-pill"><strong>Epic</strong><br><span id="epCount" class="small-muted">—</span></div>
             <div class="stat-pill"><strong>Rare</strong><br><span id="rareCount" class="small-muted">—</span></div>
-            <div class="stat-pill"><strong>Uncommon</strong><br><span id="unCount" class="small-muted">—</span></div>
+            <div class="stat-pill smallhdr"><strong>Uncommon</strong><br><span id="unCount" class="small-muted">—</span></div>
             <div class="stat-pill"><strong>Common</strong><br><span id="comCount" class="small-muted">—</span></div>
           </div>
           <div class="hint" style="margin-top:8px">Total supply capped at 1,000 for IZZA CREATURES V1.</div>
