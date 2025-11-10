@@ -79,7 +79,7 @@
         <h3>Mint Egg</h3>
         <div class="slot"><img id="eggPreview" alt="egg"></div>
         <div class="row"><button class="btn purple" id="mintBtn">MINT EGG, 5 IZZA</button></div>
-        <div class="hint">Egg shuffles through many looks, rarity visuals included, then lands on yours</div>
+        <div class="hint">Shuffle through some eggs, ultimately the IZZA gods will decide your fate!</div>
         <div id="mintMsg" class="hint"></div>
       </div>
 
@@ -118,13 +118,13 @@
         <div class="blox" style="margin-top:10px">
           <div class="small-muted">Active Wallet, public key</div>
           <div class="mono" id="mwPub">—</div>
-          <div class="small-muted">Need to set or switch your active wallet? Open the full wallet once below, then return here to save your S key locally.</div>
+          <div class="small-muted">Need to set or switch your active wallet? Open or create the full wallet once below. After creation go into your full wallet, reveal your S key once and store ot somewhere safe. Then return here to save your S key locally.</div>
         </div>
 
         <div class="blox" style="margin-top:10px">
           <div class="small-muted">Balances, Testnet</div>
           <div>Test Pi: <strong id="balPi">—</strong></div>
-          <div>IZZA: <strong id="balIzza">—</strong></div>
+          <div>Test IZZA: <strong id="balIzza">—</strong></div>
         </div>
 
         <div class="blox" style="margin-top:10px">
@@ -166,7 +166,6 @@
 
   function buildPreviewSkins(){
     const seeds = [];
-    // mix rarity hints across palette and pattern words for robust coverage
     for(const r of rarHints){
       for(const p of palettes){
         for(const t of patterns){
@@ -174,7 +173,6 @@
         }
       }
     }
-    // cap to a reasonable rotating window by sampling every few
     const step = 3;
     const picked = [];
     for(let i=0;i<seeds.length;i+=step) picked.push(seeds[i]);
@@ -183,15 +181,14 @@
   const previewSkins = buildPreviewSkins();
 
   function loadEggSkin(seed){
-    // nobg=1 makes it a clean egg tile, rarity effects are now visible even on egg
     eggPreview.src = `/nftsvg/EGGDEMO.svg?skin=${encodeURIComponent(seed)}&nobg=1&nc=${Date.now()}`;
   }
   loadEggSkin(previewSkins[0]);
 
-  // Shuffle lasts 3× longer, same tempo
+  // Slightly longer shuffle to showcase effects
   async function spinEggs(finalSeed){
-    const spins = 27;          // was 9
-    const delay = 120;         // ms per frame, unchanged feel
+    const spins = 27;
+    const delay = 120;
     for(let i=0;i<spins;i++){
       loadEggSkin(previewSkins[i % previewSkins.length]);
       await new Promise(r=>setTimeout(r,delay));
@@ -338,12 +335,28 @@
 
   // ---------- Mint flow (with auto-claim) ----------
   mintBtn.addEventListener('click', async ()=>{
-    mintMsg.textContent = 'Your creature is being fabricated by the hands of IZZA gods';
+    mintMsg.textContent = 'IZZA creature is being fabricated by the hands of IZZA gods❕';
     const gate = await ensureUserAndWalletGate();
     if(!gate){ return; }
 
+    const previewSkins = (function(){
+      const palettes = ["gold","violet","turquoise","rose","lime","sapphire","ember","obsidian","mint"];
+      const patterns = ["speckle","stripe","swirl","mosaic","metallic"];
+      const rarHints = ["LEG","EP","RARE","UN","COM"];
+      const seeds = [];
+      for(const r of rarHints){ for(const p of palettes){ for(const t of patterns){ seeds.push(`${r}-${p}-${t}`); }}}
+      const picked = []; for(let i=0;i<seeds.length;i+=3) picked.push(seeds[i]);
+      return picked;
+    })();
+
     const finalSkin = previewSkins[Math.floor(Math.random()*previewSkins.length)];
-    await spinEggs(finalSkin);
+    // slightly longer spin to showcase new lightning & sparkles
+    const spins = 27, delay = 120;
+    for(let i=0;i<spins;i++){
+      eggPreview.src = `/nftsvg/EGGDEMO.svg?skin=${encodeURIComponent(previewSkins[i % previewSkins.length])}&nobg=1&nc=${Date.now()}`;
+      await new Promise(r=>setTimeout(r,delay));
+    }
+    eggPreview.src = `/nftsvg/EGGDEMO.svg?skin=${encodeURIComponent(finalSkin)}&nobg=1&nc=${Date.now()}`;
 
     try{
       const res = await fetch('/api/creatures/mint', {
@@ -420,7 +433,7 @@
 })();
 </script>
 
-<!-- Global friends and notifications overlay, unchanged except text copy where needed -->
+<!-- Global friends and notifications overlay, unchanged -->
 <script>
 /* existing friends and notifications script exactly as before */
 </script>
