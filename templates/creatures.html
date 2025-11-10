@@ -68,41 +68,83 @@
     .spin{width:14px;height:14px;border:2px solid #86f2c3;border-top-color:transparent;border-radius:50%;animation:spin 1s linear infinite}
     @keyframes spin{to{transform:rotate(360deg)}}
 
-    .stats{border:1px solid #2a3550;border-radius:14px;background:#0e1422;padding:12px;margin-top:12px}
-    .stats h4{margin:0 0 8px}
-    .stats-grid{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:8px}
-    .stat-pill{border:1px solid #3a4a78;border-radius:12px;padding:8px;text-align:center;background:#0f1522}
-/* ---------- COLLECTION: compact 4×4 grid ---------- */
-#colStatsBox .stats-grid{
-  grid-template-columns: repeat(4, minmax(0, 1fr));
-  justify-items: center;           /* center each pill in its cell */
+    /* Base stats block with ombré frame */
+.stats{
+  border:1px solid transparent;
+  border-radius:14px;
+  background:
+    linear-gradient(#0e1422,#0e1422) padding-box,
+    linear-gradient(135deg,var(--gold1),var(--piPurple2)) border-box;
+  padding:12px;
+  margin-top:12px;
 }
-#colStatsBox .stat-pill{ padding:10px }
-#colStatsBox .stat-pill strong{ font-size:14px }
-#colStatsBox .small-muted{ font-size:12px }
+.stats h4{
+  margin:0 0 8px;
+  background:linear-gradient(90deg,var(--gold1),var(--piPurple2));
+  -webkit-background-clip:text;
+  -webkit-text-fill-color:transparent;
+  text-align:center;
+}
 
-/* narrow phones fallback to 2 columns so it doesn't squish */
+/* Stat pills: subtle ombré and inner glow */
+.stat-pill{
+  border:1px solid transparent;
+  border-radius:12px;
+  background:
+    linear-gradient(#0f1522,#0f1522) padding-box,
+    linear-gradient(180deg,var(--piPurple1),var(--gold1)) border-box;
+  padding:10px;
+  text-align:center;
+  color:var(--txt);
+  box-shadow:inset 0 0 6px rgba(255,255,255,0.04);
+}
+.stat-pill strong{
+  display:block;
+  font-size:14px;
+  background:linear-gradient(90deg,var(--gold1),var(--piPurple2));
+  -webkit-background-clip:text;
+  -webkit-text-fill-color:transparent;
+}
+.stat-pill .small-muted{font-size:12px;color:var(--muted)}
+
+/* ---------- COLLECTION: compact single 4×4 grid ---------- */
+#colStatsBox{
+  display:grid;
+  grid-template-columns:repeat(4,minmax(0,1fr));
+  gap:8px;
+  justify-items:center;
+  align-items:stretch;
+}
+#colStatsBox .stats-grid{
+  display:contents;
+  margin-top:0 !important;
+}
+#colStatsBox .stat-pill{
+  max-width:180px;
+  width:100%;
+}
 @media (max-width:420px){
-  #colStatsBox .stats-grid{ grid-template-columns: repeat(2, minmax(0,1fr)); }
+  #colStatsBox{grid-template-columns:repeat(2,minmax(0,1fr))}
 }
 
 /* ---------- MY LATEST CREATURE: center everything ---------- */
-#liveWrap{
-  display:flex;
-  align-items:center;
-  justify-content:center;
-}
-#liveWrap img{ margin:0 auto; }
+#liveWrap{display:flex;align-items:center;justify-content:center}
+#liveWrap img{margin:0 auto}
 
 /* ---------- ARMY STATS: centered 3-up grid ---------- */
 #armyBox .stats-grid{
-  grid-template-columns: repeat(3, minmax(0, 1fr));
-  justify-items: center;           /* centers the three pills */
+  grid-template-columns:repeat(3,minmax(120px,1fr));
+  justify-items:center;
+  max-width:640px;
+  margin:0 auto;
 }
 #armyBox .stat-pill{
-  min-width:120px;                 /* keeps a nice compact width */
-  width:100%;
+  min-width:120px;
   max-width:200px;
+  width:100%;
+}
+@media (max-width:420px){
+  #armyBox .stats-grid{grid-template-columns:repeat(2,minmax(120px,1fr))}
 }
     /* Responsive 2-up+ grid for My Creatures */
     #myCreaturesList{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px;align-items:start}
