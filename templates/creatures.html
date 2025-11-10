@@ -60,6 +60,12 @@
     .friend .meta.offline{color:#9fb0d6}
     .searchbar{display:flex;gap:8px}
     .searchbar input{flex:1;min-width:140px;padding:8px 10px;border-radius:10px;border:1px solid #2a3550;background:#0f1522;color:#e8f1ff}
+
+    /* surgical: minting spinner + green consent note */
+    .green-note{color:#86f2c3;font-weight:600;margin-top:6px;text-align:center}
+    .loading{display:inline-flex;align-items:center;gap:8px}
+    .spin{width:14px;height:14px;border:2px solid #86f2c3;border-top-color:transparent;border-radius:50%;animation:spin 1s linear infinite}
+    @keyframes spin{to{transform:rotate(360deg)}}
   </style>
   <script src="https://sdk.minepi.com/pi-sdk.js"></script>
 </head>
@@ -79,8 +85,12 @@
         <h3>Mint Egg</h3>
         <div class="slot"><img id="eggPreview" alt="egg"></div>
         <div class="row"><button class="btn purple" id="mintBtn">MINT EGG, 5 IZZA</button></div>
+        <!-- surgical: consent line under the button -->
+        <div class="green-note">* Clicking the above button you agree to spend 5 IZZA</div>
+
         <div class="hint">Shuffle through some eggs, ultimately the IZZA gods will ❕DECIDE YOUR FATE❕</div>
-        <div id="mintMsg" class="hint"></div>
+        <!-- aria-live so progress updates are announced -->
+        <div id="mintMsg" class="hint" aria-live="polite"></div>
       </div>
 
       <div class="col box">
@@ -315,7 +325,7 @@
       const j = await fetch(meta).then(r=>r.json());
       liveSvg.src = (j.image || '') + '&pulse=' + Date.now();
       openHabitat.href = j.external_url || '#';
-      // Updated hint for real-day mode
+      // daily-mode hint
       liveHint.textContent = 'Feed once per day. Miss 3 days and it dies. Revive by feeding 3 days in a row.';
     }catch(e){}
   }
@@ -336,9 +346,14 @@
 
   // ---------- Mint flow (with auto-claim) ----------
   mintBtn.addEventListener('click', async ()=>{
-    mintMsg.textContent = '❕ CRAFTED BY THE HANDS OF IZZA GODS ❕';
+    // show spinner + clear progress message right up front (only after gate passes)
     const gate = await ensureUserAndWalletGate();
     if(!gate){ return; }
+
+    mintMsg.innerHTML = `
+      <div class="loading"><span class="spin"></span><span>Minting in progress, please wait…</span></div>
+      <div style="margin-top:4px">❕ CRAFTED BY THE HANDS OF IZZA GODS ❕</div>
+    `;
 
     const previewSkins = (function(){
       const palettes = ["gold","violet","turquoise","rose","lime","sapphire","ember","obsidian","mint"];
@@ -351,7 +366,7 @@
     })();
 
     const finalSkin = previewSkins[Math.floor(Math.random()*previewSkins.length)];
-    // slightly longer spin to showcase new lightning & sparkles
+    // spin preview
     const spins = 27, delay = 120;
     for(let i=0;i<spins;i++){
       eggPreview.src = `/nftsvg/EGGDEMO.svg?skin=${encodeURIComponent(previewSkins[i % previewSkins.length])}&nobg=1&nc=${Date.now()}`;
