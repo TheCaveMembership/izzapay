@@ -315,7 +315,8 @@
       const j = await fetch(meta).then(r=>r.json());
       liveSvg.src = (j.image || '') + '&pulse=' + Date.now();
       openHabitat.href = j.external_url || '#';
-      liveHint.textContent = 'Feed once per minute in quick mode. Miss 3 minutes and it dies. Revive by feeding 3 minutes in a row.';
+      // Updated hint for real-day mode
+      liveHint.textContent = 'Feed once per day. Miss 3 days and it dies. Revive by feeding 3 days in a row.';
     }catch(e){}
   }
   setInterval(refreshLive, 3000);
