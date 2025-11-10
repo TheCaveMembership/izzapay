@@ -177,6 +177,24 @@
   display: block;
   min-height: 1.6em; /* ensures one consistent header zone */
 }
+    /* Make army pills align numbers perfectly */
+#armyBox .stat-pill{
+  display:flex;
+  flex-direction:column;
+  align-items:center;
+  justify-content:space-between;   /* header at top, number at bottom */
+  padding:10px;                    /* keep your existing look */
+}
+
+/* Reserve equal header zone (fits one or two lines) and center it */
+#armyBox .stat-pill strong{
+  display:flex;
+  align-items:center;
+  justify-content:center;
+  min-height:2.2em;                /* tweak if your header font-size changes */
+  line-height:1.15;
+  text-align:center;
+}
 
     /* Responsive 2-up+ grid for My Creatures */
     #myCreaturesList{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px;align-items:start}
