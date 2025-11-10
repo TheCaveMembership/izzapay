@@ -71,7 +71,7 @@
     .track{
       display:flex;gap:10px; overflow:auto; scroll-snap-type:x mandatory; -webkit-overflow-scrolling:touch; padding-bottom:4px;
     }
-    .slide{flex:0 0 auto; scroll-snap-align:start}
+    .slide{flex:0 0 auto; scroll-snap-align:start; color:var(--txt);} /* keep base text color */
     .slide.store{width:220px}
     .slide.product{width:260px}
     .navBtn{
@@ -82,6 +82,24 @@
     .navBtn:hover{filter:brightness(1.1)}
     .navPrev{left:10px} .navNext{right:10px}
     @media (hover:none){ .navBtn{display:none} }
+
+    /* >>> Surgical color tweak for carousels <<< */
+    /* default: purple text for store/product names and product price */
+    #carousel-stores .slide .title,
+    #carousel-products .slide .title,
+    #carousel-products .slide .price{
+      color:var(--piPurple2);
+      transition:color .15s ease;
+    }
+    /* on press/drag (active): turn gold */
+    #carousel-stores .slide:active .title,
+    #carousel-products .slide:active .title,
+    #carousel-products .slide:active .price{
+      color:var(--gold1);
+    }
+    /* optional: selected text highlight goes gold as well */
+    ::selection{ background:var(--gold1); color:#1a1400; }
+    ::-moz-selection{ background:var(--gold1); color:#1a1400; }
 
     /* Grid lists below carousels (unchanged behavior) */
     .grid{display:grid;gap:12px}
@@ -133,7 +151,6 @@
       {% endif %}
     </form>
 
-    {# --------- IZZA GAME store first (logo + action). No {% break %} used. --------- #}
     {% set izza_game = (merchants or []) | selectattr('slug','equalto','izza-game-crafting') | list | first %}
     {% if izza_game %}
       {% set u = (izza_game.logo_url or '') | trim %}
@@ -159,7 +176,6 @@
       </div>
     {% endif %}
 
-    {# --------- Carousel: merchant stores with real logos --------- #}
     {% set stores_with_logos = (merchants or []) | selectattr('logo_url') | list %}
     {% if stores_with_logos and stores_with_logos|length > 0 %}
       <section class="carousel" id="carousel-stores" aria-label="Stores">
@@ -188,7 +204,6 @@
       </section>
     {% endif %}
 
-    {# --------- Carousel: recently added products (uses your existing `products`) --------- #}
     {% set recent_products = products or [] %}
     {% if recent_products and recent_products|length > 0 %}
       <section class="carousel" id="carousel-products" aria-label="Recently added products">
