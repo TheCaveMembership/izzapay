@@ -107,41 +107,41 @@
 }
 .stat-pill .small-muted{font-size:12px;color:var(--muted)}
 
-/* ---------- COLLECTION: sizing + typography tweaks (4×2 locked) ---------- */
+/* ---------- COLLECTION: sizing + typography tweaks (4×2 locked, clean) ---------- */
 #colStatsBox{
   display:grid;
-  grid-template-columns: repeat(4, minmax(0,1fr)); /* 4 across */
-  gap:10px;
+  grid-template-columns: repeat(4, 1fr);  /* 4 across */
+  gap:8px;
   align-items:start;
-  justify-items:center; /* center pills so narrower widths look clean */
+  justify-items:stretch;                  /* stretch, not center */
 }
 #colStatsBox h4{ grid-column:1 / -1; }
 
-/* flatten the two rows into this single grid */
+/* flatten the two rows into the single parent grid */
 #colStatsBox .stats-grid{ display:contents; }
 
-/* smaller, tighter pills */
+/* pills fill their grid cell; smaller and tighter */
 #colStatsBox .stat-pill{
-  width: clamp(120px, 22vw, 160px);
-  padding: 8px 10px;
+  width:100%;               /* let grid define the width */
+  padding:8px 10px;
 }
 
 /* smaller headers so they never overflow */
 #colStatsBox .stat-pill strong{
-  font-size: 13px;
-  line-height: 1.1;
-  white-space: nowrap;   /* avoid wrap like “Legend / ary” */
-  letter-spacing: .1px;
+  font-size:13px;
+  line-height:1.1;
+  white-space:nowrap;
+  letter-spacing:.1px;
 }
 
 /* slightly smaller numbers */
-#colStatsBox .stat-pill .small-muted{ font-size: 11px; }
+#colStatsBox .stat-pill .small-muted{ font-size:11px; }
 
 /* center the footer note across the full width */
 #colStatsBox > .hint{
-  grid-column: 1 / -1;
-  text-align: center !important;
-  margin-top: 4px !important;
+  grid-column:1 / -1;
+  text-align:center !important;
+  margin-top:6px !important;
 }
 
 /* ---------- MY LATEST CREATURE: keep centered ---------- */
