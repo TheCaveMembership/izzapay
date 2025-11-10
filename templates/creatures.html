@@ -144,6 +144,12 @@
   text-align:center !important;
   margin-top:6px !important;
 }
+    /* --- Surgical tweak: shrink only long header labels --- */
+#colStatsBox .stat-pill strong:contains("Legendary"),
+#colStatsBox .stat-pill strong:contains("Uncommon") {
+  font-size: 11px !important;
+  letter-spacing: 0;
+}
 
 /* ---------- MY LATEST CREATURE: keep centered ---------- */
 #liveWrap{display:flex;align-items:center;justify-content:center}
