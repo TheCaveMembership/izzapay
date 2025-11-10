@@ -72,7 +72,38 @@
     .stats h4{margin:0 0 8px}
     .stats-grid{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:8px}
     .stat-pill{border:1px solid #3a4a78;border-radius:12px;padding:8px;text-align:center;background:#0f1522}
+/* ---------- COLLECTION: compact 4×4 grid ---------- */
+#colStatsBox .stats-grid{
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  justify-items: center;           /* center each pill in its cell */
+}
+#colStatsBox .stat-pill{ padding:10px }
+#colStatsBox .stat-pill strong{ font-size:14px }
+#colStatsBox .small-muted{ font-size:12px }
 
+/* narrow phones fallback to 2 columns so it doesn't squish */
+@media (max-width:420px){
+  #colStatsBox .stats-grid{ grid-template-columns: repeat(2, minmax(0,1fr)); }
+}
+
+/* ---------- MY LATEST CREATURE: center everything ---------- */
+#liveWrap{
+  display:flex;
+  align-items:center;
+  justify-content:center;
+}
+#liveWrap img{ margin:0 auto; }
+
+/* ---------- ARMY STATS: centered 3-up grid ---------- */
+#armyBox .stats-grid{
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  justify-items: center;           /* centers the three pills */
+}
+#armyBox .stat-pill{
+  min-width:120px;                 /* keeps a nice compact width */
+  width:100%;
+  max-width:200px;
+}
     /* Responsive 2-up+ grid for My Creatures */
     #myCreaturesList{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px;align-items:start}
     @media (min-width:680px){#myCreaturesList{grid-template-columns:repeat(3,minmax(0,1fr))}}
