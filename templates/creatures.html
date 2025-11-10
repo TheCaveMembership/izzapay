@@ -19,6 +19,8 @@
          border:1px solid #2a3550;color:#cfe0ff;background:var(--panel);cursor:pointer;text-decoration:none}
     .btn.purple{background:linear-gradient(180deg,var(--piPurple1),var(--piPurple2));color:#fff;border-color:transparent}
     .btn.gold{background:linear-gradient(180deg,var(--gold1),var(--gold2));color:#1a1400;border-color:transparent}
+    /* minimal red variant for Burn buttons */
+    .btn.red{background:#1b0f12;border-color:#5b2430;color:#ffb6c1}
     h1{font-size:clamp(26px,8.5vw,56px);margin:16px 0 6px;text-align:center}
     p{color:var(--muted);text-align:center}
     .row{display:flex;gap:12px;justify-content:center;flex-wrap:wrap;margin:10px 0 18px}
@@ -66,6 +68,12 @@
     .loading{display:inline-flex;align-items:center;gap:8px}
     .spin{width:14px;height:14px;border:2px solid #86f2c3;border-top-color:transparent;border-radius:50%;animation:spin 1s linear infinite}
     @keyframes spin{to{transform:rotate(360deg)}}
+
+    /* collection stats panel */
+    .stats{border:1px solid #2a3550;border-radius:14px;background:#0e1422;padding:12px;margin-top:12px}
+    .stats h4{margin:0 0 8px}
+    .stats-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(160px,1fr));gap:8px}
+    .stat-pill{border:1px solid #3a4a78;border-radius:12px;padding:8px;text-align:center;background:#0f1522}
   </style>
   <script src="https://sdk.minepi.com/pi-sdk.js"></script>
 </head>
@@ -85,16 +93,30 @@
         <h3>Mint Egg</h3>
         <div class="slot"><img id="eggPreview" alt="egg"></div>
         <div class="row"><button class="btn purple" id="mintBtn">MINT EGG, 5 IZZA</button></div>
+        <!-- surgical: consent line under the button -->
         <div class="green-note">* Clicking the above button you agree to spend 5 IZZA</div>
+
         <div class="hint">Shuffle through some eggs, ultimately the IZZA gods will ❕DECIDE YOUR FATE❕</div>
+        <!-- aria-live so progress updates are announced -->
         <div id="mintMsg" class="hint" aria-live="polite"></div>
 
-        <!-- NEW: collection stats block under mint -->
-        <div class="box" id="collStatsBox" style="margin-top:10px">
-          <h3 style="margin:0 0 6px">Collection Stats</h3>
-          <div id="collStats" class="small-muted">Loading…</div>
+        <!-- NEW: Collection Stats under Mint Egg -->
+        <div class="stats" id="colStatsBox" aria-live="polite">
+          <h4>IZZA CREATURES V1 — Collection</h4>
+          <div class="stats-grid">
+            <div class="stat-pill"><strong id="supplyLine">Supply</strong><br><span class="small-muted">—</span></div>
+            <div class="stat-pill"><strong>Hatched</strong><br><span id="hatchedCount" class="small-muted">—</span></div>
+            <div class="stat-pill"><strong>Burnt</strong><br><span id="burntCount" class="small-muted">—</span></div>
+          </div>
+          <div class="stats-grid" style="margin-top:8px">
+            <div class="stat-pill"><strong>Legendary</strong><br><span id="legCount" class="small-muted">—</span></div>
+            <div class="stat-pill"><strong>Epic</strong><br><span id="epCount" class="small-muted">—</span></div>
+            <div class="stat-pill"><strong>Rare</strong><br><span id="rareCount" class="small-muted">—</span></div>
+            <div class="stat-pill"><strong>Uncommon</strong><br><span id="unCount" class="small-muted">—</span></div>
+            <div class="stat-pill"><strong>Common</strong><br><span id="comCount" class="small-muted">—</span></div>
+          </div>
+          <div class="hint" style="margin-top:8px">Total supply capped at 1,000 for IZZA CREATURES V1.</div>
         </div>
-        <!-- /NEW -->
       </div>
 
       <div class="col box">
@@ -102,12 +124,19 @@
         <div id="liveWrap"><img id="liveSvg" alt="creature"></div>
         <div class="row">
           <button class="btn" id="feedBtn">FEED</button>
-          <!-- NEW: burn button in habitat summary -->
-          <button class="btn" id="burnLiveBtn">BURN</button>
-          <!-- /NEW -->
           <a class="btn" id="openHabitat" target="_blank" rel="noopener">OPEN HABITAT</a>
         </div>
         <div id="liveHint" class="hint"></div>
+      </div>
+    </div>
+
+    <!-- NEW: User Army Strength summary -->
+    <div class="box" id="armyBox" style="display:none;margin-top:14px">
+      <h3>Your IZZA Creature Army Strength</h3>
+      <div class="stats-grid">
+        <div class="stat-pill"><strong>Total Attack</strong><br><span id="armyAtk" class="small-muted">—</span></div>
+        <div class="stat-pill"><strong>Total Defense</strong><br><span id="armyDef" class="small-muted">—</span></div>
+        <div class="stat-pill"><strong>Creatures Count</strong><br><span id="armyCnt" class="small-muted">—</span></div>
       </div>
     </div>
 
@@ -117,7 +146,7 @@
     </div>
   </div>
 
-  <!-- Wallet modal (unchanged) -->
+  <!-- Wallet modal -->
   <div class="modal" id="myWalletModal" role="dialog" aria-modal="true" aria-labelledby="myWalletTitle" hidden>
     <div class="modal-card">
       <div class="modal-header">
@@ -175,11 +204,23 @@
   const liveHint = document.getElementById('liveHint');
   const openHabitat = document.getElementById('openHabitat');
   const eggPreview = document.getElementById('eggPreview');
-  const collStatsBox = document.getElementById('collStatsBox'); // NEW
-  const collStats = document.getElementById('collStats');       // NEW
-  const burnLiveBtn = document.getElementById('burnLiveBtn');   // NEW
 
-  // Expanded preview pool…
+  // stats elements
+  const supplyLine = document.getElementById('supplyLine');
+  const hatchedCount = document.getElementById('hatchedCount');
+  const burntCount = document.getElementById('burntCount');
+  const legCount = document.getElementById('legCount');
+  const epCount = document.getElementById('epCount');
+  const rareCount = document.getElementById('rareCount');
+  const unCount = document.getElementById('unCount');
+  const comCount = document.getElementById('comCount');
+
+  const armyBox = document.getElementById('armyBox');
+  const armyAtk = document.getElementById('armyAtk');
+  const armyDef = document.getElementById('armyDef');
+  const armyCnt = document.getElementById('armyCnt');
+
+  // Expanded preview pool: all palettes, patterns, and rarity hints
   const palettes = ["gold","violet","turquoise","rose","lime","sapphire","ember","obsidian","mint"];
   const patterns = ["speckle","stripe","swirl","mosaic","metallic"];
   const rarHints = ["LEG","EP","RARE","UN","COM"];
@@ -205,6 +246,7 @@
   }
   loadEggSkin(previewSkins[0]);
 
+  // Slightly longer shuffle to showcase effects
   async function spinEggs(finalSeed){
     const spins = 27;
     const delay = 120;
@@ -339,22 +381,38 @@
   }
   setInterval(refreshLive, 3000);
 
-  // NEW: collection stats fetcher
-  async function refreshStats(){
+  // ---------- Collection Stats ----------
+  async function loadCollectionStats(){
     try{
       const j = await fetch('/api/creatures/stats').then(r=>r.json());
-      const total = j.total_minted || 0;
-      const burned = j.total_burned || 0;
-      const alive = Math.max(0, total - burned);
-      const rc = j.rarity_counts || {};
-      collStats.innerHTML =
-        `Hatched: <strong>${total}</strong> &nbsp;•&nbsp; Burned: <strong>${burned}</strong> &nbsp;•&nbsp; Alive: <strong>${alive}</strong><br>` +
-        `Rarities minted — Common: ${rc.common||0}, Uncommon: ${rc.uncommon||0}, Rare: ${rc.rare||0}, Epic: ${rc.epic||0}, Legendary: ${rc.legendary||0}`;
-    }catch(e){
-      collStats.textContent = 'Stats unavailable';
-    }
+      // expected: {cap:1000, minted: N, burnt: M, rarity: {legendary, epic, rare, uncommon, common}}
+      if(j && j.ok){
+        const cap = j.cap || 1000;
+        supplyLine.textContent = `Supply ${j.minted - j.burnt} / ${cap}`;
+        hatchedCount.textContent = String(j.minted);
+        burntCount.textContent = String(j.burnt);
+        legCount.textContent = String((j.rarity||{}).legendary ?? 0);
+        epCount.textContent  = String((j.rarity||{}).epic ?? 0);
+        rareCount.textContent= String((j.rarity||{}).rare ?? 0);
+        unCount.textContent  = String((j.rarity||{}).uncommon ?? 0);
+        comCount.textContent = String((j.rarity||{}).common ?? 0);
+      }
+    }catch(e){}
   }
-  // /NEW
+
+  // ---------- Army Strength ----------
+  async function loadArmyStrength(){
+    try{
+      const qs = USER_CANON ? ('?u='+encodeURIComponent(USER_CANON)) : '';
+      const j = await fetch('/api/creatures/army-power'+qs, {credentials:'include'}).then(r=>r.json());
+      if(j && j.ok){
+        armyAtk.textContent = String(j.total_attack ?? 0);
+        armyDef.textContent = String(j.total_defense ?? 0);
+        armyCnt.textContent = String(j.count ?? 0);
+        armyBox.style.display = 'block';
+      }
+    }catch(e){}
+  }
 
   // Load latest & balances & stats on enter
   (async ()=>{
@@ -367,11 +425,9 @@
       }
     }catch(e){}
     try{ await refreshMyWalletModal(); }catch{}
-    try{ await refreshStats(); }catch{}
+    try{ await loadCollectionStats(); }catch{}
+    try{ await loadArmyStrength(); }catch{}
   })();
-
-  // Refresh stats periodically
-  setInterval(refreshStats, 10000); // NEW
 
   // ---------- Mint flow (with auto-claim) ----------
   mintBtn.addEventListener('click', async ()=>{
@@ -427,7 +483,12 @@
 
       await refreshLive();
       await refreshMyWalletModal();
-      await refreshStats(); // NEW
+      await loadCollectionStats();
+      await loadArmyStrength();
+      // refresh list if open
+      if (document.getElementById('myCreaturesBox').style.display !== 'none') {
+        document.getElementById('btnMyCreatures').click();
+      }
     }catch(e){
       console.error(e);
       mintMsg.textContent = 'Mint failed, please try again';
@@ -445,27 +506,36 @@
     refreshLive();
   });
 
-  // NEW: Burn from live panel
-  burnLiveBtn.addEventListener('click', async ()=>{
-    if(!lastCode){ alert('Mint or select a creature first'); return; }
+  // ---------- Burn helper ----------
+  async function burnCreature(code){
     const gate = await ensureUserAndWalletGate(); if(!gate){ return; }
-    const ok = confirm('You are about to Burn this NFT! Are you sure you want to send this IZZA Creature back into the hands of IZZA gods?');
+    const ok = confirm("You are about to Burn this NFT! Are you sure you want to send this IZZA Creature back into the hands of IZZA gods?");
     if(!ok) return;
-    const resp = await fetch('/api/creatures/burn', {
-      method:'POST',
-      headers:{'Content-Type':'application/json'},
-      body: JSON.stringify({ code:lastCode, owner_pub:gate.pub })
-    }).then(r=>r.json()).catch(()=>({ok:false}));
-    if(resp && resp.ok){
-      alert('Burned. Farewell, brave creature.');
-      await refreshLive();
-      await refreshStats();
-      document.getElementById('btnMyCreatures').click();
-    }else{
-      alert(resp && resp.error ? String(resp.error) : 'Burn failed');
+    try{
+      const r = await fetch('/api/creatures/burn', {
+        method:'POST',
+        headers:{'Content-Type':'application/json'},
+        body: JSON.stringify({ code, owner_pub: gate.pub })
+      }).then(r=>r.json());
+      if(!(r && r.ok)){ alert('Burn failed'); return; }
+      // refresh UI
+      await loadCollectionStats();
+      await loadArmyStrength();
+      // if latest was burned, clear live
+      if(lastCode === code){
+        lastCode = null;
+        liveSvg.src = '';
+        liveHint.textContent = 'Select another creature from your collection.';
+      }
+      // refresh list
+      if (document.getElementById('myCreaturesBox').style.display !== 'none') {
+        document.getElementById('btnMyCreatures').click();
+      }
+      alert('Burn complete.');
+    }catch(e){
+      alert('Burn failed.');
     }
-  });
-  // /NEW
+  }
 
   // ---------- My Creatures ----------
   const myBox  = document.getElementById('myCreaturesBox');
@@ -480,53 +550,35 @@
       const img = document.createElement('img');
       img.alt = it.code;
       img.src = `/nftsvg/${it.code}.svg?nc=${Date.now()}`;
-
       const cap = document.createElement('div');
       cap.className = 'cap';
       cap.textContent = it.code + (it.stage ? ` — ${it.stage}` : '');
+
+      const row = document.createElement('div');
+      row.style.display = 'flex';
+      row.style.gap = '8px';
 
       const openA = document.createElement('a');
       openA.href = `/creature/${it.code}`;
       openA.className = 'btn';
       openA.textContent = 'OPEN';
 
-      // NEW: Burn button next to OPEN
-      const burnBtn = document.createElement('button');
-      burnBtn.className = 'btn';
-      burnBtn.textContent = 'BURN';
-      burnBtn.addEventListener('click', async ()=>{
-        const active = await fetchActiveWallet(USER_CANON);
-        const pub = active && active.pub || '';
-        if(!pub){ alert('Open your IZZA wallet once to set an active wallet, then return.'); return; }
-        const ok = confirm('You are about to Burn this NFT! Are you sure you want to send this IZZA Creature back into the hands of IZZA gods?');
-        if(!ok) return;
-        const resp = await fetch('/api/creatures/burn', {
-          method:'POST',
-          headers:{'Content-Type':'application/json'},
-          body: JSON.stringify({ code: it.code, owner_pub: pub })
-        }).then(r=>r.json()).catch(()=>({ok:false}));
-        if(resp && resp.ok){
-          alert('Burned. IZZA gods accept your offering.');
-          // refresh list and stats
-          document.getElementById('btnMyCreatures').click();
-          refreshStats();
-        }else{
-          alert(resp && resp.error ? String(resp.error) : 'Burn failed');
-        }
-      });
-      // /NEW
+      const burnB = document.createElement('button');
+      burnB.type = 'button';
+      burnB.className = 'btn red';
+      burnB.textContent = 'BURN';
+      burnB.addEventListener('click', ()=> burnCreature(it.code));
+
+      row.appendChild(openA);
+      row.appendChild(burnB);
 
       wrap.appendChild(img);
       wrap.appendChild(cap);
-      const row = document.createElement('div');
-      row.style.display = 'flex';
-      row.style.gap = '8px';
-      row.appendChild(openA);
-      row.appendChild(burnBtn); // NEW
       wrap.appendChild(row);
       myList.appendChild(wrap);
     });
     myBox.style.display = 'block';
+    await loadArmyStrength();
     window.scrollTo({top: myBox.offsetTop - 12, behavior:'smooth'});
   });
 
