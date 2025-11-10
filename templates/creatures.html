@@ -30,12 +30,41 @@
     .col{flex:1 1 320px;max-width:520px}
     .box h3{margin:4px 0 10px}
 
-    .slot{position:relative;overflow:hidden;border-radius:16px;border:1px solid #2a3550;background:var(--card);
-          height:clamp(110px,22vw,160px);display:flex;align-items:center;justify-content:center}
-    #eggPreview{display:block;width:120px;height:120px;object-fit:contain;filter:drop-shadow(0 2px 6px rgba(0,0,0,.35))}
-    .hint{font-size:12px;color:#9fb0d6;margin-top:6px;text-align:center}
+    /* Egg slot: add breathing room + ombré frame (egg stays 120×120) */
+.slot{
+  position:relative;
+  overflow:hidden;
+  border-radius:16px;
 
-    #liveSvg{ width:220px; height:220px; object-fit:contain;border-radius:12px;border:1px solid #223056;background:#0e1422 }
+  /* ombré border like the other cards */
+  border:1px solid transparent;
+  background:
+    linear-gradient(var(--card), var(--card)) padding-box,
+    linear-gradient(135deg, var(--gold1), var(--piPurple2)) border-box;
+
+  /* space so the 120px egg + shadow never gets clipped */
+  padding:12px;                              /* 12px all around */
+  min-height:calc(120px + 24px);             /* egg height + top+bottom padding = 144px */
+  height:clamp(144px, 22vw, 180px);          /* keep your responsive feel, but never below 144 */
+
+  display:flex;
+  align-items:center;
+  justify-content:center;
+}
+
+/* Do NOT change the egg size */
+#eggPreview{
+  display:block;
+  width:120px;
+  height:120px;
+  object-fit:contain;
+  filter:drop-shadow(0 2px 6px rgba(0,0,0,.35));
+}
+
+.hint{font-size:12px;color:#9fb0d6;margin-top:6px;text-align:center}
+
+/* unchanged */
+#liveSvg{ width:220px; height:220px; object-fit:contain;border-radius:12px;border:1px solid #223056;background:#0e1422 }
 
     .modal{position:fixed;inset:0;background:rgba(0,0,0,.55);display:flex;align-items:center;justify-content:center;z-index:9999}
     .modal[hidden]{display:none}
