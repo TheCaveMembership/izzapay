@@ -72,7 +72,7 @@
     .stats-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(160px,1fr));gap:8px}
     .stat-pill{border:1px solid #3a4a78;border-radius:12px;padding:8px;text-align:center;background:#0f1522}
 
-    /* NEW: responsive 2-up+ grid for My Creatures */
+    /* Responsive 2-up+ grid for My Creatures */
     #myCreaturesList{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px;align-items:start}
     @media (min-width:680px){#myCreaturesList{grid-template-columns:repeat(3,minmax(0,1fr))}}
     @media (min-width:980px){#myCreaturesList{grid-template-columns:repeat(4,minmax(0,1fr))}}
@@ -100,7 +100,7 @@
         <div class="hint">Shuffle through some eggs, ultimately the IZZA gods will ❕DECIDE YOUR FATE❕</div>
         <div id="mintMsg" class="hint" aria-live="polite"></div>
 
-        <!-- Fixed: dedicated span for the numeric supply value -->
+        <!-- Compact Collection stats -->
         <div class="stats" id="colStatsBox" aria-live="polite">
           <h4>IZZA CREATURES V1 — Collection</h4>
           <div class="stats-grid">
@@ -145,7 +145,7 @@
     </div>
   </div>
 
-  <!-- Wallet modal (unchanged) -->
+  <!-- Wallet modal -->
   <div class="modal" id="myWalletModal" role="dialog" aria-modal="true" aria-labelledby="myWalletTitle" hidden>
     <div class="modal-card">
       <div class="modal-header">
@@ -354,7 +354,7 @@
   }
   setInterval(refreshLive, 3000);
 
-  // FIXED: Collection Stats -> correct endpoint/fields
+  // Collection Stats
   async function loadCollectionStats(){
     try{
       const j = await fetch('/api/creatures/collection-stats').then(r=>r.json());
@@ -372,7 +372,7 @@
     }catch(e){}
   }
 
-  // FIXED: Army Strength -> correct endpoint/fields
+  // Army Strength
   async function loadArmyStrength(){
     try{
       const qs = USER_CANON ? ('?u='+encodeURIComponent(USER_CANON)) : '';
@@ -541,7 +541,7 @@
 })();
 </script>
 
-<!-- Friends/notifications overlay script untouched -->
+<!-- Friends/notifications overlay script kept as-is -->
 <script>
 /* existing friends and notifications script exactly as before */
 </script>
