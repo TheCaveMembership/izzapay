@@ -35,9 +35,9 @@ DAY_SECS          = 60   # <-- set to 86400 for real days
 TEST_CRACK_START  = 30          # starts cracking after 30s
 TEST_HATCH_DONE   = 90          # fully hatched at 90s
 
-# Growth windows
-TEST_TEENAGE      = 3 * DAY_SECS
-TEST_PRIME        = 7 * DAY_SECS
+# Growth windows (surgical change): post-hatch each stage = 60s
+BABY_END          = TEST_HATCH_DONE + 60    # baby ends at 150s
+TEEN_END          = TEST_HATCH_DONE + 120   # teen ends at 210s
 TICK_STEP_SECONDS = 3
 
 # Hunger growth per “day” by stage
@@ -142,12 +142,13 @@ def _active_pub_for_request() -> str | None:
 def _clamp(v, lo, hi): return max(lo, min(hi, v))
 
 def _stage_from_elapsed(elapsed: int, hunger: int, existing_stage: str | None) -> str:
+    # surgical thresholds with 60s per post-hatch stage
     if existing_stage == "dead":
         return "dead"
     if elapsed < TEST_CRACK_START: return "egg"
     if elapsed < TEST_HATCH_DONE:  return "cracking"
-    if elapsed < TEST_TEENAGE:     return "baby"
-    if elapsed < TEST_PRIME:       return "teen"
+    if elapsed < BABY_END:         return "baby"
+    if elapsed < TEEN_END:         return "teen"
     return "prime"
 
 def _choose_palette(seed: str):
@@ -729,34 +730,43 @@ def creature_svg(code):
             </line>
           </g>'''
 
-    # Rarity sparkles and halo
+    # Rarity sparkles & effects (surgical changes: stronger sparkles + lightning sweep)
     shine_defs = f'''
       <symbol id="twinkle">
-        <polygon points="0,-3 0.8,-0.8 3,0 0.8,0.8 0,3 -0.8,0.8 -3,0 -0.8,-0.8" />
+        <polygon points="0,-3 0.9,-0.9 3,0 0.9,0.9 0,3 -0.9,0.9 -3,0 -0.9,-0.9" />
       </symbol>
-      <linearGradient id="sweep" x1="0" x2="1" y1="0" y2="0">
-        <stop offset="0" stop-color="#fff" stop-opacity="0"/>
-        <stop offset=".5" stop-color="#fff" stop-opacity=".55"/>
-        <stop offset="1" stop-color="#fff" stop-opacity="0"/>
-      </linearGradient>
+      <filter id="twkGlow"><feGaussianBlur stdDeviation="0.8"/><feMerge><feMergeNode/><feMergeNode in="SourceGraphic"/></feMerge></filter>
       <radialGradient id="aurora" cx="50%" cy="50%" r="65%">
         <stop offset="0" stop-color="{glow}" stop-opacity=".35"/>
         <stop offset="1" stop-color="{bg}" stop-opacity="0"/>
       </radialGradient>
       <filter id="haloBlur"><feGaussianBlur stdDeviation="3"/></filter>
+
+      <!-- Neon lightning bolt -->
+      <filter id="boltGlow"><feGaussianBlur stdDeviation="2"/></filter>
+      <linearGradient id="boltGrad" x1="0" x2="1" y1="0" y2="0">
+        <stop offset="0" stop-color="{glow}" stop-opacity="0.0"/>
+        <stop offset="0.25" stop-color="{glow}" stop-opacity="0.8"/>
+        <stop offset="0.75" stop-color="#ffffff" stop-opacity="1"/>
+        <stop offset="1" stop-color="{glow}" stop-opacity="0.0"/>
+      </linearGradient>
+      <path id="boltShape" d="M0,-150 L-10,-120 L10,-120 L-8,-90 L15,-90 L-5,-55 L12,-55 L-12,-10 L8,-10"
+            fill="none" stroke="url(#boltGrad)" stroke-width="6" stroke-linejoin="round" stroke-linecap="round"/>
     '''
 
+    # beefier twinkles
     twinkles = ''
     if rarity in ('uncommon','rare','epic','legendary'):
         t = []
         rndt = random.Random(st["code"] + ":twk")
-        n = 6 if rarity == 'uncommon' else 10 if rarity == 'rare' else 14 if rarity == 'epic' else 18
+        n = 10 if rarity == 'uncommon' else 16 if rarity == 'rare' else 22 if rarity == 'epic' else 28
         for i in range(n):
-            x = rndt.randint(-70, 70); y = rndt.randint(-50, 50)
-            dur = 1.0 + (i % 5) * 0.2
+            x = rndt.randint(-80, 80); y = rndt.randint(-60, 60)
+            dur = 0.8 + (i % 6) * 0.18
+            scale = 1.0 + (i % 4) * 0.25
             t.append(f'''
-              <g transform="translate({x},{y})">
-                <use href="#twinkle" fill="#fff" opacity="0">
+              <g transform="translate({x},{y}) scale({scale})">
+                <use href="#twinkle" fill="#fff" opacity="0" filter="url(#twkGlow)">
                   <animate attributeName="opacity" values="0;1;0" dur="{dur}s" repeatCount="indefinite" />
                 </use>
               </g>''')
@@ -787,14 +797,19 @@ def creature_svg(code):
           </g>'''
 
     aurora_svg = ''
-    sweep_svg  = ''
     if rarity in ('epic','legendary'):
         aurora_svg = f'<ellipse rx="170" ry="120" fill="url(#aurora)" opacity=".45" filter="url(#soft)"/>'
-    if rarity == 'legendary':
-        sweep_svg = f'''
-          <rect x="-100" y="-80" width="200" height="160" fill="url(#sweep)" opacity=".7">
-            <animate attributeName="x" from="-160" to="160" dur="2.2s" repeatCount="indefinite"/>
-          </rect>'''
+
+    # lightning bolt sweep (surgical change): replaces block sweep, orbits every 6s
+    bolt_svg = ''
+    if rarity in ('legendary',):  # keep exclusive like previous sweep; widen if you want more presence
+        bolt_svg = f'''
+          <g opacity="0.9">
+            <use href="#boltShape" filter="url(#boltGlow)">
+              <animateTransform attributeName="transform" attributeType="XML" type="rotate"
+                from="0 0 0" to="360 0 0" dur="6s" repeatCount="indefinite"/>
+            </use>
+          </g>'''
 
     # show hunger only for post hatch
     show_hunger = (stage in ('baby','teen','prime'))
@@ -810,7 +825,7 @@ def creature_svg(code):
     <text x="16" y="68">ATK {st.get('attack',0)}  DEF {st.get('defense',0)}  •  1d={DAY_SECS}s</text>
   </g>'''
 
-    # For eggs, show rarity sparkle and halo around the egg too
+    # For eggs, show rarity sparkle and effects around the egg too
     rarity_layer_for_egg = ''
     if stage in ('egg','cracking'):
         rarity_layer_for_egg = f'''
@@ -818,7 +833,7 @@ def creature_svg(code):
           {orbit_svg}
           {halo_svg}
           {aurora_svg}
-          {sweep_svg}
+          {bolt_svg}
         '''
 
     svg = f"""<svg viewBox="0 0 512 512"
@@ -865,7 +880,7 @@ def creature_svg(code):
       {orbit_svg}
       {halo_svg}
       {aurora_svg}
-      {sweep_svg}
+      {bolt_svg}
     </g>
   </g>
 
