@@ -107,10 +107,10 @@
 }
 .stat-pill .small-muted{font-size:12px;color:var(--muted)}
 
-/* ---------- COLLECTION: true 4×2 layout (force 4 across) ---------- */
+/* ---------- COLLECTION: true 4×2 layout (locked 4 across) ---------- */
 #colStatsBox{
   display:grid;
-  grid-template-columns:repeat(4, minmax(0,1fr)); /* 4 across */
+  grid-template-columns:repeat(4, minmax(0,1fr)); /* always 4 across */
   gap:8px;
   align-items:stretch;
   justify-items:stretch;
@@ -120,15 +120,10 @@
 /* flatten both .stats-grid rows into the single parent grid */
 #colStatsBox .stats-grid{ display:contents; }
 
-/* let each pill fill its cell */
+/* let each pill fill its grid cell */
 #colStatsBox .stat-pill{
   width:100%;
   max-width:none;
-}
-
-/* fallback only on ultra-narrow screens */
-@media (max-width:339px){
-  #colStatsBox{ grid-template-columns:repeat(2, minmax(0,1fr)); }
 }
 
 /* ---------- MY LATEST CREATURE: keep centered ---------- */
