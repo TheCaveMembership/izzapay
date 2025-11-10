@@ -172,6 +172,11 @@
   width:100%;
   max-width:200px;
 }
+    /* lock stat header height for visual balance */
+#armyBox .stat-pill strong {
+  display: block;
+  min-height: 1.6em; /* ensures one consistent header zone */
+}
 
     /* Responsive 2-up+ grid for My Creatures */
     #myCreaturesList{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px;align-items:start}
