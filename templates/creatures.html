@@ -107,35 +107,36 @@
 }
 .stat-pill .small-muted{font-size:12px;color:var(--muted)}
 
-/* ---------- COLLECTION: sizing + typography tweaks (4×2 locked, clean) ---------- */
+/* ---------- COLLECTION: sizing + typography tweaks (4×2 locked, no overflow) ---------- */
 #colStatsBox{
   display:grid;
-  grid-template-columns: repeat(4, 1fr);  /* 4 across */
-  gap:8px;
+  grid-template-columns: repeat(4, minmax(0,1fr)); /* key: allow tracks to shrink */
+  gap:6px;                                         /* a bit tighter */
   align-items:start;
-  justify-items:stretch;                  /* stretch, not center */
+  justify-items:stretch;
 }
 #colStatsBox h4{ grid-column:1 / -1; }
 
-/* flatten the two rows into the single parent grid */
+/* flatten the two rows into this single grid */
 #colStatsBox .stats-grid{ display:contents; }
 
-/* pills fill their grid cell; smaller and tighter */
+/* pills fill the cell and can shrink with the grid */
 #colStatsBox .stat-pill{
-  width:100%;               /* let grid define the width */
-  padding:8px 10px;
+  min-width:0;            /* key: let content shrink inside the cell */
+  width:100%;
+  padding:6px 8px;        /* slightly smaller */
 }
 
-/* smaller headers so they never overflow */
+/* smaller headers so they never wrap/overflow */
 #colStatsBox .stat-pill strong{
-  font-size:13px;
+  font-size:12.5px;
   line-height:1.1;
   white-space:nowrap;
   letter-spacing:.1px;
 }
 
 /* slightly smaller numbers */
-#colStatsBox .stat-pill .small-muted{ font-size:11px; }
+#colStatsBox .stat-pill .small-muted{ font-size:10.5px; }
 
 /* center the footer note across the full width */
 #colStatsBox > .hint{
