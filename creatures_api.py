@@ -975,7 +975,7 @@ def creature_svg(code):
             <ellipse cx="0" cy="82" rx="96" ry="28" fill="{glow}" opacity=".22" filter="url(#flameBlur)"/>
 
             <!-- tongues + sparks: shifted left and slightly scaled down -->
-            <g transform="translate(-22,0) scale(0.9)">
+            <g transform="translate(-22,0) scale(0.86,1)">
               <!-- layered tongues -->
               <g mask="url(#flameFade)">
                 <path id="tongue1"
