@@ -944,14 +944,88 @@ def creature_svg(code):
             <polygon points="-28,0 0,-20 28,0 18,0 0,-10 -18,0" fill="{glow}" stroke="#000" stroke-width="3"/>
           </g>'''
 
+    # --- FLAMES: improved rising fire with bottom fade, wavy tongues, and sparks ---
     flames_svg = ''
     if flames and stage in ('teen','prime'):
         flames_svg = f'''
-          <g opacity=".9" transform="translate(0,8)">
-            <path d="M-80,82 C-62,34,-36,4,-14,-18 C-2,6,4,28,8,52 C20,30,36,0,56,-20 C70,6,82,38,88,82 Z" fill="{glow}">
-              <animate attributeName="opacity" values="0.6;0.95;0.6" dur="1.0s" repeatCount="indefinite"/>
-              <animateTransform attributeName="transform" type="scale" values="1;1.12;1" dur="0.9s" repeatCount="indefinite"/>
-            </path>
+          <g opacity=".95" transform="translate(0,10)">
+            <!-- defs for flame gradient and fade-up mask -->
+            <defs>
+              <linearGradient id="flameGrad" x1="0" y1="1" x2="0" y2="0">
+                <stop offset="0"   stop-color="{bg}"    stop-opacity="0"/>
+                <stop offset="0.15" stop-color="{glow}"  stop-opacity="0.35"/>
+                <stop offset="0.45" stop-color="{glow}"  stop-opacity="0.75"/>
+                <stop offset="0.8"  stop-color="#ffffff" stop-opacity="0.95"/>
+                <stop offset="1"    stop-color="#ffffff" stop-opacity="1"/>
+              </linearGradient>
+              <linearGradient id="fadeUp" x1="0" y1="1" x2="0" y2="0">
+                <stop offset="0"   stop-color="#000"/>
+                <stop offset="0.25" stop-color="#555"/>
+                <stop offset="0.4" stop-color="#aaa"/>
+                <stop offset="0.55" stop-color="#fff"/>
+                <stop offset="1"   stop-color="#fff"/>
+              </linearGradient>
+              <mask id="flameFade">
+                <rect x="-256" y="-256" width="512" height="512" fill="url(#fadeUp)"/>
+              </mask>
+              <filter id="flameBlur"><feGaussianBlur stdDeviation="1.6"/></filter>
+            </defs>
+
+            <!-- base soft glow -->
+            <ellipse cx="0" cy="82" rx="96" ry="28" fill="{glow}" opacity=".22" filter="url(#flameBlur)"/>
+
+            <!-- layered tongues: three animated paths with slight phase offsets -->
+            <g mask="url(#flameFade)">
+              <path id="tongue1"
+                d="M-88,82 C-70,64 -52,38 -30,12 C-12,34 2,54 10,74 C26,50 46,22 70,-4 C90,26 104,54 110,82 Z"
+                fill="url(#flameGrad)" opacity=".75" filter="url(#flameBlur)">
+                <animate attributeName="d" dur="1.8s" repeatCount="indefinite"
+                  values="
+                    M-88,82 C-70,64 -52,38 -30,12 C-12,34 2,54 10,74 C26,50 46,22 70,-4 C90,26 104,54 110,82 Z;
+                    M-88,82 C-72,60 -56,36 -30,10 C-8,30 4,56 14,76 C28,48 48,18 72,-6 C90,20 104,52 110,82 Z;
+                    M-88,82 C-70,64 -52,38 -30,12 C-12,34 2,54 10,74 C26,50 46,22 70,-4 C90,26 104,54 110,82 Z" />
+              </path>
+
+              <path id="tongue2"
+                d="M-70,82 C-50,58 -36,30 -12,6 C6,26 16,50 22,72 C34,48 54,20 80,-8 C98,20 108,54 116,82 Z"
+                fill="url(#flameGrad)" opacity=".55" filter="url(#flameBlur)">
+                <animate attributeName="d" dur="1.6s" repeatCount="indefinite"
+                  values="
+                    M-70,82 C-50,58 -36,30 -12,6 C6,26 16,50 22,72 C34,48 54,20 80,-8 C98,20 108,54 116,82 Z;
+                    M-70,82 C-52,56 -40,28 -10,4 C10,24 20,48 26,70 C36,46 58,18 82,-10 C98,18 110,52 116,82 Z;
+                    M-70,82 C-50,58 -36,30 -12,6 C6,26 16,50 22,72 C34,48 54,20 80,-8 C98,20 108,54 116,82 Z" />
+              </path>
+
+              <path id="tongue3"
+                d="M-54,82 C-38,60 -22,34 0,10 C16,32 24,54 30,74 C42,50 62,24 86,-2 C104,22 114,54 122,82 Z"
+                fill="url(#flameGrad)" opacity=".45" filter="url(#flameBlur)">
+                <animate attributeName="d" dur="1.9s" repeatCount="indefinite"
+                  values="
+                    M-54,82 C-38,60 -22,34 0,10 C16,32 24,54 30,74 C42,50 62,24 86,-2 C104,22 114,54 122,82 Z;
+                    M-54,82 C-40,58 -26,32 2,8 C18,30 26,52 32,72 C46,48 66,22 88,-6 C104,20 116,52 122,82 Z;
+                    M-54,82 C-38,60 -22,34 0,10 C16,32 24,54 30,74 C42,50 62,24 86,-2 C104,22 114,54 122,82 Z" />
+              </path>
+            </g>
+
+            <!-- rising sparks -->
+            <g opacity=".9">
+              <circle r="2.4" fill="#ffffff">
+                <animateMotion dur="1.2s" repeatCount="indefinite" path="M-40,80 C-36,40 -18,10 -4,-40"/>
+                <animate attributeName="opacity" values="0;1;0" dur="1.2s" repeatCount="indefinite"/>
+              </circle>
+              <circle r="2.0" fill="#ffffff">
+                <animateMotion dur="1.5s" repeatCount="indefinite" path="M0,82 C4,46 10,18 12,-36"/>
+                <animate attributeName="opacity" values="0;1;0" dur="1.5s" repeatCount="indefinite"/>
+              </circle>
+              <circle r="1.8" fill="#ffffff">
+                <animateMotion dur="1.1s" repeatCount="indefinite" path="M34,78 C28,42 18,12 6,-38"/>
+                <animate attributeName="opacity" values="0;1;0" dur="1.1s" repeatCount="indefinite"/>
+              </circle>
+              <circle r="1.6" fill="#ffffff">
+                <animateMotion dur="1.35s" repeatCount="indefinite" path="M-12,80 C-8,48 -2,20 4,-32"/>
+                <animate attributeName="opacity" values="0;1;0" dur="1.35s" repeatCount="indefinite"/>
+              </circle>
+            </g>
           </g>'''
 
     lasers_svg = ''
