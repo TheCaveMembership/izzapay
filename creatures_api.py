@@ -948,7 +948,7 @@ def creature_svg(code):
     flames_svg = ''
     if flames and stage in ('teen','prime'):
         flames_svg = f'''
-          <g opacity=".95" transform="translate(0,10)">
+          <g opacity=".95" transform="translate(-10,10)">
             <!-- defs for flame gradient and fade-up mask -->
             <defs>
               <linearGradient id="flameGrad" x1="0" y1="1" x2="0" y2="0">
