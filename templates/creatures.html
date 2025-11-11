@@ -136,6 +136,16 @@
 }
 .stat-pill .small-muted{font-size:12px;color:var(--muted)}
 
+    /* Gold → Purple ombré title */
+.ombré-title {
+  text-align: center;
+  background: linear-gradient(90deg, var(--gold1), var(--piPurple2));
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  font-weight: 800;
+  margin: 10px 0 14px;
+}
+
 /* ---------- COLLECTION: sizing + typography tweaks (4×2 locked, no overflow) ---------- */
 #colStatsBox{
   display:grid;
@@ -274,7 +284,7 @@
       </div>
 
       <div class="col box">
-        <h3>My Latest Creature</h3>
+        <h3 class="ombré-title">Latest IZZA Creature Minted</h3>
         <div id="liveWrap"><img id="liveSvg" alt="creature"></div>
         <div class="row">
           <button class="btn" id="feedBtn">FEED</button>
