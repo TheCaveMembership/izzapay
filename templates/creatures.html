@@ -30,6 +30,31 @@
     .col{flex:1 1 320px;max-width:520px}
     .box h3{margin:4px 0 10px}
 
+    /* Home mark (image) in topbar */
+    .home-logo{display:inline-flex;align-items:center;justify-content:center;border-radius:12px;
+               padding:8px;background:#0b0f1f;border:1px solid #2a3550}
+    .home-logo img{width:28px;height:28px;display:block}
+
+    /* IZZA CREATURES logo-style title */
+    .izza-logo-creatures{
+      text-align:center;
+      background:linear-gradient(90deg,var(--gold1),var(--piPurple2));
+      -webkit-background-clip:text;
+      -webkit-text-fill-color:transparent;
+      font-weight:900;
+      letter-spacing:.3px;
+      margin:16px 0 4px;
+    }
+    /* small animated strip of eggs/creatures under the title */
+    .logo-samples{
+      display:flex;align-items:center;justify-content:center;gap:8px;flex-wrap:wrap;
+      margin:4px auto 10px;max-width:860px
+    }
+    .logo-samples img{
+      height:44px;width:44px;object-fit:contain;image-rendering:auto;
+      filter:drop-shadow(0 1px 4px rgba(0,0,0,.35))
+    }
+
     /* Egg slot: add breathing room + ombré frame (egg stays 120×120) */
 .slot{
   position:relative;
@@ -235,7 +260,7 @@
   text-align:center;
 }
 
-    /* Responsive 2-up+ grid for My Creatures */
+    /* Responsive 2-up+ grid for My Creatures — always visible now */
     #myCreaturesList{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px;align-items:start}
     @media (min-width:680px){#myCreaturesList{grid-template-columns:repeat(3,minmax(0,1fr))}}
     @media (min-width:980px){#myCreaturesList{grid-template-columns:repeat(4,minmax(0,1fr))}}
@@ -246,12 +271,18 @@
 <body>
   <div class="wrap">
     <div class="topbar">
-      <a class="btn" href="/">BACK HOME</a>
+      <!-- replaced BACK HOME button with your mark image, linked home -->
+      <a href="/" class="home-logo" aria-label="Back Home">
+        <img src="/static/izzapay-mark.svg" alt="IZZA PAY">
+      </a>
       <button class="btn purple upper" id="openWallet">IZZA WALLET</button>
-      <button class="btn" id="btnMyCreatures">MY CREATURES</button>
+      <!-- removed MY CREATURES button per request -->
     </div>
 
-    <h1>IZZA CREATURES</h1>
+    <!-- Logo-style title + small strip of eggs/creatures -->
+    <h1 class="izza-logo-creatures">IZZA CREATURES</h1>
+    <div id="logoSamples" class="logo-samples" aria-hidden="true"></div>
+
     <p>Pay 5 IZZA to mint an IZZA CREATURE EGG, watch it hatch live, then grow and battle.</p>
 
     <div class="grid">
@@ -294,7 +325,7 @@
       </div>
     </div>
 
-    <div class="box" id="armyBox" style="display:none;margin-top:14px">
+    <div class="box" id="armyBox" style="margin-top:14px">
       <h3>Your IZZA Creature Army Strength</h3>
       <div class="stats-grid">
         <div class="stat-pill"><strong>Total Attack</strong><br><span id="armyAtk" class="small-muted">—</span></div>
@@ -303,13 +334,14 @@
       </div>
     </div>
 
-    <div class="box" id="myCreaturesBox" style="display:none;margin-top:14px">
+    <!-- Always visible now (button removed) -->
+    <div class="box" id="myCreaturesBox" style="margin-top:14px">
       <h3>My Creatures</h3>
       <div id="myCreaturesList"></div>
     </div>
   </div>
 
-  <!-- Wallet modal -->
+  <!-- Wallet modal (unchanged) -->
   <div class="modal" id="myWalletModal" role="dialog" aria-modal="true" aria-labelledby="myWalletTitle" hidden>
     <div class="modal-card">
       <div class="modal-header">
@@ -381,13 +413,17 @@
   const armyDef = document.getElementById('armyDef');
   const armyCnt = document.getElementById('armyCnt');
 
+  const logoSamples = document.getElementById('logoSamples');
+  const myBox  = document.getElementById('myCreaturesBox');
+  const myList = document.getElementById('myCreaturesList');
+
   function buildPreviewSkins(){
     const palettes = ["gold","violet","turquoise","rose","lime","sapphire","ember","obsidian","mint"];
     const patterns = ["speckle","stripe","swirl","mosaic","metallic"];
     const rarHints = ["LEG","EP","RARE","UN","COM"];
     const seeds=[]; rarHints.forEach(r=>palettes.forEach(p=>patterns.forEach(t=>seeds.push(`${r}-${p}-${t}`))));
-    const picked=[]; for(let i=0;i<seeds.length;i+=3) picked.push(seeds[i]);
-    return picked;
+    const picked=[]; for(let i=0;i<seeds.length;i+=7) picked.push(seeds[i]); // spread variety
+    return picked.slice(0,10);
   }
   const previewSkins = buildPreviewSkins();
   function loadEggSkin(seed){ eggPreview.src=`/nftsvg/EGGDEMO.svg?skin=${encodeURIComponent(seed)}&nobg=1&nc=${Date.now()}`; }
@@ -397,6 +433,24 @@
     const spins=27, delay=120;
     for(let i=0;i<spins;i++){ loadEggSkin(previewSkins[i%previewSkins.length]); await new Promise(r=>setTimeout(r,delay)); }
     loadEggSkin(finalSeed);
+  }
+
+  // Small strip under the title: eggs + live creatures (if any)
+  function populateLogoSamples(latestCode, myItems){
+    const imgs = [];
+    // 1) a few colorful eggs (animated speckles/stripe/etc via EGGDEMO)
+    previewSkins.slice(0,6).forEach(s=>{
+      imgs.push(`<img alt="egg" src="/nftsvg/EGGDEMO.svg?skin=${encodeURIComponent(s)}&nobg=1&nc=${Date.now()}">`);
+    });
+    // 2) latest live creature if available (brings animated layers like smoke/lasers)
+    if(latestCode){
+      imgs.push(`<img alt="${latestCode}" src="/nftsvg/${latestCode}.svg?nc=${Date.now()}">`);
+    }
+    // 3) up to two from user's collection to show variety (mouths like tongue are randomized per code)
+    (myItems||[]).slice(0,2).forEach(it=>{
+      imgs.push(`<img alt="${it.code}" src="/nftsvg/${it.code}.svg?nc=${Date.now()}">`);
+    });
+    logoSamples.innerHTML = imgs.join('');
   }
 
   function __readVault(){ try{ const s=localStorage.getItem('izza_test_wallet'); return s?JSON.parse(s):null; }catch{return null} }
@@ -472,25 +526,6 @@
       document.getElementById('balIzza').textContent = '—';
     }
   }
-  document.getElementById('mwSaveBtn').addEventListener('click', async ()=>{
-    const active = await fetchActiveWallet(USER_CANON);
-    const pub = active && active.pub || '';
-    if(!/^G[A-Z0-9]{55}$/.test(pub)){ alert('Open your IZZA wallet once to set an active wallet, then return.'); return; }
-    const secret = (document.getElementById('mwSInput').value||'').trim();
-    if(!/^S[A-Z0-9]{55}$/.test(secret)){ alert('Enter a valid S key'); return; }
-    const v = __readVault() || {}; v.pub = pub; v.sec = secret; __writeVault(v);
-    const res = await linkActiveWallet(USER_CANON, pub, secret);
-    if(!res.ok){ alert('Server link failed: ' + (res.json && res.json.error || res.status)); }
-    document.getElementById('mwSInput').value = '';
-    refreshMyWalletModal();
-    alert('S key saved locally and linked.');
-  });
-  document.getElementById('mwForgetBtn').addEventListener('click', async ()=>{
-    const active = await fetchActiveWallet(USER_CANON);
-    const pub = active && active.pub || '';
-    if(pub) __forgetSecret(pub);
-    refreshMyWalletModal();
-  });
 
   async function ensureUserAndWalletGate(){
     const active = await fetchActiveWallet(USER_CANON);
@@ -550,6 +585,55 @@
     }catch(e){}
   }
 
+  // Always-visible My Creatures list (replaces the old button handler)
+  async function loadMyCreatures(){
+    try{
+      myList.innerHTML = '';
+      const qs = USER_CANON ? ('?u='+encodeURIComponent(USER_CANON)) : '';
+      const j = await fetch('/api/creatures/mine'+qs, {credentials:'include'}).then(r=>r.json()).catch(()=>({items:[]}));
+      const items = j.items || [];
+      items.forEach(it=>{
+        const card = document.createElement('div');
+        card.className = 'thumb';
+
+        const img = document.createElement('img');
+        img.alt = it.code;
+        img.src = `/nftsvg/${it.code}.svg?nc=${Date.now()}`;
+
+        const cap = document.createElement('div');
+        cap.className = 'cap';
+        cap.textContent = it.code + (it.stage ? ` — ${it.stage}` : '');
+
+        const row = document.createElement('div');
+        row.style.display = 'flex';
+        row.style.gap = '8px';
+
+        const openA = document.createElement('a');
+        openA.href = `/creature/${it.code}`;
+        openA.className = 'btn';
+        openA.textContent = 'OPEN';
+
+        const burnB = document.createElement('button');
+        burnB.type = 'button';
+        burnB.className = 'btn red';
+        burnB.textContent = 'BURN';
+        burnB.addEventListener('click', ()=> burnCreature(it.code));
+
+        row.appendChild(openA);
+        row.appendChild(burnB);
+
+        card.appendChild(img);
+        card.appendChild(cap);
+        card.appendChild(row);
+        myList.appendChild(card);
+      });
+      // also keep the title strip updated with up to two owned creatures
+      populateLogoSamples(lastCode, items);
+    }catch(e){
+      // no-op
+    }
+  }
+
   (async ()=>{
     try{
       const j = await fetch('/api/creatures/latest', {credentials:'include'}).then(r=>r.json());
@@ -562,6 +646,9 @@
     try{ await refreshMyWalletModal(); }catch{}
     try{ await loadCollectionStats(); }catch{}
     try{ await loadArmyStrength(); }catch{}
+    try{ await loadMyCreatures(); }catch{}
+    // populate title strip at least with eggs even if no creatures yet
+    populateLogoSamples(lastCode, []);
   })();
 
   mintBtn.addEventListener('click', async ()=>{
@@ -610,9 +697,8 @@
       await refreshMyWalletModal();
       await loadCollectionStats();
       await loadArmyStrength();
-      if (document.getElementById('myCreaturesBox').style.display !== 'none') {
-        document.getElementById('btnMyCreatures').click();
-      }
+      await loadMyCreatures(); // always refresh visible list
+      window.scrollTo({top: document.getElementById('liveWrap').offsetTop - 12, behavior:'smooth'});
     }catch(e){
       console.error(e);
       mintMsg.textContent = 'Mint failed, please try again';
@@ -647,60 +733,12 @@
         liveSvg.src = '';
         liveHint.textContent = 'Select another creature from your collection.';
       }
-      if (document.getElementById('myCreaturesBox').style.display !== 'none') {
-        document.getElementById('btnMyCreatures').click();
-      }
+      await loadMyCreatures();
       alert('Burn complete.');
     }catch(e){
       alert('Burn failed.');
     }
   }
-
-  const myBox  = document.getElementById('myCreaturesBox');
-  const myList = document.getElementById('myCreaturesList');
-  document.getElementById('btnMyCreatures').addEventListener('click', async ()=>{
-    myList.innerHTML = '';
-    const qs = USER_CANON ? ('?u='+encodeURIComponent(USER_CANON)) : '';
-    const j = await fetch('/api/creatures/mine'+qs, {credentials:'include'}).then(r=>r.json()).catch(()=>({items:[]}));
-    (j.items||[]).forEach(it=>{
-      const card = document.createElement('div');
-      card.className = 'thumb';
-
-      const img = document.createElement('img');
-      img.alt = it.code;
-      img.src = `/nftsvg/${it.code}.svg?nc=${Date.now()}`;
-
-      const cap = document.createElement('div');
-      cap.className = 'cap';
-      cap.textContent = it.code + (it.stage ? ` — ${it.stage}` : '');
-
-      const row = document.createElement('div');
-      row.style.display = 'flex';
-      row.style.gap = '8px';
-
-      const openA = document.createElement('a');
-      openA.href = `/creature/${it.code}`;
-      openA.className = 'btn';
-      openA.textContent = 'OPEN';
-
-      const burnB = document.createElement('button');
-      burnB.type = 'button';
-      burnB.className = 'btn red';
-      burnB.textContent = 'BURN';
-      burnB.addEventListener('click', ()=> burnCreature(it.code));
-
-      row.appendChild(openA);
-      row.appendChild(burnB);
-
-      card.appendChild(img);
-      card.appendChild(cap);
-      card.appendChild(row);
-      myList.appendChild(card);
-    });
-    myBox.style.display = 'block';
-    await loadArmyStrength();
-    window.scrollTo({top: myBox.offsetTop - 12, behavior:'smooth'});
-  });
 
 })();
 </script>
