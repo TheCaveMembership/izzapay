@@ -14,6 +14,10 @@
     .btn.purple{background:linear-gradient(180deg,#7a44ff,#b784ff);color:#fff}
     .btn.ghost{background:transparent;color:#cfe0ff;border-color:#2a3550}
     .err{color:#ff9aa2;white-space:pre-wrap}
+
+    /* eggs row styling (added) */
+    .eggs-row{display:flex;gap:10px;flex-wrap:wrap;justify-content:center;margin:16px 0}
+    .eggs-row img{width:64px;height:64px;object-fit:contain}
   </style>
 </head>
 <body>
@@ -23,7 +27,15 @@
     </div>
 
     <h1>SIGN IN WITH PI</h1>
-    <img src="/static/assets/izza.png" alt="IZZA Creatures" style="height:160px;display:block;margin:16px auto">
+
+    <!-- replaced single image with the 5-egg row -->
+    <div class="eggs-row">
+      <img alt="Egg gold speckle"    src="/nftsvg/EGGDEMO.svg?skin=LEG-gold-speckle&nobg=1&nc=1">
+      <img alt="Egg violet stripe"   src="/nftsvg/EGGDEMO.svg?skin=EP-violet-stripe&nobg=1&nc=2">
+      <img alt="Egg turquoise swirl" src="/nftsvg/EGGDEMO.svg?skin=RARE-turquoise-swirl&nobg=1&nc=3">
+      <img alt="Egg rose mosaic"     src="/nftsvg/EGGDEMO.svg?skin=UN-rose-mosaic&nobg=1&nc=4">
+      <img alt="Egg lime metallic"   src="/nftsvg/EGGDEMO.svg?skin=COM-lime-metallic&nobg=1&nc=5">
+    </div>
 
     <p>Authenticate to enter <strong>IZZA Creatures</strong>.</p>
 
