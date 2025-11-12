@@ -15,8 +15,10 @@
     .btn.ghost{background:transparent;color:#cfe0ff;border-color:#2a3550}
     .err{color:#ff9aa2;white-space:pre-wrap}
 
-    /* eggs row styling (added) */
-    .eggs-row{display:flex;gap:10px;flex-wrap:wrap;justify-content:center;margin:16px 0}
+    /* Added to match creatures page layout for wordmark and egg row */
+    .izzaword-wrap{display:flex;flex-direction:column;align-items:center;gap:8px;margin:8px 0 12px}
+    .izzaword-wrap svg{max-width:100%;height:auto;display:block;margin:0 auto}
+    .eggs-row{display:flex;gap:10px;flex-wrap:wrap;justify-content:center;margin-top:6px}
     .eggs-row img{width:64px;height:64px;object-fit:contain}
   </style>
 </head>
@@ -26,15 +28,32 @@
       <a class="btn ghost" href="/">BACK HOME</a>
     </div>
 
-    <h1>SIGN IN WITH PI</h1>
+    <!-- Replaced H1 with the IZZA CREATURES wordmark SVG -->
+    <div class="izzaword-wrap" aria-label="IZZA CREATURES">
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1400 240" width="1400" height="240"
+           shape-rendering="geometricPrecision" text-rendering="optimizeLegibility" aria-hidden="true">
+        <defs>
+          <linearGradient id="eggGw" x1="0" y1="0" x2="1" y2="0">
+            <stop offset="0%"   stop-color="#ffcf4d"/>
+            <stop offset="55%"  stop-color="#b784ff"/>
+            <stop offset="100%" stop-color="#48d4ff"/>
+          </linearGradient>
+        </defs>
+        <g fill="url(#eggGw)" stroke="#ffffff" stroke-opacity=".10" stroke-width="8" paint-order="stroke fill markers">
+          <text x="50%" y="170" text-anchor="middle"
+                font-family="Montserrat, Arial Black, Impact, system-ui, sans-serif"
+                font-size="160" font-weight="900" letter-spacing="8">IZZA CREATURES</text>
+        </g>
+      </svg>
 
-    <!-- replaced single image with the 5-egg row -->
-    <div class="eggs-row">
-      <img alt="Egg gold speckle"    src="/nftsvg/EGGDEMO.svg?skin=LEG-gold-speckle&nobg=1&nc=1">
-      <img alt="Egg violet stripe"   src="/nftsvg/EGGDEMO.svg?skin=EP-violet-stripe&nobg=1&nc=2">
-      <img alt="Egg turquoise swirl" src="/nftsvg/EGGDEMO.svg?skin=RARE-turquoise-swirl&nobg=1&nc=3">
-      <img alt="Egg rose mosaic"     src="/nftsvg/EGGDEMO.svg?skin=UN-rose-mosaic&nobg=1&nc=4">
-      <img alt="Egg lime metallic"   src="/nftsvg/EGGDEMO.svg?skin=COM-lime-metallic&nobg=1&nc=5">
+      <!-- Replaced IZZA token image with the same egg row used on the creatures page -->
+      <div class="eggs-row">
+        <img alt="Egg gold speckle"    src="/nftsvg/EGGDEMO.svg?skin=LEG-gold-speckle&nobg=1&nc=1">
+        <img alt="Egg violet stripe"   src="/nftsvg/EGGDEMO.svg?skin=EP-violet-stripe&nobg=1&nc=2">
+        <img alt="Egg turquoise swirl" src="/nftsvg/EGGDEMO.svg?skin=RARE-turquoise-swirl&nobg=1&nc=3">
+        <img alt="Egg rose mosaic"     src="/nftsvg/EGGDEMO.svg?skin=UN-rose-mosaic&nobg=1&nc=4">
+        <img alt="Egg lime metallic"   src="/nftsvg/EGGDEMO.svg?skin=COM-lime-metallic&nobg=1&nc=5">
+      </div>
     </div>
 
     <p>Authenticate to enter <strong>IZZA Creatures</strong>.</p>
