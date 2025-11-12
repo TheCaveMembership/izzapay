@@ -15,17 +15,23 @@
     html,body{background:#000;color:var(--txt);font-family:Inter,Arial,sans-serif;margin:0}
     .wrap{max-width:1100px;margin:0 auto;padding:16px 16px 120px}
 
-    /* Topbar layout: left logo, centered wallet button */
+    /* Topbar layout: left logo, centered wallet button (no boxes except the home tile) */
     .topbar{
-      display:flex;align-items:center;justify-content:space-between;gap:12px;padding:12px 0;border-bottom:1px solid var(--line);
+      display:flex;align-items:center;justify-content:space-between;gap:12px;padding:8px 0;border-bottom:1px solid var(--line);
       position:sticky;top:0;background:rgba(0,0,0,.9);backdrop-filter:blur(10px);z-index:50
     }
     .topbar .slot{flex:1;display:flex;align-items:center}
     .topbar .slot.center{justify-content:center}
     .topbar .slot.right{justify-content:flex-end}
 
-    .logo-btn{display:inline-flex;align-items:center;justify-content:center}
-    .logo-btn img{height:28px;width:auto;display:block;filter:drop-shadow(0 0 6px rgba(255,255,255,.06))}
+    /* small bordered tile only for the home mark */
+    .logo-tile{
+      display:inline-flex;align-items:center;justify-content:center;
+      border:1px solid #2a3550;background:#0e1422;border-radius:12px;
+      padding:5px; box-shadow:inset 0 0 6px rgba(255,255,255,0.04);
+    }
+    .logo-tile img{height:22px;width:auto;display:block}
+
     .btn{display:inline-flex;align-items:center;justify-content:center;padding:14px 18px;border-radius:14px;font-weight:700;letter-spacing:.2px;
          border:1px solid #2a3550;color:#cfe0ff;background:var(--panel);cursor:pointer;text-decoration:none}
     .btn.purple{background:linear-gradient(180deg,var(--piPurple1),var(--piPurple2));color:#fff;border-color:transparent}
@@ -43,6 +49,7 @@
 
     /* Wordmark wrapper + eggs row */
     .izzaword-wrap{display:flex;flex-direction:column;align-items:center;gap:8px;margin-top:8px}
+    .izzaword-wrap svg{max-width:100%;height:auto;display:block;margin:0 auto} /* center + responsive */
     .eggs-row{display:flex;gap:10px;flex-wrap:wrap;justify-content:center}
     .eggs-row img{width:64px;height:64px;object-fit:contain}
 
@@ -52,13 +59,11 @@
   overflow:hidden;
   border-radius:16px;
 
-  /* ombré border like the other cards */
   border:1px solid transparent;
   background:
     linear-gradient(var(--card), var(--card)) padding-box,
     linear-gradient(135deg, var(--gold1), var(--piPurple2)) border-box;
 
-  /* space so the 120px egg + shadow never gets clipped */
   padding:12px;
   min-height:calc(120px + 24px);
   height:clamp(144px, 22vw, 180px);
@@ -211,10 +216,10 @@
 </head>
 <body>
   <div class="wrap">
-    <!-- Topbar with left logo image, centered wallet button -->
+    <!-- Topbar with left logo image (only this has a tile), centered wallet button -->
     <div class="topbar">
       <div class="slot left">
-        <a class="logo-btn" href="/"><img src="/static/izzapay-mark.svg" alt="Back Home"></a>
+        <a class="logo-tile" href="/"><img src="/static/izzapay-mark.svg" alt="Back Home"></a>
       </div>
       <div class="slot center">
         <button class="btn purple upper" id="openWallet">IZZA WALLET</button>
@@ -242,16 +247,13 @@
         </g>
       </svg>
 
-      <!-- row of preview eggs (live from your SVG endpoint, no backgrounds) -->
+      <!-- row of preview eggs (first 5 only) -->
       <div class="eggs-row">
-        <img alt="Egg gold speckle"      src="/nftsvg/EGGDEMO.svg?skin=LEG-gold-speckle&nobg=1&nc=1">
-        <img alt="Egg violet stripe"     src="/nftsvg/EGGDEMO.svg?skin=EP-violet-stripe&nobg=1&nc=2">
-        <img alt="Egg turquoise swirl"   src="/nftsvg/EGGDEMO.svg?skin=RARE-turquoise-swirl&nobg=1&nc=3">
-        <img alt="Egg rose mosaic"       src="/nftsvg/EGGDEMO.svg?skin=UN-rose-mosaic&nobg=1&nc=4">
-        <img alt="Egg lime metallic"     src="/nftsvg/EGGDEMO.svg?skin=COM-lime-metallic&nobg=1&nc=5">
-        <img alt="Egg sapphire speckle"  src="/nftsvg/EGGDEMO.svg?skin=RARE-sapphire-speckle&nobg=1&nc=6">
-        <img alt="Egg ember grid"        src="/nftsvg/EGGDEMO.svg?skin=UN-ember-grid&nobg=1&nc=7">
-        <img alt="Egg obsidian star"     src="/nftsvg/EGGDEMO.svg?skin=COM-obsidian-starfield&nobg=1&nc=8">
+        <img alt="Egg gold speckle"    src="/nftsvg/EGGDEMO.svg?skin=LEG-gold-speckle&nobg=1&nc=1">
+        <img alt="Egg violet stripe"   src="/nftsvg/EGGDEMO.svg?skin=EP-violet-stripe&nobg=1&nc=2">
+        <img alt="Egg turquoise swirl" src="/nftsvg/EGGDEMO.svg?skin=RARE-turquoise-swirl&nobg=1&nc=3">
+        <img alt="Egg rose mosaic"     src="/nftsvg/EGGDEMO.svg?skin=UN-rose-mosaic&nobg=1&nc=4">
+        <img alt="Egg lime metallic"   src="/nftsvg/EGGDEMO.svg?skin=COM-lime-metallic&nobg=1&nc=5">
       </div>
     </div>
 
@@ -555,7 +557,7 @@
     }catch(e){}
   }
 
-  // Always-visible My Creatures loader (moved out of button listener)
+  // Always-visible My Creatures loader
   const myBox  = document.getElementById('myCreaturesBox');
   const myList = document.getElementById('myCreaturesList');
 
