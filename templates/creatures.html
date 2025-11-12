@@ -14,13 +14,24 @@
     }
     html,body{background:#000;color:var(--txt);font-family:Inter,Arial,sans-serif;margin:0}
     .wrap{max-width:1100px;margin:0 auto;padding:16px 16px 120px}
-    .topbar{display:flex;align-items:center;justify-content:center;gap:12px;padding:12px 0;border-bottom:1px solid var(--line);
-            position:sticky;top:0;background:rgba(0,0,0,.9);backdrop-filter:blur(10px);z-index:50}
+
+    /* Topbar layout: left logo, centered wallet button */
+    .topbar{
+      display:flex;align-items:center;justify-content:space-between;gap:12px;padding:12px 0;border-bottom:1px solid var(--line);
+      position:sticky;top:0;background:rgba(0,0,0,.9);backdrop-filter:blur(10px);z-index:50
+    }
+    .topbar .slot{flex:1;display:flex;align-items:center}
+    .topbar .slot.center{justify-content:center}
+    .topbar .slot.right{justify-content:flex-end}
+
+    .logo-btn{display:inline-flex;align-items:center;justify-content:center}
+    .logo-btn img{height:28px;width:auto;display:block;filter:drop-shadow(0 0 6px rgba(255,255,255,.06))}
     .btn{display:inline-flex;align-items:center;justify-content:center;padding:14px 18px;border-radius:14px;font-weight:700;letter-spacing:.2px;
          border:1px solid #2a3550;color:#cfe0ff;background:var(--panel);cursor:pointer;text-decoration:none}
     .btn.purple{background:linear-gradient(180deg,var(--piPurple1),var(--piPurple2));color:#fff;border-color:transparent}
     .btn.gold{background:linear-gradient(180deg,var(--gold1),var(--gold2));color:#1a1400;border-color:transparent}
     .btn.red{background:#1b0f12;border-color:#5b2430;color:#ffb6c1}
+
     h1{font-size:clamp(26px,8.5vw,56px);margin:16px 0 6px;text-align:center}
     p{color:var(--muted);text-align:center}
     .row{display:flex;gap:12px;justify-content:center;flex-wrap:wrap;margin:10px 0 18px}
@@ -30,30 +41,10 @@
     .col{flex:1 1 320px;max-width:520px}
     .box h3{margin:4px 0 10px}
 
-    /* Home mark (image) in topbar */
-    .home-logo{display:inline-flex;align-items:center;justify-content:center;border-radius:12px;
-               padding:8px;background:#0b0f1f;border:1px solid #2a3550}
-    .home-logo img{width:28px;height:28px;display:block}
-
-    /* IZZA CREATURES logo-style title */
-    .izza-logo-creatures{
-      text-align:center;
-      background:linear-gradient(90deg,var(--gold1),var(--piPurple2));
-      -webkit-background-clip:text;
-      -webkit-text-fill-color:transparent;
-      font-weight:900;
-      letter-spacing:.3px;
-      margin:16px 0 4px;
-    }
-    /* small animated strip of eggs/creatures under the title */
-    .logo-samples{
-      display:flex;align-items:center;justify-content:center;gap:8px;flex-wrap:wrap;
-      margin:4px auto 10px;max-width:860px
-    }
-    .logo-samples img{
-      height:44px;width:44px;object-fit:contain;image-rendering:auto;
-      filter:drop-shadow(0 1px 4px rgba(0,0,0,.35))
-    }
+    /* Wordmark wrapper + eggs row */
+    .izzaword-wrap{display:flex;flex-direction:column;align-items:center;gap:8px;margin-top:8px}
+    .eggs-row{display:flex;gap:10px;flex-wrap:wrap;justify-content:center}
+    .eggs-row img{width:64px;height:64px;object-fit:contain}
 
     /* Egg slot: add breathing room + ombré frame (egg stays 120×120) */
 .slot{
@@ -68,9 +59,9 @@
     linear-gradient(135deg, var(--gold1), var(--piPurple2)) border-box;
 
   /* space so the 120px egg + shadow never gets clipped */
-  padding:12px;                              /* 12px all around */
-  min-height:calc(120px + 24px);             /* egg height + top+bottom padding = 144px */
-  height:clamp(144px, 22vw, 180px);          /* keep your responsive feel, but never below 144 */
+  padding:12px;
+  min-height:calc(120px + 24px);
+  height:clamp(144px, 22vw, 180px);
 
   display:flex;
   align-items:center;
@@ -174,51 +165,20 @@
 /* ---------- COLLECTION: sizing + typography tweaks (4×2 locked, no overflow) ---------- */
 #colStatsBox{
   display:grid;
-  grid-template-columns: repeat(4, minmax(0,1fr)); /* key: allow tracks to shrink */
-  gap:6px;                                         /* a bit tighter */
+  grid-template-columns: repeat(4, minmax(0,1fr));
+  gap:6px;
   align-items:start;
   justify-items:stretch;
 }
 #colStatsBox h4{ grid-column:1 / -1; }
-
-/* flatten the two rows into this single grid */
 #colStatsBox .stats-grid{ display:contents; }
-
-/* pills fill the cell and can shrink with the grid */
-#colStatsBox .stat-pill{
-  min-width:0;            /* key: let content shrink inside the cell */
-  width:100%;
-  padding:6px 8px;        /* slightly smaller */
-}
-
-/* smaller headers so they never wrap/overflow */
+#colStatsBox .stat-pill{ min-width:0; width:100%; padding:6px 8px; }
 #colStatsBox .stat-pill strong{
-  font-size:12.5px;
-  line-height:1.1;
-  white-space:nowrap;
-  letter-spacing:.1px;
+  font-size:12.5px; line-height:1.1; white-space:nowrap; letter-spacing:.1px;
 }
-
-/* slightly smaller numbers */
 #colStatsBox .stat-pill .small-muted{ font-size:10.5px; }
-
-/* center the footer note across the full width */
-#colStatsBox > .hint{
-  grid-column:1 / -1;
-  text-align:center !important;
-  margin-top:6px !important;
-}
-    /* --- Surgical tweak: shrink only long header labels --- */
-#colStatsBox .stat-pill strong:contains("Legendary"),
-#colStatsBox .stat-pill strong:contains("Uncommon") {
-  font-size: 11px !important;
-  letter-spacing: 0;
-}
-    /* shrink ONLY the long headers */
-#colStatsBox .stat-pill.smallhdr strong{
-  font-size: 10px !important;
-  letter-spacing: 0;
-}
+#colStatsBox > .hint{ grid-column:1 / -1; text-align:center !important; margin-top:6px !important; }
+#colStatsBox .stat-pill.smallhdr strong{ font-size: 10px !important; letter-spacing: 0; }
 
 /* ---------- MY LATEST CREATURE: keep centered ---------- */
 #liveWrap{display:flex;align-items:center;justify-content:center}
@@ -227,40 +187,21 @@
 /* ---------- ARMY STATS: single horizontal row of 3 ---------- */
 #armyBox .stats-grid{
   display:grid;
-  grid-template-columns:repeat(3, minmax(0,1fr)); /* 3 across */
+  grid-template-columns:repeat(3, minmax(0,1fr));
   gap:8px;
   justify-items:center;
   align-items:stretch;
 }
+#armyBox .stat-pill{ width:100%; max-width:200px; }
+#armyBox .stat-pill strong { display: block; min-height: 1.6em; }
 #armyBox .stat-pill{
-  width:100%;
-  max-width:200px;
+  display:flex; flex-direction:column; align-items:center; justify-content:space-between; padding:10px;
 }
-    /* lock stat header height for visual balance */
-#armyBox .stat-pill strong {
-  display: block;
-  min-height: 1.6em; /* ensures one consistent header zone */
-}
-    /* Make army pills align numbers perfectly */
-#armyBox .stat-pill{
-  display:flex;
-  flex-direction:column;
-  align-items:center;
-  justify-content:space-between;   /* header at top, number at bottom */
-  padding:10px;                    /* keep your existing look */
-}
-
-/* Reserve equal header zone (fits one or two lines) and center it */
 #armyBox .stat-pill strong{
-  display:flex;
-  align-items:center;
-  justify-content:center;
-  min-height:2.2em;                /* tweak if your header font-size changes */
-  line-height:1.15;
-  text-align:center;
+  display:flex; align-items:center; justify-content:center; min-height:2.2em; line-height:1.15; text-align:center;
 }
 
-    /* Responsive 2-up+ grid for My Creatures — always visible now */
+    /* Always-visible My Creatures grid */
     #myCreaturesList{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px;align-items:start}
     @media (min-width:680px){#myCreaturesList{grid-template-columns:repeat(3,minmax(0,1fr))}}
     @media (min-width:980px){#myCreaturesList{grid-template-columns:repeat(4,minmax(0,1fr))}}
@@ -270,18 +211,49 @@
 </head>
 <body>
   <div class="wrap">
+    <!-- Topbar with left logo image, centered wallet button -->
     <div class="topbar">
-      <!-- replaced BACK HOME button with your mark image, linked home -->
-      <a href="/" class="home-logo" aria-label="Back Home">
-        <img src="/static/izzapay-mark.svg" alt="IZZA PAY">
-      </a>
-      <button class="btn purple upper" id="openWallet">IZZA WALLET</button>
-      <!-- removed MY CREATURES button per request -->
+      <div class="slot left">
+        <a class="logo-btn" href="/"><img src="/static/izzapay-mark.svg" alt="Back Home"></a>
+      </div>
+      <div class="slot center">
+        <button class="btn purple upper" id="openWallet">IZZA WALLET</button>
+      </div>
+      <div class="slot right"><!-- intentionally empty --></div>
     </div>
 
-    <!-- Logo-style title + small strip of eggs/creatures -->
-    <h1 class="izza-logo-creatures">IZZA CREATURES</h1>
-    <div id="logoSamples" class="logo-samples" aria-hidden="true"></div>
+    <!-- IZZA CREATURES wordmark SVG with egg colorway + eggs row -->
+    <div class="izzaword-wrap">
+      <!-- inline SVG wordmark -->
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1400 240" width="1400" height="240"
+           shape-rendering="geometricPrecision" text-rendering="optimizeLegibility" aria-label="IZZA CREATURES">
+        <defs>
+          <!-- Egg palette gradient: gold → violet → turquoise -->
+          <linearGradient id="eggGw" x1="0" y1="0" x2="1" y2="0">
+            <stop offset="0%"   stop-color="#ffcf4d"/>
+            <stop offset="55%"  stop-color="#b784ff"/>
+            <stop offset="100%" stop-color="#48d4ff"/>
+          </linearGradient>
+        </defs>
+        <g fill="url(#eggGw)" stroke="#ffffff" stroke-opacity=".10" stroke-width="8" paint-order="stroke fill markers">
+          <text x="50" y="170"
+                font-family="Montserrat, Arial Black, Impact, system-ui, sans-serif"
+                font-size="160" font-weight="900" letter-spacing="8">IZZA CREATURES</text>
+        </g>
+      </svg>
+
+      <!-- row of preview eggs (live from your SVG endpoint, no backgrounds) -->
+      <div class="eggs-row">
+        <img alt="Egg gold speckle"      src="/nftsvg/EGGDEMO.svg?skin=LEG-gold-speckle&nobg=1&nc=1">
+        <img alt="Egg violet stripe"     src="/nftsvg/EGGDEMO.svg?skin=EP-violet-stripe&nobg=1&nc=2">
+        <img alt="Egg turquoise swirl"   src="/nftsvg/EGGDEMO.svg?skin=RARE-turquoise-swirl&nobg=1&nc=3">
+        <img alt="Egg rose mosaic"       src="/nftsvg/EGGDEMO.svg?skin=UN-rose-mosaic&nobg=1&nc=4">
+        <img alt="Egg lime metallic"     src="/nftsvg/EGGDEMO.svg?skin=COM-lime-metallic&nobg=1&nc=5">
+        <img alt="Egg sapphire speckle"  src="/nftsvg/EGGDEMO.svg?skin=RARE-sapphire-speckle&nobg=1&nc=6">
+        <img alt="Egg ember grid"        src="/nftsvg/EGGDEMO.svg?skin=UN-ember-grid&nobg=1&nc=7">
+        <img alt="Egg obsidian star"     src="/nftsvg/EGGDEMO.svg?skin=COM-obsidian-starfield&nobg=1&nc=8">
+      </div>
+    </div>
 
     <p>Pay 5 IZZA to mint an IZZA CREATURE EGG, watch it hatch live, then grow and battle.</p>
 
@@ -334,14 +306,14 @@
       </div>
     </div>
 
-    <!-- Always visible now (button removed) -->
+    <!-- Always visible My Creatures -->
     <div class="box" id="myCreaturesBox" style="margin-top:14px">
       <h3>My Creatures</h3>
       <div id="myCreaturesList"></div>
     </div>
   </div>
 
-  <!-- Wallet modal (unchanged) -->
+  <!-- Wallet modal -->
   <div class="modal" id="myWalletModal" role="dialog" aria-modal="true" aria-labelledby="myWalletTitle" hidden>
     <div class="modal-card">
       <div class="modal-header">
@@ -379,7 +351,7 @@
           <div class="small-muted">Your S key is stored locally on this device only.</div>
         </div>
 
-        <div class="row" style="margin-top:12px;justify-content:flex-end">
+        <div class="blox" style="margin-top:12px;align-items:flex-end">
           <a class="btn gold" href="/token/auth?next=/token/izza">Open Full Wallet</a>
         </div>
       </div>
@@ -413,17 +385,13 @@
   const armyDef = document.getElementById('armyDef');
   const armyCnt = document.getElementById('armyCnt');
 
-  const logoSamples = document.getElementById('logoSamples');
-  const myBox  = document.getElementById('myCreaturesBox');
-  const myList = document.getElementById('myCreaturesList');
-
   function buildPreviewSkins(){
     const palettes = ["gold","violet","turquoise","rose","lime","sapphire","ember","obsidian","mint"];
     const patterns = ["speckle","stripe","swirl","mosaic","metallic"];
     const rarHints = ["LEG","EP","RARE","UN","COM"];
     const seeds=[]; rarHints.forEach(r=>palettes.forEach(p=>patterns.forEach(t=>seeds.push(`${r}-${p}-${t}`))));
-    const picked=[]; for(let i=0;i<seeds.length;i+=7) picked.push(seeds[i]); // spread variety
-    return picked.slice(0,10);
+    const picked=[]; for(let i=0;i<seeds.length;i+=3) picked.push(seeds[i]);
+    return picked;
   }
   const previewSkins = buildPreviewSkins();
   function loadEggSkin(seed){ eggPreview.src=`/nftsvg/EGGDEMO.svg?skin=${encodeURIComponent(seed)}&nobg=1&nc=${Date.now()}`; }
@@ -433,24 +401,6 @@
     const spins=27, delay=120;
     for(let i=0;i<spins;i++){ loadEggSkin(previewSkins[i%previewSkins.length]); await new Promise(r=>setTimeout(r,delay)); }
     loadEggSkin(finalSeed);
-  }
-
-  // Small strip under the title: eggs + live creatures (if any)
-  function populateLogoSamples(latestCode, myItems){
-    const imgs = [];
-    // 1) a few colorful eggs (animated speckles/stripe/etc via EGGDEMO)
-    previewSkins.slice(0,6).forEach(s=>{
-      imgs.push(`<img alt="egg" src="/nftsvg/EGGDEMO.svg?skin=${encodeURIComponent(s)}&nobg=1&nc=${Date.now()}">`);
-    });
-    // 2) latest live creature if available (brings animated layers like smoke/lasers)
-    if(latestCode){
-      imgs.push(`<img alt="${latestCode}" src="/nftsvg/${latestCode}.svg?nc=${Date.now()}">`);
-    }
-    // 3) up to two from user's collection to show variety (mouths like tongue are randomized per code)
-    (myItems||[]).slice(0,2).forEach(it=>{
-      imgs.push(`<img alt="${it.code}" src="/nftsvg/${it.code}.svg?nc=${Date.now()}">`);
-    });
-    logoSamples.innerHTML = imgs.join('');
   }
 
   function __readVault(){ try{ const s=localStorage.getItem('izza_test_wallet'); return s?JSON.parse(s):null; }catch{return null} }
@@ -467,9 +417,9 @@
   }
   async function linkActiveWallet(username, pub, secret){
     const qs = username ? ('?u='+encodeURIComponent(username)) : '';
-    const body = { pub: String(pub||'').trim().toUpperCase() };
-    if(secret && /^S[A-Z0-9]{55}$/.test(secret)) body.secret = secret.trim();
-    const r = await fetch('/api/wallet/link'+qs, { method:'POST', headers:{'content-type':'application/json'}, body:JSON.stringify(body), credentials:'include' });
+    theBody = { pub: String(pub||'').trim().toUpperCase() };
+    if(secret && /^S[A-Z0-9]{55}$/.test(secret)) theBody.secret = secret.trim();
+    const r = await fetch('/api/wallet/link'+qs, { method:'POST', headers:{'content-type':'application/json'}, body:JSON.stringify(theBody), credentials:'include' });
     const j = await r.json().catch(()=>null);
     return { ok:r.ok, status:r.status, json:j };
   }
@@ -526,6 +476,26 @@
       document.getElementById('balIzza').textContent = '—';
     }
   }
+
+  document.getElementById('mwSaveBtn').addEventListener('click', async ()=>{
+    const active = await fetchActiveWallet(USER_CANON);
+    const pub = active && active.pub || '';
+    if(!/^G[A-Z0-9]{55}$/.test(pub)){ alert('Open your IZZA wallet once to set an active wallet, then return.'); return; }
+    const secret = (document.getElementById('mwSInput').value||'').trim();
+    if(!/^S[A-Z0-9]{55}$/.test(secret)){ alert('Enter a valid S key'); return; }
+    const v = __readVault() || {}; v.pub = pub; v.sec = secret; __writeVault(v);
+    const res = await linkActiveWallet(USER_CANON, pub, secret);
+    if(!res.ok){ alert('Server link failed: ' + (res.json && res.json.error || res.status)); }
+    document.getElementById('mwSInput').value = '';
+    refreshMyWalletModal();
+    alert('S key saved locally and linked.');
+  });
+  document.getElementById('mwForgetBtn').addEventListener('click', async ()=>{
+    const active = await fetchActiveWallet(USER_CANON);
+    const pub = active && active.pub || '';
+    if(pub) __forgetSecret(pub);
+    refreshMyWalletModal();
+  });
 
   async function ensureUserAndWalletGate(){
     const active = await fetchActiveWallet(USER_CANON);
@@ -585,53 +555,52 @@
     }catch(e){}
   }
 
-  // Always-visible My Creatures list (replaces the old button handler)
+  // Always-visible My Creatures loader (moved out of button listener)
+  const myBox  = document.getElementById('myCreaturesBox');
+  const myList = document.getElementById('myCreaturesList');
+
   async function loadMyCreatures(){
-    try{
-      myList.innerHTML = '';
-      const qs = USER_CANON ? ('?u='+encodeURIComponent(USER_CANON)) : '';
-      const j = await fetch('/api/creatures/mine'+qs, {credentials:'include'}).then(r=>r.json()).catch(()=>({items:[]}));
-      const items = j.items || [];
-      items.forEach(it=>{
-        const card = document.createElement('div');
-        card.className = 'thumb';
+    myList.innerHTML = '';
+    const qs = USER_CANON ? ('?u='+encodeURIComponent(USER_CANON)) : '';
+    const j = await fetch('/api/creatures/mine'+qs, {credentials:'include'}).then(r=>r.json()).catch(()=>({items:[]}));
+    (j.items||[]).forEach(it=>{
+      const card = document.createElement('div');
+      card.className = 'thumb';
 
-        const img = document.createElement('img');
-        img.alt = it.code;
-        img.src = `/nftsvg/${it.code}.svg?nc=${Date.now()}`;
+      const img = document.createElement('img');
+      img.alt = it.code;
+      img.src = `/nftsvg/${it.code}.svg?nc=${Date.now()}`;
 
-        const cap = document.createElement('div');
-        cap.className = 'cap';
-        cap.textContent = it.code + (it.stage ? ` — ${it.stage}` : '');
+      const cap = document.createElement('div');
+      cap.className = 'cap';
+      cap.textContent = it.code + (it.stage ? ` — ${it.stage}` : '');
 
-        const row = document.createElement('div');
-        row.style.display = 'flex';
-        row.style.gap = '8px';
+      const row = document.createElement('div');
+      row.style.display = 'flex';
+      row.style.gap = '8px';
 
-        const openA = document.createElement('a');
-        openA.href = `/creature/${it.code}`;
-        openA.className = 'btn';
-        openA.textContent = 'OPEN';
+      const openA = document.createElement('a');
+      openA.href = `/creature/${it.code}`;
+      openA.className = 'btn';
+      openA.textContent = 'OPEN';
 
-        const burnB = document.createElement('button');
-        burnB.type = 'button';
-        burnB.className = 'btn red';
-        burnB.textContent = 'BURN';
-        burnB.addEventListener('click', ()=> burnCreature(it.code));
-
-        row.appendChild(openA);
-        row.appendChild(burnB);
-
-        card.appendChild(img);
-        card.appendChild(cap);
-        card.appendChild(row);
-        myList.appendChild(card);
+      const burnB = document.createElement('button');
+      burnB.type = 'button';
+      burnB.className = 'btn red';
+      burnB.textContent = 'BURN';
+      burnB.addEventListener('click', async ()=> {
+        await burnCreature(it.code);
       });
-      // also keep the title strip updated with up to two owned creatures
-      populateLogoSamples(lastCode, items);
-    }catch(e){
-      // no-op
-    }
+
+      row.appendChild(openA);
+      row.appendChild(burnB);
+
+      card.appendChild(img);
+      card.appendChild(cap);
+      card.appendChild(row);
+      myList.appendChild(card);
+    });
+    myBox.style.display = 'block';
   }
 
   (async ()=>{
@@ -647,8 +616,6 @@
     try{ await loadCollectionStats(); }catch{}
     try{ await loadArmyStrength(); }catch{}
     try{ await loadMyCreatures(); }catch{}
-    // populate title strip at least with eggs even if no creatures yet
-    populateLogoSamples(lastCode, []);
   })();
 
   mintBtn.addEventListener('click', async ()=>{
@@ -697,8 +664,7 @@
       await refreshMyWalletModal();
       await loadCollectionStats();
       await loadArmyStrength();
-      await loadMyCreatures(); // always refresh visible list
-      window.scrollTo({top: document.getElementById('liveWrap').offsetTop - 12, behavior:'smooth'});
+      await loadMyCreatures();
     }catch(e){
       console.error(e);
       mintMsg.textContent = 'Mint failed, please try again';
@@ -740,6 +706,7 @@
     }
   }
 
+  // Friends/notifications overlay script remains unchanged below (placeholder hook)
 })();
 </script>
 
