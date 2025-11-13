@@ -133,8 +133,17 @@
 
           <div class="field">
             <label class="ip-label">Banner image URL <span class="muted">(optional)</span></label>
-            <input class="ip-input" name="banner_url" placeholder="https://… (hero image across the top of your store)">
-            <small class="note">You can change this later from Store Settings.</small>
+            <div class="picker card">
+              <div class="thumb" id="bannerThumb"><span class="muted">Preview</span></div>
+              <div class="row">
+                <input type="file" id="bannerFile" accept="image/*" style="flex:1"/>
+                <button class="ip-btn" type="button" id="bannerUploadBtn">Upload</button>
+              </div>
+              <div class="field" style="margin-top:6px">
+                <input class="ip-input" id="bannerUrl" name="banner_url" placeholder="https://… (hero image across the top of your store)">
+              </div>
+              <small class="note">You can change this later from Store Settings.</small>
+            </div>
           </div>
 
           <div class="field">
@@ -228,8 +237,17 @@
 
           <div class="field">
             <label class="ip-label">Banner image URL</label>
-            <input class="ip-input" name="banner_url" value="{{ m.banner_url or '' }}" placeholder="https://… (hero image across the top of your store)">
-            <small class="note">Use a wide image for best results. You can host this on IZZA or elsewhere.</small>
+            <div class="picker card">
+              <div class="thumb" id="editBannerThumb"><span class="muted">Preview</span></div>
+              <div class="row">
+                <input type="file" id="editBannerFile" accept="image/*" style="flex:1"/>
+                <button class="ip-btn" type="button" id="editBannerUploadBtn">Upload</button>
+              </div>
+              <div class="field" style="margin-top:6px">
+                <input class="ip-input" id="editBannerUrl" name="banner_url" value="{{ m.banner_url or '' }}" placeholder="https://… (hero image across the top of your store)">
+              </div>
+              <small class="note">Use a wide image for best results. You can host this on IZZA or elsewhere.</small>
+            </div>
           </div>
 
           <div class="field-inline">
@@ -367,6 +385,8 @@
             <input type="hidden" name="crafted_item_id" id="crafted_item_id">
             <input type="hidden" name="fulfillment_kind" id="fulfillment_kind" value="">
             <input type="hidden" name="category" id="category" value="">
+            <input type="hidden" name="crafted_part" id="crafted_part">
+            <input type="hidden" name="meta_type" id="meta_type" value="">
             <small class="note">When attached, this product is marked as an in-game item.</small>
           </div>
 
@@ -866,6 +886,8 @@
     }
     bind('#logoFile', '#logoUploadBtn', '#logoUrl', 'logoThumb');
     bind('#editLogoFile', '#editLogoUploadBtn', '#editLogoUrl', 'editLogoThumb');
+    bind('#bannerFile', '#bannerUploadBtn', '#bannerUrl', 'bannerThumb');
+    bind('#editBannerFile', '#editBannerUploadBtn', '#editBannerUrl', 'editBannerThumb');
   })();
   (function(){
     const file=$('#itFile'), btn=$('#itUploadBtn'), inp=$('#itUrl'), thumbId='itThumb';
