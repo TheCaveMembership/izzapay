@@ -153,6 +153,9 @@ def init_db():
           decimals INTEGER NOT NULL DEFAULT 0,
           status TEXT DEFAULT 'draft',
           locked_issuer INTEGER DEFAULT 0,
+          -- NEW: value-backed + royalties
+          royalty_bp INTEGER,
+          backing_template_izza TEXT,
           created_at INTEGER,
           updated_at INTEGER,
           UNIQUE(code, issuer),
@@ -170,6 +173,10 @@ def init_db():
           owner_wallet_pub TEXT,
           minted_at INTEGER,
           metadata_json TEXT,
+          -- NEW: vault backing per-token
+          backing_izza TEXT,
+          backing_asset_code TEXT,
+          backing_asset_issuer TEXT,
           UNIQUE(collection_id, serial),
           FOREIGN KEY(collection_id) REFERENCES nft_collections(id) ON DELETE CASCADE,
           FOREIGN KEY(owner_user_id) REFERENCES users(id)
@@ -289,6 +296,18 @@ def ensure_schema():
         try: cx.execute("ALTER TABLE merchants ADD COLUMN custom_css TEXT")
         except Exception: pass
 
+        # NEW: additive columns for value-backed NFTs and royalties
+        try: cx.execute("ALTER TABLE nft_collections ADD COLUMN royalty_bp INTEGER")
+        except Exception: pass
+        try: cx.execute("ALTER TABLE nft_collections ADD COLUMN backing_template_izza TEXT")
+        except Exception: pass
+        try: cx.execute("ALTER TABLE nft_tokens ADD COLUMN backing_izza TEXT")
+        except Exception: pass
+        try: cx.execute("ALTER TABLE nft_tokens ADD COLUMN backing_asset_code TEXT")
+        except Exception: pass
+        try: cx.execute("ALTER TABLE nft_tokens ADD COLUMN backing_asset_issuer TEXT")
+        except Exception: pass
+
         # NFT tables (safe to re-run)
         cx.executescript("""
         CREATE TABLE IF NOT EXISTS nft_collections(
@@ -306,6 +325,8 @@ def ensure_schema():
           decimals INTEGER NOT NULL DEFAULT 0,
           status TEXT DEFAULT 'draft',
           locked_issuer INTEGER DEFAULT 0,
+          royalty_bp INTEGER,
+          backing_template_izza TEXT,
           created_at INTEGER,
           updated_at INTEGER,
           UNIQUE(code, issuer),
@@ -323,6 +344,9 @@ def ensure_schema():
           owner_wallet_pub TEXT,
           minted_at INTEGER,
           metadata_json TEXT,
+          backing_izza TEXT,
+          backing_asset_code TEXT,
+          backing_asset_issuer TEXT,
           UNIQUE(collection_id, serial),
           FOREIGN KEY(collection_id) REFERENCES nft_collections(id) ON DELETE CASCADE,
           FOREIGN KEY(owner_user_id) REFERENCES users(id)
