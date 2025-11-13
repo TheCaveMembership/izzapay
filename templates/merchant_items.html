@@ -430,7 +430,7 @@
             <input type="checkbox" name="allow_backorder" value="1"> Allow backorder
           </label>
 
-          <!-- NFT mint block -->
+                    <!-- NFT mint block -->
           <div class="card" id="nftBlock" style="margin-top:10px">
             <div class="h2" style="font-size:16px;margin-bottom:8px;display:flex;align-items:center;gap:8px">
               Mint as IZZA NFT • <span class="mono">Pi Testnet</span> <span class="pill" id="nftStatusPill" hidden>—</span>
@@ -440,6 +440,23 @@
             </label>
 
             <div id="nftForm" style="display:none">
+              <!-- Hidden wiring for backend -->
+              <input type="hidden" name="is_nft" id="is_nft" value="0">
+              <input type="hidden" name="claim_kind" id="claim_kind" value="">
+              <input type="hidden" name="nft_svg_hash" id="nft_svg_hash" value="">
+              <input type="hidden" name="nft_creator" id="nft_creator" value="">
+              <!-- percentage as basis points on the backend; we’ll send 0–1000 -->
+              <input type="hidden" name="nft_commission_bp" id="nft_commission_bp" value="0">
+
+              <!-- keep existing hidden mint fields -->
+              <input type="hidden" name="nft_enabled" id="nft_enabled" value="">
+              <input type="hidden" name="nft_kind" id="nft_kind" value="single">
+              <input type="hidden" name="nft_size" id="nft_size" value="1">
+              <input type="hidden" name="nft_prefix" id="nft_prefix" value="">
+              <input type="hidden" name="nft_tag" id="nft_tag" value="">
+              <input type="hidden" name="nft_assets_json" id="nft_assets_json" value="">
+              <input type="hidden" name="nft_vault_json" id="nft_vault_json" value="">
+
               <div class="field-inline">
                 <div class="field">
                   <label class="ip-label">Prefix <span class="muted">(asset code)</span></label>
@@ -457,6 +474,11 @@
                   <input class="ip-input" id="nftRoyaltyPct" inputmode="decimal" value="0" placeholder="0">
                   <small class="note">0 to 10 percent on secondary sales.</small>
                 </div>
+                <div class="field">
+                  <label class="ip-label">Initial backing (IZZA per NFT)</label>
+                  <input class="ip-input" id="nftBackingIzza" inputmode="decimal" value="0" placeholder="0">
+                  <small class="note">Optional. Locked in the IZZA vault and redeemable when the NFT is burned.</small>
+                </div>
               </div>
 
               <div class="row" style="align-items:center;justify-content:space-between">
@@ -469,7 +491,7 @@
                 </div>
               </div>
               <div class="inline-hint" style="margin-top:6px">
-                Uses your local IZZA wallet S-key to pay the mint fee in IZZA and issue the NFT to the distributor.
+                Uses your local IZZA wallet S-key to pay the mint fee in IZZA and issue the NFT to the distributor. If you add backing, that IZZA is locked in the IZZA vault and tied to this NFT.
               </div>
             </div>
           </div>
