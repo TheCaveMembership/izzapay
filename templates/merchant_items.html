@@ -1514,69 +1514,89 @@
 });
 
     mintBtn?.addEventListener('click', async ()=>{
-      try{
-        let pct = parseFloat((royaltyPctInput.value||'0').trim());
-        if(isNaN(pct) || pct<0) pct = 0;
-        if(pct > 10){
-          alert('Royalty cannot exceed 10%');
-          pct = 10;
-          royaltyPctInput.value = '10';
-        }
-        const bp = Math.round(pct * 100);
-        nftRoyaltyBpHidden.value = String(bp);
+  try {
+    // ----- royalty validation -----
+    let pct = parseFloat((royaltyPctInput.value||'0').trim());
+    if (isNaN(pct) || pct < 0) pct = 0;
+    if (pct > 10) {
+      alert('Royalty cannot exceed 10%');
+      pct = 10;
+      royaltyPctInput.value = '10';
+    }
+    const bp = Math.round(pct * 100);
+    nftRoyaltyBpHidden.value = String(bp);
 
-        mintBtn.disabled=true;
-        hint.textContent='Minting…';
-        const gate = await ensureUserAndWalletGate();
-        if(!gate){
-          hint.textContent='Open your IZZA wallet and save your S key locally first.';
-          mintBtn.disabled=false;
-          return;
-        }
+    mintBtn.disabled = true;
+    hint.textContent = 'Minting…';
 
-        const body = {
-          creator_pub: gate.pub,
-          creator_sec: gate.sec,
-          kind: 'single',
-          size: 1,
-          prefix: ($('#nft_prefix').value||'NFT').trim(),
-          collection_tag: ($('#nft_tag').value||'').trim(),
-          royalty_bp: bp
-        };
+    const gate = await ensureUserAndWalletGate();
+    if (!gate) {
+      hint.textContent = 'Open your IZZA wallet and save your S key locally first.';
+      mintBtn.disabled = false;
+      return;
+    }
 
-        const r = await fetch('/api/nft/mint', {
-          method:'POST',
-          headers:{'content-type':'application/json'},
-          body:JSON.stringify(body)
-        });
-        const j = await r.json();
-        if(!j.ok || !j.assets){
-          throw new Error(j.error || 'mint_failed');
-        }
-        $('#nft_assets_json').value = JSON.stringify(j.assets);
-        statusPill.hidden=false;
-        statusPill.textContent = `Minted 1`;
-        hint.textContent = `Minted 1. Fee paid: ${j.total_fee} IZZA`;
+    const body = {
+      creator_pub: gate.pub,
+      creator_sec: gate.sec,
+      kind: 'single',
+      size: 1,
+      prefix: ($('#nft_prefix').value||'NFT').trim(),
+      collection_tag: ($('#nft_tag').value||'').trim(),
+      royalty_bp: bp
+    };
 
-        try{
-          const rawSvg = ($('#svgCode')?.value||'').trim();
-          const normalized = rawSvg ? svgNormalize(rawSvg, 512) : '';
-          const hashSource = normalized || ( $('#itUrl')?.value||'' );
-          if(hashSource){
-            const hx = await sha256Hex(hashSource.toLowerCase());
-            nftSvgHashHidden.value = hx;
-          }
-        }catch{}
-
-        alert(`Minted your NFT. When this product sells, add a claim to the buyer’s Token Showcase list and let them claim into their IZZA wallet.`);
-      }catch(e){
-        console.error(e);
-        alert('Mint failed: ' + (e && e.message || e));
-        hint.textContent='Mint failed.';
-      }finally{
-        mintBtn.disabled=false;
-      }
+    const r = await fetch('/api/nft/mint', {
+      method: 'POST',
+      headers: {'content-type':'application/json'},
+      body: JSON.stringify(body)
     });
+
+    const j = await r.json();
+    if (!j.ok || !j.assets) {
+      throw new Error(j.error || 'mint_failed');
+    }
+
+    // Save asset list
+    $('#nft_assets_json').value = JSON.stringify(j.assets);
+
+    // NEW: Save vault JSON if returned
+    if (j.vault) {
+      $('#nft_vault_json').value = JSON.stringify(j.vault);
+    }
+
+    // Show paid fee hint using ANY provided field
+    const fee =
+      j.total_fee ??
+      j.total ??
+      j.fee ??
+      '?';
+
+    statusPill.hidden = false;
+    statusPill.textContent = `Minted 1`;
+    hint.textContent = `Minted 1. Fee paid: ${fee} IZZA`;
+
+    // generate SVG hash
+    try {
+      const rawSvg = ($('#svgCode')?.value||'').trim();
+      const normalized = rawSvg ? svgNormalize(rawSvg, 512) : '';
+      const hashSource = normalized || ($('#itUrl')?.value||'');
+      if (hashSource) {
+        const hx = await sha256Hex(hashSource.toLowerCase());
+        nftSvgHashHidden.value = hx;
+      }
+    } catch {}
+
+    alert(`Minted your NFT. When this product sells, add a claim to the buyer’s Token Showcase list so they can claim it.`);
+
+  } catch (e) {
+    console.error(e);
+    alert('Mint failed: ' + (e?.message || e));
+    hint.textContent = 'Mint failed.';
+  } finally {
+    mintBtn.disabled = false;
+  }
+});
   })();
 
   wireColorways();
