@@ -1,4 +1,3 @@
-# db.py
 import os, sqlite3, threading
 
 # --- Persistent locations (works on Render or locally) ---
@@ -48,7 +47,16 @@ def init_db():
           theme_mode TEXT DEFAULT 'dark',
           reply_to_email TEXT,
           pi_wallet TEXT NOT NULL,
-          -- newer cols: pi_wallet_address, pi_handle, colorway (added later)
+
+          -- Extended merchant presentation + Pi metadata
+          description TEXT,
+          banner_url TEXT,
+          font_family TEXT,
+          custom_css TEXT,
+          pi_wallet_address TEXT,
+          pi_handle TEXT,
+          colorway TEXT,
+
           FOREIGN KEY(owner_user_id) REFERENCES users(id)
         );
 
@@ -265,12 +273,20 @@ def ensure_schema():
         try: cx.execute("ALTER TABLE orders ADD COLUMN created_at INTEGER")
         except Exception: pass
 
-        # merchants extras
+        # merchants extras (safe if they already exist)
         try: cx.execute("ALTER TABLE merchants ADD COLUMN pi_wallet_address TEXT")
         except Exception: pass
         try: cx.execute("ALTER TABLE merchants ADD COLUMN pi_handle TEXT")
         except Exception: pass
         try: cx.execute("ALTER TABLE merchants ADD COLUMN colorway TEXT")
+        except Exception: pass
+        try: cx.execute("ALTER TABLE merchants ADD COLUMN description TEXT")
+        except Exception: pass
+        try: cx.execute("ALTER TABLE merchants ADD COLUMN banner_url TEXT")
+        except Exception: pass
+        try: cx.execute("ALTER TABLE merchants ADD COLUMN font_family TEXT")
+        except Exception: pass
+        try: cx.execute("ALTER TABLE merchants ADD COLUMN custom_css TEXT")
         except Exception: pass
 
         # NFT tables (safe to re-run)
