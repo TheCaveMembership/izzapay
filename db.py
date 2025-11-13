@@ -71,6 +71,24 @@ def init_db():
           stock_qty INTEGER,
           allow_backorder INTEGER DEFAULT 0,
           active INTEGER DEFAULT 1,
+
+          -- NFT product configuration fields
+          is_nft INTEGER DEFAULT 0,
+          nft_kind TEXT,
+          nft_size INTEGER,
+          nft_prefix TEXT,
+          nft_tag TEXT,
+          nft_assets_json TEXT,
+          nft_vault_json TEXT,
+          nft_commission_bp INTEGER,
+          claim_kind TEXT,
+
+          -- Optional type/category metadata for templates
+          meta_type TEXT,
+          category TEXT,
+          fulfillment_kind TEXT,
+          crafted_item_id INTEGER,
+
           FOREIGN KEY(merchant_id) REFERENCES merchants(id)
         );
 
@@ -296,6 +314,34 @@ def ensure_schema():
         try: cx.execute("ALTER TABLE merchants ADD COLUMN custom_css TEXT")
         except Exception: pass
 
+        # items: NFT product flags and templates
+        try: cx.execute("ALTER TABLE items ADD COLUMN is_nft INTEGER DEFAULT 0")
+        except Exception: pass
+        try: cx.execute("ALTER TABLE items ADD COLUMN nft_kind TEXT")
+        except Exception: pass
+        try: cx.execute("ALTER TABLE items ADD COLUMN nft_size INTEGER")
+        except Exception: pass
+        try: cx.execute("ALTER TABLE items ADD COLUMN nft_prefix TEXT")
+        except Exception: pass
+        try: cx.execute("ALTER TABLE items ADD COLUMN nft_tag TEXT")
+        except Exception: pass
+        try: cx.execute("ALTER TABLE items ADD COLUMN nft_assets_json TEXT")
+        except Exception: pass
+        try: cx.execute("ALTER TABLE items ADD COLUMN nft_vault_json TEXT")
+        except Exception: pass
+        try: cx.execute("ALTER TABLE items ADD COLUMN nft_commission_bp INTEGER")
+        except Exception: pass
+        try: cx.execute("ALTER TABLE items ADD COLUMN claim_kind TEXT")
+        except Exception: pass
+        try: cx.execute("ALTER TABLE items ADD COLUMN meta_type TEXT")
+        except Exception: pass
+        try: cx.execute("ALTER TABLE items ADD COLUMN category TEXT")
+        except Exception: pass
+        try: cx.execute("ALTER TABLE items ADD COLUMN fulfillment_kind TEXT")
+        except Exception: pass
+        try: cx.execute("ALTER TABLE items ADD COLUMN crafted_item_id INTEGER")
+        except Exception: pass
+
         # NEW: additive columns for value-backed NFTs and royalties
         try: cx.execute("ALTER TABLE nft_collections ADD COLUMN royalty_bp INTEGER")
         except Exception: pass
@@ -430,7 +476,7 @@ def ensure_schema():
             pass
 
         # Triggers to mirror pi_username -> username if username not set
-        cx.executescript("""
+        cx.executescripts("""
         CREATE TRIGGER IF NOT EXISTS trg_users_username_default_ins
         AFTER INSERT ON users
         WHEN NEW.username IS NULL
