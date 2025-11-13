@@ -1418,7 +1418,7 @@
     refreshMyWalletModal();
   });
 
-  // ================== NFT mint UI wiring (SINGLE ONLY) ==================
+    // ================== NFT mint UI wiring (SINGLE ONLY) ==================
   (function(){
     const enable = $('#nftEnableToggle');
     const formWrap = $('#nftForm');
@@ -1429,17 +1429,18 @@
     const hint    = $('#nftQuoteHint');
     const statusPill = $('#nftStatusPill');
 
-    const isNftHidden = $('#is_nft');
-    const nftEnabledHidden = $('#nft_enabled');
-    const nftKindHidden = $('#nft_kind');
-    const nftSizeHidden = $('#nft_size');
-    const nftCreatorHidden = $('#nft_creator');
+    const isNftHidden        = $('#is_nft');
+    const nftEnabledHidden   = $('#nft_enabled');
+    const nftKindHidden      = $('#nft_kind');
+    const nftSizeHidden      = $('#nft_size');
+    const nftCreatorHidden   = $('#nft_creator');
     const nftRoyaltyBpHidden = $('#nft_commission_bp');
-    const claimKindHidden = $('#claim_kind');
-    const nftSvgHashHidden = $('#nft_svg_hash');
+    const claimKindHidden    = $('#claim_kind');
+    const nftSvgHashHidden   = $('#nft_svg_hash');
+    const backingInput       = $('#nftBackingIzza');
 
-    const stockEl = $('#stock_qty');
-    const stockNote = $('#stock_note');
+    const stockEl  = $('#stock_qty');
+    const stockNote= $('#stock_note');
 
     const royaltyPctInput = $('#nftRoyaltyPct');
 
@@ -1460,18 +1461,19 @@
     function setEnabled(on){
       formWrap.style.display = on ? '' : 'none';
       nftEnabledHidden.value = on ? '1' : '';
-      isNftHidden.value = on ? '1' : '0';
-      claimKindHidden.value = on ? 'crafted_nft' : '';
+      isNftHidden.value      = on ? '1' : '0';
+      claimKindHidden.value  = on ? 'crafted_nft' : '';
       nftCreatorHidden.value = on ? (USER_CANON || '') : '';
-      nftKindHidden.value = 'single';
-      nftSizeHidden.value = '1';
+      nftKindHidden.value    = 'single';
+      nftSizeHidden.value    = '1';
       if(!on){
-        hint.textContent='';
-        mintBtn.disabled=true;
-        statusPill.hidden=true;
-        $('#nft_assets_json').value='';
+        hint.textContent = '';
+        mintBtn.disabled = true;
+        statusPill.hidden = true;
+        $('#nft_assets_json').value = '';
         royaltyPctInput.value = '0';
         nftRoyaltyBpHidden.value = '0';
+        if(backingInput) backingInput.value = '0';
       }
       lockStock(on);
     }
@@ -1486,139 +1488,148 @@
       setEnabled(enable.checked);
     });
 
+    // Quote uses existing /api/nft/quote behaviour – we don’t need backing here yet
     quoteBtn?.addEventListener('click', async ()=>{
-  try {
-    quoteBtn.disabled = true;
-    hint.textContent = 'Getting quote…';
+      try {
+        quoteBtn.disabled = true;
+        hint.textContent = 'Getting quote…';
 
-    const body = { kind: 'single', size: 1 };
-    const r = await fetch('/api/nft/quote', {
-      method: 'POST',
-      headers: { 'content-type': 'application/json' },
-      body: JSON.stringify(body)
+        const body = { kind: 'single', size: 1 };
+        const r = await fetch('/api/nft/quote', {
+          method: 'POST',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify(body)
+        });
+
+        const j = await r.json();
+        if (!j.ok) throw new Error('bad quote');
+
+        const fee =
+          j.total_fee ??
+          j.total ??
+          j.fee ??
+          null;
+
+        let extra = '';
+        if (j.per_nft)  extra += ` • per NFT: ${j.per_nft}`;
+        if (j.per_unit) extra += ` • per unit: ${j.per_unit}`;
+        if (j.step)     extra += ` • step: ${j.step}`;
+
+        if (fee == null) {
+          hint.textContent = 'Quote OK.';
+        } else {
+          hint.textContent = `Fee: ${fee} IZZA${extra}`;
+        }
+
+        mintBtn.disabled = false;
+
+        $('#nft_prefix').value = (prefix.value||'NFT').trim();
+        $('#nft_tag').value    = (tagInp.value||'').trim();
+
+      } catch (e) {
+        hint.textContent = 'Failed to quote.';
+        mintBtn.disabled = true;
+      } finally {
+        quoteBtn.disabled = false;
+      }
     });
-
-    const j = await r.json();
-    if (!j.ok) throw new Error('bad quote');
-
-    // Accept ANY of the possible fields the API might return:
-    const fee =
-      j.total_fee ??
-      j.total ??
-      j.fee ??
-      null;
-
-    // Also optionally show per-unit / price step
-    let extra = '';
-    if (j.per_nft) extra += ` • per NFT: ${j.per_nft}`;
-    if (j.per_unit) extra += ` • per unit: ${j.per_unit}`;
-    if (j.step) extra += ` • step: ${j.step}`;
-
-    if (fee == null) {
-      hint.textContent = 'Quote OK.';
-    } else {
-      hint.textContent = `Fee: ${fee} IZZA${extra}`;
-    }
-
-    // allow mint
-    mintBtn.disabled = false;
-
-    // sync prefix + tag
-    $('#nft_prefix').value = (prefix.value||'NFT').trim();
-    $('#nft_tag').value    = (tagInp.value||'').trim();
-
-  } catch (e) {
-    hint.textContent = 'Failed to quote.';
-    mintBtn.disabled = true;
-  } finally {
-    quoteBtn.disabled = false;
-  }
-});
 
     mintBtn?.addEventListener('click', async ()=>{
-  try {
-    // ----- royalty validation -----
-    let pct = parseFloat((royaltyPctInput.value||'0').trim());
-    if (isNaN(pct) || pct < 0) pct = 0;
-    if (pct > 10) {
-      alert('Royalty cannot exceed 10%');
-      pct = 10;
-      royaltyPctInput.value = '10';
-    }
-    const bp = Math.round(pct * 100);
-    nftRoyaltyBpHidden.value = String(bp);
+      try {
+        // ----- royalty validation -----
+        let pct = parseFloat((royaltyPctInput.value||'0').trim());
+        if (isNaN(pct) || pct < 0) pct = 0;
+        if (pct > 10) {
+          alert('Royalty cannot exceed 10%');
+          pct = 10;
+          royaltyPctInput.value = '10';
+        }
+        const bp = Math.round(pct * 100);
+        nftRoyaltyBpHidden.value = String(bp);
 
-    mintBtn.disabled = true;
-    hint.textContent = 'Minting…';
+        // ----- backing validation (IZZA per NFT) -----
+        let backingVal = 0;
+        if (backingInput) {
+          let raw = (backingInput.value || '0').trim();
+          let num = parseFloat(raw || '0');
+          if (!isNaN(num) && num > 0) {
+            // keep it to 7 decimals max for on-chain math
+            backingVal = Number(num.toFixed(7));
+          }
+        }
 
-    const gate = await ensureUserAndWalletGate();
-    if (!gate) {
-      hint.textContent = 'Open your IZZA wallet and save your S key locally first.';
-      mintBtn.disabled = false;
-      return;
-    }
+        mintBtn.disabled = true;
+        hint.textContent = 'Minting…';
 
-    const body = {
-      creator_pub: gate.pub,
-      creator_sec: gate.sec,
-      kind: 'single',
-      size: 1,
-      prefix: ($('#nft_prefix').value||'NFT').trim(),
-      collection_tag: ($('#nft_tag').value||'').trim(),
-      royalty_bp: bp
-    };
+        const gate = await ensureUserAndWalletGate();
+        if (!gate) {
+          hint.textContent = 'Open your IZZA wallet and save your S key locally first.';
+          mintBtn.disabled = false;
+          return;
+        }
 
-    const r = await fetch('/api/nft/mint', {
-      method: 'POST',
-      headers: {'content-type':'application/json'},
-      body: JSON.stringify(body)
-    });
+        const body = {
+          creator_pub: gate.pub,
+          creator_sec: gate.sec,
+          kind: 'single',
+          size: 1,
+          prefix: ($('#nft_prefix').value||'NFT').trim(),
+          collection_tag: ($('#nft_tag').value||'').trim(),
+          royalty_bp: bp,
+          // NEW: vault backing per NFT in IZZA
+          backing_izza: String(backingVal)
+        };
 
-    const j = await r.json();
-    if (!j.ok || !j.assets) {
-      throw new Error(j.error || 'mint_failed');
-    }
+        const r = await fetch('/api/nft/mint', {
+          method: 'POST',
+          headers: {'content-type':'application/json'},
+          body: JSON.stringify(body)
+        });
 
-    // Save asset list
-    $('#nft_assets_json').value = JSON.stringify(j.assets);
+        const j = await r.json();
+        if (!j.ok || !j.assets) {
+          throw new Error(j.error || 'mint_failed');
+        }
 
-    // NEW: Save vault JSON if returned
-    if (j.vault) {
-      $('#nft_vault_json').value = JSON.stringify(j.vault);
-    }
+        // Save asset list
+        $('#nft_assets_json').value = JSON.stringify(j.assets);
 
-    // Show paid fee hint using ANY provided field
-    const fee =
-      j.total_fee ??
-      j.total ??
-      j.fee ??
-      '?';
+        // NEW: Save vault JSON if backend ever returns it (safe no-op for now)
+        if (j.vault) {
+          $('#nft_vault_json').value = JSON.stringify(j.vault);
+        }
 
-    statusPill.hidden = false;
-    statusPill.textContent = `Minted 1`;
-    hint.textContent = `Minted 1. Fee paid: ${fee} IZZA`;
+        const fee =
+          j.total_fee ??
+          j.total ??
+          j.fee ??
+          '?';
 
-    // generate SVG hash
-    try {
-      const rawSvg = ($('#svgCode')?.value||'').trim();
-      const normalized = rawSvg ? svgNormalize(rawSvg, 512) : '';
-      const hashSource = normalized || ($('#itUrl')?.value||'');
-      if (hashSource) {
-        const hx = await sha256Hex(hashSource.toLowerCase());
-        nftSvgHashHidden.value = hx;
+        statusPill.hidden = false;
+        statusPill.textContent = `Minted 1`;
+        hint.textContent = `Minted 1. Fee paid: ${fee} IZZA`;
+
+        // generate SVG hash
+        try {
+          const rawSvg = ($('#svgCode')?.value||'').trim();
+          const normalized = rawSvg ? svgNormalize(rawSvg, 512) : '';
+          const hashSource = normalized || ($('#itUrl')?.value||'');
+          if (hashSource) {
+            const hx = await sha256Hex(hashSource.toLowerCase());
+            nftSvgHashHidden.value = hx;
+          }
+        } catch {}
+
+        alert(`Minted your NFT. When this product sells, a claim will be added so the buyer can claim it in their IZZA Token Showcase — including the backed IZZA value.`);
+
+      } catch (e) {
+        console.error(e);
+        alert('Mint failed: ' + (e?.message || e));
+        hint.textContent = 'Mint failed.';
+      } finally {
+        mintBtn.disabled = false;
       }
-    } catch {}
-
-    alert(`Minted your NFT. When this product sells, add a claim to the buyer’s Token Showcase list so they can claim it.`);
-
-  } catch (e) {
-    console.error(e);
-    alert('Mint failed: ' + (e?.message || e));
-    hint.textContent = 'Mint failed.';
-  } finally {
-    mintBtn.disabled = false;
-  }
-});
+    });
   })();
 
   wireColorways();
