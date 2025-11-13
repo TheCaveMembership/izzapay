@@ -1465,29 +1465,53 @@
     });
 
     quoteBtn?.addEventListener('click', async ()=>{
-      try{
-        quoteBtn.disabled=true;
-        hint.textContent='Getting quote…';
-        const body = { kind: 'single', size: 1 };
-        const r = await fetch('/api/nft/quote', {
-          method:'POST',
-          headers:{'content-type':'application/json'},
-          body:JSON.stringify(body)
-        });
-        const j = await r.json();
-        if(!j.ok) throw new Error('bad quote');
-        hint.textContent = `Fee: ${j.total} IZZA`;
-        mintBtn.disabled=false;
+  try {
+    quoteBtn.disabled = true;
+    hint.textContent = 'Getting quote…';
 
-        $('#nft_prefix').value = (prefix.value||'NFT').trim();
-        $('#nft_tag').value    = (tagInp.value||'').trim();
-      }catch(e){
-        hint.textContent='Failed to quote.';
-        mintBtn.disabled=true;
-      }finally{
-        quoteBtn.disabled=false;
-      }
+    const body = { kind: 'single', size: 1 };
+    const r = await fetch('/api/nft/quote', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify(body)
     });
+
+    const j = await r.json();
+    if (!j.ok) throw new Error('bad quote');
+
+    // Accept ANY of the possible fields the API might return:
+    const fee =
+      j.total_fee ??
+      j.total ??
+      j.fee ??
+      null;
+
+    // Also optionally show per-unit / price step
+    let extra = '';
+    if (j.per_nft) extra += ` • per NFT: ${j.per_nft}`;
+    if (j.per_unit) extra += ` • per unit: ${j.per_unit}`;
+    if (j.step) extra += ` • step: ${j.step}`;
+
+    if (fee == null) {
+      hint.textContent = 'Quote OK.';
+    } else {
+      hint.textContent = `Fee: ${fee} IZZA${extra}`;
+    }
+
+    // allow mint
+    mintBtn.disabled = false;
+
+    // sync prefix + tag
+    $('#nft_prefix').value = (prefix.value||'NFT').trim();
+    $('#nft_tag').value    = (tagInp.value||'').trim();
+
+  } catch (e) {
+    hint.textContent = 'Failed to quote.';
+    mintBtn.disabled = true;
+  } finally {
+    quoteBtn.disabled = false;
+  }
+});
 
     mintBtn?.addEventListener('click', async ()=>{
       try{
