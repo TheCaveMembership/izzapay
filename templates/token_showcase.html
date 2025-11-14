@@ -1743,7 +1743,7 @@ function cardEl({ code, issuer, serial, status, backingIzza, imgUrl }){
 // Publicly callable, your handlers already call this
 window.loadMyNfts = async function loadMyNfts(){
   try{
-    // Ensure we have a pub, mirror your existing logic
+    // Ensure we have a pub
     if(!window.ACTIVE_PUB && window.fetchActiveWallet){
       await fetchActiveWallet();
       if(!window.ACTIVE_PUB){
@@ -1754,39 +1754,67 @@ window.loadMyNfts = async function loadMyNfts(){
     const pub = window.ACTIVE_PUB || '';
     nftPubEcho.textContent = pub || '—';
 
-    // Hard stop if no wallet
+    const vaultTotalEl = document.getElementById('nftVaultTotal');
+    const mwVaultEl    = document.getElementById('mwVaultIzza');
+
     if(!pub){
       nftListEl.innerHTML = '';
       nftMsg.textContent = 'Link a wallet first to view NFTs.';
+      if (vaultTotalEl) vaultTotalEl.textContent = '0';
+      if (mwVaultEl) mwVaultEl.textContent = '0';
       return;
     }
 
     nftMsg.textContent = 'Loading…';
     nftListEl.innerHTML = '';
 
-    // Owned
+    // Owned NFTs with backing info from backend
     const owned = await jget(`/api/nft/owned?pub=${encodeURIComponent(pub)}`);
     const ownedRows = owned && owned.ok ? (owned.rows || []) : [];
 
-    // Pending claims (so users see what’s about to arrive)
+    // Compute total vaulted IZZA across owned NFTs
+    let totalVault = 0;
+    for (const r of ownedRows){
+      const v = parseFloat(r.backing_izza || '0');
+      if (!isNaN(v) && v > 0) totalVault += v;
+    }
+    const totalVaultStr = totalVault.toFixed(4);
+
+    if (vaultTotalEl) vaultTotalEl.textContent = `${totalVaultStr} IZZA`;
+    if (mwVaultEl) mwVaultEl.textContent = `${totalVaultStr} IZZA`;
+
+    // Pending claims
     let pendingRows = [];
     try{
       const u = (window.USER && USER.username) ? USER.username : '';
       const pend = await jget(`/api/nft/pending?pub=${encodeURIComponent(pub)}${u ? `&u=${encodeURIComponent(u)}`:''}`);
       const pendList = (pend && pend.ok && Array.isArray(pend.pending)) ? pend.pending : [];
-      // Flatten pending.assets into rows like owned, mark status
       for(const p of pendList){
         const issuer = p.issuer;
         const assets = Array.isArray(p.assets) ? p.assets : [];
         for(const code of assets){
-          pendingRows.push({ code, issuer, serial: null, status: 'pending' });
+          pendingRows.push({
+            code,
+            issuer,
+            serial: null,
+            status: 'pending',
+            backingIzza: null,
+            imgUrl: null
+          });
         }
       }
     }catch(_){/* ignore pending errors */}
 
-    // Merge, owned first, then pending
+    // Merge rows: owned first, then pending
     const rows = [
-      ...ownedRows.map(r => ({ code: r.code, issuer: r.issuer, serial: r.serial || 1, status: null })),
+      ...ownedRows.map(r => ({
+        code: r.code,
+        issuer: r.issuer,
+        serial: r.serial || 1,
+        status: null,
+        backingIzza: r.backing_izza,
+        imgUrl: r.img_url || null
+      })),
       ...pendingRows
     ];
 
@@ -1796,7 +1824,6 @@ window.loadMyNfts = async function loadMyNfts(){
       return;
     }
 
-    // Render
     const frag = document.createDocumentFragment();
     rows.forEach(r => frag.appendChild(cardEl(r)));
     nftListEl.innerHTML = '';
@@ -1806,6 +1833,10 @@ window.loadMyNfts = async function loadMyNfts(){
     console.warn('loadMyNfts error', err);
     nftListEl.innerHTML = '';
     nftMsg.textContent = 'Could not load NFTs right now.';
+    const vaultTotalEl = document.getElementById('nftVaultTotal');
+    const mwVaultEl    = document.getElementById('mwVaultIzza');
+    if (vaultTotalEl) vaultTotalEl.textContent = '0';
+    if (mwVaultEl) mwVaultEl.textContent = '0';
   }
 };
 
