@@ -651,11 +651,11 @@ def creatures_feed():
 @bp_creatures.post("/api/creatures/burn")
 def creatures_burn():
     """
-    Burns a creature by transferring the ONE_NFT_UNIT amount of the NFT
-    back to the distributor account, then marking the row as burned
-    (timestamp + tx hash). We require that the caller is the current
-    owner. Secret can come either from the request (owner_sec) or
-    from wallet_api linkage.
+    Burns a creature by:
+      1) Transferring the ONE_NFT_UNIT amount of the NFT back to the distributor.
+      2) Redeeming the vaulted IZZA amount back to the owner (vault_izza).
+      3) Marking the row as burned (timestamp + tx hash), clearing owner_pub.
+    Caller must be the current owner. Secret can come from the request or wallet_api.
     """
     j = request.get_json(silent=True) or {}
     code = (j.get("code") or "").strip().upper()
@@ -669,7 +669,7 @@ def creatures_burn():
 
     with _db() as cx:
         row = cx.execute(
-            "SELECT owner_pub, burned_at FROM nft_creatures WHERE code=? AND issuer=?",
+            "SELECT owner_pub, burned_at, vault_izza FROM nft_creatures WHERE code=? AND issuer=?",
             (code, CREATURE_ISSUER_G)
         ).fetchone()
         if not row:
@@ -678,6 +678,8 @@ def creatures_burn():
             return jsonify({"ok": True, "note": "already_burned"})
         if (row["owner_pub"] or "").upper() != owner_pub:
             abort(403, "not_owner")
+
+        raw_vault = row["vault_izza"]
 
     # get secret if not provided
     if not owner_sec:
@@ -688,31 +690,69 @@ def creatures_burn():
     if not owner_sec:
         abort(400, "owner_secret_required")
 
-    asset = Asset(code, CREATURE_ISSUER_G)
+    # NFT asset (the creature token)
+    nft_asset = Asset(code, CREATURE_ISSUER_G)
 
     # ensure trustline exists (owner should already have it)
     try:
-        if not _account_has_trustline(owner_pub, asset):
-            _change_trust(owner_sec, asset, limit="1")
+        if not _account_has_trustline(owner_pub, nft_asset):
+            _change_trust(owner_sec, nft_asset, limit="1")
     except Exception:
         # trustline missing and cannot add => cannot burn
         abort(400, "trustline_missing")
 
-    # transfer back to distributor with a burn memo
+    # 1) Send NFT back to distributor with burn memo
     try:
-        tx_resp = _pay_asset(owner_sec, DISTR_G, str(ONE_NFT_UNIT), asset, memo=f"BURN {code}")
-        burn_tx = getattr(tx_resp, "get", lambda k, d=None: None)("hash") if isinstance(tx_resp, dict) else None
+        tx_resp = _pay_asset(owner_sec, DISTR_G, str(ONE_NFT_UNIT), nft_asset, memo=f"BURN {code}")
+        burn_tx = tx_resp.get("hash") if isinstance(tx_resp, dict) else None
     except Exception as e:
         abort(400, f"burn_failed:{e}")
 
+    # 2) Redeem vaulted IZZA back to owner (if any)
+    vault_amount = Decimal("0")
+    try:
+        if raw_vault is not None:
+            vault_amount = Decimal(str(raw_vault))
+    except Exception:
+        # Fallback for legacy rows – if you want NO auto-vault, leave this as 0
+        vault_amount = BASE_VAULT_IZZA
+
+    redeem_tx = None
+    if vault_amount > 0:
+        try:
+            izza_asset = Asset(IZZA_CODE, IZZA_ISS)
+            # Make sure distributor trusts IZZA (normally already set during mint)
+            try:
+                _change_trust(DISTR_S, izza_asset, limit="100000000")
+            except Exception:
+                pass
+            r = _pay_asset(DISTR_S, owner_pub, str(vault_amount), izza_asset, memo=f"VAULT REDEEM {code}")
+            redeem_tx = r.get("hash") if isinstance(r, dict) else None
+        except Exception:
+            # If redemption fails, we can either:
+            #  - abort (keeping NFT unburned), or
+            #  - continue with burn but report no redemption.
+            # For safety, let's *not* abort the burn if the NFT tx already went through.
+            redeem_tx = None
+
+    # 3) Mark creature as burned, clear owner, zero vault
     with _db() as cx:
         cx.execute(
-            "UPDATE nft_creatures SET burned_at=?, burn_tx=?, owner_pub=NULL, stage='dead' WHERE code=? AND issuer=?",
-            (_now_i(), burn_tx, code, CREATURE_ISSUER_G)
+            "UPDATE nft_creatures "
+            "SET burned_at=?, burn_tx=?, owner_pub=NULL, stage='dead', vault_izza=? "
+            "WHERE code=? AND issuer=?",
+            (_now_i(), burn_tx, "0", code, CREATURE_ISSUER_G)
         )
         cx.commit()
 
-    return jsonify({"ok": True, "code": code, "burned": True, "tx": burn_tx})
+    return jsonify({
+        "ok": True,
+        "code": code,
+        "burned": True,
+        "tx": burn_tx,
+        "redeem_tx": redeem_tx,
+        "vault_redeemed": str(vault_amount)
+    })
 
 # ---------- NEW: collection stats ----------
 @bp_creatures.get("/api/creatures/collection-stats")
