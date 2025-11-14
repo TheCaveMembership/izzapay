@@ -258,28 +258,8 @@
       <div class="col box">
         <h3>Mint Egg</h3>
         <div class="egg-slot"><img id="eggPreview" alt="egg"></div>
-        <div class="row">
-  <button class="btn purple" id="mintBtn">MINT EGG, 5 IZZA</button>
-</div>
-
-<div style="margin-top:8px">
-  <label class="small-muted" style="display:block;margin-bottom:4px">
-    Extra IZZA to vault into this Creature NFT (optional)
-  </label>
-  <input
-    id="extraVault"
-    type="number"
-    min="0"
-    step="0.0000001"
-    placeholder="0.0"
-    style="width:100%;padding:8px 10px;border-radius:10px;border:1px solid #2a3550;background:#0f1522;color:#e8f1ff;font-size:14px"
-  >
-</div>
-
-<div class="green-note">
-  Base cost is 5 IZZA, where 4 IZZA is the mint fee and 1 IZZA is vaulted.
-  Any extra you enter here will also be locked as additional vault value for this IZZA Creature NFT.
-</div>
+        <div class="row"><button class="btn purple" id="mintBtn">MINT EGG, 5 IZZA</button></div>
+        <div class="green-note">* Clicking the above button you agree to spend 5 IZZA</div>
 
         <div class="hint">Shuffle through some eggs, ultimately the IZZA gods will ❕DECIDE YOUR FATE❕</div>
         <div id="mintMsg" class="hint" aria-live="polite"></div>
@@ -560,91 +540,65 @@
 
   // Army Strength
   async function loadArmyStrength(){
-  try{
-    let qs = '';
-    try {
-      const v = __readVault();
-      if (v && v.pub) {
-        qs = '?owner_pub=' + encodeURIComponent(String(v.pub).trim().toUpperCase());
-      } else if (USER_CANON) {
-        qs = '?u=' + encodeURIComponent(USER_CANON);
+    try{
+      const qs = USER_CANON ? ('?u='+encodeURIComponent(USER_CANON)) : '';
+      const j = await fetch('/api/creatures/army-stats'+qs, {credentials:'include'}).then(r=>r.json());
+      if(j && j.ok){
+        armyAtk.textContent = String(j.attack ?? 0);
+        armyDef.textContent = String(j.defense ?? 0);
+        armyCnt.textContent = String(j.count ?? 0);
+        armyBox.style.display = 'block';
       }
-    } catch(e) {}
-
-    const j = await fetch('/api/creatures/army-stats' + qs, {credentials:'include'})
-                .then(r => r.json());
-
-    if (j && j.ok){
-      armyAtk.textContent = String(j.attack ?? 0);
-      armyDef.textContent = String(j.defense ?? 0);
-      armyCnt.textContent = String(j.count ?? 0);
-      armyBox.style.display = 'block';
-    }
-  }catch(e){}
-}
+    }catch(e){}
+  }
 
   // Always-visible My Creatures loader
   const myBox  = document.getElementById('myCreaturesBox');
   const myList = document.getElementById('myCreaturesList');
 
   async function loadMyCreatures(){
-  myList.innerHTML = '';
+    myList.innerHTML = '';
+    const qs = USER_CANON ? ('?u='+encodeURIComponent(USER_CANON)) : '';
+    const j = await fetch('/api/creatures/mine'+qs, {credentials:'include'}).then(r=>r.json()).catch(()=>({items:[]}));
+    (j.items||[]).forEach(it=>{
+      const card = document.createElement('div');
+      card.className = 'thumb';
 
-  // Prefer the active local wallet pub, fall back to username
-  let qs = '';
-  try {
-    const v = __readVault();
-    if (v && v.pub) {
-      qs = '?owner_pub=' + encodeURIComponent(String(v.pub).trim().toUpperCase());
-    } else if (USER_CANON) {
-      qs = '?u=' + encodeURIComponent(USER_CANON);
-    }
-  } catch(e) {}
+      const img = document.createElement('img');
+      img.alt = it.code;
+      img.src = `/nftsvg/${it.code}.svg?nc=${Date.now()}`;
 
-  const j = await fetch('/api/creatures/mine' + qs, {credentials:'include'})
-            .then(r => r.json())
-            .catch(() => ({items:[]}));
+      const cap = document.createElement('div');
+      cap.className = 'cap';
+      cap.textContent = it.code + (it.stage ? ` — ${it.stage}` : '');
 
-  (j.items || []).forEach(it => {
-    const card = document.createElement('div');
-    card.className = 'thumb';
+      const row = document.createElement('div');
+      row.style.display = 'flex';
+      row.style.gap = '8px';
 
-    const img = document.createElement('img');
-    img.alt = it.code;
-    img.src = `/nftsvg/${it.code}.svg?nc=${Date.now()}`;
+      const openA = document.createElement('a');
+      openA.href = `/creature/${it.code}`;
+      openA.className = 'btn';
+      openA.textContent = 'OPEN';
 
-    const cap = document.createElement('div');
-    cap.className = 'cap';
-    cap.textContent = it.code + (it.stage ? ` — ${it.stage}` : '');
+      const burnB = document.createElement('button');
+      burnB.type = 'button';
+      burnB.className = 'btn red';
+      burnB.textContent = 'BURN';
+      burnB.addEventListener('click', async ()=> {
+        await burnCreature(it.code);
+      });
 
-    const row = document.createElement('div');
-    row.style.display = 'flex';
-    row.style.gap = '8px';
+      row.appendChild(openA);
+      row.appendChild(burnB);
 
-    const openA = document.createElement('a');
-    openA.href = `/creature/${it.code}`;
-    openA.className = 'btn';
-    openA.textContent = 'OPEN';
-
-    const burnB = document.createElement('button');
-    burnB.type = 'button';
-    burnB.className = 'btn red';
-    burnB.textContent = 'BURN';
-    burnB.addEventListener('click', async ()=> {
-      await burnCreature(it.code);
+      card.appendChild(img);
+      card.appendChild(cap);
+      card.appendChild(row);
+      myList.appendChild(card);
     });
-
-    row.appendChild(openA);
-    row.appendChild(burnB);
-
-    card.appendChild(img);
-    card.appendChild(cap);
-    card.appendChild(row);
-    myList.appendChild(card);
-  });
-
-  myBox.style.display = 'block';
-}
+    myBox.style.display = 'block';
+  }
 
   (async ()=>{
     try{
@@ -679,21 +633,12 @@
     }
     eggPreview.src = `/nftsvg/EGGDEMO.svg?skin=${encodeURIComponent(finalSkin)}&nobg=1&nc=${Date.now()}`;
 
-      const extraVaultInput = document.getElementById('extraVault');
-  let extraVault = (extraVaultInput?.value || '').trim();
-  if(!extraVault) extraVault = "0";
-
-  try{
-    const res = await fetch('/api/creatures/mint', {
-      method:'POST',
-      headers:{'Content-Type':'application/json'},
-      body: JSON.stringify({
-        buyer_pub: gate.pub,
-        buyer_sec: gate.sec,
-        skin: finalSkin,
-        extra_vault_izza: extraVault
-      })
-    }).then(r=>r.json());
+    try{
+      const res = await fetch('/api/creatures/mint', {
+        method:'POST',
+        headers:{'Content-Type':'application/json'},
+        body: JSON.stringify({ buyer_pub:gate.pub, buyer_sec:gate.sec, skin: finalSkin })
+      }).then(r=>r.json());
       if(!(res && res.ok)) throw new Error(res && res.error || 'mint_failed');
 
       lastCode = res.asset.code; lastIssuer = res.asset.issuer;
