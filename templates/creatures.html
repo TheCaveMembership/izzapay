@@ -258,8 +258,28 @@
       <div class="col box">
         <h3>Mint Egg</h3>
         <div class="egg-slot"><img id="eggPreview" alt="egg"></div>
-        <div class="row"><button class="btn purple" id="mintBtn">MINT EGG, 5 IZZA</button></div>
-        <div class="green-note">* Clicking the above button you agree to spend 5 IZZA</div>
+        <div class="row">
+  <button class="btn purple" id="mintBtn">MINT EGG, 5 IZZA</button>
+</div>
+
+<div style="margin-top:8px">
+  <label class="small-muted" style="display:block;margin-bottom:4px">
+    Extra IZZA to vault into this Creature NFT (optional)
+  </label>
+  <input
+    id="extraVault"
+    type="number"
+    min="0"
+    step="0.0000001"
+    placeholder="0.0"
+    style="width:100%;padding:8px 10px;border-radius:10px;border:1px solid #2a3550;background:#0f1522;color:#e8f1ff;font-size:14px"
+  >
+</div>
+
+<div class="green-note">
+  Base cost is 5 IZZA, where 4 IZZA is the mint fee and 1 IZZA is vaulted.
+  Any extra you enter here will also be locked as additional vault value for this IZZA Creature NFT.
+</div>
 
         <div class="hint">Shuffle through some eggs, ultimately the IZZA gods will ❕DECIDE YOUR FATE❕</div>
         <div id="mintMsg" class="hint" aria-live="polite"></div>
