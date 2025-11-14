@@ -755,19 +755,27 @@ def creatures_collection_stats():
 def creatures_army_stats():
     """
     Sums current ATK/DEF over all un-burned creatures owned by the active wallet
-    (or by ?owner_pub=). Uses the same state math as SVG/state endpoints so it
-    reflects live hunger/age effects.
+    (or by ?owner_pub=/ ?pub=). Uses the same state math as SVG/state endpoints
+    so it reflects live hunger/age effects.
     """
     _ensure_tables()
-    owner_pub = (request.args.get("owner_pub") or "").strip() or _active_pub_for_request()
+
+    # Accept ?owner_pub=, ?pub=, or fall back to active wallet resolved from username/session
+    owner_pub = (
+        (request.args.get("owner_pub") or request.args.get("pub") or "").strip()
+        or _active_pub_for_request()
+    )
     if not owner_pub:
         return jsonify({"ok": False, "error": "no_active_wallet"})
 
     with _db() as cx:
         rows = cx.execute(
-    "SELECT * FROM nft_creatures WHERE owner_pub=? AND issuer=? AND COALESCE(burned_at,0)=0",
-    (owner_pub, CREATURE_ISSUER_G)
-).fetchall()
+            """
+            SELECT * FROM nft_creatures
+            WHERE owner_pub=? AND issuer=? AND COALESCE(burned_at,0)=0
+            """,
+            (owner_pub, CREATURE_ISSUER_G),
+        ).fetchall()
 
     total_atk = 0
     total_def = 0
@@ -778,7 +786,7 @@ def creatures_army_stats():
             "code": r["code"],
             "stage": stage,
             "hunger": hunger,
-            "elapsed": max(0, _now_i() - int(r["hatch_start"] or _now_i()))
+            "elapsed": max(0, _now_i() - int(r["hatch_start"] or _now_i())),
         }
         rarity = _rarity_from(r["code"], r["egg_seed"] or "")
         stats = _compute_stats_dict(st, last_feed_at, rarity)
