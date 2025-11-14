@@ -1676,39 +1676,67 @@ async function jget(url){
 }
 
 // Build one NFT card
-function cardEl({ code, issuer, serial, status }){
+function cardEl({ code, issuer, serial, status, backingIzza, imgUrl }){
   const wrap = document.createElement('div');
-  wrap.style.cssText = 'border:1px solid var(--line);border-radius:10px;padding:10px;background:var(--panel);';
+  wrap.style.cssText = 'border:1px solid var(--line);border-radius:10px;padding:10px;background:var(--panel);display:flex;flex-direction:column;gap:6px;';
+
+  // Optional icon at top
+  if (imgUrl) {
+    const img = document.createElement('img');
+    img.src = imgUrl;
+    img.alt = code;
+    img.loading = 'lazy';
+    img.style.cssText = 'width:100%;max-height:90px;object-fit:contain;border-radius:6px;background:rgba(0,0,0,.3);';
+    wrap.appendChild(img);
+  }
+
   const head = document.createElement('div');
-  head.style.cssText = 'font-weight:600;margin-bottom:6px;font-family:var(--mono)';
+  head.style.cssText = 'font-weight:600;font-family:var(--mono);font-size:13px;';
   head.textContent = serial ? `${code} #${serial}` : code;
 
   const meta = document.createElement('div');
-  meta.style.cssText = 'font-size:12px;color:var(--muted);word-break:break-all;font-family:var(--mono)';
+  meta.style.cssText = 'font-size:11px;color:var(--muted);word-break:break-all;font-family:var(--mono)';
   meta.textContent = issuer;
 
+  const vault = document.createElement('div');
+  vault.style.cssText = 'margin-top:2px;font-size:11px;';
+  const backed = parseFloat(backingIzza || '0');
+  if (!isNaN(backed) && backed > 0) {
+    vault.innerHTML = `
+      <div><strong>Vaulted:</strong> <span class="mono">${backingIzza} IZZA</span></div>
+      <div class="small-muted">Redeemable if you burn this NFT</div>
+    `;
+  } else if (status === 'pending') {
+    vault.innerHTML = `<div class="small-muted">Pending claim and vault backing</div>`;
+  } else {
+    vault.innerHTML = `<div class="small-muted">No IZZA backing yet</div>`;
+  }
+
   const row = document.createElement('div');
-  row.style.cssText = 'margin-top:6px;font-size:12px;display:flex;gap:10px;flex-wrap:wrap;align-items:center';
+  row.style.cssText = 'margin-top:4px;font-size:11px;display:flex;gap:10px;flex-wrap:wrap;align-items:center';
 
   if(status){
     const badge = document.createElement('span');
     badge.textContent = status.toUpperCase();
-    badge.style.cssText = 'padding:2px 6px;border:1px solid var(--line);border-radius:999px;background:var(--glass)';
+    badge.style.cssText = 'padding:2px 6px;border:1px solid var(--line);border-radius:999px;background:var(--glass);font-size:10px;';
     row.appendChild(badge);
   }
 
   const aAsset = document.createElement('a');
   aAsset.href = `https://api.testnet.minepi.com/assets?asset_code=${encodeURIComponent(code)}&asset_issuer=${encodeURIComponent(issuer)}`;
-  aAsset.target = '_blank'; aAsset.rel = 'noopener';
+  aAsset.target = '_blank';
+  aAsset.rel = 'noopener';
   aAsset.textContent = 'Asset';
 
   const aIssuer = document.createElement('a');
   aIssuer.href = `https://api.testnet.minepi.com/accounts/${encodeURIComponent(issuer)}`;
-  aIssuer.target = '_blank'; aIssuer.rel = 'noopener';
+  aIssuer.target = '_blank';
+  aIssuer.rel = 'noopener';
   aIssuer.textContent = 'Issuer';
 
   row.append(aAsset, aIssuer);
-  wrap.append(head, meta, row);
+
+  wrap.append(head, meta, vault, row);
   return wrap;
 }
 
