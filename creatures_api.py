@@ -9,7 +9,8 @@ from db import conn as _conn
 # Shared Horizon helpers
 from nft_api import (
     server, PP,
-    _account_has_trustline, _change_trust, _pay_asset, _ensure_distributor_holds_one
+    _account_has_trustline, _change_trust, _pay_asset, _ensure_distributor_holds_one,
+    ONE_NFT_UNIT, _fmt_amount
 )
 
 try:
