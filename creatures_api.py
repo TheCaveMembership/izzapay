@@ -489,7 +489,7 @@ def creatures_mine():
             rows = cx.execute("""
               SELECT code, issuer, owner_pub, stage, palette, pattern, hatch_start
               FROM nft_creatures
-              WHERE (burned_at IS NULL) AND (
+              WHERE COALESCE(burned_at,0)=0 AND (
                 user_id=? OR (user_id IS NULL AND owner_pub IS NOT NULL AND owner_pub IN (
                   SELECT pub FROM user_wallets WHERE username IN (
                     SELECT pi_username FROM users WHERE id=?
