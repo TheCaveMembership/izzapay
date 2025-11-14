@@ -51,7 +51,9 @@ HUNGER_PER_DAY = {
 MISSED_DAYS_TO_DIE   = 3
 REVIVE_DAYS_REQUIRED = 3
 
-EGG_PRICE_IZZA = Decimal("5")
+EGG_PRICE_IZZA = Decimal("5")     # total base cost shown to user
+EGG_FEE_IZZA   = Decimal("4")     # platform fee from that 5
+EGG_BASE_VAULT = EGG_PRICE_IZZA - EGG_FEE_IZZA  # 1 IZZA base vault
 
 # ----- collection cap (live supply) -----
 CREATURES_CAP = 1000  # IZZA CREATURES V1 circulating cap
