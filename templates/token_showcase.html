@@ -763,10 +763,16 @@
       </div>
       <div class="grid" style="gap:12px;margin-top:10px">
         <div class="blox">
-          <h4>Balances</h4>
-          <div class="small-muted">Pi</div><div class="mono" id="mwPi">—</div>
-          <div class="small-muted" style="margin-top:8px">IZZA</div><div class="mono" id="mwIzza">—</div>
-        </div>
+  <h4>Balances</h4>
+  <div class="small-muted">Pi</div>
+  <div class="mono" id="mwPi">—</div>
+
+  <div class="small-muted" style="margin-top:8px">IZZA</div>
+  <div class="mono" id="mwIzza">—</div>
+
+  <div class="small-muted" style="margin-top:8px">Vaulted in IZZA NFTs<br><span class="small-muted">(redeemable if you burn your IZZA NFTs)</span></div>
+  <div class="mono" id="mwVaultIzza">0</div>
+</div>
         <div class="blox">
           <h4>Actions</h4>
 
@@ -813,15 +819,24 @@
 
     <div class="modal-body">
       <div class="blox">
-        <div class="small-muted">Wallet</div>
-        <div class="mono wrapaddr" id="nftPubEcho">—</div>
-      </div>
+  <div class="small-muted">Wallet</div>
+  <div class="mono wrapaddr" id="nftPubEcho">—</div>
+</div>
 
-      <div class="blox" style="margin-top:10px">
-        <h4 style="margin:0 0 8px 0">Owned / Pending NFTs</h4>
-        <div id="nftList" style="display:grid;grid-template-columns:repeat(auto-fill,minmax(180px,1fr));gap:10px"></div>
-        <div id="nftMsg" class="help" style="margin-top:8px"></div>
-      </div>
+<div class="blox" style="margin-top:10px">
+  <h4 style="margin:0 0 4px 0">Vaulted value</h4>
+  <div class="small-muted">
+    Total IZZA locked behind your IZZA NFTs,
+    redeemable if you burn those NFTs.
+  </div>
+  <div class="mono" id="nftVaultTotal" style="margin-top:4px">0</div>
+</div>
+
+<div class="blox" style="margin-top:10px">
+  <h4 style="margin:0 0 8px 0">Owned / Pending NFTs</h4>
+  <div id="nftList" style="display:grid;grid-template-columns:repeat(auto-fill,minmax(180px,1fr));gap:10px"></div>
+  <div id="nftMsg" class="help" style="margin-top:8px"></div>
+</div>
 
       <div class="top-cta" style="margin-top:10px">
         <a id="nftCraftCta" class="cta" href="/izza-game/auth?dest=city">🧪 Craft more in IZZA City</a>
