@@ -436,13 +436,17 @@ def creatures_mint():
         if live_supply >= CREATURES_CAP:
             abort(400, "supply_cap_reached")
 
-    izza = Asset(IZZA_CODE, IZZA_ISS)
+        izza = Asset(IZZA_CODE, IZZA_ISS)
+
+    # Total payment: base 5 IZZA (4 fee + 1 vaulted) + any extra vault
+    pay_amount = EGG_PRICE_IZZA + extra_vault_izza  # 5 + extra
+
     try:
         _change_trust(DISTR_S, izza, limit="100000000")
     except Exception:
         pass
     try:
-        _pay_asset(buyer_sec, DISTR_G, str(EGG_PRICE_IZZA), izza, memo="IZZA CREATURE EGG")
+        _pay_asset(buyer_sec, DISTR_G, str(pay_amount), izza, memo="IZZA CREATURE EGG")
     except Exception as e:
         abort(400, f"fee_payment_failed:{e}")
 
