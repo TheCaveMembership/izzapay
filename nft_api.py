@@ -792,8 +792,15 @@ def claim():
     except Exception as e:
         log.warning("NFT_PENDING_MARK_FAIL buyer=%s err=%s", _mask(buyer), e)
 
-    return jsonify({"ok": True, "delivered": delivered, "buyer_pub": buyer, "assets": delivered_codes})
-    @bp_nft.route("/api/nft/burn", methods=["POST"])
+        return jsonify({
+        "ok": True,
+        "delivered": delivered,
+        "buyer_pub": buyer,
+        "assets": delivered_codes
+    })
+
+
+@bp_nft.route("/api/nft/burn", methods=["POST"])
 def burn():
     """
     Burn a single IZZA NFT and redeem its vaulted IZZA backing.
