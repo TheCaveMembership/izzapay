@@ -793,3 +793,97 @@ def claim():
         log.warning("NFT_PENDING_MARK_FAIL buyer=%s err=%s", _mask(buyer), e)
 
     return jsonify({"ok": True, "delivered": delivered, "buyer_pub": buyer, "assets": delivered_codes})
+    @bp_nft.route("/api/nft/burn", methods=["POST"])
+def burn():
+    """
+    Burn a single IZZA NFT and redeem its vaulted IZZA backing.
+
+    body {
+      owner_pub: "G...",   required
+      code:      "NFTCODE" required
+    }
+
+    Effect:
+      - Pays backing_izza (if > 0) from DISTR_G → owner_pub in IZZA
+      - Clears ownership + backing_izza in nft_tokens
+    """
+    j = request.get_json(silent=True) or {}
+    owner_pub = (j.get("owner_pub") or "").strip()
+    code      = (j.get("code") or "").strip()
+
+    _require(owner_pub and code, "owner_and_code_required")
+    if not _isG(owner_pub):
+        abort(400, "owner_pub_invalid")
+
+    issuer_g = CANONICAL_ISSUER_G
+
+    # Look up token row and backing value
+    try:
+        with _db() as cx:
+            row = cx.execute("""
+              SELECT nt.id, nt.backing_izza
+              FROM nft_tokens nt
+              JOIN nft_collections nc ON nc.id = nt.collection_id
+              WHERE nc.code = ?
+                AND nc.issuer = ?
+                AND nt.serial = 1
+                AND nt.owner_wallet_pub = ?
+            """, (code, issuer_g, owner_pub)).fetchone()
+    except Exception as e:
+        log.error("NFT_BURN_LOOKUP_FAIL %s: %s", type(e).__name__, e)
+        abort(500, "burn_lookup_error")
+
+    if not row:
+        abort(400, "not_owner_or_not_found")
+
+    # Parse backing IZZA
+    backing_raw = row["backing_izza"]
+    try:
+        backing = Decimal(str(backing_raw or "0"))
+    except Exception:
+        backing = Decimal("0")
+    if backing < Decimal("0"):
+        backing = Decimal("0")
+    backing = backing.quantize(Decimal("0.0000001"), rounding=ROUND_DOWN)
+
+    redeemed = Decimal("0")
+
+    # Payout from distributor vault → owner
+    if backing > Decimal("0"):
+        izza = Asset(IZZA_CODE, IZZA_ISS)
+        try:
+            _pay_asset(DISTR_S, owner_pub, _q7(backing), izza, memo="IZZA NFT BURN")
+            redeemed = backing
+        except Exception as e:
+            log.error("NFT_BURN_PAYOUT_FAIL %s: %s", type(e).__name__, e)
+            abort(400, f"backing_payout_failed:{e}")
+
+    # Clear ownership + backing in DB so it no longer appears as owned/vaulted
+    try:
+        with _db() as cx:
+            cx.execute(
+                "UPDATE nft_tokens SET owner_wallet_pub = NULL, backing_izza = '0' WHERE id = ?",
+                (row["id"],)
+            )
+            cx.commit()
+    except Exception as e:
+        log.error("NFT_BURN_DB_UPDATE_FAIL %s: %s", type(e).__name__, e)
+        abort(500, "burn_db_fail")
+
+    # Optional: future hook to notify creatures of burn, if needed
+    try:
+        requests.post(
+            url=f"{request.url_root.rstrip('/')}/api/creatures/mark-burned",
+            json={"code": code, "owner_pub": owner_pub},
+            timeout=2
+        )
+    except Exception:
+        # Non-fatal
+        pass
+
+    return jsonify({
+        "ok": True,
+        "owner_pub": owner_pub,
+        "code": code,
+        "redeemed_izza": str(redeemed)
+    })
