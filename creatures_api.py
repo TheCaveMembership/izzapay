@@ -689,7 +689,7 @@ def creatures_burn():
         if (row["owner_pub"] or "").upper() != owner_pub:
             abort(403, "not_owner")
 
-    # get secret if not provided
+        # get secret if not provided
     if not owner_sec:
         try:
             owner_sec = _get_linked_secret(owner_pub) or ""
@@ -700,21 +700,62 @@ def creatures_burn():
 
     asset = Asset(code, CREATURE_ISSUER_G)
 
-    # ensure trustline exists (owner should already have it)
+    # --- NEW: look up vault backing and prepare IZZA payout on burn ---
+    izza_asset = Asset(IZZA_CODE, IZZA_ISS)
+    vault_amount = Decimal("0")
+    vault_tx_hash = None
+
+    with _db() as cx:
+        vrow = cx.execute(
+            "SELECT id, vault_izza FROM nft_vaults "
+            "WHERE asset_code=? AND asset_issuer=? AND COALESCE(status,'active')='active'",
+            (code, CREATURE_ISSUER_G)
+        ).fetchone()
+        if vrow and vrow["vault_izza"]:
+            try:
+                vault_amount = Decimal(str(vrow["vault_izza"]))
+            except Exception:
+                vault_amount = Decimal("0")
+        vault_id = vrow["id"] if vrow else None
+
+        # ensure trustline exists (owner should already have it) for the NFT asset
     try:
         if not _account_has_trustline(owner_pub, asset):
             _change_trust(owner_sec, asset, limit="1")
     except Exception:
-        # trustline missing and cannot add => cannot burn
         abort(400, "trustline_missing")
 
-    # transfer back to distributor with a burn memo
+    # transfer the 1-unit NFT back to distributor with a burn memo
     try:
         tx_resp = _pay_asset(owner_sec, DISTR_G, "1", asset, memo=f"BURN {code}")
-        burn_tx = getattr(tx_resp, "get", lambda k, d=None: None)("hash") if isinstance(tx_resp, dict) else None
+        burn_tx = tx_resp.get("hash") if isinstance(tx_resp, dict) else None
     except Exception as e:
         abort(400, f"burn_failed:{e}")
 
+    # return vaulted IZZA to owner, if any
+    if vault_amount > 0 and vault_id is not None:
+        try:
+            # ensure IZZA trustline
+            if not _account_has_trustline(owner_pub, izza_asset):
+                _change_trust(owner_sec, izza_asset, limit="100000000")
+
+            vtx_resp = _pay_asset(DISTR_S, owner_pub, str(vault_amount), izza_asset,
+                                  memo=f"VAULT RETURN {code}")
+            vault_tx_hash = vtx_resp.get("hash") if isinstance(vtx_resp, dict) else None
+        except Exception as e:
+            # If vault payout fails, we abort and do NOT mark as burned so user can retry
+            abort(400, f"vault_payout_failed:{e}")
+
+        # mark the vault row as closed / burned
+        with _db() as cx:
+            cx.execute("""
+                UPDATE nft_vaults
+                SET vault_izza='0', burned_at=?, burn_owner_pub=?, burn_tx=?, status='burned'
+                WHERE id=?
+            """, (_now_i(), owner_pub, vault_tx_hash, vault_id))
+            cx.commit()
+
+    # finally mark the creature as burned
     with _db() as cx:
         cx.execute(
             "UPDATE nft_creatures SET burned_at=?, burn_tx=?, owner_pub=NULL, stage='dead' WHERE code=? AND issuer=?",
@@ -722,7 +763,13 @@ def creatures_burn():
         )
         cx.commit()
 
-    return jsonify({"ok": True, "code": code, "burned": True, "tx": burn_tx})
+    return jsonify({
+        "ok": True,
+        "code": code,
+        "burned": True,
+        "tx": burn_tx,
+        "vault_returned": str(vault_amount)
+    })
 
 # ---------- NEW: collection stats ----------
 @bp_creatures.get("/api/creatures/collection-stats")
