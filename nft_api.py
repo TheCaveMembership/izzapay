@@ -621,6 +621,13 @@ def mint():
             )
         except Exception as e:
             log.warning("NFT_DB_COLLECTION_UPSERT_FAIL code=%s err=%s", code, e)
+
+        # >>> NEW: record the minting user as the initial owner in nft_tokens <<<
+        try:
+            _upsert_collection_and_assign(code=code, issuer=iss_kp.public_key, owner_pub=creator_pub)
+        except Exception as e:
+            log.warning("NFT_DB_ASSIGN_ON_MINT_FAIL code=%s err=%s", code, e)
+
         minted.append(code)
 
     return jsonify({
@@ -813,7 +820,7 @@ def claim():
     except Exception as e:
         log.warning("NFT_PENDING_MARK_FAIL buyer=%s err=%s", _mask(buyer), e)
 
-    # Always return a proper JSON response (this was the broken part before)
+    # Always return a proper JSON response
     return jsonify({
         "ok": True,
         "delivered": delivered,
