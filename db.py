@@ -250,6 +250,23 @@ def init_db():
         CREATE INDEX IF NOT EXISTS idx_nft_pending_user ON nft_pending_claims(buyer_username, status);
         """)
 
+        # NEW: global vault table for value-backed NFTs (products and creatures share this)
+        cx.execute("""
+          CREATE TABLE IF NOT EXISTS nft_vaults(
+            id INTEGER PRIMARY KEY,
+            asset_code TEXT NOT NULL,
+            asset_issuer TEXT NOT NULL,
+            vault_izza TEXT NOT NULL,
+            creator_pub TEXT,
+            created_at INTEGER NOT NULL,
+            burned_at INTEGER,
+            burn_owner_pub TEXT,
+            burn_tx TEXT,
+            status TEXT NOT NULL DEFAULT 'active',
+            UNIQUE(asset_code, asset_issuer)
+          );
+        """)
+
         # Partial UNIQUE indexes for active listings
         cx.execute("""
           CREATE UNIQUE INDEX IF NOT EXISTS uniq_nft_listings_active_serial
@@ -445,6 +462,26 @@ def ensure_schema():
         CREATE INDEX IF NOT EXISTS idx_nft_pending_pub ON nft_pending_claims(buyer_pub, status);
         CREATE INDEX IF NOT EXISTS idx_nft_pending_user ON nft_pending_claims(buyer_username, status);
         """)
+
+        # NEW: ensure global vault table exists on existing DBs too
+        try:
+            cx.execute("""
+              CREATE TABLE IF NOT EXISTS nft_vaults(
+                id INTEGER PRIMARY KEY,
+                asset_code TEXT NOT NULL,
+                asset_issuer TEXT NOT NULL,
+                vault_izza TEXT NOT NULL,
+                creator_pub TEXT,
+                created_at INTEGER NOT NULL,
+                burned_at INTEGER,
+                burn_owner_pub TEXT,
+                burn_tx TEXT,
+                status TEXT NOT NULL DEFAULT 'active',
+                UNIQUE(asset_code, asset_issuer)
+              );
+            """)
+        except Exception:
+            pass
 
         # Partial UNIQUE indexes (recreate if needed)
         cx.execute("""
