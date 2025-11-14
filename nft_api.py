@@ -52,6 +52,22 @@ def _norm_username(u: str | None) -> str | None:
 def _now_i() -> int:
     return int(time.time())
 
+# NFT units: 1 stroop = 0.0000001 is "one whole NFT"
+ONE_NFT_UNIT = Decimal("0.0000001")
+
+def _fmt_amount(x: Decimal) -> str:
+    """
+    Format a Decimal as a Stellar amount:
+    - up to 7 decimal places
+    - no scientific notation
+    - no trailing zeros or trailing dot
+    """
+    q = x.quantize(Decimal("0.0000001"), rounding=ROUND_DOWN)
+    s = format(q, "f")  # no exponent
+    if "." in s:
+        s = s.rstrip("0").rstrip(".")
+    return s or "0"
+
 # ---------- env ----------
 HORIZON_URL = os.getenv("NFT_HORIZON_URL", "https://api.testnet.minepi.com").strip()
 PASSPHRASE  = os.getenv("NFT_NETWORK_PASSPHRASE", "auto").strip()
@@ -246,7 +262,7 @@ def _upsert_collection_and_assign(code: str, issuer: str, owner_pub: str) -> Non
         """, (cid, owner_pub, _now_i()))
         cx.commit()
 
-# ---- Idempotent: make sure distributor holds exactly one unit of the asset ----
+# ---- Idempotent: make sure distributor holds exactly ONE_NFT_UNIT of the asset ----
 def _ensure_distributor_holds_one(asset: Asset):
     try:
         _change_trust(DISTR_S, asset, limit="1")
@@ -255,10 +271,12 @@ def _ensure_distributor_holds_one(asset: Asset):
             raise
     dj = _account_json(DISTR_G)
     bal = _balance_for_asset_from_json(dj, asset.code, asset.issuer)
-    if bal >= Decimal("1"):
+    if bal >= ONE_NFT_UNIT:
         return
-    need = Decimal("1") - bal
-    amt = str(need.quantize(Decimal("1")))
+    need = ONE_NFT_UNIT - bal
+    if need <= Decimal("0"):
+        return
+    amt = _fmt_amount(need)
     iss_kp = Keypair.from_secret(ISSUER_S)
     iss_acc = _load(iss_kp.public_key)
     tx = (TransactionBuilder(iss_acc, PP, base_fee=_base_fee())
@@ -361,6 +379,21 @@ def api_nft_owned():
         log.error("NFT_OWNED_FAIL %s: %s", type(e).__name__, e)
         return jsonify({"ok": False, "error": "db_error"}), 500
 
+# ---------- helper: active wallet from username ----------
+def _active_wallet_pub_for_username(u: str | None) -> str | None:
+    if not u:
+        return None
+    u = u.strip().lower()
+    try:
+        with _db() as cx:
+            row = cx.execute(
+                "SELECT pub FROM user_wallets WHERE lower(username)=?",
+                (u,)
+            ).fetchone()
+        return row["pub"] if row else None
+    except Exception:
+        return None
+
 # ---------- Mint ----------
 @bp_nft.route("/api/nft/mint", methods=["POST"])
 def mint():
@@ -393,7 +426,7 @@ def mint():
     except Exception as e:
         abort(400, f"fee_payment_failed: {e}")
 
-    # mint 1 unit for each code to distributor, and ensure DB rows exist
+    # mint ONE_NFT_UNIT for each code to distributor, and ensure DB rows exist
     iss_kp = Keypair.from_secret(ISSUER_S)
     minted = []
     for i in range(size):
@@ -444,8 +477,8 @@ def claim():
 
         _ensure_distributor_holds_one(asset)
 
-        # On-chain delivery
-        _pay_asset(DISTR_S, buyer, "1", asset, memo="IZZA NFT")
+        # On-chain delivery of ONE_NFT_UNIT (0.0000001)
+        _pay_asset(DISTR_S, buyer, _fmt_amount(ONE_NFT_UNIT), asset, memo="IZZA NFT")
         delivered += 1
         delivered_codes.append(code)
 
