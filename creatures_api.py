@@ -571,17 +571,18 @@ def creatures_auto_claim():
     except Exception:
         owner_sec = None
 
-    if owner_sec:
+        if owner_sec:
         try:
             if not _account_has_trustline(owner_pub, asset):
-                _change_trust(owner_sec, asset, limit="1")
-            _pay_asset(DISTR_S, owner_pub, "1", asset, memo=f"IZZA CREATURE {code}")
+                _change_trust(owner_sec, asset, limit="1")  # limit can stay 1, that’s fine
+            _pay_asset(DISTR_S, owner_pub, _fmt_amount(ONE_NFT_UNIT), asset,
+                       memo=f"IZZA CREATURE {code}")
             delivered = True
         except Exception:
             delivered = False
 
     tx_hash = None
-    if not delivered:
+        if not delivered:
         base_fee = server.fetch_base_fee()
         dist_acct = server.load_account(DISTR_G)
         claimant = Claimant(destination=owner_pub, predicate=ClaimPredicate.predicate_unconditional())
@@ -591,7 +592,11 @@ def creatures_auto_claim():
                 network_passphrase=PP,
                 base_fee=base_fee,
             )
-            .append_create_claimable_balance_op(asset=asset, amount="1", claimants=[claimant])
+            .append_create_claimable_balance_op(
+                asset=asset,
+                amount=_fmt_amount(ONE_NFT_UNIT),
+                claimants=[claimant]
+            )
             .set_timeout(120)
             .build()
         )
@@ -720,15 +725,16 @@ def creatures_burn():
         vault_id = vrow["id"] if vrow else None
 
         # ensure trustline exists (owner should already have it) for the NFT asset
-    try:
+        try:
         if not _account_has_trustline(owner_pub, asset):
             _change_trust(owner_sec, asset, limit="1")
     except Exception:
         abort(400, "trustline_missing")
 
-    # transfer the 1-unit NFT back to distributor with a burn memo
+    # transfer the NFT unit back to distributor with a burn memo
     try:
-        tx_resp = _pay_asset(owner_sec, DISTR_G, "1", asset, memo=f"BURN {code}")
+        tx_resp = _pay_asset(owner_sec, DISTR_G, _fmt_amount(ONE_NFT_UNIT), asset,
+                             memo=f"BURN {code}")
         burn_tx = tx_resp.get("hash") if isinstance(tx_resp, dict) else None
     except Exception as e:
         abort(400, f"burn_failed:{e}")
