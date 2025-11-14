@@ -125,6 +125,39 @@ def _ensure_tables():
           UNIQUE(code, issuer)
         )""")
 
+def _record_creature_vault(cx: sqlite3.Connection, code: str, issuer: str,
+                           vault_izza: Decimal, creator_pub: str | None):
+    """
+    Record or update a vault entry for a creature NFT.
+
+    This uses the shared nft_vaults table that is also used by item NFTs.
+    The schema is:
+      nft_vaults(
+        id INTEGER PRIMARY KEY,
+        asset_code TEXT,
+        asset_issuer TEXT,
+        vault_izza TEXT,
+        creator_pub TEXT,
+        created_at INTEGER,
+        burned_at INTEGER,
+        burn_owner_pub TEXT,
+        burn_tx TEXT,
+        status TEXT,
+        UNIQUE(asset_code, asset_issuer)
+      )
+    """
+    if vault_izza <= 0:
+        return
+
+    cx.execute("""
+      INSERT INTO nft_vaults(asset_code, asset_issuer, vault_izza, creator_pub,
+                             created_at, burned_at, burn_owner_pub, burn_tx, status)
+      VALUES(?,?,?,?,?,?,?, ?, 'active')
+      ON CONFLICT(asset_code, asset_issuer)
+      DO UPDATE SET vault_izza = vault_izza + excluded.vault_izza,
+                    status = 'active'
+    """, (code, issuer, str(vault_izza), creator_pub, _now_i(), None, None, None))
+
 # ---------- username/pub fallback ----------
 def _norm_username(u: str | None) -> str | None:
     if not u: return None
@@ -382,6 +415,18 @@ def creatures_mint():
     buyer_sec = (j.get("buyer_sec") or "").strip()
     client_skin = (j.get("skin") or "").strip()
 
+    # NEW: optional extra vault IZZA provided by buyer at mint time
+    extra_raw = str(j.get("extra_vault_izza") or "0").strip()
+    try:
+        extra_vault_izza = Decimal(extra_raw)
+    except Exception:
+        extra_vault_izza = Decimal("0")
+    if extra_vault_izza < 0:
+        extra_vault_izza = Decimal("0")
+
+    # total vault backing for this egg (base 1 IZZA + any extra the buyer chose)
+    total_vault_izza = EGG_BASE_VAULT + extra_vault_izza
+
     if not buyer_pub or not buyer_sec:
         abort(400, "wallet_required")
 
@@ -427,6 +472,10 @@ def creatures_mint():
           VALUES(?,?,?,?, 'draft', ?, ?)
           ON CONFLICT(code, issuer) DO UPDATE SET updated_at=excluded.updated_at
         """, (code, CREATURE_ISSUER_G, 1, 0, ts, ts))
+
+        # NEW: record value backing in the shared global vault table
+        _record_creature_vault(cx, code, CREATURE_ISSUER_G, total_vault_izza, buyer_pub)
+
         cx.commit()
 
     return jsonify({"ok": True, "asset": {"code": code, "issuer": CREATURE_ISSUER_G}, "hatch_start": ts})
