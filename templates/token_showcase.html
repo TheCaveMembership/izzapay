@@ -2514,7 +2514,7 @@ const groups = Object.values(byIssuer);
   }
 
   async function submitNftGroup(g){
-  const u = (USER?.username || '');
+  const u   = (USER?.username || '');
   const url = u ? `/api/nft/claim?u=${encodeURIComponent(u)}` : '/api/nft/claim';
 
   const body = {
@@ -2525,40 +2525,102 @@ const groups = Object.values(byIssuer);
   };
 
   // Attach extras map if present
+  let extras = null;
   if (g.extras && Object.keys(g.extras).length) {
-    // send as strings to avoid float issues
-    const extras = {};
+    extras = {};
     for (const [code, amt] of Object.entries(g.extras)) {
-      if (amt > 0) extras[code] = String(amt);
+      const n = Number(amt) || 0;
+      if (n > 0) extras[code] = String(n);
     }
     if (Object.keys(extras).length) {
       body.extras_izza = extras;
+    } else {
+      extras = null;
     }
   }
 
-  // final preflight: ensure all trustlines exist for this group
-  await window.__nftTrust_addIfNeeded(g.assets.map(code => ({ code, issuer: g.issuer })));
+  // Final preflight: ensure all NFT trustlines exist for this group
+  await window.__nftTrust_addIfNeeded(
+    g.assets.map(code => ({ code, issuer: g.issuer }))
+  );
 
+  // NEW: if user entered extra backing, build + submit a real IZZA payment XDR first
+  if (extras) {
+    const payRes = await fetch('/api/nft/backing/xdr', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        buyer_pub: pub,
+        extras_izza: extras
+      })
+    });
 
-    const r1  = await fetch(url, { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(body) });
-    const txt = await r1.text().catch(()=> '');
-    let j1 = {}; try { j1 = JSON.parse(txt); } catch { j1 = { ok:false, error: txt }; }
+    const payTxt = await payRes.text().catch(() => '');
+    let payJson = {};
+    try { payJson = JSON.parse(payTxt); }
+    catch { payJson = { ok:false, error: payTxt }; }
 
-    if (!r1.ok || !j1?.ok){
-      const m = /buyer_missing_trustline:([A-Z0-9]{1,12})/i.exec(txt||'');
-      if (m){
-        const code = m[1];
-        await window.__nftTrust_addIfNeeded([{ code, issuer: g.issuer }]);
-        const r2  = await fetch(url, { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(body) });
-        const t2  = await r2.text().catch(()=> '');
-        let j2={}; try { j2 = JSON.parse(t2); } catch { j2 = { ok:false, error: t2 }; }
-        if (!r2.ok || !j2?.ok) throw new Error(j2?.error || `HTTP ${r2.status}`);
-        return true;
-      }
-      throw new Error(j1?.error || `HTTP ${r1.status}`);
+    if (!payRes.ok || !payJson?.ok) {
+      throw new Error(payJson?.error || `HTTP ${payRes.status}`);
     }
-    return true;
+
+    const xdr  = payJson.xdr;
+    const pass = payJson.network_passphrase || PASS;
+
+    const ok = await ensureStellar().catch(() => false);
+    if (!(ok && window.StellarSdk)) throw new Error('Stellar SDK missing');
+
+    const SDK = window.StellarSdk;
+    const tx  = SDK.TransactionBuilder.fromXDR(xdr, pass);
+    const localSec = getLocalSecret(pub, USER?.username);
+
+    if (localSec) {
+      tx.sign(SDK.Keypair.fromSecret(localSec));
+      const server = getServer();
+      await server.submitTransaction(tx);
+      log('nft.backing.submit.ok', {
+        total: payJson.total,
+        count: Object.keys(extras).length
+      });
+    } else {
+      const uri = `web+stellar:tx?xdr=${encodeURIComponent(xdr)}&network_passphrase=${encodeURIComponent(pass)}`;
+      window.location.assign(uri);
+      throw new Error('sep7 in flight');
+    }
   }
+
+  // Now do the actual NFT claim (which will update DB backing_izza using extras_izza)
+  const r1  = await fetch(url, {
+    method:'POST',
+    headers:{'Content-Type':'application/json'},
+    body: JSON.stringify(body)
+  });
+  const txt = await r1.text().catch(()=> '');
+  let j1 = {};
+  try { j1 = JSON.parse(txt); }
+  catch { j1 = { ok:false, error: txt }; }
+
+  if (!r1.ok || !j1?.ok){
+    const m = /buyer_missing_trustline:([A-Z0-9]{1,12})/i.exec(txt||'');
+    if (m){
+      const code = m[1];
+      await window.__nftTrust_addIfNeeded([{ code, issuer: g.issuer }]);
+      const r2  = await fetch(url, {
+        method:'POST',
+        headers:{'Content-Type':'application/json'},
+        body: JSON.stringify(body)
+      });
+      const t2  = await r2.text().catch(()=> '');
+      let j2={};
+      try { j2 = JSON.parse(t2); }
+      catch { j2 = { ok:false, error: t2 }; }
+      if (!r2.ok || !j2?.ok) throw new Error(j2?.error || `HTTP ${r2.status}`);
+      return true;
+    }
+    throw new Error(j1?.error || `HTTP ${r1.status}`);
+  }
+  return true;
+}
 
   const ops = [];
   if (picks.length) ops.push(`claimables:${picks.length}`);
