@@ -765,9 +765,9 @@ def creatures_army_stats():
 
     with _db() as cx:
         rows = cx.execute(
-            "SELECT * FROM nft_creatures WHERE owner_pub=? AND issuer=? AND burned_at IS NULL",
-            (owner_pub, CREATURE_ISSUER_G)
-        ).fetchall()
+    "SELECT * FROM nft_creatures WHERE owner_pub=? AND issuer=? AND COALESCE(burned_at,0)=0",
+    (owner_pub, CREATURE_ISSUER_G)
+).fetchall()
 
     total_atk = 0
     total_def = 0
