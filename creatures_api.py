@@ -484,31 +484,37 @@ def creatures_latest():
 def creatures_mine():
     _ensure_tables()
     uid = getattr(g, "user_id", None)
+
+    # Allow explicit ?pub= to view by wallet, otherwise use active wallet resolved via session/username
+    active_pub = (request.args.get("pub") or "").strip() or _active_pub_for_request()
+
     with _db() as cx:
+        params = []
+        owner_clauses = []
+
+        # Always filter out burned creatures
+        base_where = "COALESCE(burned_at,0)=0"
+
         if uid is not None:
-            rows = cx.execute("""
-              SELECT code, issuer, owner_pub, stage, palette, pattern, hatch_start
-              FROM nft_creatures
-              WHERE COALESCE(burned_at,0)=0 AND (
-                user_id=? OR (user_id IS NULL AND owner_pub IS NOT NULL AND owner_pub IN (
-                  SELECT pub FROM user_wallets WHERE username IN (
-                    SELECT pi_username FROM users WHERE id=?
-                  )
-                ))
-              )
-              ORDER BY id DESC LIMIT 200
-            """, (uid, uid)).fetchall()
+            owner_clauses.append("user_id=?")
+            params.append(uid)
+
+        if active_pub:
+            owner_clauses.append("owner_pub=?")
+            params.append(active_pub)
+
+        if not owner_clauses:
+            rows = []
         else:
-            active_pub = _active_pub_for_request()
-            if active_pub:
-                rows = cx.execute("""
-                  SELECT code, issuer, owner_pub, stage, palette, pattern, hatch_start
-                  FROM nft_creatures
-                  WHERE owner_pub=? AND burned_at IS NULL
-                  ORDER BY id DESC LIMIT 200
-                """, (active_pub,)).fetchall()
-            else:
-                rows = []
+            sql = f"""
+                SELECT code, issuer, owner_pub, stage, palette, pattern, hatch_start
+                FROM nft_creatures
+                WHERE {base_where} AND ({' OR '.join(owner_clauses)})
+                ORDER BY id DESC
+                LIMIT 200
+            """
+            rows = cx.execute(sql, params).fetchall()
+
     return jsonify({"items": [dict(r) for r in rows]})
 
 @bp_creatures.post("/api/creatures/mark-owned")
