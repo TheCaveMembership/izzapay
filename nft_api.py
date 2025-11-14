@@ -622,12 +622,7 @@ def mint():
         except Exception as e:
             log.warning("NFT_DB_COLLECTION_UPSERT_FAIL code=%s err=%s", code, e)
 
-        # >>> NEW: record the minting user as the initial owner in nft_tokens <<<
-        try:
-            _upsert_collection_and_assign(code=code, issuer=iss_kp.public_key, owner_pub=creator_pub)
-        except Exception as e:
-            log.warning("NFT_DB_ASSIGN_ON_MINT_FAIL code=%s err=%s", code, e)
-
+        # IMPORTANT: do NOT assign owner here; ownership still happens in claim()
         minted.append(code)
 
     return jsonify({
