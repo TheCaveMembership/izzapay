@@ -1,5 +1,5 @@
 import os, json, time, random, sqlite3, math
-from decimal import Decimal
+from decimal import Decimal, InvalidOperation
 from flask import Blueprint, request, jsonify, abort, make_response, url_for, g, session
 from stellar_sdk import (
     Asset, Keypair, Claimant, ClaimPredicate, TransactionBuilder
@@ -51,7 +51,8 @@ HUNGER_PER_DAY = {
 MISSED_DAYS_TO_DIE   = 3
 REVIVE_DAYS_REQUIRED = 3
 
-EGG_PRICE_IZZA = Decimal("5")
+EGG_PRICE_IZZA   = Decimal("5")   # base mint cost (4 fee + 1 vaulted)
+BASE_VAULT_IZZA  = Decimal("1")   # base vaulted value per creature
 
 # ----- collection cap (live supply) -----
 CREATURES_CAP = 1000  # IZZA CREATURES V1 circulating cap
@@ -90,6 +91,7 @@ def _ensure_tables():
           meta_version INTEGER DEFAULT 1,
           user_id INTEGER,
           revive_progress INTEGER DEFAULT 0,
+          vault_izza TEXT,
           -- NEW: burn bookkeeping
           burned_at INTEGER,
           burn_tx   TEXT,
@@ -98,6 +100,7 @@ def _ensure_tables():
         for colstmt in [
             ("last_hunger_at",  "ALTER TABLE nft_creatures ADD COLUMN last_hunger_at INTEGER"),
             ("revive_progress", "ALTER TABLE nft_creatures ADD COLUMN revive_progress INTEGER DEFAULT 0"),
+            ("vault_izza",      "ALTER TABLE nft_creatures ADD COLUMN vault_izza TEXT"),
             ("burned_at",       "ALTER TABLE nft_creatures ADD COLUMN burned_at INTEGER"),
             ("burn_tx",         "ALTER TABLE nft_creatures ADD COLUMN burn_tx TEXT")
         ]:
@@ -316,7 +319,8 @@ def _compute_state_dict(code: str) -> dict:
         st = {
             "code":"EGGDEMO","issuer":CREATURE_ISSUER_G or "GDEMOISS","owner_pub":None,
             "elapsed":0,"tick_seconds":TICK_STEP_SECONDS,"hunger":0,"stage":"egg",
-            "palette":base,"pattern":pat,"hatch_start":_now_i(), "rarity": rarity
+            "palette":base,"pattern":pat,"hatch_start":_now_i(), "rarity": rarity,
+            "vault_izza": str(BASE_VAULT_IZZA)
         }
         stats = _compute_stats_dict(st, last_feed_at=_now_i(), rarity=rarity)
         st.update(stats)
@@ -340,6 +344,18 @@ def _compute_state_dict(code: str) -> dict:
         "stage":stage,"palette":r["palette"],"pattern":r["pattern"],
         "hatch_start":int(r["hatch_start"] or _now_i())
     }
+
+    # vault value (base 1 IZZA if missing)
+    vault_val = None
+    try:
+        raw = r["vault_izza"]
+        if raw is not None:
+            vault_val = Decimal(str(raw))
+    except Exception:
+        vault_val = None
+    if vault_val is None:
+        vault_val = BASE_VAULT_IZZA
+    st["vault_izza"] = str(vault_val)
 
     skin_hint = (r["egg_seed"] or "").strip()
     rarity = _rarity_from(st["code"], skin_hint)
@@ -379,9 +395,21 @@ def creatures_mint():
     buyer_pub = (j.get("buyer_pub") or "").strip()
     buyer_sec = (j.get("buyer_sec") or "").strip()
     client_skin = (j.get("skin") or "").strip()
+    extra_vault_raw = str(j.get("extra_vault_izza", "0")).strip()
 
     if not buyer_pub or not buyer_sec:
         abort(400, "wallet_required")
+
+    # Parse extra vault amount (IZZA)
+    try:
+        extra_vault = Decimal(extra_vault_raw or "0")
+        if extra_vault < 0:
+            extra_vault = Decimal("0")
+    except (InvalidOperation, TypeError):
+        extra_vault = Decimal("0")
+
+    # Total vault locked into this creature (base 1 + extra)
+    vault_total = BASE_VAULT_IZZA + extra_vault
 
     # Enforce circulating cap (live supply = unburned)
     with _db() as cx:
@@ -394,8 +422,11 @@ def creatures_mint():
         _change_trust(DISTR_S, izza, limit="100000000")
     except Exception:
         pass
+
+    # Charge base egg cost plus any extra vault amount
+    total_cost = EGG_PRICE_IZZA + extra_vault
     try:
-        _pay_asset(buyer_sec, DISTR_G, str(EGG_PRICE_IZZA), izza, memo="IZZA CREATURE EGG")
+        _pay_asset(buyer_sec, DISTR_G, str(total_cost), izza, memo="IZZA CREATURE EGG")
     except Exception as e:
         abort(400, f"fee_payment_failed:{e}")
 
@@ -416,10 +447,17 @@ def creatures_mint():
 
     with _db() as cx:
         cx.execute("""
-          INSERT INTO nft_creatures(code, issuer, owner_pub, egg_seed, palette, pattern,
-                                    hatch_start, last_feed_at, last_hunger_at, hunger, stage, meta_version, user_id, revive_progress, burned_at, burn_tx)
-          VALUES(?,?,?,?,?,?, ?,?,?,?,?,1,?, 0, NULL, NULL)
-        """, (code, CREATURE_ISSUER_G, None, seed, base, pat, ts, ts, ts, 0, "egg", uid))
+          INSERT INTO nft_creatures(
+            code, issuer, owner_pub, egg_seed, palette, pattern,
+            hatch_start, last_feed_at, last_hunger_at, hunger, stage,
+            meta_version, user_id, revive_progress, vault_izza, burned_at, burn_tx
+          )
+          VALUES(?,?,?,?,?,?, ?,?,?,?,?, 1, ?, 0, ?, 0, NULL)
+        """, (
+            code, CREATURE_ISSUER_G, None, seed, base, pat,
+            ts, ts, ts, 0, "egg",
+            uid, str(vault_total)
+        ))
         cx.execute("""
           INSERT INTO nft_collections(code, issuer, total_supply, decimals, status, created_at, updated_at)
           VALUES(?,?,?,?, 'draft', ?, ?)
@@ -787,6 +825,7 @@ def creature_svg(code):
     pattern = st["pattern"] or "speckle"
     elapsed = int(st["elapsed"])
     rarity  = st.get("rarity", "common")
+    vault_izza = str(st.get("vault_izza", "1"))
 
     skin_hint = (request.args.get("skin") or "") if str(code).upper() == "EGGDEMO" else ""
 
@@ -1130,7 +1169,8 @@ def creature_svg(code):
   <g font-family="ui-monospace, Menlo, monospace" font-size="14" fill="#fff" opacity=".95">
     <text x="16" y="28">Stage: {stage} • Rarity: {rarity}</text>
     <text x="16" y="48" opacity="{ '1' if show_hunger else '0'}">Hunger: {hunger}%</text>
-    <text x="16" y="68">ATK {st.get('attack',0)}  DEF {st.get('defense',0)}  •  1d={DAY_SECS}s</text>
+    <text x="16" y="68">Vault: {vault_izza} IZZA</text>
+    <text x="16" y="88">ATK {st.get('attack',0)}  DEF {st.get('defense',0)}  •  1d={DAY_SECS}s</text>
   </g>'''
 
     rarity_layer_for_egg = ''
