@@ -71,9 +71,6 @@ if not (ISSUER_S and ISSUER_G and DISTR_S and DISTR_G):
 if not IZZA_ISS:
     raise RuntimeError("Missing IZZA_TOKEN_ISSUER env var")
 
-# ---------- NEW: indivisible NFT unit at 1 stroop ----------
-ONE_NFT_UNIT = Decimal("0.0000001")
-
 # Canonical issuer guard
 try:
     _pub_from_secret = Keypair.from_secret(ISSUER_S).public_key
@@ -249,11 +246,8 @@ def _upsert_collection_and_assign(code: str, issuer: str, owner_pub: str) -> Non
         """, (cid, owner_pub, _now_i()))
         cx.commit()
 
-# ---- Idempotent: make sure distributor holds exactly ONE_NFT_UNIT of the asset ----
+# ---- Idempotent: make sure distributor holds exactly one unit of the asset ----
 def _ensure_distributor_holds_one(asset: Asset):
-    """
-    Updated: distributor should hold ONE_NFT_UNIT (0.0000001) instead of full 1.0
-    """
     try:
         _change_trust(DISTR_S, asset, limit="1")
     except Exception as e:
@@ -261,14 +255,10 @@ def _ensure_distributor_holds_one(asset: Asset):
             raise
     dj = _account_json(DISTR_G)
     bal = _balance_for_asset_from_json(dj, asset.code, asset.issuer)
-    # If distributor already has at least ONE_NFT_UNIT, do nothing
-    if bal >= ONE_NFT_UNIT:
+    if bal >= Decimal("1"):
         return
-    need = ONE_NFT_UNIT - bal
-    if need <= Decimal("0"):
-        return
-    # Quantize to 7-decimal stroop precision
-    amt = str(need.quantize(ONE_NFT_UNIT, rounding=ROUND_DOWN))
+    need = Decimal("1") - bal
+    amt = str(need.quantize(Decimal("1")))
     iss_kp = Keypair.from_secret(ISSUER_S)
     iss_acc = _load(iss_kp.public_key)
     tx = (TransactionBuilder(iss_acc, PP, base_fee=_base_fee())
@@ -403,7 +393,7 @@ def mint():
     except Exception as e:
         abort(400, f"fee_payment_failed: {e}")
 
-    # mint ONE_NFT_UNIT for each code to distributor, and ensure DB rows exist
+    # mint 1 unit for each code to distributor, and ensure DB rows exist
     iss_kp = Keypair.from_secret(ISSUER_S)
     minted = []
     for i in range(size):
@@ -455,8 +445,7 @@ def claim():
         _ensure_distributor_holds_one(asset)
 
         # On-chain delivery
-        # UPDATED: send ONE_NFT_UNIT (0.0000001) instead of "1"
-        _pay_asset(DISTR_S, buyer, str(ONE_NFT_UNIT), asset, memo="IZZA NFT")
+        _pay_asset(DISTR_S, buyer, "1", asset, memo="IZZA NFT")
         delivered += 1
         delivered_codes.append(code)
 
