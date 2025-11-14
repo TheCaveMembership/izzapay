@@ -2329,18 +2329,35 @@ async function listClaimables(){
         claimTblBody.appendChild(trHead);
 
         const trBody = document.createElement('tr');
-        trBody.className = `group-row is-nft`;
-        trBody.innerHTML = `
-          <td colspan="4">
-            <div class="block" style="display:flex;flex-direction:column;gap:8px;">
-              <div class="line" style="display:flex;justify-content:space-between;align-items:center;white-space:nowrap;">
-                <span>Issuer</span>
-                <span class="num" style="text-align:right">${issuer}</span>
-              </div>
-              <span class="lockhint">Check an NFT to claim it to your wallet, establish a trustline first if disabled.</span>
-            </div>
-          </td>`;
-        claimTblBody.appendChild(trBody);
+trBody.className = `group-row is-nft`;
+trBody.innerHTML = `
+  <td colspan="4">
+    <div class="block" style="display:flex;flex-direction:column;gap:8px;">
+      <div class="line" style="display:flex;justify-content:space-between;align-items:center;white-space:nowrap;">
+        <span>Issuer</span>
+        <span class="num" style="text-align:right">${issuer}</span>
+      </div>
+
+      <div class="line" style="display:flex;justify-content:space-between;align-items:center;white-space:nowrap;">
+        <span>Add extra backing (IZZA)</span>
+        <input
+          type="number"
+          min="0"
+          step="0.0000001"
+          class="extraBacking"
+          data-code="${code}"
+          data-issuer="${issuer}"
+          placeholder="0.0000000"
+          style="max-width:150px;text-align:right;background:rgba(255,255,255,.06);border:1px solid rgba(255,255,255,.16);border-radius:10px;color:#fff;padding:6px 8px;font-size:13px;"
+        >
+      </div>
+
+      <span class="lockhint">
+        Optional, add extra IZZA value to vault into this NFT when you claim it.
+      </span>
+    </div>
+  </td>`;
+claimTblBody.appendChild(trBody);
       }
     }
 
