@@ -27,11 +27,9 @@ log = logging.getLogger(__name__)
 
 # ---------- small helpers ----------
 def _mask(k: str | None) -> str:
-    if not k:
-        return ""
+    if not k: return ""
     k = k.strip()
-    if len(k) <= 8:
-        return k[:1] + "…"
+    if len(k) <= 8: return k[:1] + "…"
     return f"{k[:4]}…{k[-4:]}"
 
 def _isG(v: str | None) -> bool:
@@ -47,8 +45,7 @@ def _isS(v: str | None) -> bool:
         return False
 
 def _norm_username(u: str | None) -> str | None:
-    if not u:
-        return None
+    if not u: return None
     u = str(u).strip().lstrip("@").lower()
     return u or None
 
@@ -58,17 +55,6 @@ def _now_i() -> int:
 def _q7(x: Decimal) -> str:
     # Stellar amounts are up to 7 decimals
     return str(x.quantize(Decimal("0.0000001"), rounding=ROUND_DOWN))
-
-def _fmt_amount(x) -> str:
-    """
-    Format a numeric amount into a Stellar string with 7 decimals.
-    Shared helper for NFT unit transfers and IZZA amounts.
-    """
-    try:
-        d = Decimal(str(x))
-    except Exception:
-        d = Decimal("0")
-    return _q7(d)
 
 # ---------- env ----------
 HORIZON_URL = os.getenv("NFT_HORIZON_URL", "https://api.testnet.minepi.com").strip()
@@ -144,16 +130,14 @@ def _account_json(pub_g: str) -> dict | None:
         return None
 
 def _balance_native_from_json(j: dict | None) -> str:
-    if not j:
-        return "0"
+    if not j: return "0"
     for b in j.get("balances", []):
         if b.get("asset_type") == "native":
             return b.get("balance", "0")
     return "0"
 
 def _balance_for_asset_from_json(j: dict | None, code: str, issuer: str) -> Decimal:
-    if not j:
-        return Decimal("0")
+    if not j: return Decimal("0")
     for b in j.get("balances", []):
         if b.get("asset_code") == code and b.get("asset_issuer") == issuer:
             try:
@@ -169,8 +153,7 @@ def _base_fee() -> int:
     except Exception:
         return 500
 
-def _load(g: str):
-    return server.load_account(g)
+def _load(g): return server.load_account(g)
 
 # ---------- pricing ----------
 PRICE_SINGLE = Decimal("0.1")
@@ -181,11 +164,10 @@ TIERS = [
     (50,  Decimal("0.0850")),
     (100, Decimal("0.0800"))
 ]
-def per_unit(n: int) -> Decimal:
+def per_unit(n:int)->Decimal:
     p = TIERS[0][1]
     for m, price in TIERS:
-        if n >= m:
-            p = price
+        if n >= m: p = price
     return p
 
 # ---------- utils ----------
@@ -214,8 +196,7 @@ def _change_trust(secret: str, asset: Asset, limit="1"):
         return server.submit_transaction(tx)
     except sx.BadResponseError as e:
         msg = (getattr(e, "message", "") or str(e) or "").lower()
-        if "op_low_reserve" in msg:
-            raise
+        if "op_low_reserve" in msg: raise
         return {"ok": True}
     except Exception:
         raise
@@ -233,13 +214,11 @@ def _pay_asset(secret_from: str, to_g: str, amount: str, asset: Asset, memo=None
     return server.submit_transaction(tx)
 
 def _require(b, msg="bad_request"):
-    if not b:
-        abort(400, msg)
+    if not b: abort(400, msg)
 
 def _account_has_trustline(pub_g: str, asset: Asset) -> bool:
     j = _account_json(pub_g)
-    if not j:
-        return False
+    if not j: return False
     for b in j.get("balances", []):
         if b.get("asset_code") == asset.code and b.get("asset_issuer") == asset.issuer:
             return True
@@ -250,20 +229,14 @@ def _buyer_has_izza_and_trust(pub_g: str, need: Decimal) -> bool:
     Check the buyer has both a trustline and at least `need` IZZA balance.
     """
     j = _account_json(pub_g)
-    if not j:
-        return False
+    if not j: return False
     bal = _balance_for_asset_from_json(j, IZZA_CODE, IZZA_ISS)
     return bal >= need
 
 # ---------- DB helpers ----------
-def _ensure_collection_row(
-    code: str,
-    issuer: str,
-    total_supply: int = 1,
-    decimals: int = 0,
-    royalty_bp: int | None = None,
-    backing_template_izza: str | None = None
-):
+def _ensure_collection_row(code: str, issuer: str, total_supply: int = 1, decimals: int = 0,
+                           royalty_bp: int | None = None,
+                           backing_template_izza: str | None = None):
     """
     Ensure nft_collections row exists and satisfies NOT NULL constraints.
     Also store default royalty_bp and backing_template_izza if provided.
@@ -312,6 +285,7 @@ def _upsert_collection_and_assign(code: str, issuer: str, owner_pub: str) -> Non
         cid = int(row["id"])
         backing_tpl = row["backing_template_izza"]
 
+        # Ensure token serial 1 exists and is owned by owner_pub
         cx.execute("""
           INSERT INTO nft_tokens(
             collection_id, serial, owner_wallet_pub, minted_at,
@@ -494,6 +468,7 @@ def api_nft_owned():
             """, (pub,)).fetchall()
         out = []
         for r in rows:
+            # backing value as a string number
             backing_raw = r["backing_izza"]
             backing_str = "0"
             if backing_raw is not None:
@@ -502,11 +477,13 @@ def api_nft_owned():
                 except Exception:
                     backing_str = "0"
 
+            # optional metadata for image
             img_url = None
             meta_raw = r["metadata_json"]
             if meta_raw:
                 try:
                     meta = json.loads(meta_raw)
+                    # Try common keys, you can adjust if you use a different schema
                     img_url = (
                         meta.get("image_url")
                         or meta.get("image")
@@ -531,8 +508,7 @@ def api_nft_owned():
 
 # ---------- helper: active wallet from username ----------
 def _active_wallet_pub_for_username(u: str | None) -> str | None:
-    if not u:
-        return None
+    if not u: return None
     u = u.strip().lower()
     try:
         with _db() as cx:
@@ -556,21 +532,19 @@ def mint():
     tag = (j.get("collection_tag") or "").strip()
 
     _require(creator_pub and creator_sec, "creator_wallet_required")
-    if not _isG(creator_pub):
-        abort(400, "creator_pub_invalid")
-    if not _isS(creator_sec):
-        abort(400, "creator_sec_invalid")
+    if not _isG(creator_pub): abort(400, "creator_pub_invalid")
+    if not _isS(creator_sec): abort(400, "creator_sec_invalid")
 
+    # Creator royalty (basis points) 0–1000
     royalty_bp = 0
     try:
         royalty_bp = int(j.get("royalty_bp") or 0)
     except Exception:
         royalty_bp = 0
-    if royalty_bp < 0:
-        royalty_bp = 0
-    if royalty_bp > 1000:
-        royalty_bp = 1000
+    if royalty_bp < 0: royalty_bp = 0
+    if royalty_bp > 1000: royalty_bp = 1000
 
+    # Optional vault backing per NFT (in IZZA)
     try:
         backing_raw = str(j.get("backing_izza") or "0").strip()
         backing_per = Decimal(backing_raw or "0")
@@ -586,22 +560,26 @@ def mint():
 
     izza = Asset(IZZA_CODE, IZZA_ISS)
 
+    # Trustline for IZZA on distributor (fee receiver / vault)
     try:
         _change_trust(DISTR_S, izza, limit="100000000")
     except Exception as e:
         log.warning("NFT_DISTR_TRUST_IZZA_FAIL %s: %s", type(e).__name__, e)
 
+    # Fee charge (mint fee only)
     try:
         _pay_asset(creator_sec, DISTR_G, str(total_fee), izza, memo="IZZA NFT FEE")
     except Exception as e:
         abort(400, f"fee_payment_failed: {e}")
 
+    # Backing charge (locked value backing NFTs)
     if total_backing > Decimal("0"):
         try:
             _pay_asset(creator_sec, DISTR_G, str(total_backing), izza, memo="IZZA NFT BACKING")
         except Exception as e:
             abort(400, f"backing_payment_failed: {e}")
 
+    # mint ONE_NFT_UNIT for each code to distributor, and ensure DB rows exist
     iss_kp = Keypair.from_secret(ISSUER_S)
     minted = []
     for i in range(size):
@@ -611,7 +589,7 @@ def mint():
             _ensure_distributor_holds_one(asset)
         except Exception as e:
             abort(400, f"mint_trust_failed:{code}:{e}")
-
+        # ensure collection row now to satisfy future assigns + backing + royalties
         try:
             _ensure_collection_row(
                 code,
@@ -623,12 +601,6 @@ def mint():
             )
         except Exception as e:
             log.warning("NFT_DB_COLLECTION_UPSERT_FAIL code=%s err=%s", code, e)
-
-        try:
-            _upsert_collection_and_assign(code=code, issuer=iss_kp.public_key, owner_pub=creator_pub)
-        except Exception as e:
-            log.warning("NFT_DB_ASSIGN_ON_MINT_FAIL code=%s err=%s", code, e)
-
         minted.append(code)
 
     return jsonify({
@@ -646,6 +618,15 @@ def mint():
 def backing_xdr():
     """
     Build an IZZA payment XDR for extra NFT backing from buyer → DISTR_G.
+
+    Body:
+      {
+        "buyer_pub": "G...",
+        "extras_izza": { "EGG115FBCG": "0.05", "NFTXYZ": "0.02", ... }
+      }
+
+    Returns:
+      { ok, xdr, network_passphrase, total }
     """
     j = request.get_json(silent=True) or {}
     buyer_pub = (j.get("buyer_pub") or "").strip()
@@ -669,6 +650,7 @@ def backing_xdr():
     if total <= Decimal("0"):
         abort(400, "backing_amount_zero")
 
+    # Preflight: buyer must have trust + balance
     if not _buyer_has_izza_and_trust(buyer_pub, total):
         abort(400, "buyer lacks IZZA balance or trustline")
 
@@ -709,7 +691,13 @@ def backing_xdr():
 @bp_nft.route("/api/nft/claim", methods=["POST"])
 def claim():
     """
-    Claim item NFTs and optionally attach extra IZZA backing per code.
+    body {
+      buyer_pub: "G...", optional if ?u is present with linked wallet
+      assets:    ["NFT...", ...], required
+      issuer:    ignored, canonical issuer enforced
+      pending_id: optional
+      extras_izza: { "NFTCODE": "0.05", ... } optional per-code extra backing (IZZA)
+    }
     """
     j = request.get_json(silent=True) or {}
     u = _norm_username(request.args.get("u")) or _norm_username(session.get("pi_username"))
@@ -723,8 +711,7 @@ def claim():
         extras_izza = {}
 
     _require(buyer and assets, "buyer_and_assets_required")
-    if not _isG(buyer):
-        abort(400, "buyer_pub_invalid")
+    if not _isG(buyer): abort(400, "buyer_pub_invalid")
 
     delivered = 0
     delivered_codes = []
@@ -737,15 +724,19 @@ def claim():
 
         _ensure_distributor_holds_one(asset)
 
+        # On-chain delivery: send ONE_NFT_UNIT (0.0000001)
         _pay_asset(DISTR_S, buyer, str(ONE_NFT_UNIT), asset, memo="IZZA NFT")
         delivered += 1
         delivered_codes.append(code)
 
+        # Record ownership (ensure collection row, then token with backing)
         try:
             _upsert_collection_and_assign(code=code, issuer=issuer_g, owner_pub=buyer)
         except Exception as e:
+            # do not fail claim if DB write has a constraint race
             log.warning("NFT_DB_ASSIGN_FAIL code=%s err=%s", code, e)
 
+        # If buyer supplied extra IZZA backing for this code, add it to backing_izza
         try:
             extra_val = extras_izza.get(code)
             if extra_val is not None:
@@ -753,6 +744,7 @@ def claim():
         except Exception as e:
             log.warning("NFT_BACKING_UPDATE_FAIL code=%s err=%s", code, e)
 
+    # ---------- notify creatures about ownership ----------
     try:
         for code in delivered_codes:
             try:
@@ -766,6 +758,7 @@ def claim():
     except Exception:
         pass
 
+    # Mark pending claims as claimed
     try:
         with _db() as cx:
             changed = 0
@@ -777,6 +770,7 @@ def claim():
                 )
                 changed = cx.total_changes
             else:
+                # Fallback, mark any pending rows for this buyer that contain any of the delivered asset codes
                 for code in delivered_codes:
                     cx.execute("""
                         UPDATE nft_pending_claims
@@ -798,17 +792,27 @@ def claim():
     except Exception as e:
         log.warning("NFT_PENDING_MARK_FAIL buyer=%s err=%s", _mask(buyer), e)
 
-    return jsonify({
+        return jsonify({
         "ok": True,
         "delivered": delivered,
         "buyer_pub": buyer,
         "assets": delivered_codes
     })
 
+
 @bp_nft.route("/api/nft/burn", methods=["POST"])
 def burn():
     """
     Burn a single IZZA NFT and redeem its vaulted IZZA backing.
+
+    body {
+      owner_pub: "G...",   required
+      code:      "NFTCODE" required
+    }
+
+    Effect:
+      - Pays backing_izza (if > 0) from DISTR_G → owner_pub in IZZA
+      - Clears ownership + backing_izza in nft_tokens
     """
     j = request.get_json(silent=True) or {}
     owner_pub = (j.get("owner_pub") or "").strip()
@@ -820,6 +824,7 @@ def burn():
 
     issuer_g = CANONICAL_ISSUER_G
 
+    # Look up token row and backing value
     try:
         with _db() as cx:
             row = cx.execute("""
@@ -838,6 +843,7 @@ def burn():
     if not row:
         abort(400, "not_owner_or_not_found")
 
+    # Parse backing IZZA
     backing_raw = row["backing_izza"]
     try:
         backing = Decimal(str(backing_raw or "0"))
@@ -849,6 +855,7 @@ def burn():
 
     redeemed = Decimal("0")
 
+    # Payout from distributor vault → owner
     if backing > Decimal("0"):
         izza = Asset(IZZA_CODE, IZZA_ISS)
         try:
@@ -858,6 +865,7 @@ def burn():
             log.error("NFT_BURN_PAYOUT_FAIL %s: %s", type(e).__name__, e)
             abort(400, f"backing_payout_failed:{e}")
 
+    # Clear ownership + backing in DB so it no longer appears as owned/vaulted
     try:
         with _db() as cx:
             cx.execute(
@@ -869,6 +877,7 @@ def burn():
         log.error("NFT_BURN_DB_UPDATE_FAIL %s: %s", type(e).__name__, e)
         abort(500, "burn_db_fail")
 
+    # Optional: notify creatures of burn
     try:
         requests.post(
             url=f"{request.url_root.rstrip('/')}/api/creatures/mark-burned",
