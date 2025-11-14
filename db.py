@@ -25,12 +25,6 @@ def conn():
     return cx
 
 def init_db():
-    """
-    Use the ORIGINAL, known-good base schema that was working before,
-    without the newer vault / royalty columns baked directly into CREATE TABLE.
-
-    All new columns and tables are added later in ensure_schema().
-    """
     _ensure_dirs()
     with _lock, conn() as cx:
         cx.executescript("""
@@ -39,7 +33,7 @@ def init_db():
           id INTEGER PRIMARY KEY,
           pi_uid TEXT UNIQUE,
           pi_username TEXT,
-          -- app code reads users.username
+          -- NEW: app code reads users.username
           username TEXT,
           role TEXT DEFAULT 'buyer',
           created_at INTEGER
@@ -133,7 +127,7 @@ def init_db():
         CREATE UNIQUE INDEX IF NOT EXISTS idx_user_wallets_username ON user_wallets(username);
 
         ----------------------------------------------------------------------
-        -- NFT / Collections (base schema)
+        -- NFT / Collections
         ----------------------------------------------------------------------
 
         CREATE TABLE IF NOT EXISTS nft_collections(
@@ -194,7 +188,7 @@ def init_db():
           sold_at INTEGER,
           buyer_user_id INTEGER,
           order_id INTEGER,
-          -- columns we need for SOLD + auditing
+          -- NEW: columns we need for SOLD + auditing
           item_id INTEGER,
           buyer_username TEXT,
           FOREIGN KEY(collection_id) REFERENCES nft_collections(id) ON DELETE CASCADE,
@@ -253,10 +247,7 @@ def init_db():
         """)
 
 def ensure_schema():
-    """
-    Add missing columns without dropping existing data;
-    create new NFT tables if absent; add vault + backing/royalty columns.
-    """
+    """Add missing columns without dropping existing data; create new NFT tables if absent."""
     with _lock, conn() as cx:
         # sessions.pi_username
         try: cx.execute("ALTER TABLE sessions ADD COLUMN pi_username TEXT")
@@ -274,63 +265,15 @@ def ensure_schema():
         try: cx.execute("ALTER TABLE orders ADD COLUMN created_at INTEGER")
         except Exception: pass
 
-        # merchants extras (safe if they already exist)
+        # merchants extras
         try: cx.execute("ALTER TABLE merchants ADD COLUMN pi_wallet_address TEXT")
         except Exception: pass
         try: cx.execute("ALTER TABLE merchants ADD COLUMN pi_handle TEXT")
         except Exception: pass
         try: cx.execute("ALTER TABLE merchants ADD COLUMN colorway TEXT")
         except Exception: pass
-        try: cx.execute("ALTER TABLE merchants ADD COLUMN description TEXT")
-        except Exception: pass
-        try: cx.execute("ALTER TABLE merchants ADD COLUMN banner_url TEXT")
-        except Exception: pass
-        try: cx.execute("ALTER TABLE merchants ADD COLUMN font_family TEXT")
-        except Exception: pass
-        try: cx.execute("ALTER TABLE merchants ADD COLUMN custom_css TEXT")
-        except Exception: pass
 
-        # items: NFT product flags and templates
-        try: cx.execute("ALTER TABLE items ADD COLUMN is_nft INTEGER DEFAULT 0")
-        except Exception: pass
-        try: cx.execute("ALTER TABLE items ADD COLUMN nft_kind TEXT")
-        except Exception: pass
-        try: cx.execute("ALTER TABLE items ADD COLUMN nft_size INTEGER")
-        except Exception: pass
-        try: cx.execute("ALTER TABLE items ADD COLUMN nft_prefix TEXT")
-        except Exception: pass
-        try: cx.execute("ALTER TABLE items ADD COLUMN nft_tag TEXT")
-        except Exception: pass
-        try: cx.execute("ALTER TABLE items ADD COLUMN nft_assets_json TEXT")
-        except Exception: pass
-        try: cx.execute("ALTER TABLE items ADD COLUMN nft_vault_json TEXT")
-        except Exception: pass
-        try: cx.execute("ALTER TABLE items ADD COLUMN nft_commission_bp INTEGER")
-        except Exception: pass
-        try: cx.execute("ALTER TABLE items ADD COLUMN claim_kind TEXT")
-        except Exception: pass
-        try: cx.execute("ALTER TABLE items ADD COLUMN meta_type TEXT")
-        except Exception: pass
-        try: cx.execute("ALTER TABLE items ADD COLUMN category TEXT")
-        except Exception: pass
-        try: cx.execute("ALTER TABLE items ADD COLUMN fulfillment_kind TEXT")
-        except Exception: pass
-        try: cx.execute("ALTER TABLE items ADD COLUMN crafted_item_id INTEGER")
-        except Exception: pass
-
-        # NEW: additive columns for value-backed NFTs and royalties
-        try: cx.execute("ALTER TABLE nft_collections ADD COLUMN royalty_bp INTEGER")
-        except Exception: pass
-        try: cx.execute("ALTER TABLE nft_collections ADD COLUMN backing_template_izza TEXT")
-        except Exception: pass
-        try: cx.execute("ALTER TABLE nft_tokens ADD COLUMN backing_izza TEXT")
-        except Exception: pass
-        try: cx.execute("ALTER TABLE nft_tokens ADD COLUMN backing_asset_code TEXT")
-        except Exception: pass
-        try: cx.execute("ALTER TABLE nft_tokens ADD COLUMN backing_asset_issuer TEXT")
-        except Exception: pass
-
-        # NFT tables (safe to re-run, for brand-new DBs)
+        # NFT tables (safe to re-run)
         cx.executescript("""
         CREATE TABLE IF NOT EXISTS nft_collections(
           id INTEGER PRIMARY KEY,
@@ -347,8 +290,6 @@ def ensure_schema():
           decimals INTEGER NOT NULL DEFAULT 0,
           status TEXT DEFAULT 'draft',
           locked_issuer INTEGER DEFAULT 0,
-          royalty_bp INTEGER,
-          backing_template_izza TEXT,
           created_at INTEGER,
           updated_at INTEGER,
           UNIQUE(code, issuer),
@@ -366,9 +307,6 @@ def ensure_schema():
           owner_wallet_pub TEXT,
           minted_at INTEGER,
           metadata_json TEXT,
-          backing_izza TEXT,
-          backing_asset_code TEXT,
-          backing_asset_issuer TEXT,
           UNIQUE(collection_id, serial),
           FOREIGN KEY(collection_id) REFERENCES nft_collections(id) ON DELETE CASCADE,
           FOREIGN KEY(owner_user_id) REFERENCES users(id)
@@ -421,26 +359,6 @@ def ensure_schema():
         CREATE INDEX IF NOT EXISTS idx_nft_pending_pub ON nft_pending_claims(buyer_pub, status);
         CREATE INDEX IF NOT EXISTS idx_nft_pending_user ON nft_pending_claims(buyer_username, status);
         """)
-
-        # NEW: global vault table for value-backed NFTs
-        try:
-            cx.execute("""
-              CREATE TABLE IF NOT EXISTS nft_vaults(
-                id INTEGER PRIMARY KEY,
-                asset_code TEXT NOT NULL,
-                asset_issuer TEXT NOT NULL,
-                vault_izza TEXT NOT NULL,
-                creator_pub TEXT,
-                created_at INTEGER NOT NULL,
-                burned_at INTEGER,
-                burn_owner_pub TEXT,
-                burn_tx TEXT,
-                status TEXT NOT NULL DEFAULT 'active',
-                UNIQUE(asset_code, asset_issuer)
-              );
-            """)
-        except Exception:
-            pass
 
         # Partial UNIQUE indexes (recreate if needed)
         cx.execute("""
