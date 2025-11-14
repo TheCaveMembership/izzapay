@@ -459,7 +459,8 @@ def api_nft_owned():
                   nc.issuer,
                   nt.backing_izza,
                   nt.backing_asset_code,
-                  nt.backing_asset_issuer
+                  nt.backing_asset_issuer,
+                  nt.metadata_json
                 FROM nft_tokens nt
                 JOIN nft_collections nc ON nc.id = nt.collection_id
                 WHERE nt.owner_wallet_pub = ?
@@ -467,13 +468,38 @@ def api_nft_owned():
             """, (pub,)).fetchall()
         out = []
         for r in rows:
+            # backing value as a string number
+            backing_raw = r["backing_izza"]
+            backing_str = "0"
+            if backing_raw is not None:
+                try:
+                    backing_str = str(Decimal(str(backing_raw)))
+                except Exception:
+                    backing_str = "0"
+
+            # optional metadata for image
+            img_url = None
+            meta_raw = r["metadata_json"]
+            if meta_raw:
+                try:
+                    meta = json.loads(meta_raw)
+                    # Try common keys, you can adjust if you use a different schema
+                    img_url = (
+                        meta.get("image_url")
+                        or meta.get("image")
+                        or meta.get("img")
+                    )
+                except Exception:
+                    img_url = None
+
             out.append({
                 "code": r["code"],
                 "issuer": r["issuer"],
                 "serial": r["serial"],
-                "backing_izza": r["backing_izza"],
+                "backing_izza": backing_str,
                 "backing_asset_code": r["backing_asset_code"],
                 "backing_asset_issuer": r["backing_asset_issuer"],
+                "img_url": img_url,
             })
         return jsonify({"ok": True, "rows": out}), 200
     except Exception as e:
