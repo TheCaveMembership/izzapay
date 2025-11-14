@@ -560,65 +560,91 @@
 
   // Army Strength
   async function loadArmyStrength(){
-    try{
-      const qs = USER_CANON ? ('?u='+encodeURIComponent(USER_CANON)) : '';
-      const j = await fetch('/api/creatures/army-stats'+qs, {credentials:'include'}).then(r=>r.json());
-      if(j && j.ok){
-        armyAtk.textContent = String(j.attack ?? 0);
-        armyDef.textContent = String(j.defense ?? 0);
-        armyCnt.textContent = String(j.count ?? 0);
-        armyBox.style.display = 'block';
+  try{
+    let qs = '';
+    try {
+      const v = __readVault();
+      if (v && v.pub) {
+        qs = '?owner_pub=' + encodeURIComponent(String(v.pub).trim().toUpperCase());
+      } else if (USER_CANON) {
+        qs = '?u=' + encodeURIComponent(USER_CANON);
       }
-    }catch(e){}
-  }
+    } catch(e) {}
+
+    const j = await fetch('/api/creatures/army-stats' + qs, {credentials:'include'})
+                .then(r => r.json());
+
+    if (j && j.ok){
+      armyAtk.textContent = String(j.attack ?? 0);
+      armyDef.textContent = String(j.defense ?? 0);
+      armyCnt.textContent = String(j.count ?? 0);
+      armyBox.style.display = 'block';
+    }
+  }catch(e){}
+}
 
   // Always-visible My Creatures loader
   const myBox  = document.getElementById('myCreaturesBox');
   const myList = document.getElementById('myCreaturesList');
 
   async function loadMyCreatures(){
-    myList.innerHTML = '';
-    const qs = USER_CANON ? ('?u='+encodeURIComponent(USER_CANON)) : '';
-    const j = await fetch('/api/creatures/mine'+qs, {credentials:'include'}).then(r=>r.json()).catch(()=>({items:[]}));
-    (j.items||[]).forEach(it=>{
-      const card = document.createElement('div');
-      card.className = 'thumb';
+  myList.innerHTML = '';
 
-      const img = document.createElement('img');
-      img.alt = it.code;
-      img.src = `/nftsvg/${it.code}.svg?nc=${Date.now()}`;
+  // Prefer the active local wallet pub, fall back to username
+  let qs = '';
+  try {
+    const v = __readVault();
+    if (v && v.pub) {
+      qs = '?owner_pub=' + encodeURIComponent(String(v.pub).trim().toUpperCase());
+    } else if (USER_CANON) {
+      qs = '?u=' + encodeURIComponent(USER_CANON);
+    }
+  } catch(e) {}
 
-      const cap = document.createElement('div');
-      cap.className = 'cap';
-      cap.textContent = it.code + (it.stage ? ` — ${it.stage}` : '');
+  const j = await fetch('/api/creatures/mine' + qs, {credentials:'include'})
+            .then(r => r.json())
+            .catch(() => ({items:[]}));
 
-      const row = document.createElement('div');
-      row.style.display = 'flex';
-      row.style.gap = '8px';
+  (j.items || []).forEach(it => {
+    const card = document.createElement('div');
+    card.className = 'thumb';
 
-      const openA = document.createElement('a');
-      openA.href = `/creature/${it.code}`;
-      openA.className = 'btn';
-      openA.textContent = 'OPEN';
+    const img = document.createElement('img');
+    img.alt = it.code;
+    img.src = `/nftsvg/${it.code}.svg?nc=${Date.now()}`;
 
-      const burnB = document.createElement('button');
-      burnB.type = 'button';
-      burnB.className = 'btn red';
-      burnB.textContent = 'BURN';
-      burnB.addEventListener('click', async ()=> {
-        await burnCreature(it.code);
-      });
+    const cap = document.createElement('div');
+    cap.className = 'cap';
+    cap.textContent = it.code + (it.stage ? ` — ${it.stage}` : '');
 
-      row.appendChild(openA);
-      row.appendChild(burnB);
+    const row = document.createElement('div');
+    row.style.display = 'flex';
+    row.style.gap = '8px';
 
-      card.appendChild(img);
-      card.appendChild(cap);
-      card.appendChild(row);
-      myList.appendChild(card);
+    const openA = document.createElement('a');
+    openA.href = `/creature/${it.code}`;
+    openA.className = 'btn';
+    openA.textContent = 'OPEN';
+
+    const burnB = document.createElement('button');
+    burnB.type = 'button';
+    burnB.className = 'btn red';
+    burnB.textContent = 'BURN';
+    burnB.addEventListener('click', async ()=> {
+      await burnCreature(it.code);
     });
-    myBox.style.display = 'block';
-  }
+
+    row.appendChild(openA);
+    row.appendChild(burnB);
+
+    card.appendChild(img);
+    card.appendChild(cap);
+    card.appendChild(row);
+    myList.appendChild(card);
+  });
+
+  myBox.style.display = 'block';
+}
 
   (async ()=>{
     try{
