@@ -758,7 +758,7 @@ def claim():
     except Exception:
         pass
 
-    # Mark pending claims as claimed
+        # Mark pending claims as claimed
     try:
         with _db() as cx:
             changed = 0
@@ -792,7 +792,8 @@ def claim():
     except Exception as e:
         log.warning("NFT_PENDING_MARK_FAIL buyer=%s err=%s", _mask(buyer), e)
 
-        return jsonify({
+    # Always return a valid JSON response, even if marking pending rows failed
+    return jsonify({
         "ok": True,
         "delivered": delivered,
         "buyer_pub": buyer,
