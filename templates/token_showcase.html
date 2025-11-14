@@ -2416,15 +2416,51 @@ claimSelected?.addEventListener('click', async ()=>{
     .map(x => (x.dataset.balanceIds || x.value || '').trim());
   const picks = rawPicks.flatMap(v => v.split(',')).map(s => s.trim()).filter(Boolean);
 
-  // NFT picks: group by issuer
-  const pickedNfts = Array.from(document.querySelectorAll('.cbPickNft:checked'))
-    .map(el => ({ code: el.dataset.code, issuer: el.dataset.issuer }))
-    .filter(x => x.code && x.issuer);
-  const byIssuer = {};
-  for (const p of pickedNfts){
-    (byIssuer[p.issuer] ||= []).push(p.code);
+  // Helper stays the same
+function uniq(arr){ return Array.from(new Set(arr)); }
+
+// NFT picks, now with optional extra backing per NFT
+const pickedNfts = Array.from(document.querySelectorAll('.cbPickNft:checked'))
+  .map(el => {
+    const code   = (el.dataset.code   || '').trim();
+    const issuer = (el.dataset.issuer || '').trim();
+    const input  = claimTblBody.querySelector(
+      `.extraBacking[data-code="${code}"][data-issuer="${issuer}"]`
+    );
+
+    let extra = 0;
+    if (input && input.value) {
+      const v = Number(input.value);
+      if (isFinite(v) && v > 0) {
+        extra = v;
+      }
+    }
+    return { code, issuer, extra };
+  })
+  .filter(x => x.code && x.issuer);
+
+// Group by issuer and collect extras, keeping assets as a string array for compatibility
+const byIssuer = {};
+for (const p of pickedNfts){
+  if (!byIssuer[p.issuer]) {
+    byIssuer[p.issuer] = { issuer: p.issuer, assets: [], extras: {} };
   }
-  const groups = Object.entries(byIssuer).map(([issuer, codes]) => ({ issuer, assets: uniq(codes) }));
+  const g = byIssuer[p.issuer];
+
+  // assets list (unique codes)
+  if (!g.assets.includes(p.code)) {
+    g.assets.push(p.code);
+  }
+
+  // extras map per code (can accumulate if same code appears twice defensively)
+  if (p.extra > 0) {
+    const prev = g.extras[p.code] || 0;
+    g.extras[p.code] = prev + p.extra;
+  }
+}
+
+// Final groups array, same shape as before but now with extras per group
+const groups = Object.values(byIssuer);
 
   if (!picks.length && !groups.length){
     claimMsg.textContent='Pick at least one balance or NFT.';
@@ -2478,12 +2514,31 @@ claimSelected?.addEventListener('click', async ()=>{
   }
 
   async function submitNftGroup(g){
-    const u = (USER?.username || '');
-    const url = u ? `/api/nft/claim?u=${encodeURIComponent(u)}` : '/api/nft/claim';
-    const body = { buyer_pub: pub, assets: g.assets, issuer: g.issuer, as_claimable: true };
+  const u = (USER?.username || '');
+  const url = u ? `/api/nft/claim?u=${encodeURIComponent(u)}` : '/api/nft/claim';
 
-    // final preflight: ensure all trustlines exist for this group
-    await window.__nftTrust_addIfNeeded(g.assets.map(code => ({ code, issuer: g.issuer })));
+  const body = {
+    buyer_pub: pub,
+    assets: g.assets,
+    issuer: g.issuer,
+    as_claimable: true
+  };
+
+  // Attach extras map if present
+  if (g.extras && Object.keys(g.extras).length) {
+    // send as strings to avoid float issues
+    const extras = {};
+    for (const [code, amt] of Object.entries(g.extras)) {
+      if (amt > 0) extras[code] = String(amt);
+    }
+    if (Object.keys(extras).length) {
+      body.extras_izza = extras;
+    }
+  }
+
+  // final preflight: ensure all trustlines exist for this group
+  await window.__nftTrust_addIfNeeded(g.assets.map(code => ({ code, issuer: g.issuer })));
+
 
     const r1  = await fetch(url, { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(body) });
     const txt = await r1.text().catch(()=> '');
