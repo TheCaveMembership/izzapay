@@ -1736,6 +1736,58 @@ function cardEl({ code, issuer, serial, status, backingIzza, imgUrl }){
 
   row.append(aAsset, aIssuer);
 
+  // ---- Burn & Redeem button (only for owned, backed NFTs, not pending) ----
+  if (!isNaN(backed) && backed > 0 && status !== 'pending') {
+    const burnBtn = document.createElement('button');
+    burnBtn.type = 'button';
+    burnBtn.textContent = 'Burn & redeem';
+    burnBtn.className = 'cta';
+    burnBtn.style.cssText = 'margin-top:6px;font-size:11px;padding:4px 8px;';
+
+    burnBtn.addEventListener('click', async ()=>{
+      const pub = window.ACTIVE_PUB || document.getElementById('acctPub')?.value || '';
+      if(!pub){
+        alert('Link a wallet first to burn NFTs.');
+        return;
+      }
+      const msg = `Burn ${code}${serial ? ' #' + serial : ''} and redeem ${backingIzza} IZZA?\nThis action is permanent.`;
+      if(!window.confirm(msg)) return;
+
+      burnBtn.disabled = true;
+      burnBtn.textContent = 'Burning…';
+
+      try{
+        const r = await fetch('/api/nft/burn', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          credentials: 'include',
+          body: JSON.stringify({
+            owner_pub: pub,
+            code
+          })
+        });
+        const j = await r.json().catch(()=>({}));
+        if(!r.ok || !j.ok){
+          const err = j && j.error ? j.error : `HTTP ${r.status}`;
+          alert('Burn failed: ' + err);
+        }else{
+          const redeemed = j.redeemed_izza || backingIzza;
+          alert(`Burned. Redeemed ${redeemed} IZZA into your wallet.`);
+          if (window.loadMyNfts) window.loadMyNfts();
+          document.dispatchEvent(new CustomEvent('izza:nft:burned', { detail: { code, pub } }));
+        }
+      }catch(e){
+        console.warn('burn error', e);
+        alert('Could not complete burn right now.');
+      }finally{
+        burnBtn.disabled = false;
+        burnBtn.textContent = 'Burn & redeem';
+      }
+    });
+
+    wrap.appendChild(burnBtn);
+  }
+
   wrap.append(head, meta, vault, row);
   return wrap;
 }
