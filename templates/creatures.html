@@ -653,12 +653,21 @@
     }
     eggPreview.src = `/nftsvg/EGGDEMO.svg?skin=${encodeURIComponent(finalSkin)}&nobg=1&nc=${Date.now()}`;
 
-    try{
-      const res = await fetch('/api/creatures/mint', {
-        method:'POST',
-        headers:{'Content-Type':'application/json'},
-        body: JSON.stringify({ buyer_pub:gate.pub, buyer_sec:gate.sec, skin: finalSkin })
-      }).then(r=>r.json());
+      const extraVaultInput = document.getElementById('extraVault');
+  let extraVault = (extraVaultInput?.value || '').trim();
+  if(!extraVault) extraVault = "0";
+
+  try{
+    const res = await fetch('/api/creatures/mint', {
+      method:'POST',
+      headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({
+        buyer_pub: gate.pub,
+        buyer_sec: gate.sec,
+        skin: finalSkin,
+        extra_vault_izza: extraVault
+      })
+    }).then(r=>r.json());
       if(!(res && res.ok)) throw new Error(res && res.error || 'mint_failed');
 
       lastCode = res.asset.code; lastIssuer = res.asset.issuer;
