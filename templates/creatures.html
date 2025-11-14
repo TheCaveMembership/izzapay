@@ -522,6 +522,18 @@
     return { user:USER_CANON, pub, sec:getLocalSecret(pub) };
   }
 
+  // helper for view-only endpoints: prefer pub, fallback to username
+  async function getViewWalletPub(){
+    try{
+      if(!USER_CANON) return '';
+      const active = await fetchActiveWallet(USER_CANON);
+      const pub = active && active.pub || '';
+      return pub || '';
+    }catch(e){
+      return '';
+    }
+  }
+
   let lastCode = null, lastIssuer = null;
   async function refreshLive(){
     if(!lastCode){ liveHint.textContent='Mint an egg to see it here'; return; }
@@ -553,10 +565,16 @@
     }catch(e){}
   }
 
-  // Army Strength – back to username-based lookup
+  // Army Strength – now prefers pub key, fallback to username
   async function loadArmyStrength(){
     try{
-      const qs = USER_CANON ? ('?u='+encodeURIComponent(USER_CANON)) : '';
+      let qs = '';
+      const pub = await getViewWalletPub();
+      if(pub){
+        qs = '?pub=' + encodeURIComponent(pub);
+      }else if(USER_CANON){
+        qs = '?u=' + encodeURIComponent(USER_CANON);
+      }
       const j = await fetch('/api/creatures/army-stats'+qs, {credentials:'include'}).then(r=>r.json());
       if(j && j.ok){
         armyAtk.textContent = String(j.attack ?? 0);
@@ -567,13 +585,21 @@
     }catch(e){}
   }
 
-  // Always-visible My Creatures loader – username-based lookup
+  // Always-visible My Creatures loader – now prefers pub key, fallback to username
   const myBox  = document.getElementById('myCreaturesBox');
   const myList = document.getElementById('myCreaturesList');
 
   async function loadMyCreatures(){
     myList.innerHTML = '';
-    const qs = USER_CANON ? ('?u='+encodeURIComponent(USER_CANON)) : '';
+
+    let qs = '';
+    const pub = await getViewWalletPub();
+    if(pub){
+      qs = '?pub=' + encodeURIComponent(pub);
+    }else if(USER_CANON){
+      qs = '?u=' + encodeURIComponent(USER_CANON);
+    }
+
     const j = await fetch('/api/creatures/mine'+qs, {credentials:'include'})
               .then(r=>r.json())
               .catch(()=>({items:[]}));
