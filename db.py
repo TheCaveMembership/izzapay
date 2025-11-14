@@ -472,7 +472,7 @@ def ensure_schema():
             pass
 
         # Triggers to mirror pi_username -> username if username not set
-        cx.executescripts("""
+        cx.executescript("""
         CREATE TRIGGER IF NOT EXISTS trg_users_username_default_ins
         AFTER INSERT ON users
         WHEN NEW.username IS NULL
