@@ -8,7 +8,7 @@ from db import conn as _conn
 
 # Shared Horizon helpers
 from nft_api import (
-    server, PP,
+    server, PP, ONE_NFT_UNIT,
     _account_has_trustline, _change_trust, _pay_asset, _ensure_distributor_holds_one
 )
 
@@ -506,7 +506,7 @@ def creatures_auto_claim():
     if not row:
         abort(404, "unknown_code")
     if row["owner_pub"]:
-        return jsonify({"ok": True, "code": code, "note": "already owned"})
+        return jsonify({"ok": True, "code": code, "note": "already_owned"})
 
     asset = Asset(code, CREATURE_ISSUER_G)
     delivered = False
@@ -519,7 +519,7 @@ def creatures_auto_claim():
         try:
             if not _account_has_trustline(owner_pub, asset):
                 _change_trust(owner_sec, asset, limit="1")
-            _pay_asset(DISTR_S, owner_pub, "1", asset, memo=f"IZZA CREATURE {code}")
+            _pay_asset(DISTR_S, owner_pub, str(ONE_NFT_UNIT), asset, memo=f"IZZA CREATURE {code}")
             delivered = True
         except Exception:
             delivered = False
@@ -535,7 +535,7 @@ def creatures_auto_claim():
                 network_passphrase=PP,
                 base_fee=base_fee,
             )
-            .append_create_claimable_balance_op(asset=asset, amount="1", claimants=[claimant])
+            .append_create_claimable_balance_op(asset=asset, amount=str(ONE_NFT_UNIT), claimants=[claimant])
             .set_timeout(120)
             .build()
         )
@@ -607,9 +607,10 @@ def creatures_feed():
 @bp_creatures.post("/api/creatures/burn")
 def creatures_burn():
     """
-    Burns a creature by transferring the 1-unit NFT back to the distributor account,
-    then marking the row as burned (timestamp + tx hash). We require that the caller
-    is the current owner. Secret can come either from the request (owner_sec) or
+    Burns a creature by transferring the ONE_NFT_UNIT amount of the NFT
+    back to the distributor account, then marking the row as burned
+    (timestamp + tx hash). We require that the caller is the current
+    owner. Secret can come either from the request (owner_sec) or
     from wallet_api linkage.
     """
     j = request.get_json(silent=True) or {}
@@ -655,7 +656,7 @@ def creatures_burn():
 
     # transfer back to distributor with a burn memo
     try:
-        tx_resp = _pay_asset(owner_sec, DISTR_G, "1", asset, memo=f"BURN {code}")
+        tx_resp = _pay_asset(owner_sec, DISTR_G, str(ONE_NFT_UNIT), asset, memo=f"BURN {code}")
         burn_tx = getattr(tx_resp, "get", lambda k, d=None: None)("hash") if isinstance(tx_resp, dict) else None
     except Exception as e:
         abort(400, f"burn_failed:{e}")
