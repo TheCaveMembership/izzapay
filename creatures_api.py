@@ -51,9 +51,7 @@ HUNGER_PER_DAY = {
 MISSED_DAYS_TO_DIE   = 3
 REVIVE_DAYS_REQUIRED = 3
 
-EGG_PRICE_IZZA = Decimal("5")     # total base cost shown to user
-EGG_FEE_IZZA   = Decimal("4")     # platform fee from that 5
-EGG_BASE_VAULT = EGG_PRICE_IZZA - EGG_FEE_IZZA  # 1 IZZA base vault
+EGG_PRICE_IZZA = Decimal("5")
 
 # ----- collection cap (live supply) -----
 CREATURES_CAP = 1000  # IZZA CREATURES V1 circulating cap
@@ -124,39 +122,6 @@ def _ensure_tables():
           updated_at INTEGER,
           UNIQUE(code, issuer)
         )""")
-
-def _record_creature_vault(cx: sqlite3.Connection, code: str, issuer: str,
-                           vault_izza: Decimal, creator_pub: str | None):
-    """
-    Record or update a vault entry for a creature NFT.
-
-    This uses the shared nft_vaults table that is also used by item NFTs.
-    The schema is:
-      nft_vaults(
-        id INTEGER PRIMARY KEY,
-        asset_code TEXT,
-        asset_issuer TEXT,
-        vault_izza TEXT,
-        creator_pub TEXT,
-        created_at INTEGER,
-        burned_at INTEGER,
-        burn_owner_pub TEXT,
-        burn_tx TEXT,
-        status TEXT,
-        UNIQUE(asset_code, asset_issuer)
-      )
-    """
-    if vault_izza <= 0:
-        return
-
-    cx.execute("""
-      INSERT INTO nft_vaults(asset_code, asset_issuer, vault_izza, creator_pub,
-                             created_at, burned_at, burn_owner_pub, burn_tx, status)
-      VALUES(?,?,?,?,?,?,?, ?, 'active')
-      ON CONFLICT(asset_code, asset_issuer)
-      DO UPDATE SET vault_izza = vault_izza + excluded.vault_izza,
-                    status = 'active'
-    """, (code, issuer, str(vault_izza), creator_pub, _now_i(), None, None, None))
 
 # ---------- username/pub fallback ----------
 def _norm_username(u: str | None) -> str | None:
@@ -415,18 +380,6 @@ def creatures_mint():
     buyer_sec = (j.get("buyer_sec") or "").strip()
     client_skin = (j.get("skin") or "").strip()
 
-    # NEW: optional extra vault IZZA provided by buyer at mint time
-    extra_raw = str(j.get("extra_vault_izza") or "0").strip()
-    try:
-        extra_vault_izza = Decimal(extra_raw)
-    except Exception:
-        extra_vault_izza = Decimal("0")
-    if extra_vault_izza < 0:
-        extra_vault_izza = Decimal("0")
-
-    # total vault backing for this egg (base 1 IZZA + any extra the buyer chose)
-    total_vault_izza = EGG_BASE_VAULT + extra_vault_izza
-
     if not buyer_pub or not buyer_sec:
         abort(400, "wallet_required")
 
@@ -436,17 +389,13 @@ def creatures_mint():
         if live_supply >= CREATURES_CAP:
             abort(400, "supply_cap_reached")
 
-        izza = Asset(IZZA_CODE, IZZA_ISS)
-
-    # Total payment: base 5 IZZA (4 fee + 1 vaulted) + any extra vault
-    pay_amount = EGG_PRICE_IZZA + extra_vault_izza  # 5 + extra
-
+    izza = Asset(IZZA_CODE, IZZA_ISS)
     try:
         _change_trust(DISTR_S, izza, limit="100000000")
     except Exception:
         pass
     try:
-        _pay_asset(buyer_sec, DISTR_G, str(pay_amount), izza, memo="IZZA CREATURE EGG")
+        _pay_asset(buyer_sec, DISTR_G, str(EGG_PRICE_IZZA), izza, memo="IZZA CREATURE EGG")
     except Exception as e:
         abort(400, f"fee_payment_failed:{e}")
 
@@ -476,10 +425,6 @@ def creatures_mint():
           VALUES(?,?,?,?, 'draft', ?, ?)
           ON CONFLICT(code, issuer) DO UPDATE SET updated_at=excluded.updated_at
         """, (code, CREATURE_ISSUER_G, 1, 0, ts, ts))
-
-        # NEW: record value backing in the shared global vault table
-        _record_creature_vault(cx, code, CREATURE_ISSUER_G, total_vault_izza, buyer_pub)
-
         cx.commit()
 
     return jsonify({"ok": True, "asset": {"code": code, "issuer": CREATURE_ISSUER_G}, "hatch_start": ts})
@@ -689,7 +634,7 @@ def creatures_burn():
         if (row["owner_pub"] or "").upper() != owner_pub:
             abort(403, "not_owner")
 
-        # get secret if not provided
+    # get secret if not provided
     if not owner_sec:
         try:
             owner_sec = _get_linked_secret(owner_pub) or ""
@@ -700,62 +645,21 @@ def creatures_burn():
 
     asset = Asset(code, CREATURE_ISSUER_G)
 
-    # --- NEW: look up vault backing and prepare IZZA payout on burn ---
-    izza_asset = Asset(IZZA_CODE, IZZA_ISS)
-    vault_amount = Decimal("0")
-    vault_tx_hash = None
-
-    with _db() as cx:
-        vrow = cx.execute(
-            "SELECT id, vault_izza FROM nft_vaults "
-            "WHERE asset_code=? AND asset_issuer=? AND COALESCE(status,'active')='active'",
-            (code, CREATURE_ISSUER_G)
-        ).fetchone()
-        if vrow and vrow["vault_izza"]:
-            try:
-                vault_amount = Decimal(str(vrow["vault_izza"]))
-            except Exception:
-                vault_amount = Decimal("0")
-        vault_id = vrow["id"] if vrow else None
-
-        # ensure trustline exists (owner should already have it) for the NFT asset
+    # ensure trustline exists (owner should already have it)
     try:
         if not _account_has_trustline(owner_pub, asset):
             _change_trust(owner_sec, asset, limit="1")
     except Exception:
+        # trustline missing and cannot add => cannot burn
         abort(400, "trustline_missing")
 
-    # transfer the 1-unit NFT back to distributor with a burn memo
+    # transfer back to distributor with a burn memo
     try:
         tx_resp = _pay_asset(owner_sec, DISTR_G, "1", asset, memo=f"BURN {code}")
-        burn_tx = tx_resp.get("hash") if isinstance(tx_resp, dict) else None
+        burn_tx = getattr(tx_resp, "get", lambda k, d=None: None)("hash") if isinstance(tx_resp, dict) else None
     except Exception as e:
         abort(400, f"burn_failed:{e}")
 
-    # return vaulted IZZA to owner, if any
-    if vault_amount > 0 and vault_id is not None:
-        try:
-            # ensure IZZA trustline
-            if not _account_has_trustline(owner_pub, izza_asset):
-                _change_trust(owner_sec, izza_asset, limit="100000000")
-
-            vtx_resp = _pay_asset(DISTR_S, owner_pub, str(vault_amount), izza_asset,
-                                  memo=f"VAULT RETURN {code}")
-            vault_tx_hash = vtx_resp.get("hash") if isinstance(vtx_resp, dict) else None
-        except Exception as e:
-            # If vault payout fails, we abort and do NOT mark as burned so user can retry
-            abort(400, f"vault_payout_failed:{e}")
-
-        # mark the vault row as closed / burned
-        with _db() as cx:
-            cx.execute("""
-                UPDATE nft_vaults
-                SET vault_izza='0', burned_at=?, burn_owner_pub=?, burn_tx=?, status='burned'
-                WHERE id=?
-            """, (_now_i(), owner_pub, vault_tx_hash, vault_id))
-            cx.commit()
-
-    # finally mark the creature as burned
     with _db() as cx:
         cx.execute(
             "UPDATE nft_creatures SET burned_at=?, burn_tx=?, owner_pub=NULL, stage='dead' WHERE code=? AND issuer=?",
@@ -763,13 +667,7 @@ def creatures_burn():
         )
         cx.commit()
 
-    return jsonify({
-        "ok": True,
-        "code": code,
-        "burned": True,
-        "tx": burn_tx,
-        "vault_returned": str(vault_amount)
-    })
+    return jsonify({"ok": True, "code": code, "burned": True, "tx": burn_tx})
 
 # ---------- NEW: collection stats ----------
 @bp_creatures.get("/api/creatures/collection-stats")
