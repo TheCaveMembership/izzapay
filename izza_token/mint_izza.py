@@ -47,13 +47,26 @@ BASE_FEE_OVERRIDE = getenv("BASE_FEE", "")
 
 # Runtime switches (safe defaults)
 RUN_MINT         = getenv("RUN_MINT", "0") == "1"          # default: don't mint again
-RUN_SELL_LADDER  = getenv("RUN_SELL_LADDER", "1") == "1"   # default: DO seed the sale ladder
+RUN_SELL_LADDER  = getenv("RUN_SELL_LADDER", "0") == "1"   # default: DON'T seed the sale ladder
+RUN_MOVE_IZZA    = getenv("RUN_MOVE_IZZA", "0") == "1"     # new: move IZZA from distributor → wallet
+RUN_NATIVE_PAYOUT = getenv("RUN_NATIVE_PAYOUT", "0") == "1"  # optional native (Pi) payout, default off
+
+# New: move-IZZA configuration
+MOVE_IZZA_DEST   = getenv("MOVE_IZZA_DEST", "")            # destination pubkey (your IZZA wallet)
+MOVE_IZZA_AMOUNT = getenv("MOVE_IZZA_AMOUNT", "0")         # amount of IZZA to move (e.g. "100000")
+
+# Optional native payout config (kept but disabled by default)
+NATIVE_PAYOUT_DEST   = getenv("NATIVE_PAYOUT_DEST", "")
+NATIVE_PAYOUT_AMOUNT = getenv("NATIVE_PAYOUT_AMOUNT", "0")
+NATIVE_PAYOUT_MEMO   = getenv("NATIVE_PAYOUT_MEMO", "IZZA test payout")
 
 print("Loaded environment:")
 print("ISSUER_PUB:", ISSUER_PUB)
 print("DISTR_PUB:", DISTR_PUB)
 print("HORIZON_URL:", HORIZON_URL)
-print("RUN_MINT:", RUN_MINT, " RUN_SELL_LADDER:", RUN_SELL_LADDER)
+print("RUN_MINT:", RUN_MINT,
+      " RUN_SELL_LADDER:", RUN_SELL_LADDER,
+      " RUN_MOVE_IZZA:", RUN_MOVE_IZZA)
 
 # Validate keys
 problems = []
@@ -203,7 +216,7 @@ def issuer_mint_payment():
     tx.sign(issuer_kp)
     return submit_and_print(tx)
 
-# ==================== DEX OFFER HELPERS (ADD HERE) ====================
+# ==================== DEX OFFER HELPERS ====================
 
 from stellar_sdk import Asset as _AssetAlias  # not strictly needed; Asset.native() already imported
 
@@ -259,8 +272,7 @@ def cancel_all_izza_offers():
     """Cancel all existing IZZA sell offers from the distributor."""
     distr_kp = Keypair.from_secret(DISTR_SECRET)
 
-    # FIX: use .for_seller(), not .seller()
-    # Also pull up to 200 per page to be safe.
+    # use .for_seller(), not .seller()
     page = server.offers().for_seller(distr_kp.public_key).limit(200).call()
     offers = page.get("_embedded", {}).get("records", [])
 
@@ -296,7 +308,7 @@ def cancel_all_izza_offers():
     submit_and_print(tx)
     print(f"🧹 Canceled {len(izza_offers)} IZZA offers.")
 
-# -------- NEW: Ladder-to-target helper (linear or geometric) --------
+# -------- Ladder-to-target helper (linear or geometric) --------
 def seed_ladder_to_target(total_amount: int,
                           chunk_amount: int,
                           start_price: Decimal,
@@ -340,8 +352,6 @@ def seed_ladder_to_target(total_amount: int,
 
     print(f"✅ Ladder seeded: {len(prices)} rungs from {prices[0]:f} → {prices[-1]:f}")
 
-# ================== END DEX OFFER HELPERS (STOP ADDING) ==================
-
 # =============== NATIVE (TEST PI) PAYMENT HELPER ===============
 def send_native_payment(destination_pub: str, amount_pi: str, memo_text: str = ""):
     """
@@ -370,6 +380,47 @@ def send_native_payment(destination_pub: str, amount_pi: str, memo_text: str = "
     tx = tb.build()
     tx.sign(distr_kp)
     return submit_and_print(tx)
+
+# =============== NEW: DISTRIBUTOR → WALLET IZZA TRANSFER ===============
+def distributor_send_izza(destination_pub: str, amount_izza: str):
+    """
+    Move IZZA from DISTR_PUB to destination_pub (your IZZA wallet).
+    No new mint, no offers – just a straight payment.
+    """
+    if not StrKey.is_valid_ed25519_public_key(destination_pub):
+        raise ValueError("MOVE_IZZA_DEST is not a valid public key")
+
+    amount_dec = Decimal(amount_izza)
+    if amount_dec <= 0:
+        raise ValueError("MOVE_IZZA_AMOUNT must be > 0")
+
+    bal = get_izza_balance(DISTR_PUB)
+    print(f"Distributor IZZA balance before move: {bal}")
+    if bal < amount_dec:
+        raise RuntimeError(f"Not enough IZZA in distributor. Have {bal}, need {amount_dec}")
+
+    distr_kp   = Keypair.from_secret(DISTR_SECRET)
+    distr_acct = server.load_account(distr_kp.public_key)
+
+    tx = (
+        TransactionBuilder(
+            source_account=distr_acct,
+            network_passphrase=NETWORK_PASSPHRASE,
+            base_fee=get_base_fee(),
+        )
+        .append_payment_op(
+            destination=destination_pub,
+            amount=str(amount_dec),
+            asset=asset
+        )
+        .set_timeout(180)
+        .build()
+    )
+    tx.sign(distr_kp)
+    resp = submit_and_print(tx)
+    print(f"🚚 Moved {amount_dec} {ASSET_CODE} from distributor to {destination_pub}")
+    return resp
+
 # ===============================================================
 
 def main():
@@ -416,7 +467,6 @@ def main():
             sellable_int = int(sellable.to_integral_value(rounding="ROUND_FLOOR"))
             print(f"Posting ladder for {sellable_int} IZZA …")
 
-            # Env-tunable ladder to a target end price
             ladder_chunk = int(getenv("LADDER_CHUNK", "10000"))
             ladder_total = int(getenv("LADDER_TOTAL", str(sellable_int)))
             ladder_start = Decimal(getenv("LADDER_START_PRICE", "0.0005"))
@@ -433,14 +483,31 @@ def main():
     else:
         print("⏭️  RUN_SELL_LADDER is 0. Skipping offer creation.")
 
+    # --- OPTIONAL: move IZZA from distributor → your wallet ---
+    if RUN_MOVE_IZZA:
+        try:
+            amt = str(Decimal(MOVE_IZZA_AMOUNT))
+        except Exception:
+            raise ValueError("MOVE_IZZA_AMOUNT must be numeric")
+        if not MOVE_IZZA_DEST:
+            raise RuntimeError("RUN_MOVE_IZZA=1 but MOVE_IZZA_DEST is empty")
+        print(f"\nMoving {amt} {ASSET_CODE} from distributor to {MOVE_IZZA_DEST} …")
+        distributor_send_izza(MOVE_IZZA_DEST, amt)
+    else:
+        print("⏭️  RUN_MOVE_IZZA is 0. Skipping distributor → wallet IZZA move.")
+
     # --- OPTIONAL: send native test Pi out of distributor ---
-    DEST_PI = "GDDFUCFIWEXARKUPKBU5SKXBQSUNTBPQQEDYHGYJGSZFYCGCGZO5X7CT"
-    AMOUNT  = "2100"  # test Pi to send
-
-    # maybe_create_account(DEST_PI)  # only if you need to auto-fund
-
-    print(f"\nSending {AMOUNT} test Pi to {DEST_PI} …")
-    send_native_payment(DEST_PI, AMOUNT, memo_text="IZZA test payout")
+    if RUN_NATIVE_PAYOUT:
+        try:
+            nat_amt = str(Decimal(NATIVE_PAYOUT_AMOUNT))
+        except Exception:
+            raise ValueError("NATIVE_PAYOUT_AMOUNT must be numeric")
+        if not NATIVE_PAYOUT_DEST:
+            raise RuntimeError("RUN_NATIVE_PAYOUT=1 but NATIVE_PAYOUT_DEST is empty")
+        print(f"\nSending {nat_amt} test Pi to {NATIVE_PAYOUT_DEST} …")
+        send_native_payment(NATIVE_PAYOUT_DEST, nat_amt, memo_text=NATIVE_PAYOUT_MEMO)
+    else:
+        print("⏭️  RUN_NATIVE_PAYOUT is 0. Skipping native payout.")
 
     print("\nAll done. Verify balances/offers at:")
     print(f"  Issuer:      {HORIZON_URL}/accounts/{ISSUER_PUB}")
