@@ -4,11 +4,13 @@ import sys
 import argparse
 import random
 import time
-import sqlite3
 from decimal import Decimal
 from dotenv import load_dotenv
 from stellar_sdk import Server, Keypair, TransactionBuilder, Asset, StrKey
 from stellar_sdk.exceptions import NotFoundError
+
+# Use the same DB as the IZZA app
+import db as app_db
 
 # Try to import AuthorizationFlag, but verify attributes exist
 try:
@@ -49,21 +51,16 @@ FUNDING_STARTING_BAL = getenv("FUNDING_STARTING_BALANCE", "5")
 # Optional manual override via env
 BASE_FEE_OVERRIDE = getenv("BASE_FEE", "")
 
-# ----------------- NEW: airdrop config -----------------
-RUN_AIRDROP     = getenv("RUN_AIRDROP", "0") == "1"
-AIRDROP_AMOUNT  = getenv("AIRDROP_AMOUNT", "0.0000001")  # 1 stroop of IZZA
-AIRDROP_TAG     = getenv("AIRDROP_TAG", "default")       # use different tag per weekly drop
-
-# Shared SQLite location (same style as db.py)
-DATA_ROOT       = os.getenv("DATA_ROOT", "/var/data/izzapay")
-SQLITE_DB_PATH  = os.getenv("SQLITE_DB_PATH", os.path.join(DATA_ROOT, "app.sqlite"))
-SQLITE_BUSY_MS  = int(os.getenv("SQLITE_BUSY_TIMEOUT_MS", "3000"))
-
 # Runtime switches (safe defaults)
 RUN_MINT          = getenv("RUN_MINT", "0") == "1"          # set to 1 when you want to mint
 RUN_SELL_LADDER   = getenv("RUN_SELL_LADDER", "0") == "1"   # seed the sale ladder when 1
 RUN_MOVE_IZZA     = getenv("RUN_MOVE_IZZA", "0") == "1"     # move IZZA from distributor → wallet
 RUN_NATIVE_PAYOUT = getenv("RUN_NATIVE_PAYOUT", "0") == "1"  # optional native (Pi) payout, default off
+
+# NEW: weekly IZZA airdrop to all IZZA trustline holders
+RUN_AIRDROP     = getenv("RUN_AIRDROP", "0") == "1"
+AIRDROP_AMOUNT  = getenv("AIRDROP_AMOUNT", "0.0000001")  # per wallet, tiny amount
+AIRDROP_TAG     = getenv("AIRDROP_TAG", "").strip()      # e.g. "week1" – used to avoid double-crediting
 
 # New: move-IZZA configuration
 MOVE_IZZA_DEST   = getenv("MOVE_IZZA_DEST", "")            # destination pubkey (your IZZA wallet)
@@ -94,67 +91,6 @@ if problems:
 
 server = Server(HORIZON_URL)
 asset  = Asset(ASSET_CODE, ISSUER_PUB)
-
-# ----------------- SQLite helpers for airdrops -----------------
-
-def _ensure_airdrop_tables():
-    """
-    Create izza_airdrops table in the shared app.sqlite DB if it does not exist.
-    This lets the app later connect airdrops → loot crates via wallet_pub.
-    """
-    os.makedirs(os.path.dirname(SQLITE_DB_PATH), exist_ok=True)
-    cx = sqlite3.connect(SQLITE_DB_PATH, timeout=SQLITE_BUSY_MS / 1000.0)
-    try:
-        cx.execute("PRAGMA foreign_keys=ON;")
-        cx.execute("PRAGMA journal_mode=WAL;")
-        cx.execute("PRAGMA synchronous=NORMAL;")
-        cx.execute(f"PRAGMA busy_timeout={SQLITE_BUSY_MS};")
-        cx.executescript("""
-        CREATE TABLE IF NOT EXISTS izza_airdrops(
-          id INTEGER PRIMARY KEY,
-          wallet_pub TEXT NOT NULL,
-          amount TEXT NOT NULL,
-          tx_hash TEXT,
-          drop_tag TEXT,
-          created_at INTEGER NOT NULL
-        );
-        CREATE INDEX IF NOT EXISTS idx_airdrops_wallet ON izza_airdrops(wallet_pub);
-        CREATE UNIQUE INDEX IF NOT EXISTS idx_airdrops_wallet_tag
-          ON izza_airdrops(wallet_pub, drop_tag);
-        """)
-        cx.commit()
-    finally:
-        cx.close()
-
-def _airdrop_already_recorded(wallet_pub: str, drop_tag: str) -> bool:
-    cx = sqlite3.connect(SQLITE_DB_PATH, timeout=SQLITE_BUSY_MS / 1000.0)
-    try:
-        cx.execute(f"PRAGMA busy_timeout={SQLITE_BUSY_MS};")
-        cur = cx.execute(
-            "SELECT 1 FROM izza_airdrops WHERE wallet_pub=? AND drop_tag=? LIMIT 1",
-            (wallet_pub, drop_tag),
-        )
-        row = cur.fetchone()
-        return row is not None
-    finally:
-        cx.close()
-
-def _record_airdrop(wallet_pub: str, amount: str, tx_hash: str | None, drop_tag: str):
-    cx = sqlite3.connect(SQLITE_DB_PATH, timeout=SQLITE_BUSY_MS / 1000.0)
-    try:
-        cx.execute(f"PRAGMA busy_timeout={SQLITE_BUSY_MS};")
-        cx.execute(
-            """
-            INSERT OR IGNORE INTO izza_airdrops(wallet_pub, amount, tx_hash, drop_tag, created_at)
-            VALUES(?,?,?,?,?)
-            """,
-            (wallet_pub, amount, tx_hash or "", drop_tag, int(time.time())),
-        )
-        cx.commit()
-    finally:
-        cx.close()
-
-# ----------------- Stellar helpers -----------------
 
 def get_base_fee() -> int:
     """Pick a safe base fee in stroops."""
@@ -587,103 +523,138 @@ def distributor_send_izza(destination_pub: str, amount_izza: str):
     print(f"🚚 Moved {amount_dec} {ASSET_CODE} from distributor to {destination_pub}")
     return resp
 
-# =============== NEW: AIRDROP TO ALL IZZA TRUSTLINES ===============
+# ===============================================================
+# NEW: Enumerate IZZA trustline holders and airdrop tiny IZZA
+# ===============================================================
 
 def iter_izza_trustline_holders():
     """
-    Yield account IDs for every wallet that has an IZZA trustline.
-    Uses Horizon accounts().for_asset(asset) paging.
+    Yield all account_ids that have a trustline to IZZA (excluding issuer + distributor).
+    This is what you target with the tiny airdrop (e.g. 0.0000001 IZZA).
     """
-    print("Scanning Horizon for IZZA trustline holders …")
-    call_builder = server.accounts().for_asset(asset).limit(200)
-    page = call_builder.call()
+    cursor = None
+    seen = set()
     while True:
+        call = server.accounts().for_asset(asset).limit(200)
+        if cursor:
+            call = call.cursor(cursor)
+        page = call.call()
         records = page.get("_embedded", {}).get("records", [])
         if not records:
             break
+
         for acc in records:
             acct_id = acc.get("account_id")
             if not acct_id:
                 continue
-            # Optional: skip issuer + distributor if they also trust themselves
             if acct_id in (ISSUER_PUB, DISTR_PUB):
                 continue
+            if acct_id in seen:
+                continue
+            seen.add(acct_id)
             yield acct_id
-        # next page
-        next_link = page.get("_links", {}).get("next", {}).get("href")
-        if not next_link:
+
+        next_href = page.get("_links", {}).get("next", {}).get("href")
+        if not next_href or "cursor=" not in next_href:
             break
-        # Use the paging token of the last record for cursor
-        last = records[-1]
-        cursor = last.get("paging_token")
-        if not cursor:
-            break
-        page = server.accounts().for_asset(asset).cursor(cursor).limit(200).call()
+        cursor = next_href.split("cursor=")[-1].split("&")[0] or None
 
-def run_airdrop_to_trustlines():
+def ensure_airdrop_table(cx):
     """
-    Send AIRDROP_AMOUNT IZZA from DISTR_PUB to every wallet
-    that has an IZZA trustline and has not yet been recorded
-    in izza_airdrops for the current AIRDROP_TAG.
+    Simple airdrop log table used by the IZZA app to decide:
+      - does this wallet_pub have an IZZA airdrop for a given tag?
     """
-    _ensure_airdrop_tables()
+    cx.execute("""
+      CREATE TABLE IF NOT EXISTS izza_airdrops(
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        wallet_pub TEXT NOT NULL,
+        tag TEXT,
+        amount TEXT,
+        tx_hash TEXT,
+        created_at INTEGER,
+        UNIQUE(wallet_pub, tag)
+      );
+    """)
 
-    amount_str = str(Decimal(AIRDROP_AMOUNT))
-    print(f"\n=== IZZA airdrop starting ===")
-    print(f"Amount per wallet: {amount_str} {ASSET_CODE}")
-    print(f"Drop tag: {AIRDROP_TAG}")
-    print(f"Writing log to SQLite DB at {SQLITE_DB_PATH}\n")
+def run_izza_airdrop():
+    """
+    Send AIRDROP_AMOUNT IZZA from DISTR_PUB to every IZZA trustline holder,
+    and log it in the izza_airdrops table for the app to hook loot crates onto.
+    """
+    try:
+        amt_dec = Decimal(AIRDROP_AMOUNT)
+    except Exception:
+        raise ValueError("AIRDROP_AMOUNT must be numeric")
 
-    distr_kp = Keypair.from_secret(DISTR_SECRET)
+    if amt_dec <= 0:
+        print("⚠️  AIRDROP_AMOUNT is <= 0, skipping airdrop.")
+        return
 
-    sent_count = 0
-    skipped_existing = 0
-    failed = 0
+    holders = list(iter_izza_trustline_holders())
+    if not holders:
+        print("⚠️  No IZZA trustline holders found for airdrop.")
+        return
 
-    for wallet_pub in iter_izza_trustline_holders():
-        # Skip if already recorded for this drop tag
-        if _airdrop_already_recorded(wallet_pub, AIRDROP_TAG):
-            skipped_existing += 1
-            continue
+    total_needed = amt_dec * Decimal(len(holders))
+    dist_bal = get_izza_balance(DISTR_PUB)
+    print(f"Airdrop config: amount={amt_dec} per wallet, holders={len(holders)}, "
+          f"needed={total_needed}, distributor_balance={dist_bal}")
 
-        # Make sure account still exists
-        try:
-            server.accounts().account_id(wallet_pub).call()
-        except NotFoundError:
-            print(f"  ⚠️  Skipping {wallet_pub}, account not found.")
-            continue
+    if dist_bal < total_needed:
+        print("⚠️  Not enough IZZA in distributor to cover full airdrop, aborting.")
+        return
 
-        try:
-            distr_acct = server.load_account(distr_kp.public_key)
-            tx = (
+    distr_kp   = Keypair.from_secret(DISTR_SECRET)
+    distr_acct = server.load_account(distr_kp.public_key)
+    base_fee   = get_base_fee()
+    now_ts     = int(time.time())
+    tag_value  = AIRDROP_TAG or None
+
+    with app_db.conn() as cx:
+        ensure_airdrop_table(cx)
+
+        sent = 0
+        skipped = 0
+        for pub in holders:
+            # If tag is set, don't double-record same wallet+tag
+            if tag_value is not None:
+                row = cx.execute(
+                    "SELECT 1 FROM izza_airdrops WHERE wallet_pub = ? AND tag = ?",
+                    (pub, tag_value)
+                ).fetchone()
+                if row:
+                    print(f"⏭️  Skipping already-recorded wallet for tag {tag_value}: {pub}")
+                    skipped += 1
+                    continue
+
+            tb = (
                 TransactionBuilder(
                     source_account=distr_acct,
                     network_passphrase=NETWORK_PASSPHRASE,
-                    base_fee=get_base_fee(),
+                    base_fee=base_fee,
                 )
                 .append_payment_op(
-                    destination=wallet_pub,
-                    amount=amount_str,
+                    destination=pub,
+                    amount=str(amt_dec),
                     asset=asset
                 )
                 .set_timeout(180)
-                .build()
             )
+            tx = tb.build()
             tx.sign(distr_kp)
-            resp = server.submit_transaction(tx)
-            tx_hash = resp.get("hash", "")
-            sent_count += 1
-            print(f"  🎁 Airdropped {amount_str} {ASSET_CODE} to {wallet_pub} tx={tx_hash}")
-            _record_airdrop(wallet_pub, amount_str, tx_hash, AIRDROP_TAG)
-        except Exception as e:
-            failed += 1
-            print(f"  ❌ Airdrop failed for {wallet_pub}: {e}")
+            try:
+                resp = submit_and_print(tx)
+                tx_hash = resp.get("hash")
+                cx.execute(
+                    "INSERT OR IGNORE INTO izza_airdrops(wallet_pub, tag, amount, tx_hash, created_at) "
+                    "VALUES (?,?,?,?,?)",
+                    (pub, tag_value, str(amt_dec), tx_hash, now_ts)
+                )
+                sent += 1
+            except Exception as e:
+                print(f"⚠️  Airdrop payment failed for {pub}: {e}")
 
-    print("\n=== IZZA airdrop complete ===")
-    print(f"Sent:   {sent_count}")
-    print(f"Skipped (already recorded for this tag): {skipped_existing}")
-    print(f"Failed: {failed}")
-    print("You can now use izza_airdrops + user_wallets in your app to show loot crates.\n")
+        print(f"✅ Airdrop complete. Sent to {sent} wallets, skipped {skipped} (already recorded).")
 
 # ===============================================================
 
@@ -771,6 +742,13 @@ def main():
     else:
         print("⏭️  RUN_SELL_LADDER is 0. Skipping offer creation.")
 
+    # --- Optional: IZZA weekly airdrop to all trustline holders ---
+    if RUN_AIRDROP:
+        print("\nRunning IZZA trustline-holder airdrop …")
+        run_izza_airdrop()
+    else:
+        print("⏭️  RUN_AIRDROP is 0. Skipping IZZA airdrop.")
+
     # --- OPTIONAL: move IZZA from distributor → your wallet ---
     if RUN_MOVE_IZZA:
         try:
@@ -796,12 +774,6 @@ def main():
         send_native_payment(NATIVE_PAYOUT_DEST, nat_amt, memo_text=NATIVE_PAYOUT_MEMO)
     else:
         print("⏭️  RUN_NATIVE_PAYOUT is 0. Skipping native payout.")
-
-    # --- OPTIONAL: weekly IZZA airdrop to all trustlines ---
-    if RUN_AIRDROP:
-        run_airdrop_to_trustlines()
-    else:
-        print("⏭️  RUN_AIRDROP is 0. Skipping IZZA airdrop to trustlines.")
 
     print("\nAll done. Verify balances/offers at:")
     print(f"  Issuer:      {HORIZON_URL}/accounts/{ISSUER_PUB}")
