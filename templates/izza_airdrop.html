@@ -151,6 +151,10 @@
       </div>
 
       <p id="lootReward" class="loot-reward"></p>
+      <!-- New: button to go mint an IZZA egg after opening a crate -->
+      <button id="mintEggBtn" class="btn-ombre" style="margin-top:10px; display:none;">
+        Go mint an IZZA egg
+      </button>
     </div>
   </div>
 
@@ -173,6 +177,7 @@
   const crateHeader  = document.getElementById("crateHeader");
   const lootEmpty    = document.getElementById("lootEmpty");
   const lootReward   = document.getElementById("lootReward");
+  const mintEggBtn   = document.getElementById("mintEggBtn");
 
   function updateUserLabel() {
     if (playMode === "pi" && currentUser && currentUser.username) {
@@ -284,6 +289,10 @@
 
   async function refreshAirdropProfile() {
     lootReward.textContent = "";
+    if (mintEggBtn) {
+      mintEggBtn.style.display = "none";
+    }
+
     const username = (playMode === "pi" && currentUser && currentUser.username)
       ? currentUser.username
       : "guest";
@@ -366,7 +375,13 @@
         lootReward.textContent =
           "You opened an IZZA loot crate and received "
           + (reward.label || (reward.amount + " " + reward.type))
-          + " (" + rarity + ").";
+          + " (" + rarity + "). "
+          + "Your reward has been deposited into your IZZA Testnet wallet. "
+          + "You can now mint an IZZA egg.";
+
+        if (mintEggBtn) {
+          mintEggBtn.style.display = "inline-block";
+        }
       }
     } catch (e) {
       console.error("open crate error", e);
@@ -390,6 +405,13 @@
       playMode = "guest";
       applyModeUi();
       refreshAirdropProfile();
+    });
+  }
+
+  if (mintEggBtn) {
+    mintEggBtn.addEventListener("click", function(){
+      // Change this path if your creatures route is different
+      window.location.href = "/izza-creatures";
     });
   }
 
