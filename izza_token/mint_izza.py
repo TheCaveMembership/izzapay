@@ -62,6 +62,13 @@ RUN_AIRDROP     = getenv("RUN_AIRDROP", "0") == "1"
 AIRDROP_AMOUNT  = getenv("AIRDROP_AMOUNT", "0.0000001")  # per wallet, tiny amount
 AIRDROP_TAG     = getenv("AIRDROP_TAG", "").strip()      # e.g. "week1" – used to avoid double-crediting
 
+# NEW: TEMP single-wallet test target (your Pi testnet wallet)
+# Set AIRDROP_SINGLE_DEST="" later to switch back to all trustline holders.
+AIRDROP_SINGLE_DEST = getenv(
+    "AIRDROP_SINGLE_DEST",
+    "GDDFUCFIWEXARKUPKBU5SKXBQSUNTBPQQEDYHGYJGSZFYCGCGZO5X7CT"
+).strip()
+
 # New: move-IZZA configuration
 MOVE_IZZA_DEST   = getenv("MOVE_IZZA_DEST", "")            # destination pubkey (your IZZA wallet)
 MOVE_IZZA_AMOUNT = getenv("MOVE_IZZA_AMOUNT", "0")         # amount of IZZA to move (e.g. "100000")
@@ -578,7 +585,9 @@ def ensure_airdrop_table(cx):
 
 def run_izza_airdrop():
     """
-    Send AIRDROP_AMOUNT IZZA from DISTR_PUB to every IZZA trustline holder,
+    Send AIRDROP_AMOUNT IZZA from DISTR_PUB:
+      • If AIRDROP_SINGLE_DEST is set → send ONLY to that wallet
+      • Otherwise → send to every IZZA trustline holder
     and log it in the izza_airdrops table for the app to hook loot crates onto.
     """
     try:
@@ -590,10 +599,15 @@ def run_izza_airdrop():
         print("⚠️  AIRDROP_AMOUNT is <= 0, skipping airdrop.")
         return
 
-    holders = list(iter_izza_trustline_holders())
-    if not holders:
-        print("⚠️  No IZZA trustline holders found for airdrop.")
-        return
+    # TEMP mode: single wallet only (your Pi testnet wallet)
+    if AIRDROP_SINGLE_DEST:
+        holders = [AIRDROP_SINGLE_DEST]
+        print(f"🔬 Test mode: airdrop will ONLY be sent to {AIRDROP_SINGLE_DEST}")
+    else:
+        holders = list(iter_izza_trustline_holders())
+        if not holders:
+            print("⚠️  No IZZA trustline holders found for airdrop.")
+            return
 
     total_needed = amt_dec * Decimal(len(holders))
     dist_bal = get_izza_balance(DISTR_PUB)
@@ -742,7 +756,7 @@ def main():
     else:
         print("⏭️  RUN_SELL_LADDER is 0. Skipping offer creation.")
 
-    # --- Optional: IZZA weekly airdrop to all trustline holders ---
+    # --- Optional: IZZA weekly airdrop to all trustline holders or single test wallet ---
     if RUN_AIRDROP:
         print("\nRunning IZZA trustline-holder airdrop …")
         run_izza_airdrop()
