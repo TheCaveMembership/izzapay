@@ -151,10 +151,6 @@
       </div>
 
       <p id="lootReward" class="loot-reward"></p>
-      <!-- New: button to go mint an IZZA egg after opening a crate -->
-      <button id="mintEggBtn" class="btn-ombre" style="margin-top:10px; display:none;">
-        Go mint an IZZA egg
-      </button>
     </div>
   </div>
 
@@ -165,27 +161,28 @@
 
   let piReady = false;
   let authInFlight = false;
-  let currentUser = null;
-  let playMode = null; // "pi" or "guest"
+  let currentUser = null;  // { username, wallet_pub }
+  let playMode = null;     // "pi" or "guest"
 
-  const piLoginBtn = document.getElementById("piLoginBtn");
-  const guestBtn   = document.getElementById("guestBtn");
-  const userLabel  = document.getElementById("userLabel");
-  const airdropMsg = document.getElementById("airdropMessage");
+  const piLoginBtn  = document.getElementById("piLoginBtn");
+  const guestBtn    = document.getElementById("guestBtn");
+  const userLabel   = document.getElementById("userLabel");
+  const airdropMsg  = document.getElementById("airdropMessage");
   const crateSection = document.getElementById("crateSection");
   const crateGrid    = document.getElementById("crateGrid");
   const crateHeader  = document.getElementById("crateHeader");
   const lootEmpty    = document.getElementById("lootEmpty");
   const lootReward   = document.getElementById("lootReward");
-  const mintEggBtn   = document.getElementById("mintEggBtn");
 
   function updateUserLabel() {
-    if (playMode === "pi" && currentUser && currentUser.username) {
-      userLabel.textContent = "Signed in as @" + currentUser.username + ".";
+    if (playMode === "pi" && currentUser && currentUser.username && currentUser.wallet_pub) {
+      userLabel.textContent =
+        "Signed in as @" + currentUser.username + " (Pi Testnet wallet " +
+        currentUser.wallet_pub.slice(0,5) + "..." + currentUser.wallet_pub.slice(-4) + ").";
     } else if (playMode === "guest") {
-      userLabel.textContent = "Guest mode, authenticate with Pi to see IZZA airdrops.";
+      userLabel.textContent = "Guest mode, authenticate with Pi to check your IZZA airdrops.";
     } else {
-      userLabel.textContent = "Tap Sign in with Pi to check your IZZA airdrop status.";
+      userLabel.textContent = "Tap Sign in with Pi to check if your Pi Testnet wallet received an IZZA airdrop.";
     }
   }
 
@@ -263,15 +260,30 @@
     setPiBtn("Waiting for Pi…", true);
 
     try {
-      const scopes = ["username"];
+      const scopes = ["username","wallet_address"];  // wallet_address required for wallet pub
       const onIncompletePaymentFound = function(payment){};
 
       const { user } = await Pi.authenticate(scopes, onIncompletePaymentFound);
-      currentUser = user || null;
 
-      if (currentUser && currentUser.username) {
-        try { localStorage.setItem("izza_username", currentUser.username); } catch (e) {}
+      const walletPub =
+        user && user.wallet && user.wallet.public_key
+          ? user.wallet.public_key
+          : null;
+
+      if (!walletPub) {
+        alert("Could not read Pi Testnet wallet from Pi auth. Make sure you are in Pi Browser.");
+        return false;
       }
+
+      currentUser = {
+        username: user.username,
+        wallet_pub: walletPub
+      };
+
+      try {
+        localStorage.setItem("izza_username", currentUser.username);
+        localStorage.setItem("izza_wallet_pub", currentUser.wallet_pub);
+      } catch (e) {}
 
       playMode = "pi";
       applyModeUi();
@@ -289,18 +301,21 @@
 
   async function refreshAirdropProfile() {
     lootReward.textContent = "";
-    if (mintEggBtn) {
-      mintEggBtn.style.display = "none";
+
+    let username = "guest";
+    let walletPub = "";
+
+    if (playMode === "pi" && currentUser && currentUser.username && currentUser.wallet_pub) {
+      username = currentUser.username;
+      walletPub = currentUser.wallet_pub;
     }
 
-    const username = (playMode === "pi" && currentUser && currentUser.username)
-      ? currentUser.username
-      : "guest";
-
     try {
-      const data = await getJSON(
-        "/api/izza_airdrop/profile?username=" + encodeURIComponent(username)
-      );
+      const params = new URLSearchParams();
+      params.set("username", username);
+      if (walletPub) params.set("wallet_pub", walletPub);
+
+      const data = await getJSON("/api/izza_airdrop/profile?" + params.toString());
 
       airdropMsg.textContent = data.message || "";
       if (!data.ok) {
@@ -313,10 +328,11 @@
 
       if (!crates.length) {
         crateSection.style.display = "block";
-        crateHeader.textContent = "No unopened IZZA loot crates found yet.";
+        crateHeader.textContent = "No unopened IZZA loot crates detected.";
         lootEmpty.style.display = "block";
         lootEmpty.textContent =
-          "Enable the IZZA token in your Pi Testnet Wallet token list to start receiving weekly airdrops.";
+          "Open your Pi Testnet Wallet, add the IZZA Testnet token in the token list, " +
+          "and watch for future airdrops directly to your Pi Testnet wallet.";
         return;
       }
 
@@ -330,7 +346,7 @@
         div.dataset.crateId = c.id;
         div.innerHTML = `
           <div class="crate-label">IZZA LOOT CRATE</div>
-          <div class="crate-wave">${c.wave_tag}</div>
+          <div class="crate-wave">${c.wave_tag || ""}</div>
         `;
         div.addEventListener("click", function(){
           openCrate(c.id);
@@ -346,14 +362,14 @@
 
   async function openCrate(crateId) {
     if (!crateId) return;
-    const username = (playMode === "pi" && currentUser && currentUser.username)
-      ? currentUser.username
-      : "guest";
 
-    if (username === "guest") {
-      alert("Sign in with Pi before opening loot crates.");
+    if (!(playMode === "pi" && currentUser && currentUser.username && currentUser.wallet_pub)) {
+      alert("Sign in with Pi first so we know which Pi Testnet wallet to reward.");
       return;
     }
+
+    const username  = currentUser.username;
+    const walletPub = currentUser.wallet_pub;
 
     const card = crateGrid.querySelector('[data-crate-id="' + crateId + '"]');
     if (card) {
@@ -363,6 +379,7 @@
     try {
       const resp = await postJSON("/api/izza_airdrop/open", {
         username: username,
+        wallet_pub: walletPub,
         crate_id: crateId
       });
 
@@ -373,15 +390,9 @@
         const rarity = resp.rarity || "common";
 
         lootReward.textContent =
-          "You opened an IZZA loot crate and received "
-          + (reward.label || (reward.amount + " " + reward.type))
-          + " (" + rarity + "). "
-          + "Your reward has been deposited into your IZZA Testnet wallet. "
-          + "You can now mint an IZZA egg.";
-
-        if (mintEggBtn) {
-          mintEggBtn.style.display = "inline-block";
-        }
+          "You opened an IZZA loot crate and received " +
+          (reward.label || (reward.amount + " " + reward.type)) +
+          " (" + rarity + ") directly to your Pi Testnet wallet.";
       }
     } catch (e) {
       console.error("open crate error", e);
@@ -408,18 +419,12 @@
     });
   }
 
-  if (mintEggBtn) {
-    mintEggBtn.addEventListener("click", function(){
-      // Change this path if your creatures route is different
-      window.location.href = "/izza-creatures";
-    });
-  }
-
   (function bootstrapFromStorage(){
     try {
-      const stored = localStorage.getItem("izza_username");
-      if (stored) {
-        currentUser = { username: stored };
+      const storedU = localStorage.getItem("izza_username");
+      const storedW = localStorage.getItem("izza_wallet_pub");
+      if (storedU && storedW) {
+        currentUser = { username: storedU, wallet_pub: storedW };
         playMode = "pi";
       }
     } catch (e) {}
