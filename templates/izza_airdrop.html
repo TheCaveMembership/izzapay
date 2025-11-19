@@ -1,0 +1,411 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>IZZA Loot Crates</title>
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+
+  <link rel="stylesheet" href="{{ url_for('static', filename='css/styles.css') }}">
+
+  <!-- Pi SDK -->
+  <script src="https://sdk.minepi.com/pi-sdk.js"></script>
+
+  <style>
+    .page-wrap {
+      min-height: 100vh;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: flex-start;
+      padding: 20px 16px 40px;
+      box-sizing: border-box;
+    }
+    .airdrop-card {
+      max-width: 420px;
+      width: 100%;
+      margin-top: 10px;
+      padding: 18px 16px;
+      border-radius: 18px;
+      background: rgba(4, 9, 20, 0.9);
+      box-shadow: 0 12px 45px rgba(0,0,0,0.65);
+      backdrop-filter: blur(14px);
+    }
+    .airdrop-title {
+      margin: 0 0 6px;
+      font-size: 20px;
+      letter-spacing: 0.12em;
+      text-transform: uppercase;
+    }
+    .airdrop-sub {
+      margin: 0 0 12px;
+      font-size: 13px;
+      opacity: 0.78;
+    }
+    .auth-row {
+      display: flex;
+      gap: 8px;
+      flex-wrap: wrap;
+      margin-bottom: 12px;
+    }
+    .auth-row button {
+      flex: 1;
+      min-width: 140px;
+    }
+    .btn-ombre {
+      border: 0;
+      border-radius: 999px;
+      padding: 10px 14px;
+      font-size: 12px;
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
+      background: linear-gradient(135deg,#ff2fbf,#40f0ff);
+      color: #fff;
+      cursor: pointer;
+    }
+    .btn-ombre.btn-disabled {
+      opacity: 0.5;
+      cursor: default;
+      pointer-events: none;
+    }
+    .btn-outline {
+      border-radius: 999px;
+      border: 1px solid rgba(255,255,255,0.4);
+      background: transparent;
+      color: #fff;
+      padding: 10px 14px;
+      font-size: 12px;
+      text-transform: uppercase;
+      letter-spacing: 0.08em;
+      cursor: pointer;
+    }
+    .status-text {
+      font-size: 12px;
+      opacity: 0.86;
+      margin: 4px 0;
+    }
+    .username-label {
+      margin-top: 4px;
+      margin-bottom: 6px;
+    }
+    .crate-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fill, minmax(96px, 1fr));
+      gap: 10px;
+      margin-top: 10px;
+    }
+    .crate-card {
+      position: relative;
+      border-radius: 12px;
+      padding: 10px 8px;
+      text-align: center;
+      background: radial-gradient(circle at 20% 0%, rgba(255,255,255,0.05), transparent 60%),
+                  rgba(10,14,35,0.95);
+      box-shadow: 0 8px 24px rgba(0,0,0,0.65);
+      cursor: pointer;
+    }
+    .crate-card.opening {
+      outline: 2px solid rgba(255,47,191,0.9);
+      box-shadow: 0 0 18px rgba(255,47,191,0.7);
+    }
+    .crate-label {
+      font-size: 11px;
+      opacity: 0.9;
+      margin-bottom: 4px;
+    }
+    .crate-wave {
+      font-size: 10px;
+      opacity: 0.7;
+    }
+    .loot-empty {
+      margin-top: 10px;
+      font-size: 12px;
+      opacity: 0.8;
+    }
+    .loot-reward {
+      margin-top: 12px;
+      font-size: 13px;
+    }
+  </style>
+</head>
+
+<body>
+  <div class="page-wrap">
+    <div class="airdrop-card">
+      <h1 class="airdrop-title">IZZA AIRDROP</h1>
+      <p class="airdrop-sub">
+        Redeem your IZZA loot crates, authenticated with Pi.
+      </p>
+
+      <div class="auth-row">
+        <button id="piLoginBtn" class="btn-ombre">Sign in with Pi</button>
+        <button id="guestBtn" class="btn-outline">View as guest</button>
+      </div>
+
+      <p id="userLabel" class="status-text username-label"></p>
+      <p id="airdropMessage" class="status-text"></p>
+
+      <div id="crateSection" style="display:none;">
+        <p class="status-text" id="crateHeader"></p>
+        <div id="crateGrid" class="crate-grid"></div>
+        <p id="lootEmpty" class="loot-empty" style="display:none;"></p>
+      </div>
+
+      <p id="lootReward" class="loot-reward"></p>
+    </div>
+  </div>
+
+<script>
+(function(){
+  const PI_APP_ID = "{{ PI_APP_ID }}";
+  const PI_SANDBOX = "{{ PI_SANDBOX }}" === "true";
+
+  let piReady = false;
+  let authInFlight = false;
+  let currentUser = null;
+  let playMode = null; // "pi" or "guest"
+
+  const piLoginBtn = document.getElementById("piLoginBtn");
+  const guestBtn   = document.getElementById("guestBtn");
+  const userLabel  = document.getElementById("userLabel");
+  const airdropMsg = document.getElementById("airdropMessage");
+  const crateSection = document.getElementById("crateSection");
+  const crateGrid    = document.getElementById("crateGrid");
+  const crateHeader  = document.getElementById("crateHeader");
+  const lootEmpty    = document.getElementById("lootEmpty");
+  const lootReward   = document.getElementById("lootReward");
+
+  function updateUserLabel() {
+    if (playMode === "pi" && currentUser && currentUser.username) {
+      userLabel.textContent = "Signed in as @" + currentUser.username + ".";
+    } else if (playMode === "guest") {
+      userLabel.textContent = "Guest mode, authenticate with Pi to see IZZA airdrops.";
+    } else {
+      userLabel.textContent = "Tap Sign in with Pi to check your IZZA airdrop status.";
+    }
+  }
+
+  function setPiBtn(label, disabled) {
+    if (!piLoginBtn) return;
+    piLoginBtn.textContent = label;
+    piLoginBtn.disabled = !!disabled;
+    if (disabled) {
+      piLoginBtn.classList.add("btn-disabled");
+    } else {
+      piLoginBtn.classList.remove("btn-disabled");
+    }
+  }
+
+  function applyModeUi() {
+    if (playMode === "pi") {
+      setPiBtn("Reauth with Pi", false);
+      guestBtn.textContent = "Switch to guest";
+    } else if (playMode === "guest") {
+      setPiBtn("Sign in with Pi", false);
+      guestBtn.textContent = "Guest mode active";
+    } else {
+      setPiBtn("Sign in with Pi", false);
+      guestBtn.textContent = "View as guest";
+    }
+    updateUserLabel();
+  }
+
+  function initPi() {
+    if (!window.Pi || typeof window.Pi.init !== "function") {
+      console.warn("Pi SDK not available");
+      return;
+    }
+    try {
+      window.Pi.init({
+        version: "2.0",
+        sandbox: PI_SANDBOX
+      });
+      piReady = true;
+    } catch (e) {
+      console.error("Pi.init failed", e);
+    }
+  }
+
+  initPi();
+  applyModeUi();
+
+  async function postJSON(url, body) {
+    const res = await fetch(url, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body || {})
+    });
+    return res.json();
+  }
+
+  async function getJSON(url) {
+    const res = await fetch(url);
+    return res.json();
+  }
+
+  async function interactivePiAuth() {
+    if (!piReady) {
+      alert("Pi is not ready yet, try again in a moment.");
+      return false;
+    }
+
+    if (!window.Pi || typeof window.Pi.authenticate !== "function") {
+      alert("Pi authentication is not available in this environment.");
+      return false;
+    }
+
+    if (authInFlight) return false;
+    authInFlight = true;
+    setPiBtn("Waiting for Pi…", true);
+
+    try {
+      const scopes = ["username"];
+      const onIncompletePaymentFound = function(payment){};
+
+      const { user } = await Pi.authenticate(scopes, onIncompletePaymentFound);
+      currentUser = user || null;
+
+      if (currentUser && currentUser.username) {
+        try { localStorage.setItem("izza_username", currentUser.username); } catch (e) {}
+      }
+
+      playMode = "pi";
+      applyModeUi();
+      await refreshAirdropProfile();
+      return true;
+    } catch (err) {
+      console.error("Pi.authenticate failed", err);
+      alert("Pi login failed, " + (err && err.message ? err.message : String(err)));
+      return false;
+    } finally {
+      authInFlight = false;
+      setPiBtn(playMode === "pi" ? "Reauth with Pi" : "Sign in with Pi", false);
+    }
+  }
+
+  async function refreshAirdropProfile() {
+    lootReward.textContent = "";
+    const username = (playMode === "pi" && currentUser && currentUser.username)
+      ? currentUser.username
+      : "guest";
+
+    try {
+      const data = await getJSON(
+        "/api/izza_airdrop/profile?username=" + encodeURIComponent(username)
+      );
+
+      airdropMsg.textContent = data.message || "";
+      if (!data.ok) {
+        crateSection.style.display = "none";
+        return;
+      }
+
+      const crates = data.crates || [];
+      crateGrid.innerHTML = "";
+
+      if (!crates.length) {
+        crateSection.style.display = "block";
+        crateHeader.textContent = "No unopened IZZA loot crates found yet.";
+        lootEmpty.style.display = "block";
+        lootEmpty.textContent =
+          "Enable the IZZA token in your Pi Testnet Wallet token list to start receiving weekly airdrops.";
+        return;
+      }
+
+      crateSection.style.display = "block";
+      crateHeader.textContent = "Tap a crate to reveal your reward.";
+      lootEmpty.style.display = "none";
+
+      crates.forEach(function(c){
+        const div = document.createElement("div");
+        div.className = "crate-card";
+        div.dataset.crateId = c.id;
+        div.innerHTML = `
+          <div class="crate-label">IZZA LOOT CRATE</div>
+          <div class="crate-wave">${c.wave_tag}</div>
+        `;
+        div.addEventListener("click", function(){
+          openCrate(c.id);
+        });
+        crateGrid.appendChild(div);
+      });
+    } catch (e) {
+      console.error("airdrop profile error", e);
+      airdropMsg.textContent = "Network error loading IZZA airdrop status.";
+      crateSection.style.display = "none";
+    }
+  }
+
+  async function openCrate(crateId) {
+    if (!crateId) return;
+    const username = (playMode === "pi" && currentUser && currentUser.username)
+      ? currentUser.username
+      : "guest";
+
+    if (username === "guest") {
+      alert("Sign in with Pi before opening loot crates.");
+      return;
+    }
+
+    const card = crateGrid.querySelector('[data-crate-id="' + crateId + '"]');
+    if (card) {
+      card.classList.add("opening");
+    }
+
+    try {
+      const resp = await postJSON("/api/izza_airdrop/open", {
+        username: username,
+        crate_id: crateId
+      });
+
+      if (!resp.ok) {
+        alert("Could not open crate, " + (resp.error || "unknown error"));
+      } else {
+        const reward = resp.reward || {};
+        const rarity = resp.rarity || "common";
+
+        lootReward.textContent =
+          "You opened an IZZA loot crate and received "
+          + (reward.label || (reward.amount + " " + reward.type))
+          + " (" + rarity + ").";
+      }
+    } catch (e) {
+      console.error("open crate error", e);
+      alert("Network problem opening crate.");
+    } finally {
+      if (card) {
+        card.classList.remove("opening");
+      }
+      await refreshAirdropProfile();
+    }
+  }
+
+  if (piLoginBtn) {
+    piLoginBtn.addEventListener("click", function(){
+      interactivePiAuth();
+    });
+  }
+
+  if (guestBtn) {
+    guestBtn.addEventListener("click", function(){
+      playMode = "guest";
+      applyModeUi();
+      refreshAirdropProfile();
+    });
+  }
+
+  (function bootstrapFromStorage(){
+    try {
+      const stored = localStorage.getItem("izza_username");
+      if (stored) {
+        currentUser = { username: stored };
+        playMode = "pi";
+      }
+    } catch (e) {}
+    applyModeUi();
+    refreshAirdropProfile();
+  })();
+})();
+</script>
+
+</body>
+</html>
