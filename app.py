@@ -22,6 +22,7 @@ from emailer import send_email
 from payments import split_amounts
 from staking import bp_stake
 from nft_api import bp_nft
+from izza_airdrop import izza_airdrop_bp
 from creatures_api import bp_creatures
 from friends_api import bp as friends_bp
 # 🟢 Wallet API blueprint import (needs to be at top-level)
@@ -153,6 +154,7 @@ app.register_blueprint(bp_faucet)
 app.register_blueprint(wallet_api_bp)
 app.register_blueprint(bp_stake)
 app.register_blueprint(bp_nft)
+app.register_blueprint(izza_airdrop_bp)
 app.register_blueprint(bp_creatures) 
 app.register_blueprint(friends_bp)
 
