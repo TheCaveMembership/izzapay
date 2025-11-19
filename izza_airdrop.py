@@ -2,108 +2,263 @@
 
 import os
 import time
-import sqlite3
 import logging
-from flask import Blueprint, render_template, request, jsonify
+import random
 from decimal import Decimal
+
+from flask import Blueprint, render_template, request, jsonify
+
+from stellar_sdk import Server, Keypair, TransactionBuilder, Asset
+from stellar_sdk.exceptions import NotFoundError
+
+import db as app_db
 
 log = logging.getLogger(__name__)
 
 izza_airdrop_bp = Blueprint("izza_airdrop", __name__)
 
-# Use same disk strategy as the rest of your app
-BASE_DIR = os.path.dirname(os.path.abspath(__file__))
-DISK_ROOT = os.getenv("DISK_ROOT", "/var/data")
+# ====== ENV / HORIZON CONFIG (reuse same env as your IZZA scripts) ======
 
-try:
-    os.makedirs(DISK_ROOT, exist_ok=True)
-    db_dir = DISK_ROOT
-except Exception as e:
-    db_dir = BASE_DIR
-    log.warning("Could not use DISK_ROOT %s, using BASE_DIR. err=%s", DISK_ROOT, e)
+HORIZON_URL        = os.getenv("HORIZON_URL", "")
+NETWORK_PASSPHRASE = os.getenv("NETWORK_PASSPHRASE", "")
+ASSET_CODE         = os.getenv("ASSET_CODE", "IZZA")
+ISSUER_PUB         = os.getenv("ISSUER_PUB", "")
+DISTR_PUB          = os.getenv("DISTR_PUB", "")
+DISTR_SECRET       = os.getenv("DISTR_SECRET", "")
 
-AIRDROP_DB_PATH = os.path.join(db_dir, "izza_airdrops.db")
-log.info("Using IZZA airdrop DB at %s", AIRDROP_DB_PATH)
+# If any of these are missing, on-chain payouts will fail – we log but don't crash import
+if not all([HORIZON_URL, NETWORK_PASSPHRASE, ISSUER_PUB, DISTR_PUB, DISTR_SECRET]):
+    log.warning("IZZA airdrop payout env vars incomplete; crate rewards will not send on-chain.")
 
-
-def _get_conn():
-    return sqlite3.connect(AIRDROP_DB_PATH)
+_server = Server(HORIZON_URL) if HORIZON_URL else None
+_asset  = Asset(ASSET_CODE, ISSUER_PUB) if ISSUER_PUB else None
 
 
-def init_airdrop_db():
-    conn = _get_conn()
-    cur = conn.cursor()
-    cur.execute(
-        """
-        CREATE TABLE IF NOT EXISTS izza_airdrop_crates (
-            id          INTEGER PRIMARY KEY AUTOINCREMENT,
-            username    TEXT NOT NULL,
-            wave_tag    TEXT NOT NULL,   -- for example '2025-11-19-weekly-1'
-            opened      INTEGER NOT NULL DEFAULT 0,
-            created_ts  INTEGER NOT NULL,
-            opened_ts   INTEGER
+def _get_base_fee() -> int:
+    try:
+        if not _server:
+            return 100_000
+        suggested = _server.fetch_base_fee()
+    except Exception:
+        suggested = 100
+    return max(int(suggested * 20), 10_000)
+
+
+def _ensure_airdrop_tables():
+    """
+    Ensure izza_airdrops + izza_airdrop_claims exist in the main app DB.
+
+    izza_airdrops is also created by your CLI script; schema must match.
+    """
+    with app_db.conn() as cx:
+        cx.execute(
+            """
+            CREATE TABLE IF NOT EXISTS izza_airdrops(
+              id INTEGER PRIMARY KEY AUTOINCREMENT,
+              wallet_pub TEXT NOT NULL,
+              tag TEXT,
+              amount TEXT,
+              tx_hash TEXT,
+              created_at INTEGER,
+              UNIQUE(wallet_pub, tag)
+            );
+            """
         )
-        """
-    )
-    conn.commit()
-    conn.close()
+        cx.execute(
+            """
+            CREATE TABLE IF NOT EXISTS izza_airdrop_claims(
+              id INTEGER PRIMARY KEY AUTOINCREMENT,
+              airdrop_id INTEGER NOT NULL,
+              username   TEXT NOT NULL,
+              reward_amount   TEXT,
+              reward_tx_hash  TEXT,
+              opened_ts INTEGER NOT NULL,
+              UNIQUE(airdrop_id, username)
+            );
+            """
+        )
 
 
-init_airdrop_db()
+_ensure_airdrop_tables()
+
+
+def _lookup_wallet_for_username(username: str):
+    """
+    Map Pi username -> IZZA wallet pubkey via user_wallets table.
+    """
+    if not username:
+        return None
+    with app_db.conn() as cx:
+        row = cx.execute(
+            "SELECT pub FROM user_wallets WHERE username = ?",
+            (username,),
+        ).fetchone()
+        if not row:
+            return None
+        return row["pub"] if isinstance(row, dict) or hasattr(row, "keys") else row[0]
 
 
 def get_unopened_crates(username: str):
-    conn = _get_conn()
-    cur = conn.cursor()
-    cur.execute(
-        "SELECT id, wave_tag, created_ts FROM izza_airdrop_crates "
-        "WHERE username = ? AND opened = 0 ORDER BY created_ts ASC",
-        (username,),
+    """
+    Unopened crates = izza_airdrops rows for that wallet_pub
+    that do not yet have a claim by this username.
+    """
+    wallet_pub = _lookup_wallet_for_username(username)
+    if not wallet_pub:
+        return []
+
+    with app_db.conn() as cx:
+        rows = cx.execute(
+            """
+            SELECT a.id, a.tag, a.created_at
+            FROM izza_airdrops a
+            LEFT JOIN izza_airdrop_claims c
+              ON c.airdrop_id = a.id
+             AND c.username   = ?
+            WHERE a.wallet_pub = ?
+              AND c.id IS NULL
+            ORDER BY a.created_at ASC;
+            """,
+            (username, wallet_pub),
+        ).fetchall()
+
+    crates = []
+    for r in rows:
+        tag = r["tag"] if hasattr(r, "keys") else r[1]
+        created_ts = r["created_at"] if hasattr(r, "keys") else r[2]
+        crates.append(
+            {
+                "id": r["id"] if hasattr(r, "keys") else r[0],
+                "wave_tag": tag or "IZZA wave",
+                "created_ts": created_ts,
+            }
+        )
+    return crates
+
+
+def _send_izza_reward(wallet_pub: str, amount_izza: str) -> str:
+    """
+    Send IZZA from DISTR_PUB to wallet_pub on Pi Testnet.
+
+    Returns tx hash if successful, raises on failure.
+    """
+    if not all([_server, _asset, NETWORK_PASSPHRASE, DISTR_SECRET]):
+        raise RuntimeError("izza_payout_env_incomplete")
+
+    distr_kp = Keypair.from_secret(DISTR_SECRET)
+    distr_acct = _server.load_account(distr_kp.public_key)
+    base_fee = _get_base_fee()
+
+    amt_dec = Decimal(amount_izza)
+    if amt_dec <= 0:
+        raise ValueError("reward_amount_invalid")
+
+    tx = (
+        TransactionBuilder(
+            source_account=distr_acct,
+            network_passphrase=NETWORK_PASSPHRASE,
+            base_fee=base_fee,
+        )
+        .append_payment_op(
+            destination=wallet_pub,
+            amount=str(amt_dec),
+            asset=_asset,
+        )
+        .set_timeout(180)
+        .build()
     )
-    rows = cur.fetchall()
-    conn.close()
-    return [
-        {"id": r[0], "wave_tag": r[1], "created_ts": r[2]}
-        for r in rows
-    ]
+    tx.sign(distr_kp)
+    resp = _server.submit_transaction(tx)
+    tx_hash = resp.get("hash")
+    log.info("IZZA loot crate payout sent wallet=%s amount=%s hash=%s", wallet_pub, amt_dec, tx_hash)
+    return tx_hash or ""
 
 
 def open_crate(username: str, crate_id: int):
     """
-    Marks crate as opened, returns a simple reward payload.
-    Right now reward is just cosmetic text and maybe a small
-    off chain number you can evolve later.
+    Verify crate belongs to username's IZZA wallet, mark claimed,
+    send 5–25 IZZA, and return reward payload.
     """
-    conn = _get_conn()
-    cur = conn.cursor()
+    if not username:
+        raise ValueError("invalid_username")
 
-    cur.execute(
-        "SELECT id, opened, wave_tag, created_ts FROM izza_airdrop_crates "
-        "WHERE id = ? AND username = ?",
-        (crate_id, username),
-    )
-    row = cur.fetchone()
-    if not row:
-        conn.close()
-        raise ValueError("crate_not_found")
-    if row[1]:
-        conn.close()
-        raise ValueError("crate_already_opened")
+    wallet_pub = _lookup_wallet_for_username(username)
+    if not wallet_pub:
+        raise ValueError("wallet_not_linked")
 
-    now = int(time.time())
-    cur.execute(
-        "UPDATE izza_airdrop_crates SET opened = 1, opened_ts = ? WHERE id = ?",
-        (now, crate_id),
-    )
-    conn.commit()
-    conn.close()
+    now_ts = int(time.time())
 
-    # Simple reward logic for now, you can wire this into staking, IZZA NFT, whatever later
-    # You can also make this depend on wave_tag or random rolls
+    # Pick random reward between 5 and 25 IZZA (whole tokens)
+    reward_int = random.randint(5, 25)
+    reward_dec = Decimal(reward_int)
+    reward_str = f"{reward_dec:.7f}"  # 7 decimal places for Stellar-style assets
+
+    # First, claim this crate atomically in DB (so it can't be double-opened)
+    with app_db.conn() as cx:
+        row = cx.execute(
+            """
+            SELECT a.id, a.wallet_pub, a.tag, a.amount, a.tx_hash, a.created_at
+            FROM izza_airdrops a
+            LEFT JOIN izza_airdrop_claims c
+              ON c.airdrop_id = a.id
+             AND c.username   = ?
+            WHERE a.id = ?
+              AND a.wallet_pub = ?
+              AND c.id IS NULL
+            """,
+            (username, crate_id, wallet_pub),
+        ).fetchone()
+
+        if not row:
+            # Either crate doesn't exist, wallet doesn't match,
+            # or it has already been claimed.
+            raise ValueError("crate_not_found_or_claimed")
+
+        # Reserve this crate for this username
+        cx.execute(
+            """
+            INSERT INTO izza_airdrop_claims(airdrop_id, username, reward_amount, opened_ts)
+            VALUES (?,?,?,?)
+            """,
+            (crate_id, username, reward_str, now_ts),
+        )
+
+    # Now send on-chain reward
+    try:
+        tx_hash = _send_izza_reward(wallet_pub, reward_str)
+    except Exception as e:
+        log.exception("Error sending IZZA loot payout username=%s crate_id=%s", username, crate_id)
+        # We already reserved the crate; we do NOT want to allow re-open,
+        # but we can record failure in the claim record.
+        tx_hash = ""
+
+        with app_db.conn() as cx:
+            cx.execute(
+                """
+                UPDATE izza_airdrop_claims
+                   SET reward_tx_hash = ?
+                 WHERE airdrop_id = ? AND username = ?
+                """,
+                (f"ERROR:{e}", crate_id, username),
+            )
+        raise
+
+    # Update claim record with tx hash
+    with app_db.conn() as cx:
+        cx.execute(
+            """
+            UPDATE izza_airdrop_claims
+               SET reward_tx_hash = ?
+             WHERE airdrop_id = ? AND username = ?
+            """,
+            (tx_hash, crate_id, username),
+        )
+
     reward = {
-        "type": "izza_bonus",
-        "amount": 1,
-        "label": "1 IZZA Loot Point"
+        "type": "IZZA",
+        "amount": str(reward_dec),
+        "label": f"{reward_int} IZZA airdrop reward",
+        "tx_hash": tx_hash,
     }
     rarity = "common"
 
@@ -120,7 +275,6 @@ def izza_airdrop_page():
     Page that your IZZA AIRDROP button should link to.
     Only does Pi authentication on the front end.
     """
-    # Pass through PI_APP_ID and sandbox the same way you do elsewhere
     PI_APP_ID = os.getenv("PI_APP_ID", "")
     PI_SANDBOX = os.getenv("PI_SANDBOX", "true").lower() == "true"
 
@@ -138,6 +292,7 @@ def api_izza_airdrop_profile():
     Returns any unopened crates for that user.
     """
     username = request.args.get("username") or "guest"
+
     if username == "guest":
         return jsonify({
             "ok": True,
@@ -149,6 +304,19 @@ def api_izza_airdrop_profile():
             ),
         })
 
+    wallet_pub = _lookup_wallet_for_username(username)
+    if not wallet_pub:
+        return jsonify({
+            "ok": True,
+            "username": username,
+            "has_airdrop": False,
+            "crates": [],
+            "message": (
+                "No IZZA wallet linked yet. "
+                "Open IZZA, connect your IZZA Testnet wallet, then return here to redeem airdrops."
+            ),
+        })
+
     crates = get_unopened_crates(username)
     has_airdrop = len(crates) > 0
 
@@ -156,9 +324,9 @@ def api_izza_airdrop_profile():
         msg = "You have IZZA loot crates waiting, tap a crate to open it."
     else:
         msg = (
-            "No IZZA loot crates detected yet, "
-            "open your Pi Testnet Wallet, add the IZZA Testnet token in the token list, "
-            "and you will start receiving weekly IZZA airdrops."
+            "No IZZA loot crates detected yet. "
+            "Make sure the IZZA Testnet token is added in your Pi Wallet token list "
+            "to receive future IZZA airdrops."
         )
 
     return jsonify({
@@ -190,7 +358,14 @@ def api_izza_airdrop_open():
         result = open_crate(username, crate_id_int)
         return jsonify({"ok": True, **result})
     except ValueError as e:
-        return jsonify({"ok": False, "error": str(e)}), 400
-    except Exception as e:
+        code = str(e)
+        if code in ("wallet_not_linked", "crate_not_found_or_claimed", "invalid_username"):
+            return jsonify({"ok": False, "error": code}), 400
+        return jsonify({"ok": False, "error": code}), 400
+    except RuntimeError as e:
+        # Likely env / horizon / payout config issue
+        log.exception("Runtime error while opening loot crate")
+        return jsonify({"ok": False, "error": str(e)}), 500
+    except Exception:
         log.exception("Error opening IZZA loot crate user=%s crate_id=%s", username, crate_id_int)
         return jsonify({"ok": False, "error": "server_error"}), 500
