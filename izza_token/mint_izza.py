@@ -36,7 +36,8 @@ DISTR_PUB     = getenv("DISTR_PUB", required=True)
 DISTR_SECRET  = getenv("DISTR_SECRET", required=True)
 
 ASSET_CODE  = getenv("ASSET_CODE", "IZZA")
-MINT_AMOUNT = getenv("MINT_AMOUNT", "1000000.0000000")
+# ✅ Default mint is now 500,000 IZZA
+MINT_AMOUNT = getenv("MINT_AMOUNT", "500000.0000000")
 HOME_DOMAIN = getenv("HOME_DOMAIN", "izzapay.onrender.com")
 
 FUNDING_SECRET       = getenv("FUNDING_SECRET", "")
@@ -46,9 +47,9 @@ FUNDING_STARTING_BAL = getenv("FUNDING_STARTING_BALANCE", "5")
 BASE_FEE_OVERRIDE = getenv("BASE_FEE", "")
 
 # Runtime switches (safe defaults)
-RUN_MINT         = getenv("RUN_MINT", "0") == "1"          # default: don't mint again
-RUN_SELL_LADDER  = getenv("RUN_SELL_LADDER", "0") == "1"   # default: DON'T seed the sale ladder
-RUN_MOVE_IZZA    = getenv("RUN_MOVE_IZZA", "0") == "1"     # new: move IZZA from distributor → wallet
+RUN_MINT          = getenv("RUN_MINT", "0") == "1"          # set to 1 when you want to mint
+RUN_SELL_LADDER   = getenv("RUN_SELL_LADDER", "0") == "1"   # default: DON'T seed the sale ladder
+RUN_MOVE_IZZA     = getenv("RUN_MOVE_IZZA", "0") == "1"     # move IZZA from distributor → wallet
 RUN_NATIVE_PAYOUT = getenv("RUN_NATIVE_PAYOUT", "0") == "1"  # optional native (Pi) payout, default off
 
 # New: move-IZZA configuration
@@ -442,16 +443,13 @@ def main():
     print("Step 2/4: Distributor change-trust … (idempotent)")
     distributor_change_trust()
 
-    # SAFE MINT GUARD:
-    print("Step 3/4: Conditional mint check …")
+    # Step 3: Mint
+    print("Step 3/4: Mint step …")
     current_bal = get_izza_balance(DISTR_PUB)
-    print(f"Distributor IZZA balance: {current_bal}")
+    print(f"Distributor IZZA balance before mint: {current_bal}")
     if RUN_MINT:
-        if current_bal > Decimal("0"):
-            print("⏭️  Skipping mint: distributor already holds IZZA.")
-        else:
-            print("Mint enabled and distributor has 0 IZZA → minting …")
-            issuer_mint_payment()
+        print(f"Mint enabled → minting {MINT_AMOUNT} IZZA to distributor regardless of existing balance.")
+        issuer_mint_payment()
     else:
         print("⏭️  RUN_MINT is 0 (default). Mint step skipped.")
 
