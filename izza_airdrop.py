@@ -142,10 +142,23 @@ def roll_reward():
 
 
 # -------------------------------------------------------------------
-# PAGE
+# PAGE ROUTES
 # -------------------------------------------------------------------
+
+# MAIN route
 @izza_airdrop_bp.route("/izza-airdrop")
 def izza_airdrop_page():
+    return render_template(
+        "izza_airdrop.html",
+        PI_APP_ID=os.getenv("PI_APP_ID",""),
+        PI_SANDBOX="true" if os.getenv("PI_SANDBOX","true")=="true" else "false"
+    )
+
+# ------------------------------------------------------------
+# NEW: alias route so /airdrop works
+# ------------------------------------------------------------
+@izza_airdrop_bp.route("/airdrop")
+def airdrop_alias():
     return render_template(
         "izza_airdrop.html",
         PI_APP_ID=os.getenv("PI_APP_ID",""),
