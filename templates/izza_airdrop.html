@@ -156,8 +156,11 @@
     if(!window.Pi) return alert("Pi SDK not available.");
 
     try {
-      const scopes = ["username","wallets"];
-      const { user } = await Pi.authenticate(scopes, ()=>{});
+      const scopes = ["username", "payments"];
+const onIncomplete = payment => { console.log("incomplete", payment); };
+
+const { user, accessToken } = await Pi.authenticate(scopes, onIncomplete);
+currentUser = user;
       currentUser = user;
       updateUserLabel();
 
