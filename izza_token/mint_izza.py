@@ -2,6 +2,7 @@ import os
 import math
 import sys
 import argparse
+import random
 from decimal import Decimal
 from dotenv import load_dotenv
 from stellar_sdk import Server, Keypair, TransactionBuilder, Asset, StrKey
@@ -36,7 +37,7 @@ DISTR_PUB     = getenv("DISTR_PUB", required=True)
 DISTR_SECRET  = getenv("DISTR_SECRET", required=True)
 
 ASSET_CODE  = getenv("ASSET_CODE", "IZZA")
-# ✅ Default mint is now 500,000 IZZA
+# Default mint is now 500,000 IZZA (you will set RUN_MINT=0 so this is idle for now)
 MINT_AMOUNT = getenv("MINT_AMOUNT", "500000.0000000")
 HOME_DOMAIN = getenv("HOME_DOMAIN", "izzapay.onrender.com")
 
@@ -48,7 +49,7 @@ BASE_FEE_OVERRIDE = getenv("BASE_FEE", "")
 
 # Runtime switches (safe defaults)
 RUN_MINT          = getenv("RUN_MINT", "0") == "1"          # set to 1 when you want to mint
-RUN_SELL_LADDER   = getenv("RUN_SELL_LADDER", "0") == "1"   # default: DON'T seed the sale ladder
+RUN_SELL_LADDER   = getenv("RUN_SELL_LADDER", "0") == "1"   # seed the sale ladder when 1
 RUN_MOVE_IZZA     = getenv("RUN_MOVE_IZZA", "0") == "1"     # move IZZA from distributor → wallet
 RUN_NATIVE_PAYOUT = getenv("RUN_NATIVE_PAYOUT", "0") == "1"  # optional native (Pi) payout, default off
 
@@ -256,8 +257,7 @@ def seed_sale_ladder(total_amount: int,
                      start_price: Decimal = Decimal("0.0005"),
                      step: Decimal = Decimal("0.001")):
     """
-    Seed a ladder of offers so that for each 'chunk_amount' sold, the next
-    remaining offer is +step Pi higher.
+    Simple ladder: equal chunks, linear step. Kept for fallback.
     """
     remaining = int(total_amount)
     i = 0
@@ -309,7 +309,7 @@ def cancel_all_izza_offers():
     submit_and_print(tx)
     print(f"🧹 Canceled {len(izza_offers)} IZZA offers.")
 
-# -------- Ladder-to-target helper (linear or geometric) --------
+# -------- Old ladder-to-target helper (kept) --------
 def seed_ladder_to_target(total_amount: int,
                           chunk_amount: int,
                           start_price: Decimal,
@@ -318,6 +318,7 @@ def seed_ladder_to_target(total_amount: int,
     """
     Build a ladder from start_price up to end_price across N rungs so that the
     last rung reaches end_price. 'mode' = 'linear' or 'geometric'.
+    Equal chunk size each rung.
     """
     total_amount = int(total_amount)
     chunk_amount = int(chunk_amount)
@@ -353,6 +354,96 @@ def seed_ladder_to_target(total_amount: int,
 
     print(f"✅ Ladder seeded: {len(prices)} rungs from {prices[0]:f} → {prices[-1]:f}")
 
+# -------- NEW: hype ladder with variable chunks and curve wiggle --------
+def seed_hype_sell_ladder(total_amount: int,
+                          start_price: Decimal,
+                          end_price: Decimal,
+                          min_chunk: int,
+                          max_chunk: int,
+                          wiggle_pct: Decimal):
+    """
+    Build a 'hype' ladder:
+      • Prices follow a smooth geometric curve from start_price → end_price
+      • Each rung size (IZZA amount) is random between [min_chunk, max_chunk]
+      • Small random wiggle on price so the curve is not perfectly smooth
+      • Prices are forced to be non-decreasing overall
+    """
+    total_amount = int(total_amount)
+    if total_amount <= 0:
+        print("⚠️  Nothing to seed (total is 0).")
+        return
+
+    if min_chunk <= 0 or max_chunk <= 0 or min_chunk > max_chunk:
+        # sane fallback
+        avg_chunk = max(1, total_amount // 50)
+        min_chunk = max(1, avg_chunk // 2)
+        max_chunk = max(min_chunk, avg_chunk * 2)
+
+    # Estimate rungs based on avg chunk size
+    expected_chunk = (min_chunk + max_chunk) // 2
+    est_rungs = max(1, math.ceil(total_amount / expected_chunk))
+
+    sp = Decimal(start_price)
+    ep = Decimal(end_price)
+
+    remaining = total_amount
+    rung_index = 0
+    last_price = sp
+
+    print(f"Seeding hype ladder for {total_amount} {ASSET_CODE} "
+          f"from {sp} → {ep} with ~{est_rungs} rungs …")
+
+    while remaining > 0:
+        # Progress 0 → 1 over estimated rungs
+        if est_rungs > 1:
+            t = Decimal(rung_index) / Decimal(est_rungs - 1)
+        else:
+            t = Decimal("1")
+
+        # Geometric curve base factor
+        if sp > 0:
+            base_factor = (ep / sp) ** t if ep > 0 else Decimal("1")
+            base_price = sp * base_factor
+        else:
+            base_price = ep
+
+        # Random wiggle, e.g. ± wiggle_pct (0.05 = 5 percent)
+        if wiggle_pct > 0:
+            w = random.uniform(float(-wiggle_pct), float(wiggle_pct))
+            base_price = base_price * (Decimal("1") + Decimal(str(w)))
+
+        # Enforce non decreasing curve and clamp within [sp, ep]
+        if rung_index == 0:
+            price = max(sp, min(base_price, ep))
+        else:
+            if base_price <= last_price:
+                # minimal step up based on remaining headroom
+                remaining_steps = max(1, est_rungs - rung_index)
+                step_up = (ep - last_price) / Decimal(remaining_steps)
+                if step_up <= 0:
+                    step_up = Decimal("0.0001")
+                price = last_price + step_up
+            else:
+                price = base_price
+
+            if price > ep:
+                price = ep
+
+        # Random chunk size for this rung
+        chunk = random.randint(min_chunk, max_chunk)
+        if chunk > remaining:
+            chunk = remaining
+
+        # Quantize price for neatness
+        price_q = price.quantize(Decimal("0.0000001"))
+        create_sell_offer(amount_izza=str(chunk), price_pi_per_izza=str(price_q))
+
+        remaining -= chunk
+        last_price = price
+        rung_index += 1
+
+    print(f"✅ Hype ladder seeded: {rung_index} offers from {sp} → {last_price}")
+
 # =============== NATIVE (TEST PI) PAYMENT HELPER ===============
 def send_native_payment(destination_pub: str, amount_pi: str, memo_text: str = ""):
     """
@@ -382,7 +473,7 @@ def send_native_payment(destination_pub: str, amount_pi: str, memo_text: str = "
     tx.sign(distr_kp)
     return submit_and_print(tx)
 
-# =============== NEW: DISTRIBUTOR → WALLET IZZA TRANSFER ===============
+# =============== DISTRIBUTOR → WALLET IZZA TRANSFER ===============
 def distributor_send_izza(destination_pub: str, amount_izza: str):
     """
     Move IZZA from DISTR_PUB to destination_pub (your IZZA wallet).
@@ -457,27 +548,54 @@ def main():
     if RUN_SELL_LADDER:
         print("Step 4/4: Seed DEX sale ladder …")
         current_bal = get_izza_balance(DISTR_PUB)
-        target_to_sell = Decimal("400000")
-        sellable = min(current_bal, target_to_sell)
+
+        # How much of distributor balance we let the script post
+        ladder_total_env = getenv("HYPE_LADDER_TOTAL", "500000")
+        try:
+            ladder_total = Decimal(ladder_total_env)
+        except Exception:
+            ladder_total = Decimal("500000")
+
+        sellable = min(current_bal, ladder_total)
         if sellable <= 0:
             print("⚠️  No IZZA available to post offers. Skipping ladder.")
         else:
             sellable_int = int(sellable.to_integral_value(rounding="ROUND_FLOOR"))
             print(f"Posting ladder for {sellable_int} IZZA …")
 
-            ladder_chunk = int(getenv("LADDER_CHUNK", "10000"))
-            ladder_total = int(getenv("LADDER_TOTAL", str(sellable_int)))
-            ladder_start = Decimal(getenv("LADDER_START_PRICE", "0.0005"))
-            ladder_end   = Decimal(getenv("LADDER_END_PRICE",  "1.0"))
-            ladder_mode  = getenv("LADDER_MODE", "geometric")  # or "linear"
+            ladder_mode = getenv("LADDER_MODE", "hype")  # "hype", "geometric", or "linear"
 
-            seed_ladder_to_target(
-                total_amount=ladder_total,
-                chunk_amount=ladder_chunk,
-                start_price=ladder_start,
-                end_price=ladder_end,
-                mode=ladder_mode
-            )
+            # Shared price range env (you want 0.33 → 33.33)
+            ladder_start = Decimal(getenv("LADDER_START_PRICE", "0.33"))
+            ladder_end   = Decimal(getenv("LADDER_END_PRICE",  "33.33"))
+
+            if ladder_mode == "hype":
+                # Hype ladder config
+                min_chunk = int(getenv("HYPE_LADDER_MIN_CHUNK", "1500"))
+                max_chunk = int(getenv("HYPE_LADDER_MAX_CHUNK", "15000"))
+                wiggle    = Decimal(getenv("HYPE_LADDER_WIGGLE", "0.08"))  # 8 percent wiggle
+
+                seed_hype_sell_ladder(
+                    total_amount=sellable_int,
+                    start_price=ladder_start,
+                    end_price=ladder_end,
+                    min_chunk=min_chunk,
+                    max_chunk=max_chunk,
+                    wiggle_pct=wiggle,
+                )
+            else:
+                # Fallback to old equal chunk ladder
+                ladder_chunk = int(getenv("LADDER_CHUNK", "10000"))
+                ladder_total_int = int(getenv("LADDER_TOTAL", str(sellable_int)))
+                mode = ladder_mode if ladder_mode in ("linear", "geometric") else "geometric"
+
+                seed_ladder_to_target(
+                    total_amount=ladder_total_int,
+                    chunk_amount=ladder_chunk,
+                    start_price=ladder_start,
+                    end_price=ladder_end,
+                    mode=mode,
+                )
     else:
         print("⏭️  RUN_SELL_LADDER is 0. Skipping offer creation.")
 
