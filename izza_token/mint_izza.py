@@ -196,25 +196,6 @@ def set_issuer_options():
     tx.sign(issuer_kp)
     return submit_and_print(tx)
 
-def distributor_change_trust():
-    distr_kp   = Keypair.from_secret(DISTR_SECRET)
-    distr_acct = server.load_account(distr_kp.public_key)
-    tx = (
-        TransactionBuilder(
-            source_account=distr_acct,
-            network_passphrase=NETWORK_PASSPHRASE,
-            base_fee=get_base_fee(),
-        )
-        .append_change_trust_op(
-            asset=asset,
-            limit=str(Decimal("922337203685.4775807"))
-        )
-        .set_timeout(120)
-        .build()
-    )
-    tx.sign(distr_kp)
-    return submit_and_print(tx)
-
 def issuer_mint_payment():
     issuer_kp   = Keypair.from_secret(ISSUER_SECRET)
     issuer_acct = server.load_account(issuer_kp.public_key)
@@ -685,14 +666,11 @@ def main():
     maybe_create_account(ISSUER_PUB)
     maybe_create_account(DISTR_PUB)
 
-    print("Step 1/4: Set issuer options … (idempotent)")
+    print("Step 1/3: Set issuer options … (idempotent)")
     set_issuer_options()
 
-    print("Step 2/4: Distributor change-trust … (idempotent)")
-    distributor_change_trust()
-
-    # Step 3: Mint
-    print("Step 3/4: Mint step …")
+    # Step 2: Mint
+    print("Step 2/3: Mint step …")
     current_bal = get_izza_balance(DISTR_PUB)
     print(f"Distributor IZZA balance before mint: {current_bal}")
     if RUN_MINT:
@@ -701,9 +679,9 @@ def main():
     else:
         print("⏭️  RUN_MINT is 0 (default). Mint step skipped.")
 
-    # --- Step 4: Seed public sale ladder (Growth allocation) ---
+    # --- Step 3: Seed public sale ladder (Growth allocation) ---
     if RUN_SELL_LADDER:
-        print("Step 4/4: Seed DEX sale ladder …")
+        print("Step 3/3: Seed DEX sale ladder …")
         current_bal = get_izza_balance(DISTR_PUB)
 
         # How much of distributor balance we let the script post
