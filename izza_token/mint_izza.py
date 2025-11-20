@@ -51,33 +51,32 @@ FUNDING_STARTING_BAL = getenv("FUNDING_STARTING_BALANCE", "5")
 # Optional manual override via env
 BASE_FEE_OVERRIDE = getenv("BASE_FEE", "")
 
-# Runtime switches (safe defaults)
-RUN_MINT          = getenv("RUN_MINT", "0") == "1"          # set to 1 when you want to mint
-RUN_SELL_LADDER   = getenv("RUN_SELL_LADDER", "0") == "1"   # seed the sale ladder when 1
-RUN_MOVE_IZZA     = getenv("RUN_MOVE_IZZA", "0") == "1"     # move IZZA from distributor → wallet
-RUN_NATIVE_PAYOUT = getenv("RUN_NATIVE_PAYOUT", "0") == "1"  # optional native (Pi) payout, default off
+# Runtime switches
+RUN_MINT          = getenv("RUN_MINT", "0") == "1"
+RUN_SELL_LADDER   = getenv("RUN_SELL_LADDER", "0") == "1"
+RUN_MOVE_IZZA     = getenv("RUN_MOVE_IZZA", "0") == "1"
+RUN_NATIVE_PAYOUT = getenv("RUN_NATIVE_PAYOUT", "0") == "1"
 
-# NEW: weekly IZZA airdrop to all IZZA trustline holders
+# Weekly IZZA airdrop to all IZZA trustline holders
 RUN_AIRDROP     = getenv("RUN_AIRDROP", "0") == "1"
-AIRDROP_AMOUNT  = getenv("AIRDROP_AMOUNT", "0.0000001")  # per wallet, tiny amount
-AIRDROP_TAG     = getenv("AIRDROP_TAG", "").strip()      # e.g. "IZZALOOT" – used to avoid double-crediting
+AIRDROP_AMOUNT  = getenv("AIRDROP_AMOUNT", "0.0000001")
+AIRDROP_TAG     = getenv("AIRDROP_TAG", "").strip()      # e.g. "IZZALOOT"
 
-# NEW: TEMP single-wallet test target (your Pi testnet wallet)
-# Set AIRDROP_SINGLE_DEST="" later to switch back to all trustline holders.
+# TEMP single wallet test target
 AIRDROP_SINGLE_DEST = getenv(
     "AIRDROP_SINGLE_DEST",
     "GDDFUCFIWEXARKUPKBU5SKXBQSUNTBPQQEDYHGYJGSZFYCGCGZO5X7CT"
 ).strip()
 
-# Airdrop throttling + retry controls
-AIRDROP_SLEEP_SECONDS = float(getenv("AIRDROP_SLEEP_SECONDS", "0.9"))   # wait after each tx
-AIRDROP_MAX_RETRIES   = int(getenv("AIRDROP_MAX_RETRIES", "3"))         # per wallet on failure
+# Airdrop throttling and retry controls
+AIRDROP_SLEEP_SECONDS = float(getenv("AIRDROP_SLEEP_SECONDS", "0.9"))
+AIRDROP_MAX_RETRIES   = int(getenv("AIRDROP_MAX_RETRIES", "3"))
 
-# New: move-IZZA configuration
-MOVE_IZZA_DEST   = getenv("MOVE_IZZA_DEST", "")            # destination pubkey (your IZZA wallet)
-MOVE_IZZA_AMOUNT = getenv("MOVE_IZZA_AMOUNT", "0")         # amount of IZZA to move (e.g. "100000")
+# Move IZZA configuration
+MOVE_IZZA_DEST   = getenv("MOVE_IZZA_DEST", "")
+MOVE_IZZA_AMOUNT = getenv("MOVE_IZZA_AMOUNT", "0")
 
-# Optional native payout config (kept but disabled by default)
+# Optional native payout config
 NATIVE_PAYOUT_DEST   = getenv("NATIVE_PAYOUT_DEST", "")
 NATIVE_PAYOUT_AMOUNT = getenv("NATIVE_PAYOUT_AMOUNT", "0")
 NATIVE_PAYOUT_MEMO   = getenv("NATIVE_PAYOUT_MEMO", "IZZA test payout")
@@ -104,14 +103,12 @@ server = Server(HORIZON_URL)
 asset  = Asset(ASSET_CODE, ISSUER_PUB)
 
 def get_base_fee() -> int:
-    """Pick a safe base fee in stroops."""
     if BASE_FEE_OVERRIDE:
         return int(BASE_FEE_OVERRIDE)
     try:
-        suggested = server.fetch_base_fee()  # stroops per op
+        suggested = server.fetch_base_fee()
     except Exception:
         suggested = 100
-    # Pi Testnet tends to need more; multiply and floor.
     return max(int(suggested * 20), 10_000)
 
 def horizon_account_exists(pubkey: str) -> bool:
@@ -127,7 +124,7 @@ def maybe_create_account(target_pub: str):
     if not FUNDING_SECRET:
         raise RuntimeError(
             f"Account {target_pub} not found.\n"
-            f"Fund it manually on the Pi Testnet, then re-run."
+            f"Fund it manually on the Pi Testnet, then re run."
         )
     funder_kp   = Keypair.from_secret(FUNDING_SECRET)
     funder_acct = server.load_account(funder_kp.public_key)
@@ -146,7 +143,7 @@ def maybe_create_account(target_pub: str):
     )
     tx.sign(funder_kp)
     resp = server.submit_transaction(tx)
-    print(f"✅ Created/funded {target_pub}: {resp.get('hash')}")
+    print(f"✅ Created funded {target_pub}: {resp.get('hash')}")
 
 def submit_and_print(tx):
     resp = server.submit_transaction(tx)
@@ -155,7 +152,6 @@ def submit_and_print(tx):
     return resp
 
 def get_izza_balance(pubkey: str) -> Decimal:
-    """Return IZZA balance for an account (0 if no trustline)."""
     try:
         acc = server.accounts().account_id(pubkey).call()
     except NotFoundError:
@@ -169,12 +165,11 @@ def get_izza_balance(pubkey: str) -> Decimal:
             return Decimal(b.get("balance", "0"))
     return Decimal("0")
 
-# ---- Set issuer options ----
+# Set issuer options
 def set_issuer_options():
     issuer_kp   = Keypair.from_secret(ISSUER_SECRET)
     issuer_acct = server.load_account(issuer_kp.public_key)
 
-    # Use ONE combined bitmask, not a list
     if USE_ENUM_FLAGS:
         clear_flags = (
             AuthorizationFlag.AUTH_REQUIRED_FLAG
@@ -182,7 +177,7 @@ def set_issuer_options():
             | AuthorizationFlag.AUTH_CLAWBACK_ENABLED_FLAG
         )
     else:
-        clear_flags = 11  # 1 + 2 + 8
+        clear_flags = 11
 
     tx = (
         TransactionBuilder(
@@ -220,16 +215,11 @@ def issuer_mint_payment():
     tx.sign(issuer_kp)
     return submit_and_print(tx)
 
-# ==================== DEX OFFER HELPERS ====================
+# DEX offer helpers
 
-from stellar_sdk import Asset as _AssetAlias  # not strictly needed; Asset.native() already imported
+from stellar_sdk import Asset as _AssetAlias  # noqa
 
 def create_sell_offer(amount_izza: str, price_pi_per_izza: str):
-    """
-    Post a single sell offer: SELL IZZA for native (Pi) at a fixed price.
-    amount_izza: how many IZZA to sell in this offer
-    price_pi_per_izza: quoted as Pi per 1 IZZA (e.g., '0.001')
-    """
     distr_kp   = Keypair.from_secret(DISTR_SECRET)
     distr_acct = server.load_account(distr_kp.public_key)
 
@@ -240,11 +230,11 @@ def create_sell_offer(amount_izza: str, price_pi_per_izza: str):
             base_fee=get_base_fee(),
         )
         .append_manage_sell_offer_op(
-            selling=asset,                 # IZZA (your asset)
-            buying=Asset.native(),         # buy Pi (native)
+            selling=asset,
+            buying=Asset.native(),
             amount=str(Decimal(amount_izza)),
             price=str(Decimal(price_pi_per_izza)),
-            offer_id=0                     # 0 = create new offer
+            offer_id=0
         )
         .set_timeout(180)
         .build()
@@ -258,9 +248,6 @@ def seed_sale_ladder(total_amount: int,
                      chunk_amount: int = 10_000,
                      start_price: Decimal = Decimal("0.0005"),
                      step: Decimal = Decimal("0.001")):
-    """
-    Simple ladder: equal chunks, linear step. Kept for fallback.
-    """
     remaining = int(total_amount)
     i = 0
     while remaining > 0:
@@ -272,10 +259,8 @@ def seed_sale_ladder(total_amount: int,
     print("✅ Sale ladder seeded.")
 
 def cancel_all_izza_offers():
-    """Cancel all existing IZZA sell offers from the distributor."""
     distr_kp = Keypair.from_secret(DISTR_SECRET)
 
-    # use .for_seller(), not .seller()
     page = server.offers().for_seller(distr_kp.public_key).limit(200).call()
     offers = page.get("_embedded", {}).get("records", [])
 
@@ -283,7 +268,6 @@ def cancel_all_izza_offers():
         print("No IZZA offers to cancel.")
         return
 
-    # Keep only offers where we are selling IZZA from our issuer
     izza_offers = [o for o in offers
                    if o.get("selling", {}).get("asset_code") == ASSET_CODE
                    and o.get("selling", {}).get("asset_issuer") == ISSUER_PUB]
@@ -302,8 +286,8 @@ def cancel_all_izza_offers():
         tb.append_manage_sell_offer_op(
             selling=asset,
             buying=Asset.native(),
-            amount="0",                  # amount=0 => cancel existing offer
-            price=o["price"],            # Horizon requires a price even when canceling
+            amount="0",
+            price=o["price"],
             offer_id=int(o["id"])
         )
     tx = tb.set_timeout(180).build()
@@ -311,21 +295,15 @@ def cancel_all_izza_offers():
     submit_and_print(tx)
     print(f"🧹 Canceled {len(izza_offers)} IZZA offers.")
 
-# -------- Old ladder-to-target helper (kept) --------
 def seed_ladder_to_target(total_amount: int,
                           chunk_amount: int,
                           start_price: Decimal,
                           end_price: Decimal,
                           mode: str = "geometric"):
-    """
-    Build a ladder from start_price up to end_price across N rungs so that the
-    last rung reaches end_price. 'mode' = 'linear' or 'geometric'.
-    Equal chunk size each rung.
-    """
     total_amount = int(total_amount)
     chunk_amount = int(chunk_amount)
     if total_amount <= 0 or chunk_amount <= 0:
-        print("⚠️  Nothing to seed (total or chunk is 0).")
+        print("⚠️  Nothing to seed.")
         return
 
     rungs = math.ceil(total_amount / chunk_amount)
@@ -354,34 +332,24 @@ def seed_ladder_to_target(total_amount: int,
         create_sell_offer(amount_izza=str(this_chunk), price_pi_per_izza=str(p))
         remaining -= this_chunk
 
-    print(f"✅ Ladder seeded: {len(prices)} rungs from {prices[0]:f} → {prices[-1]:f}")
+    print(f"✅ Ladder seeded: {len(prices)} rungs from {prices[0]:f} to {prices[-1]:f}")
 
-# -------- NEW: hype ladder with variable chunks and curve wiggle --------
 def seed_hype_sell_ladder(total_amount: int,
                           start_price: Decimal,
                           end_price: Decimal,
                           min_chunk: int,
                           max_chunk: int,
                           wiggle_pct: Decimal):
-    """
-    Build a 'hype' ladder:
-      • Prices follow a smooth geometric curve from start_price → end_price
-      • Each rung size (IZZA amount) is random between [min_chunk, max_chunk]
-      • Small random wiggle on price so the curve is not perfectly smooth
-      • Prices are forced to be non-decreasing overall
-    """
     total_amount = int(total_amount)
     if total_amount <= 0:
-        print("⚠️  Nothing to seed (total is 0).")
+        print("⚠️  Nothing to seed.")
         return
 
     if min_chunk <= 0 or max_chunk <= 0 or min_chunk > max_chunk:
-        # sane fallback
         avg_chunk = max(1, total_amount // 50)
         min_chunk = max(1, avg_chunk // 2)
         max_chunk = max(min_chunk, avg_chunk * 2)
 
-    # Estimate rungs based on avg chunk size
     expected_chunk = (min_chunk + max_chunk) // 2
     est_rungs = max(1, math.ceil(total_amount / expected_chunk))
 
@@ -392,34 +360,28 @@ def seed_hype_sell_ladder(total_amount: int,
     rung_index = 0
     last_price = sp
 
-    print(f"Seeding hype ladder for {total_amount} {ASSET_CODE} "
-          f"from {sp} → {ep} with ~{est_rungs} rungs …")
+    print(f"Seeding hype ladder for {total_amount} {ASSET_CODE} from {sp} to {ep} with about {est_rungs} rungs …")
 
     while remaining > 0:
-        # Progress 0 → 1 over estimated rungs
         if est_rungs > 1:
             t = Decimal(rung_index) / Decimal(est_rungs - 1)
         else:
             t = Decimal("1")
 
-        # Geometric curve base factor
         if sp > 0:
             base_factor = (ep / sp) ** t if ep > 0 else Decimal("1")
             base_price = sp * base_factor
         else:
             base_price = ep
 
-        # Random wiggle, e.g. ± wiggle_pct (0.05 = 5 percent)
         if wiggle_pct > 0:
             w = random.uniform(float(-wiggle_pct), float(wiggle_pct))
             base_price = base_price * (Decimal("1") + Decimal(str(w)))
 
-        # Enforce non decreasing curve and clamp within [sp, ep]
         if rung_index == 0:
             price = max(sp, min(base_price, ep))
         else:
             if base_price <= last_price:
-                # minimal step up based on remaining headroom
                 remaining_steps = max(1, est_rungs - rung_index)
                 step_up = (ep - last_price) / Decimal(remaining_steps)
                 if step_up <= 0:
@@ -431,12 +393,10 @@ def seed_hype_sell_ladder(total_amount: int,
             if price > ep:
                 price = ep
 
-        # Random chunk size for this rung
         chunk = random.randint(min_chunk, max_chunk)
         if chunk > remaining:
             chunk = remaining
 
-        # Quantize price for neatness
         price_q = price.quantize(Decimal("0.0000001"))
         create_sell_offer(amount_izza=str(chunk), price_pi_per_izza=str(price_q))
 
@@ -444,14 +404,11 @@ def seed_hype_sell_ladder(total_amount: int,
         last_price = price
         rung_index += 1
 
-    print(f"✅ Hype ladder seeded: {rung_index} offers from {sp} → {last_price}")
+    print(f"✅ Hype ladder seeded: {rung_index} offers from {sp} to {last_price}")
 
-# =============== NATIVE (TEST PI) PAYMENT HELPER ===============
+# Native test Pi payment helper
+
 def send_native_payment(destination_pub: str, amount_pi: str, memo_text: str = ""):
-    """
-    Send native (test Pi) from the DISTR_PUB to destination_pub.
-    amount_pi must be a string like "2300" or "2300.0000000".
-    """
     distr_kp   = Keypair.from_secret(DISTR_SECRET)
     distr_acct = server.load_account(distr_kp.public_key)
 
@@ -469,24 +426,21 @@ def send_native_payment(destination_pub: str, amount_pi: str, memo_text: str = "
         .set_timeout(180)
     )
     if memo_text:
-        tb.add_text_memo(memo_text[:28])  # Horizon text memos max 28 bytes
+        tb.add_text_memo(memo_text[:28])
 
     tx = tb.build()
     tx.sign(distr_kp)
     return submit_and_print(tx)
 
-# =============== DISTRIBUTOR → WALLET IZZA TRANSFER ===============
+# Distributor to wallet IZZA transfer
+
 def distributor_send_izza(destination_pub: str, amount_izza: str):
-    """
-    Move IZZA from DISTR_PUB to destination_pub (your IZZA wallet).
-    No new mint, no offers – just a straight payment.
-    """
     if not StrKey.is_valid_ed25519_public_key(destination_pub):
         raise ValueError("MOVE_IZZA_DEST is not a valid public key")
 
     amount_dec = Decimal(amount_izza)
     if amount_dec <= 0:
-        raise ValueError("MOVE_IZZA_AMOUNT must be > 0")
+        raise ValueError("MOVE_IZZA_AMOUNT must be greater than 0")
 
     bal = get_izza_balance(DISTR_PUB)
     print(f"Distributor IZZA balance before move: {bal}")
@@ -515,15 +469,9 @@ def distributor_send_izza(destination_pub: str, amount_izza: str):
     print(f"🚚 Moved {amount_dec} {ASSET_CODE} from distributor to {destination_pub}")
     return resp
 
-# ===============================================================
-# NEW: Enumerate IZZA trustline holders and airdrop tiny IZZA
-# ===============================================================
+# Enumerate IZZA trustline holders
 
 def iter_izza_trustline_holders():
-    """
-    Yield all account_ids that have a trustline to IZZA (excluding issuer + distributor).
-    This is what you target with the tiny airdrop (e.g. 0.0000001 IZZA).
-    """
     cursor = None
     seen = set()
     while True:
@@ -552,10 +500,6 @@ def iter_izza_trustline_holders():
         cursor = next_href.split("cursor=")[-1].split("&")[0] or None
 
 def ensure_airdrop_table(cx):
-    """
-    Simple airdrop log table used by the IZZA app to decide:
-      - does this wallet_pub have an IZZA airdrop for a given tag?
-    """
     cx.execute("""
       CREATE TABLE IF NOT EXISTS izza_airdrops(
         id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -570,18 +514,11 @@ def ensure_airdrop_table(cx):
 
 def run_izza_airdrop():
     """
-    Send AIRDROP_AMOUNT IZZA from DISTR_PUB:
-
-      • If AIRDROP_SINGLE_DEST is set → send ONLY to that wallet
-      • Otherwise → send to every IZZA trustline holder
-
-    and log it in the izza_airdrops table.
-
-    On each run it prints:
-      • total current trustline holders
-      • total wallets ever recorded for this tag
-      • how many of the current trustline holders already have this tag
-      • how many trustlines will be attempted this run
+    On each run it prints
+      total current trustline holders
+      total wallets ever recorded for this tag
+      how many of the current trustline holders already have this tag
+      how many trustlines will be attempted this run
     """
     try:
         amt_dec = Decimal(AIRDROP_AMOUNT)
@@ -592,7 +529,6 @@ def run_izza_airdrop():
         print("⚠️  AIRDROP_AMOUNT is <= 0, skipping airdrop.")
         return
 
-    # TEMP mode: single wallet only (your Pi testnet wallet)
     if AIRDROP_SINGLE_DEST:
         holders = [AIRDROP_SINGLE_DEST]
         print(f"🔬 Test mode: airdrop will ONLY be sent to {AIRDROP_SINGLE_DEST}")
@@ -625,7 +561,6 @@ def run_izza_airdrop():
     with app_db.conn() as cx:
         ensure_airdrop_table(cx)
 
-        # All wallets that have ever received this tag (any run, any time)
         if tag_value is not None:
             rows = cx.execute(
                 "SELECT DISTINCT wallet_pub FROM izza_airdrops WHERE tag = ?",
@@ -639,10 +574,8 @@ def run_izza_airdrop():
         all_tag_wallets = {r[0] for r in rows}
         total_tag_wallets = len(all_tag_wallets)
 
-        # How many of the CURRENT trustline holders already have this tag
         already_had = len(holders_set & all_tag_wallets)
 
-        # Exact number of trustlines that will be attempted this run
         will_attempt_this_run = max(0, total_candidates - already_had)
 
         print(f"Tag '{tag_value}' summary before this run:")
@@ -656,7 +589,6 @@ def run_izza_airdrop():
         failed  = 0
 
         for idx, pub in enumerate(holders, start=1):
-            # If tag is set, don't double-record same wallet+tag
             if tag_value is not None:
                 row = cx.execute(
                     "SELECT 1 FROM izza_airdrops WHERE wallet_pub = ? AND tag = ?",
@@ -680,7 +612,6 @@ def run_izza_airdrop():
                           f"failed={failed} remaining_for_tag≈{remaining_for_tag}")
                 continue
 
-            # Build transaction for this wallet
             def build_tx():
                 nonlocal distr_acct
                 distr_acct = server.load_account(distr_kp.public_key)
@@ -711,6 +642,8 @@ def run_izza_airdrop():
                         "VALUES (?,?,?,?,?)",
                         (pub, tag_value, str(amt_dec), tx_hash, now_ts)
                     )
+                    # NEW commit so partial runs are saved
+                    cx.commit()
                     sent += 1
                     break
                 except Exception as e:
@@ -733,7 +666,6 @@ def run_izza_airdrop():
                         failed += 1
                         break
 
-            # sleep between wallets to stay well under Horizon rate limits
             time.sleep(AIRDROP_SLEEP_SECONDS)
 
             if idx % 50 == 0 or idx == total_candidates:
@@ -755,8 +687,6 @@ def run_izza_airdrop():
         print(f"  Failed in this run:                         {failed}")
         print(f"  Trustlines still left for this tag (now):   {remaining_for_tag}")
 
-# ===============================================================
-
 def main():
     parser = argparse.ArgumentParser(add_help=False)
     parser.add_argument("--cancel", action="store_true", help="Cancel all existing IZZA sell offers and exit")
@@ -766,29 +696,26 @@ def main():
         cancel_all_izza_offers()
         return
 
-    print("Checking accounts exist on-chain …")
+    print("Checking accounts exist on chain …")
     maybe_create_account(ISSUER_PUB)
     maybe_create_account(DISTR_PUB)
 
-    print("Step 1/3: Set issuer options … (idempotent)")
+    print("Step 1 of 3: Set issuer options …")
     set_issuer_options()
 
-    # Step 2: Mint
-    print("Step 2/3: Mint step …")
+    print("Step 2 of 3: Mint step …")
     current_bal = get_izza_balance(DISTR_PUB)
     print(f"Distributor IZZA balance before mint: {current_bal}")
     if RUN_MINT:
-        print(f"Mint enabled → minting {MINT_AMOUNT} IZZA to distributor regardless of existing balance.")
+        print(f"Mint enabled, minting {MINT_AMOUNT} IZZA to distributor regardless of existing balance.")
         issuer_mint_payment()
     else:
-        print("⏭️  RUN_MINT is 0 (default). Mint step skipped.")
+        print("⏭️  RUN_MINT is 0. Mint step skipped.")
 
-    # --- Step 3: Seed public sale ladder (Growth allocation) ---
     if RUN_SELL_LADDER:
-        print("Step 3/3: Seed DEX sale ladder …")
+        print("Step 3 of 3: Seed DEX sale ladder …")
         current_bal = get_izza_balance(DISTR_PUB)
 
-        # How much of distributor balance we let the script post
         ladder_total_env = getenv("HYPE_LADDER_TOTAL", "500000")
         try:
             ladder_total = Decimal(ladder_total_env)
@@ -802,17 +729,15 @@ def main():
             sellable_int = int(sellable.to_integral_value(rounding="ROUND_FLOOR"))
             print(f"Posting ladder for {sellable_int} IZZA …")
 
-            ladder_mode = getenv("LADDER_MODE", "hype")  # "hype", "geometric", or "linear"
+            ladder_mode = getenv("LADDER_MODE", "hype")
 
-            # Shared price range env (you want 0.33 → 33.33)
             ladder_start = Decimal(getenv("LADDER_START_PRICE", "0.33"))
             ladder_end   = Decimal(getenv("LADDER_END_PRICE",  "33.33"))
 
             if ladder_mode == "hype":
-                # Hype ladder config
                 min_chunk = int(getenv("HYPE_LADDER_MIN_CHUNK", "1500"))
                 max_chunk = int(getenv("HYPE_LADDER_MAX_CHUNK", "15000"))
-                wiggle    = Decimal(getenv("HYPE_LADDER_WIGGLE", "0.08"))  # 8 percent wiggle
+                wiggle    = Decimal(getenv("HYPE_LADDER_WIGGLE", "0.08"))
 
                 seed_hype_sell_ladder(
                     total_amount=sellable_int,
@@ -823,7 +748,6 @@ def main():
                     wiggle_pct=wiggle,
                 )
             else:
-                # Fallback to old equal chunk ladder
                 ladder_chunk = int(getenv("LADDER_CHUNK", "10000"))
                 ladder_total_int = int(getenv("LADDER_TOTAL", str(sellable_int)))
                 mode = ladder_mode if ladder_mode in ("linear", "geometric") else "geometric"
@@ -838,14 +762,12 @@ def main():
     else:
         print("⏭️  RUN_SELL_LADDER is 0. Skipping offer creation.")
 
-    # --- Optional: IZZA weekly airdrop to all trustline holders or single test wallet ---
     if RUN_AIRDROP:
-        print("\nRunning IZZA trustline-holder airdrop …")
+        print("\nRunning IZZA trustline holder airdrop …")
         run_izza_airdrop()
     else:
         print("⏭️  RUN_AIRDROP is 0. Skipping IZZA airdrop.")
 
-    # --- OPTIONAL: move IZZA from distributor → your wallet ---
     if RUN_MOVE_IZZA:
         try:
             amt = str(Decimal(MOVE_IZZA_AMOUNT))
@@ -856,9 +778,8 @@ def main():
         print(f"\nMoving {amt} {ASSET_CODE} from distributor to {MOVE_IZZA_DEST} …")
         distributor_send_izza(MOVE_IZZA_DEST, amt)
     else:
-        print("⏭️  RUN_MOVE_IZZA is 0. Skipping distributor → wallet IZZA move.")
+        print("⏭️  RUN_MOVE_IZZA is 0. Skipping distributor to wallet IZZA move.")
 
-    # --- OPTIONAL: send native test Pi out of distributor ---
     if RUN_NATIVE_PAYOUT:
         try:
             nat_amt = str(Decimal(NATIVE_PAYOUT_AMOUNT))
@@ -871,7 +792,7 @@ def main():
     else:
         print("⏭️  RUN_NATIVE_PAYOUT is 0. Skipping native payout.")
 
-    print("\nAll done. Verify balances/offers at:")
+    print("\nAll done. Verify balances offers at:")
     print(f"  Issuer:      {HORIZON_URL}/accounts/{ISSUER_PUB}")
     print(f"  Distributor: {HORIZON_URL}/accounts/{DISTR_PUB}")
     print(f"  Offers API:  {HORIZON_URL}/offers?seller={DISTR_PUB}")
