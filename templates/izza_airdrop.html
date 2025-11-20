@@ -111,7 +111,7 @@
     <button id="activateBtn"
             class="btn btn-outline"
             style="width:100%; margin-top:10px; display:none;">
-      Activate IZZA loot crates (0 test Pi)
+      Activate IZZA loot crates (0.0000001 Pi)
     </button>
 
     <p id="userLabel"></p>
@@ -242,7 +242,7 @@
     });
   }
 
-  // ---------------- Activate via 0 Pi payment ----------------
+  // ---------------- Activate via tiny Pi payment ----------------
   if (activateBtn) {
     activateBtn.onclick = async function(){
       if (!window.Pi) {
@@ -259,7 +259,7 @@
         activateBtn.textContent = "Activating…";
 
         const paymentData = {
-          amount: 0,
+          amount: "0.0000001",
           memo: "Activate IZZA loot crates",
           metadata: {
             type: "izza_airdrop_activation",
@@ -308,19 +308,19 @@
               alert("Network problem finishing activation.");
             } finally {
               activateBtn.disabled = false;
-              activateBtn.textContent = "Activate IZZA loot crates (0 test Pi)";
+              activateBtn.textContent = "Activate IZZA loot crates (0.0000001 Pi)";
             }
           },
           onCancel: (paymentId) => {
             console.log("Activation cancelled", paymentId);
             activateBtn.disabled = false;
-            activateBtn.textContent = "Activate IZZA loot crates (0 test Pi)";
+            activateBtn.textContent = "Activate IZZA loot crates (0.0000001 Pi)";
           },
           onError: (error, payment) => {
             console.error("Activation payment error", error, payment);
             alert("Activation payment error, " + (error?.message || String(error)));
             activateBtn.disabled = false;
-            activateBtn.textContent = "Activate IZZA loot crates (0 test Pi)";
+            activateBtn.textContent = "Activate IZZA loot crates (0.0000001 Pi)";
           }
         };
 
@@ -329,7 +329,7 @@
         console.error("Pi.createPayment activation error", e);
         alert("Could not start activation payment, " + (e?.message || String(e)));
         activateBtn.disabled = false;
-        activateBtn.textContent = "Activate IZZA loot crates (0 test Pi)";
+        activateBtn.textContent = "Activate IZZA loot crates (0.0000001 Pi)";
       }
     };
   }
