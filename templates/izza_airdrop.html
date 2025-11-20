@@ -103,9 +103,16 @@
   <div class="airdrop-card">
 
     <h1 class="airdrop-title">IZZA AIRDROP</h1>
-    <p class="airdrop-sub">Authenticate with Pi to redeem your IZZA loot crate.</p>
+    <p class="airdrop-sub">Authenticate with Pi to link your wallet and redeem your IZZA loot crate.</p>
 
     <button id="piLoginBtn" class="btn btn-ombre" style="width:100%;">Sign in with Pi</button>
+
+    <!-- New: activation button, appears after Pi auth -->
+    <button id="activateBtn"
+            class="btn btn-outline"
+            style="width:100%; margin-top:10px; display:none;">
+      Activate IZZA loot crates (0 test Pi)
+    </button>
 
     <p id="userLabel"></p>
     <p id="airdropMessage"></p>
@@ -125,20 +132,22 @@
   const PI_APP_ID = "{{ PI_APP_ID }}";
   const PI_SANDBOX = "{{ PI_SANDBOX }}" === "true";
 
-  let currentUser = null;
+  let currentUser      = null;
+  let currentWalletPub = null;
 
-  const piLoginBtn = document.getElementById("piLoginBtn");
-  const userLabel  = document.getElementById("userLabel");
-  const msg        = document.getElementById("airdropMessage");
-  const crateGrid  = document.getElementById("crateGrid");
-  const crateSec   = document.getElementById("crateSection");
-  const crateHeader= document.getElementById("crateHeader");
-  const lootReward = document.getElementById("lootReward");
+  const piLoginBtn  = document.getElementById("piLoginBtn");
+  const activateBtn = document.getElementById("activateBtn");
+  const userLabel   = document.getElementById("userLabel");
+  const msg         = document.getElementById("airdropMessage");
+  const crateGrid   = document.getElementById("crateGrid");
+  const crateSec    = document.getElementById("crateSection");
+  const crateHeader = document.getElementById("crateHeader");
+  const lootReward  = document.getElementById("lootReward");
 
   function initPi(){
     if(!window.Pi) return;
     try {
-      Pi.init({ version:"2.0", sandbox:PI_SANDBOX });
+      Pi.init({ version:"2.0", sandbox: PI_SANDBOX });
     } catch(e){ console.error(e); }
   }
 
@@ -152,24 +161,10 @@
     }
   }
 
-  piLoginBtn.onclick = async function(){
-    if(!window.Pi) return alert("Pi SDK not available.");
-
-    try {
-      const scopes = ["username", "payments"];
-const onIncomplete = payment => { console.log("incomplete", payment); };
-
-const { user, accessToken } = await Pi.authenticate(scopes, onIncomplete);
-currentUser = user;
-      currentUser = user;
-      updateUserLabel();
-
-      await loadProfile();
-    } catch(err){
-      console.error(err);
-      alert("Pi auth failed.");
-    }
-  };
+  function setActivateVisible(visible) {
+    if (!activateBtn) return;
+    activateBtn.style.display = visible ? "block" : "none";
+  }
 
   async function getJSON(url){
     const r = await fetch(url);
@@ -185,21 +180,54 @@ currentUser = user;
     return r.json();
   }
 
-  async function loadProfile(){
-    if(!currentUser || !currentUser.username) return;
+  // ---------------- Pi Auth ----------------
+  piLoginBtn.onclick = async function(){
+    if(!window.Pi) return alert("Pi SDK not available.");
 
-    const data = await getJSON("/api/izza_airdrop/profile?username="+encodeURIComponent(currentUser.username));
+    try {
+      const scopes = ["username", "payments"];
+      const onIncomplete = payment => { console.log("incomplete payment", payment); };
+
+      const { user, accessToken } = await Pi.authenticate(scopes, onIncomplete);
+      currentUser = user;
+      updateUserLabel();
+
+      msg.textContent = "Tap 'Activate IZZA loot crates' to link your Testnet wallet and reveal your airdrop (if you have one).";
+      lootReward.textContent = "";
+      crateSec.style.display = "none";
+      crateGrid.innerHTML = "";
+      crateHeader.textContent = "";
+      currentWalletPub = null;
+
+      setActivateVisible(true);
+    } catch(err){
+      console.error(err);
+      alert("Pi auth failed.");
+    }
+  };
+
+  // ---------------- Profile by wallet_pub ----------------
+  async function loadProfile(){
+    if(!currentWalletPub) {
+      msg.textContent = "Activate IZZA loot crates to link your wallet.";
+      crateSec.style.display="none";
+      return;
+    }
+
+    const data = await getJSON("/api/izza_airdrop/profile?wallet_pub="+encodeURIComponent(currentWalletPub));
 
     msg.textContent = data.message || "";
 
-    if(!data.ok || !data.crates){
+    if(!data.ok || !data.crates || !data.crates.length){
       crateSec.style.display="none";
+      crateGrid.innerHTML="";
+      crateHeader.textContent = "";
       return;
     }
 
     crateSec.style.display="block";
     crateGrid.innerHTML="";
-    crateHeader.textContent = data.crates.length>0 ? "Tap a crate to reveal your IZZA reward" : "";
+    crateHeader.textContent = "Tap a crate to reveal your IZZA reward";
 
     data.crates.forEach(c=>{
       const div = document.createElement("div");
@@ -207,22 +235,120 @@ currentUser = user;
       div.dataset.id = c.id;
       div.innerHTML = `
         <div class="crate-label">IZZA LOOT CRATE</div>
-        <div class="crate-wave">${c.wave_tag}</div>
+        <div class="crate-wave">${c.wave_tag || ""}</div>
       `;
       div.onclick = ()=> openCrate(c.id);
       crateGrid.appendChild(div);
     });
   }
 
+  // ---------------- Activate via 0 Pi payment ----------------
+  if (activateBtn) {
+    activateBtn.onclick = async function(){
+      if (!window.Pi) {
+        alert("Pi SDK not available.");
+        return;
+      }
+      if (!currentUser || !currentUser.username) {
+        alert("Sign in with Pi first.");
+        return;
+      }
+
+      try {
+        activateBtn.disabled = true;
+        activateBtn.textContent = "Activating…";
+
+        const paymentData = {
+          amount: 0,
+          memo: "Activate IZZA loot crates",
+          metadata: {
+            type: "izza_airdrop_activation",
+            username: currentUser.username
+          }
+        };
+
+        const callbacks = {
+          onReadyForServerApproval: async (paymentId) => {
+            try {
+              await postJSON("/api/izza_airdrop/activate/approve", {
+                paymentId,
+                username: currentUser.username
+              });
+            } catch (e) {
+              console.error("activation approve error", e);
+            }
+          },
+          onReadyForServerCompletion: async (paymentId, txid) => {
+            try {
+              const resp = await postJSON("/api/izza_airdrop/activate/complete", {
+                paymentId,
+                txid,
+                username: currentUser.username
+              });
+
+              if (!resp || !resp.ok) {
+                const err = resp && resp.error;
+                if (err === "no_airdrop_for_wallet") {
+                  msg.textContent =
+                    "This Testnet wallet did not receive the IZZA airdrop for this campaign.";
+                } else if (err === "wallet_lookup_failed") {
+                  msg.textContent = "Could not read your wallet from the activation transaction.";
+                } else {
+                  msg.textContent = "Activation failed, " + (err || "unknown error");
+                }
+                return;
+              }
+
+              currentWalletPub = resp.wallet_pub;
+              msg.textContent = "Your IZZA loot crate is ready. Tap it to reveal your reward.";
+              await loadProfile();
+
+            } catch (e) {
+              console.error("activation complete error", e);
+              alert("Network problem finishing activation.");
+            } finally {
+              activateBtn.disabled = false;
+              activateBtn.textContent = "Activate IZZA loot crates (0 test Pi)";
+            }
+          },
+          onCancel: (paymentId) => {
+            console.log("Activation cancelled", paymentId);
+            activateBtn.disabled = false;
+            activateBtn.textContent = "Activate IZZA loot crates (0 test Pi)";
+          },
+          onError: (error, payment) => {
+            console.error("Activation payment error", error, payment);
+            alert("Activation payment error, " + (error?.message || String(error)));
+            activateBtn.disabled = false;
+            activateBtn.textContent = "Activate IZZA loot crates (0 test Pi)";
+          }
+        };
+
+        Pi.createPayment(paymentData, callbacks);
+      } catch (e) {
+        console.error("Pi.createPayment activation error", e);
+        alert("Could not start activation payment, " + (e?.message || String(e)));
+        activateBtn.disabled = false;
+        activateBtn.textContent = "Activate IZZA loot crates (0 test Pi)";
+      }
+    };
+  }
+
+  // ---------------- Open crate ----------------
   async function openCrate(id){
     if(!currentUser || !currentUser.username) return;
+    if(!currentWalletPub) {
+      alert("Activation did not link a wallet. Try again.");
+      return;
+    }
 
     const card = crateGrid.querySelector('[data-id="'+id+'"]');
     if(card) card.classList.add("opening");
 
     const resp = await postJSON("/api/izza_airdrop/open",{
       username: currentUser.username,
-      crate_id: id
+      crate_id: id,
+      wallet_pub: currentWalletPub
     });
 
     if(!resp.ok){
@@ -233,6 +359,9 @@ currentUser = user;
 
     lootReward.textContent = `You received ${resp.reward_amount} IZZA!`;
     if(card) card.classList.remove("opening");
+
+    // crate is consumed, so refresh the crate list
+    await loadProfile();
 
     alert("You now have enough IZZA to mint an IZZA Creature egg! Redirecting you...");
     window.location.href = "/creatures";
