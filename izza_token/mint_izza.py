@@ -577,15 +577,11 @@ def run_izza_airdrop():
 
     and log it in the izza_airdrops table.
 
-    Includes:
-      • throttling (AIRDROP_SLEEP_SECONDS)
-      • retry logic (AIRDROP_MAX_RETRIES)
-      • progress counters showing:
-          - total trustline holders
-          - how many already had this tag
-          - how many received in this run
-          - how many failed
-          - how many are still left to receive this tag
+    On each run it prints:
+      • total current trustline holders
+      • total wallets ever recorded for this tag
+      • how many of the current trustline holders already have this tag
+      • how many trustlines will be attempted this run
     """
     try:
         amt_dec = Decimal(AIRDROP_AMOUNT)
@@ -624,20 +620,36 @@ def run_izza_airdrop():
     now_ts     = int(time.time())
     tag_value  = AIRDROP_TAG or None
 
+    holders_set = set(holders)
+
     with app_db.conn() as cx:
         ensure_airdrop_table(cx)
 
-        # How many already had this tag before this run?
-        already_had = 0
+        # All wallets that have ever received this tag (any run, any time)
         if tag_value is not None:
-            row = cx.execute(
-                "SELECT COUNT(DISTINCT wallet_pub) FROM izza_airdrops WHERE tag = ?",
+            rows = cx.execute(
+                "SELECT DISTINCT wallet_pub FROM izza_airdrops WHERE tag = ?",
                 (tag_value,)
-            ).fetchone()
-            if row and row[0] is not None:
-                already_had = int(row[0])
+            ).fetchall()
+        else:
+            rows = cx.execute(
+                "SELECT DISTINCT wallet_pub FROM izza_airdrops WHERE tag IS NULL"
+            ).fetchall()
 
-        print(f"Existing recipients for tag '{tag_value}': {already_had}")
+        all_tag_wallets = {r[0] for r in rows}
+        total_tag_wallets = len(all_tag_wallets)
+
+        # How many of the CURRENT trustline holders already have this tag
+        already_had = len(holders_set & all_tag_wallets)
+
+        # Exact number of trustlines that will be attempted this run
+        will_attempt_this_run = max(0, total_candidates - already_had)
+
+        print(f"Tag '{tag_value}' summary before this run:")
+        print(f"  wallets ever recorded for this tag:          {total_tag_wallets}")
+        print(f"  current IZZA trustline holders:             {total_candidates}")
+        print(f"  trustline holders already sent for this tag:{already_had}")
+        print(f"  trustlines that will be attempted this run: {will_attempt_this_run}")
 
         sent    = 0
         skipped = 0
@@ -650,17 +662,23 @@ def run_izza_airdrop():
                     "SELECT 1 FROM izza_airdrops WHERE wallet_pub = ? AND tag = ?",
                     (pub, tag_value)
                 ).fetchone()
-                if row:
-                    skipped += 1
-                    if idx % 50 == 0 or idx == total_candidates:
-                        remaining_for_tag = max(
-                            0,
-                            total_candidates - (already_had + sent)
-                        )
-                        print(f"[{idx}/{total_candidates}] "
-                              f"sent={sent} skipped(already tagged)={skipped} "
-                              f"failed={failed} remaining_for_tag≈{remaining_for_tag}")
-                    continue
+            else:
+                row = cx.execute(
+                    "SELECT 1 FROM izza_airdrops WHERE wallet_pub = ? AND tag IS NULL",
+                    (pub,)
+                ).fetchone()
+
+            if row:
+                skipped += 1
+                if idx % 50 == 0 or idx == total_candidates:
+                    remaining_for_tag = max(
+                        0,
+                        total_candidates - (already_had + sent)
+                    )
+                    print(f"[{idx}/{total_candidates}] "
+                          f"sent={sent} skipped(already tagged)={skipped} "
+                          f"failed={failed} remaining_for_tag≈{remaining_for_tag}")
+                continue
 
             # Build transaction for this wallet
             def build_tx():
@@ -684,8 +702,6 @@ def run_izza_airdrop():
             tx = build_tx()
             tx.sign(distr_kp)
 
-            success_for_wallet = False
-
             for attempt in range(1, AIRDROP_MAX_RETRIES + 1):
                 try:
                     resp = submit_and_print(tx)
@@ -696,11 +712,9 @@ def run_izza_airdrop():
                         (pub, tag_value, str(amt_dec), tx_hash, now_ts)
                     )
                     sent += 1
-                    success_for_wallet = True
                     break
                 except Exception as e:
                     err = str(e)
-                    # crude detection of rate limits / transient issues
                     transient = (
                         "rate limit" in err.lower()
                         or "tx_bad_seq" in err.lower()
@@ -731,15 +745,15 @@ def run_izza_airdrop():
                       f"sent={sent} skipped(already tagged)={skipped} "
                       f"failed={failed} remaining_for_tag≈{remaining_for_tag}")
 
-        total_now = already_had + sent
-        remaining_for_tag = max(0, total_candidates - total_now)
+        total_now_among_holders = already_had + sent
+        remaining_for_tag = max(0, total_candidates - total_now_among_holders)
 
         print("✅ Airdrop run complete.")
-        print(f"  Total trustline holders considered: {total_candidates}")
-        print(f"  Already had tag '{tag_value}' before this run: {already_had}")
-        print(f"  Newly sent in this run: {sent}")
-        print(f"  Failed in this run: {failed}")
-        print(f"  Still left to receive this tag (based on current holders): {remaining_for_tag}")
+        print(f"  Total current trustline holders:            {total_candidates}")
+        print(f"  Trustline holders that had tag before run:  {already_had}")
+        print(f"  Newly sent to trustlines in this run:       {sent}")
+        print(f"  Failed in this run:                         {failed}")
+        print(f"  Trustlines still left for this tag (now):   {remaining_for_tag}")
 
 # ===============================================================
 
