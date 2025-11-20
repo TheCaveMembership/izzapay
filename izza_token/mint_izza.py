@@ -60,7 +60,7 @@ RUN_NATIVE_PAYOUT = getenv("RUN_NATIVE_PAYOUT", "0") == "1"  # optional native (
 # NEW: weekly IZZA airdrop to all IZZA trustline holders
 RUN_AIRDROP     = getenv("RUN_AIRDROP", "0") == "1"
 AIRDROP_AMOUNT  = getenv("AIRDROP_AMOUNT", "0.0000001")  # per wallet, tiny amount
-AIRDROP_TAG     = getenv("AIRDROP_TAG", "").strip()      # e.g. "week1" – used to avoid double-crediting
+AIRDROP_TAG     = getenv("AIRDROP_TAG", "").strip()      # e.g. "IZZALOOT" – used to avoid double-crediting
 
 # NEW: TEMP single-wallet test target (your Pi testnet wallet)
 # Set AIRDROP_SINGLE_DEST="" later to switch back to all trustline holders.
@@ -68,6 +68,10 @@ AIRDROP_SINGLE_DEST = getenv(
     "AIRDROP_SINGLE_DEST",
     "GDDFUCFIWEXARKUPKBU5SKXBQSUNTBPQQEDYHGYJGSZFYCGCGZO5X7CT"
 ).strip()
+
+# Airdrop throttling + retry controls
+AIRDROP_SLEEP_SECONDS = float(getenv("AIRDROP_SLEEP_SECONDS", "0.9"))   # wait after each tx
+AIRDROP_MAX_RETRIES   = int(getenv("AIRDROP_MAX_RETRIES", "3"))         # per wallet on failure
 
 # New: move-IZZA configuration
 MOVE_IZZA_DEST   = getenv("MOVE_IZZA_DEST", "")            # destination pubkey (your IZZA wallet)
@@ -567,9 +571,21 @@ def ensure_airdrop_table(cx):
 def run_izza_airdrop():
     """
     Send AIRDROP_AMOUNT IZZA from DISTR_PUB:
+
       • If AIRDROP_SINGLE_DEST is set → send ONLY to that wallet
       • Otherwise → send to every IZZA trustline holder
-    and log it in the izza_airdrops table for the app to hook loot crates onto.
+
+    and log it in the izza_airdrops table.
+
+    Includes:
+      • throttling (AIRDROP_SLEEP_SECONDS)
+      • retry logic (AIRDROP_MAX_RETRIES)
+      • progress counters showing:
+          - total trustline holders
+          - how many already had this tag
+          - how many received in this run
+          - how many failed
+          - how many are still left to receive this tag
     """
     try:
         amt_dec = Decimal(AIRDROP_AMOUNT)
@@ -590,9 +606,12 @@ def run_izza_airdrop():
             print("⚠️  No IZZA trustline holders found for airdrop.")
             return
 
-    total_needed = amt_dec * Decimal(len(holders))
-    dist_bal = get_izza_balance(DISTR_PUB)
-    print(f"Airdrop config: amount={amt_dec} per wallet, holders={len(holders)}, "
+    total_candidates = len(holders)
+    total_needed     = amt_dec * Decimal(total_candidates)
+    dist_bal         = get_izza_balance(DISTR_PUB)
+
+    print(f"Airdrop config: amount={amt_dec} per wallet, "
+          f"holders={total_candidates}, "
           f"needed={total_needed}, distributor_balance={dist_bal}")
 
     if dist_bal < total_needed:
@@ -608,9 +627,23 @@ def run_izza_airdrop():
     with app_db.conn() as cx:
         ensure_airdrop_table(cx)
 
-        sent = 0
+        # How many already had this tag before this run?
+        already_had = 0
+        if tag_value is not None:
+            row = cx.execute(
+                "SELECT COUNT(DISTINCT wallet_pub) FROM izza_airdrops WHERE tag = ?",
+                (tag_value,)
+            ).fetchone()
+            if row and row[0] is not None:
+                already_had = int(row[0])
+
+        print(f"Existing recipients for tag '{tag_value}': {already_had}")
+
+        sent    = 0
         skipped = 0
-        for pub in holders:
+        failed  = 0
+
+        for idx, pub in enumerate(holders, start=1):
             # If tag is set, don't double-record same wallet+tag
             if tag_value is not None:
                 row = cx.execute(
@@ -618,38 +651,95 @@ def run_izza_airdrop():
                     (pub, tag_value)
                 ).fetchone()
                 if row:
-                    print(f"⏭️  Skipping already-recorded wallet for tag {tag_value}: {pub}")
                     skipped += 1
+                    if idx % 50 == 0 or idx == total_candidates:
+                        remaining_for_tag = max(
+                            0,
+                            total_candidates - (already_had + sent)
+                        )
+                        print(f"[{idx}/{total_candidates}] "
+                              f"sent={sent} skipped(already tagged)={skipped} "
+                              f"failed={failed} remaining_for_tag≈{remaining_for_tag}")
                     continue
 
-            tb = (
-                TransactionBuilder(
-                    source_account=distr_acct,
-                    network_passphrase=NETWORK_PASSPHRASE,
-                    base_fee=base_fee,
+            # Build transaction for this wallet
+            def build_tx():
+                nonlocal distr_acct
+                distr_acct = server.load_account(distr_kp.public_key)
+                tb = (
+                    TransactionBuilder(
+                        source_account=distr_acct,
+                        network_passphrase=NETWORK_PASSPHRASE,
+                        base_fee=base_fee,
+                    )
+                    .append_payment_op(
+                        destination=pub,
+                        amount=str(amt_dec),
+                        asset=asset
+                    )
+                    .set_timeout(180)
                 )
-                .append_payment_op(
-                    destination=pub,
-                    amount=str(amt_dec),
-                    asset=asset
-                )
-                .set_timeout(180)
-            )
-            tx = tb.build()
-            tx.sign(distr_kp)
-            try:
-                resp = submit_and_print(tx)
-                tx_hash = resp.get("hash")
-                cx.execute(
-                    "INSERT OR IGNORE INTO izza_airdrops(wallet_pub, tag, amount, tx_hash, created_at) "
-                    "VALUES (?,?,?,?,?)",
-                    (pub, tag_value, str(amt_dec), tx_hash, now_ts)
-                )
-                sent += 1
-            except Exception as e:
-                print(f"⚠️  Airdrop payment failed for {pub}: {e}")
+                return tb.build()
 
-        print(f"✅ Airdrop complete. Sent to {sent} wallets, skipped {skipped} (already recorded).")
+            tx = build_tx()
+            tx.sign(distr_kp)
+
+            success_for_wallet = False
+
+            for attempt in range(1, AIRDROP_MAX_RETRIES + 1):
+                try:
+                    resp = submit_and_print(tx)
+                    tx_hash = resp.get("hash")
+                    cx.execute(
+                        "INSERT OR IGNORE INTO izza_airdrops(wallet_pub, tag, amount, tx_hash, created_at) "
+                        "VALUES (?,?,?,?,?)",
+                        (pub, tag_value, str(amt_dec), tx_hash, now_ts)
+                    )
+                    sent += 1
+                    success_for_wallet = True
+                    break
+                except Exception as e:
+                    err = str(e)
+                    # crude detection of rate limits / transient issues
+                    transient = (
+                        "rate limit" in err.lower()
+                        or "tx_bad_seq" in err.lower()
+                        or "timeout" in err.lower()
+                    )
+                    if attempt < AIRDROP_MAX_RETRIES and transient:
+                        wait_sec = 3 * attempt
+                        print(f"⏳ Transient error for {pub} on attempt {attempt}/{AIRDROP_MAX_RETRIES}. "
+                              f"Waiting {wait_sec}s and retrying…")
+                        time.sleep(wait_sec)
+                        tx = build_tx()
+                        tx.sign(distr_kp)
+                        continue
+                    else:
+                        print(f"⚠️  Airdrop payment failed for {pub} after {attempt} attempt(s): {e}")
+                        failed += 1
+                        break
+
+            # sleep between wallets to stay well under Horizon rate limits
+            time.sleep(AIRDROP_SLEEP_SECONDS)
+
+            if idx % 50 == 0 or idx == total_candidates:
+                remaining_for_tag = max(
+                    0,
+                    total_candidates - (already_had + sent)
+                )
+                print(f"[{idx}/{total_candidates}] "
+                      f"sent={sent} skipped(already tagged)={skipped} "
+                      f"failed={failed} remaining_for_tag≈{remaining_for_tag}")
+
+        total_now = already_had + sent
+        remaining_for_tag = max(0, total_candidates - total_now)
+
+        print("✅ Airdrop run complete.")
+        print(f"  Total trustline holders considered: {total_candidates}")
+        print(f"  Already had tag '{tag_value}' before this run: {already_had}")
+        print(f"  Newly sent in this run: {sent}")
+        print(f"  Failed in this run: {failed}")
+        print(f"  Still left to receive this tag (based on current holders): {remaining_for_tag}")
 
 # ===============================================================
 
