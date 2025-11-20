@@ -34,7 +34,7 @@ ISSUER_PUB   = os.getenv("ISSUER_PUB")
 DISTR_PUB    = os.getenv("DISTR_PUB")
 DISTR_SECRET = os.getenv("DISTR_SECRET")
 
-# Pi Platform API (same style as 67 app)
+# Pi Platform API
 PI_API_KEY      = os.getenv("PI_PLATFORM_API_KEY")
 PI_PLATFORM_URL = os.getenv("PI_PLATFORM_URL", "https://api.minepi.com")
 
@@ -45,9 +45,9 @@ PI_MAINNET_HORIZON = os.getenv("PI_MAINNET_HORIZON", "https://api.minepi.com")
 # Optional: limit to a single wave tag (same as mint_izza AIRDROP_TAG)
 AIRDROP_TAG = os.getenv("AIRDROP_TAG", "").strip()  # e.g. "test1"
 
-server   = Server(HORIZON)
-asset_izza = Asset(ASSET_CODE, ISSUER_PUB)
-dist_kp  = Keypair.from_secret(DISTR_SECRET)
+server      = Server(HORIZON)
+asset_izza  = Asset(ASSET_CODE, ISSUER_PUB)
+dist_kp     = Keypair.from_secret(DISTR_SECRET)
 
 
 # -------------------------------------------------------------------
@@ -148,20 +148,42 @@ def roll_reward():
 # -------------------------------------------------------------------
 # HORIZON HELPERS
 # -------------------------------------------------------------------
-def get_tx_source_account(txid: str) -> str | None:
+def get_tx_source_account(txid: str, max_attempts: int = 6, delay_sec: float = 2.0) -> str | None:
     """
     Look up a transaction on Pi *mainnet* Horizon and return the source_account.
     For the activation payment, this is the user's Pi mainnet wallet_pub.
+
+    There can be a short delay before a fresh tx shows up on Horizon, so we
+    retry a few times on 404 before giving up.
     """
-    try:
-        url = f"{PI_MAINNET_HORIZON}/transactions/{txid}"
-        r = requests.get(url, timeout=15)
-        r.raise_for_status()
-        data = r.json()
-        return data.get("source_account")
-    except Exception as e:
-        log.exception("get_tx_source_account failed txid=%s error=%s", txid, e)
-        return None
+    url = f"{PI_MAINNET_HORIZON}/transactions/{txid}"
+    for attempt in range(1, max_attempts + 1):
+        try:
+            r = requests.get(url, timeout=15)
+            if r.status_code == 404:
+                # tx not ingested yet – retry a few times with backoff
+                log.warning(
+                    "get_tx_source_account: tx not found yet (404) txid=%s attempt=%s/%s",
+                    txid, attempt, max_attempts
+                )
+                if attempt < max_attempts:
+                    time.sleep(delay_sec)
+                    continue
+                r.raise_for_status()
+            r.raise_for_status()
+            data = r.json()
+            return data.get("source_account")
+        except Exception as e:
+            # On final attempt, log full exception
+            if attempt == max_attempts:
+                log.exception("get_tx_source_account failed txid=%s error=%s", txid, e)
+                return None
+            # For transient network errors, brief sleep then retry
+            log.warning(
+                "get_tx_source_account transient error txid=%s attempt=%s/%s err=%s",
+                txid, attempt, max_attempts, e
+            )
+            time.sleep(delay_sec)
 
 
 # -------------------------------------------------------------------
@@ -217,7 +239,7 @@ def api_profile():
 
 
 # -------------------------------------------------------------------
-# ACTIVATE – 0 Pi payment to capture wallet_pub and grant crate
+# ACTIVATE – 0.0000001 Pi payment to capture wallet_pub and grant crate
 # -------------------------------------------------------------------
 @izza_airdrop_bp.post("/api/izza_airdrop/activate/approve")
 def api_airdrop_activate_approve():
@@ -241,15 +263,17 @@ def api_airdrop_activate_approve():
         resp.raise_for_status()
         return jsonify({"ok": True})
     except Exception as e:
-        log.exception("IZZA airdrop activate approve error payment_id=%s user=%s err=%s",
-                      payment_id, username, e)
+        log.exception(
+            "IZZA airdrop activate approve error payment_id=%s user=%s err=%s",
+            payment_id, username, e
+        )
         return jsonify({"ok": False, "error": "approve_failed"}), 500
 
 
 @izza_airdrop_bp.post("/api/izza_airdrop/activate/complete")
 def api_airdrop_activate_complete():
     """
-    Called from Pi SDK onReadyForServerCompletion for the 0 Pi activation payment.
+    Called from Pi SDK onReadyForServerCompletion for the 0.0000001 Pi activation payment.
     We:
       1) Complete the payment on Pi Platform.
       2) Look up tx on Horizon and grab source_account (user wallet_pub).
@@ -257,7 +281,7 @@ def api_airdrop_activate_complete():
       4) If found, ensure a crate row exists for that wallet_pub + wave_tag.
       5) Return wallet_pub + crate_id so front-end can load profile.
     """
-    data      = request.get_json(force=True) or {}
+    data       = request.get_json(force=True) or {}
     payment_id = data.get("paymentId")
     txid       = data.get("txid")
     username   = data.get("username") or ""
@@ -265,7 +289,7 @@ def api_airdrop_activate_complete():
     if not payment_id or not txid:
         return jsonify({"ok": False, "error": "missing_payment_fields"}), 400
 
-    # Complete payment on Pi Platform (even though it's 0 Pi, user pays fee)
+    # Complete payment on Pi Platform (even though it's tiny Pi, user pays fee)
     if PI_API_KEY:
         try:
             resp = requests.post(
@@ -276,11 +300,13 @@ def api_airdrop_activate_complete():
             )
             resp.raise_for_status()
         except Exception as e:
-            log.exception("IZZA airdrop activate complete error payment_id=%s user=%s err=%s",
-                          payment_id, username, e)
+            log.exception(
+                "IZZA airdrop activate complete error payment_id=%s user=%s err=%s",
+                payment_id, username, e
+            )
             return jsonify({"ok": False, "error": "complete_failed"}), 500
 
-    # Get wallet_pub from tx on Pi mainnet Horizon
+    # Get wallet_pub from tx on Pi mainnet Horizon (with retry)
     wallet_pub = get_tx_source_account(txid)
     if not wallet_pub:
         return jsonify({"ok": False, "error": "wallet_lookup_failed"}), 500
