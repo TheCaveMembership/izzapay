@@ -35,7 +35,7 @@ DISTR_PUB    = os.getenv("DISTR_PUB")
 DISTR_SECRET = os.getenv("DISTR_SECRET")
 
 # Pi Platform API (same style as 67 app)
-PI_API_KEY      = os.getenv("PI_API_KEY")
+PI_API_KEY      = os.getenv("PI_PLATFORM_API_KEY")
 PI_PLATFORM_URL = os.getenv("PI_PLATFORM_URL", "https://api.minepi.com")
 
 # Optional: limit to a single wave tag (same as mint_izza AIRDROP_TAG)
