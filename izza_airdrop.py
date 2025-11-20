@@ -167,10 +167,12 @@ def ensure_crate_for_wallet(wallet_pub: str):
         _amount, tag = row
         wave_tag = tag or (AIRDROP_TAG or "airdrop")
 
-        # Does an unopened crate already exist for this wallet and wave
+                # Does ANY crate already exist for this wallet and wave
+        # Once a crate is created (opened or not) we never create another for this airdrop.
         existing = conn.execute(
             "SELECT id FROM izza_crates "
-            "WHERE wallet_pub = ? AND wave_tag = ? AND opened = 0",
+            "WHERE wallet_pub = ? AND wave_tag = ? "
+            "LIMIT 1",
             (wallet_pub, wave_tag)
         ).fetchone()
 
