@@ -29,19 +29,46 @@
       background: rgba(4,9,20,0.88);
       box-shadow: 0 12px 45px rgba(0,0,0,0.6);
       backdrop-filter: blur(14px);
+      position: relative;
+      overflow: hidden;
     }
 
-    h1.airdrop-title {
-      margin: 0 0 6px;
-      font-size: 22px;
-      text-transform: uppercase;
-      letter-spacing:0.12em;
+    /* Centered IZZA AIRDROP SVG logo at the top */
+    .airdrop-logo-wrap {
+      display:flex;
+      justify-content:center;
+      align-items:center;
+      margin-bottom: 8px;
+    }
+
+    .izza-airdrop-logo {
+      max-width: 100%;
+      height: auto;
+    }
+
+    /* Parachute SVG floating near the top-right of the card */
+    .parachute-wrap {
+      position: absolute;
+      top: -18px;
+      right: 18px;
+      width: 70px;
+      height: 70px;
+      pointer-events: none;
+      animation: parachuteFloat 3.2s ease-in-out infinite;
+    }
+
+    @keyframes parachuteFloat {
+      0%   { transform: translateY(-20px); opacity: 0; }
+      20%  { transform: translateY(-6px);  opacity: 1; }
+      60%  { transform: translateY(0px);   opacity: 1; }
+      100% { transform: translateY(4px);   opacity: 0.85; }
     }
 
     .airdrop-sub {
       margin:0 0 12px;
       font-size:14px;
       opacity:0.75;
+      text-align:left;
     }
 
     .btn {
@@ -84,11 +111,21 @@
       text-align:center;
       cursor:pointer;
       box-shadow:0 8px 24px rgba(0,0,0,0.5);
+      position: relative;
     }
 
     .crate-card.opening {
       outline:2px solid rgba(255,47,191,0.95);
       box-shadow:0 0 18px rgba(255,47,191,0.65);
+    }
+
+    /* Visual “opening…” indicator while crate has pink border */
+    .crate-card.opening::after {
+      content: "Opening loot crate…";
+      display: block;
+      font-size: 11px;
+      margin-top: 6px;
+      opacity: 0.85;
     }
 
     .crate-label { font-size:12px; opacity:0.95; }
@@ -126,7 +163,72 @@
 <div class="page-wrap">
   <div class="airdrop-card">
 
-    <h1 class="airdrop-title">IZZA AIRDROP</h1>
+    <!-- Parachute with package floating down -->
+    <div class="parachute-wrap">
+      <svg xmlns="http://www.w3.org/2000/svg"
+           viewBox="0 0 80 80"
+           width="80" height="80">
+        <defs>
+          <linearGradient id="parachuteGrad" x1="0" y1="0" x2="1" y2="0">
+            <stop offset="0%"  stop-color="#40f0ff"/>
+            <stop offset="100%" stop-color="#ff2fbf"/>
+          </linearGradient>
+        </defs>
+        <!-- canopy -->
+        <path d="M10 30
+                 Q40 5 70 30
+                 L10 30 Z"
+              fill="url(#parachuteGrad)" />
+        <!-- canopy segments lines -->
+        <line x1="40" y1="10" x2="40" y2="32" stroke="#ffffff" stroke-opacity=".7" stroke-width="1.4"/>
+        <line x1="25" y1="15" x2="32" y2="32" stroke="#ffffff" stroke-opacity=".6" stroke-width="1.2"/>
+        <line x1="55" y1="15" x2="48" y2="32" stroke="#ffffff" stroke-opacity=".6" stroke-width="1.2"/>
+        <!-- strings -->
+        <line x1="20" y1="30" x2="30" y2="44" stroke="#ffffff" stroke-width="1"/>
+        <line x1="40" y1="30" x2="40" y2="44" stroke="#ffffff" stroke-width="1"/>
+        <line x1="60" y1="30" x2="50" y2="44" stroke="#ffffff" stroke-width="1"/>
+        <!-- package -->
+        <rect x="30" y="44" width="20" height="18" rx="2"
+              fill="#151a30" stroke="#ff2fbf" stroke-width="1.2"/>
+        <!-- package strap -->
+        <line x1="40" y1="44" x2="40" y2="62" stroke="#40f0ff" stroke-width="2"/>
+        <line x1="30" y1="53" x2="50" y2="53" stroke="#40f0ff" stroke-width="2"/>
+      </svg>
+    </div>
+
+    <!-- Centered IZZA AIRDROP SVG logo -->
+    <div class="airdrop-logo-wrap">
+      <svg class="izza-airdrop-logo"
+           xmlns="http://www.w3.org/2000/svg"
+           viewBox="0 0 1400 240"
+           width="1400" height="240"
+           shape-rendering="geometricPrecision"
+           text-rendering="optimizeLegibility">
+        <defs>
+          <!-- Reverse of button gradient: blue → pink -->
+          <linearGradient id="gw-airdrop" x1="0" y1="0" x2="1" y2="0">
+            <stop offset="0%"  stop-color="#40f0ff"/>
+            <stop offset="55%" stop-color="#ff2fbf"/>
+            <stop offset="100%" stop-color="#ff2fbf"/>
+          </linearGradient>
+        </defs>
+
+        <g fill="url(#gw-airdrop)"
+           stroke="#ffffff"
+           stroke-opacity=".10"
+           stroke-width="8"
+           paint-order="stroke fill markers">
+          <text x="50" y="170"
+                font-family="Montserrat, Arial Black, Impact, system-ui, sans-serif"
+                font-size="160"
+                font-weight="900"
+                letter-spacing="8">
+            IZZA AIRDROP
+          </text>
+        </g>
+      </svg>
+    </div>
+
     <p class="airdrop-sub">
       Sign in with Pi, then paste your Pi Testnet wallet address to check
       if this wallet received an IZZA airdrop and unlock IZZA Loot Crates!
