@@ -152,6 +152,17 @@ def init_db():
         );
         CREATE UNIQUE INDEX IF NOT EXISTS idx_user_wallets_username ON user_wallets(username);
 
+        -- NEW: separate Pi Testnet airdrop wallet per username (used by /izza-airdrop)
+        CREATE TABLE IF NOT EXISTS izza_airdrop_wallets(
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          username   TEXT NOT NULL UNIQUE,
+          wallet_pub TEXT NOT NULL,
+          created_at INTEGER,
+          updated_at INTEGER
+        );
+        CREATE UNIQUE INDEX IF NOT EXISTS idx_izza_airdrop_wallets_username
+          ON izza_airdrop_wallets(username);
+
         ----------------------------------------------------------------------
         -- NFT / Collections
         ----------------------------------------------------------------------
@@ -465,6 +476,24 @@ def ensure_schema():
         except Exception: pass
         try: cx.execute("ALTER TABLE nft_listings ADD COLUMN buyer_username TEXT")
         except Exception: pass
+
+        # NEW: ensure izza_airdrop_wallets exists in migrated DBs too
+        try:
+            cx.execute("""
+              CREATE TABLE IF NOT EXISTS izza_airdrop_wallets(
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                username   TEXT NOT NULL UNIQUE,
+                wallet_pub TEXT NOT NULL,
+                created_at INTEGER,
+                updated_at INTEGER
+              );
+            """)
+            cx.execute("""
+              CREATE UNIQUE INDEX IF NOT EXISTS idx_izza_airdrop_wallets_username
+              ON izza_airdrop_wallets(username);
+            """)
+        except Exception:
+            pass
 
         # Now that item_id exists, create the lookup index safely
         try:
