@@ -38,6 +38,10 @@ DISTR_SECRET = os.getenv("DISTR_SECRET")
 PI_API_KEY      = os.getenv("PI_PLATFORM_API_KEY")
 PI_PLATFORM_URL = os.getenv("PI_PLATFORM_URL", "https://api.minepi.com")
 
+# Horizon for the Pi *mainnet* chain, used only to look up the
+# activation payment transaction and read source_account (wallet_pub)
+PI_MAINNET_HORIZON = os.getenv("PI_MAINNET_HORIZON", "https://api.minepi.com")
+
 # Optional: limit to a single wave tag (same as mint_izza AIRDROP_TAG)
 AIRDROP_TAG = os.getenv("AIRDROP_TAG", "").strip()  # e.g. "test1"
 
@@ -146,11 +150,11 @@ def roll_reward():
 # -------------------------------------------------------------------
 def get_tx_source_account(txid: str) -> str | None:
     """
-    Look up a transaction on Horizon and return the source_account
-    (for a user→app payment, this is the user's Pi testnet wallet_pub).
+    Look up a transaction on Pi *mainnet* Horizon and return the source_account.
+    For the activation payment, this is the user's Pi mainnet wallet_pub.
     """
     try:
-        url = f"{HORIZON}/transactions/{txid}"
+        url = f"{PI_MAINNET_HORIZON}/transactions/{txid}"
         r = requests.get(url, timeout=15)
         r.raise_for_status()
         data = r.json()
@@ -276,7 +280,7 @@ def api_airdrop_activate_complete():
                           payment_id, username, e)
             return jsonify({"ok": False, "error": "complete_failed"}), 500
 
-    # Get wallet_pub from tx on Horizon
+    # Get wallet_pub from tx on Pi mainnet Horizon
     wallet_pub = get_tx_source_account(txid)
     if not wallet_pub:
         return jsonify({"ok": False, "error": "wallet_lookup_failed"}), 500
