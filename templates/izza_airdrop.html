@@ -230,16 +230,17 @@
     </div>
 
     <p class="airdrop-sub">
-      Sign in with Pi, then paste your Pi Testnet wallet address to check
+      Authenticate with Pi, then paste your Pi Testnet wallet address to check
       if this wallet received an IZZA airdrop and unlock IZZA Loot Crates!
     </p>
 
-    <button id="piLoginBtn" class="btn btn-ombre" style="width:100%;">Sign in with Pi</button>
+    <!-- renamed label only -->
+    <button id="piLoginBtn" class="btn btn-ombre" style="width:100%;">Authenticate with Pi</button>
 
     <p id="userLabel" class="status-text"></p>
 
-    <!-- Wallet connect row, same concept as 67 Loot Crates -->
-    <div id="walletRow" class="gate-box">
+    <!-- Wallet connect row, starts hidden until after Pi auth if needed -->
+    <div id="walletRow" class="gate-box" style="display:none;">
       <p style="margin:0 0 6px;">
         Paste your <strong>Pi Testnet wallet address</strong> 
       </p>
@@ -271,6 +272,7 @@
 
   let currentUser      = null;
   let currentWalletPub = null;
+  let storedLocalWallet = null;  // from localStorage, used only as a fallback
 
   const piLoginBtn   = document.getElementById("piLoginBtn");
   const userLabel    = document.getElementById("userLabel");
@@ -316,19 +318,58 @@
     return r.json();
   }
 
-  // preload remembered IZZA airdrop wallet from local storage
+  // preload remembered IZZA airdrop wallet from local storage ONLY as a fallback
   (function(){
     try {
       const w = localStorage.getItem("IZZA_wallet_pub");
       if (w) {
-        currentWalletPub = w;
-        walletPubInput.value = w;
-        walletStatus.textContent =
-          "Using wallet " + w.slice(0,6) + "…" + w.slice(-4) + " to check airdrops.";
-        loadProfile();
+        storedLocalWallet = w;
       }
     } catch(e) {}
   })();
+
+  async function lookupSavedAirdropWalletForUser() {
+    if (!currentUser || !currentUser.username) {
+      // no user yet
+      walletRow.style.display = "none";
+      return;
+    }
+
+    const uname = currentUser.username;
+    try {
+      const data = await getJSON(
+        "/api/izza_airdrop/get_wallet?username=" + encodeURIComponent(uname)
+      );
+
+      if (data.ok && data.wallet_pub) {
+        // Saved Pi Testnet wallet for this user, no need to show input
+        currentWalletPub = data.wallet_pub;
+        walletRow.style.display = "none";
+        walletStatus.textContent =
+          "Using saved wallet " +
+          currentWalletPub.slice(0,6) + "…" + currentWalletPub.slice(-4) +
+          " to check airdrops.";
+        await loadProfile();
+      } else {
+        // No saved wallet yet for this user -> show input box
+        walletRow.style.display = "block";
+        if (storedLocalWallet && !walletPubInput.value) {
+          walletPubInput.value = storedLocalWallet;
+        }
+        walletStatus.textContent =
+          "Paste your Pi Testnet wallet address to check for IZZA airdrop.";
+      }
+    } catch(e) {
+      console.error(e);
+      // On error, fall back to showing the input so the user can still proceed
+      walletRow.style.display = "block";
+      if (storedLocalWallet && !walletPubInput.value) {
+        walletPubInput.value = storedLocalWallet;
+      }
+      walletStatus.textContent =
+        "Paste your Pi Testnet wallet address to check for IZZA airdrop.";
+    }
+  }
 
   // Pi auth, username only, same concept as 67
   piLoginBtn.onclick = async function(){
@@ -344,6 +385,9 @@
       const { user, accessToken } = await Pi.authenticate(scopes, onIncomplete);
       currentUser = user;
       updateUserLabel();
+
+      // after successful auth, see if we already have a persisted Pi Testnet wallet for this user
+      await lookupSavedAirdropWalletForUser();
     } catch(err){
       console.error(err);
       alert("Pi auth failed.");
@@ -360,7 +404,7 @@
 
     walletStatus.textContent = "Checking this wallet for IZZA airdrop…";
 
-    // optional server side log or future mapping, same idea as 67 /api/set_wallet
+    // optional server side log or mapping, now actually persisted per user
     try {
       const uname = currentUser && currentUser.username ? currentUser.username : "guest";
       const res = await postJSON("/api/izza_airdrop/set_wallet", {
