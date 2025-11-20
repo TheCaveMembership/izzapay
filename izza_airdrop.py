@@ -7,9 +7,7 @@ from decimal import Decimal
 
 from flask import Blueprint, render_template, request, jsonify
 
-import requests
 from stellar_sdk import Server, Keypair, Asset, TransactionBuilder
-from stellar_sdk.exceptions import NotFoundError
 
 # Use same app DB as the rest of IZZA
 import db as app_db
@@ -18,7 +16,7 @@ izza_airdrop_bp = Blueprint("izza_airdrop", __name__)
 log = logging.getLogger("izza_airdrop")
 
 # -------------------------------------------------------------------
-# DB HELPER (shared DB via db.py)
+# DB HELPER
 # -------------------------------------------------------------------
 def cx():
     return app_db.conn()
@@ -34,21 +32,12 @@ ISSUER_PUB   = os.getenv("ISSUER_PUB")
 DISTR_PUB    = os.getenv("DISTR_PUB")
 DISTR_SECRET = os.getenv("DISTR_SECRET")
 
-# Pi Platform API
-PI_API_KEY      = os.getenv("PI_PLATFORM_API_KEY")
-PI_PLATFORM_URL = os.getenv("PI_PLATFORM_URL", "https://api.minepi.com")
+# Optional, limit to a single wave tag (same as mint_izza AIRDROP_TAG)
+AIRDROP_TAG = os.getenv("AIRDROP_TAG", "").strip()
 
-# Horizon for the Pi *mainnet* chain, used only to look up the
-# activation payment transaction and read source_account (wallet_pub)
-PI_MAINNET_HORIZON = os.getenv("PI_MAINNET_HORIZON", "https://api.minepi.com")
-
-# Optional: limit to a single wave tag (same as mint_izza AIRDROP_TAG)
-AIRDROP_TAG = os.getenv("AIRDROP_TAG", "").strip()  # e.g. "test1"
-
-server      = Server(HORIZON)
-asset_izza  = Asset(ASSET_CODE, ISSUER_PUB)
-dist_kp     = Keypair.from_secret(DISTR_SECRET)
-
+server     = Server(HORIZON)
+asset_izza = Asset(ASSET_CODE, ISSUER_PUB)
+dist_kp    = Keypair.from_secret(DISTR_SECRET)
 
 # -------------------------------------------------------------------
 # INIT TABLES
@@ -68,7 +57,7 @@ def init_tables():
         );
         """)
 
-        # Crates, keyed primarily by wallet_pub (username cosmetic)
+        # Crates, keyed primarily by wallet_pub
         conn.execute("""
         CREATE TABLE IF NOT EXISTS izza_crates(
           id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -85,9 +74,8 @@ def init_tables():
 
 init_tables()
 
-
 # -------------------------------------------------------------------
-# PAYMENT: DISTRIBUTOR → USER PI TESTNET WALLET (IZZA)
+# PAYMENT, DISTRIBUTOR → USER PI TESTNET WALLET (IZZA)
 # -------------------------------------------------------------------
 def send_izza_tokens(dest_pub: str, amount_izza: int | Decimal):
     """Send IZZA from distributor to the user's Pi Testnet wallet."""
@@ -129,7 +117,6 @@ def send_izza_tokens(dest_pub: str, amount_izza: int | Decimal):
         log.exception("send_izza_tokens error dest=%s amount=%s", dest_pub, amount_izza)
         return False, str(e)
 
-
 # -------------------------------------------------------------------
 # RARITY TABLE (5–25 IZZA)
 # -------------------------------------------------------------------
@@ -144,177 +131,22 @@ def roll_reward():
     else:
         return 25, "legendary"
 
-
 # -------------------------------------------------------------------
-# HORIZON HELPERS
+# HELPER, ENSURE CRATE FOR WALLET
 # -------------------------------------------------------------------
-def get_tx_source_account(txid: str, max_attempts: int = 6, delay_sec: float = 2.0) -> str | None:
+def ensure_crate_for_wallet(wallet_pub: str):
     """
-    Look up a transaction on Pi *mainnet* Horizon and return the source_account.
-    For the activation payment, this is the user's Pi mainnet wallet_pub.
+    Mirror the old activate_complete logic, but without a Pi payment.
 
-    There can be a short delay before a fresh tx shows up on Horizon, so we
-    retry a few times on 404 before giving up.
+    When a wallet is checked, if there is an izza_airdrops row for it
+    and no unopened crate yet for the wave, create one crate.
     """
-    url = f"{PI_MAINNET_HORIZON}/transactions/{txid}"
-    for attempt in range(1, max_attempts + 1):
-        try:
-            r = requests.get(url, timeout=15)
-            if r.status_code == 404:
-                # tx not ingested yet – retry a few times with backoff
-                log.warning(
-                    "get_tx_source_account: tx not found yet (404) txid=%s attempt=%s/%s",
-                    txid, attempt, max_attempts
-                )
-                if attempt < max_attempts:
-                    time.sleep(delay_sec)
-                    continue
-                r.raise_for_status()
-            r.raise_for_status()
-            data = r.json()
-            return data.get("source_account")
-        except Exception as e:
-            # On final attempt, log full exception
-            if attempt == max_attempts:
-                log.exception("get_tx_source_account failed txid=%s error=%s", txid, e)
-                return None
-            # For transient network errors, brief sleep then retry
-            log.warning(
-                "get_tx_source_account transient error txid=%s attempt=%s/%s err=%s",
-                txid, attempt, max_attempts, e
-            )
-            time.sleep(delay_sec)
-
-
-# -------------------------------------------------------------------
-# PAGE ROUTES
-# -------------------------------------------------------------------
-
-# MAIN route
-@izza_airdrop_bp.route("/izza-airdrop")
-def izza_airdrop_page():
-    return render_template(
-        "izza_airdrop.html",
-        PI_APP_ID=os.getenv("PI_APP_ID", ""),
-        PI_SANDBOX="true" if os.getenv("PI_SANDBOX", "true") == "true" else "false"
-    )
-
-
-# alias route so /airdrop works
-@izza_airdrop_bp.route("/airdrop")
-def airdrop_alias():
-    return render_template(
-        "izza_airdrop.html",
-        PI_APP_ID=os.getenv("PI_APP_ID", ""),
-        PI_SANDBOX="true" if os.getenv("PI_SANDBOX", "true") == "true" else "false"
-    )
-
-
-# -------------------------------------------------------------------
-# PROFILE ENDPOINT – crates by wallet_pub
-# -------------------------------------------------------------------
-@izza_airdrop_bp.get("/api/izza_airdrop/profile")
-def api_profile():
-    wallet_pub = request.args.get("wallet_pub")
     if not wallet_pub:
-        return jsonify({"ok": False, "message": "No wallet_pub"}), 400
-
-    with cx() as conn:
-        crates = conn.execute(
-            "SELECT id, wave_tag FROM izza_crates "
-            "WHERE wallet_pub = ? AND opened = 0 "
-            "ORDER BY id ASC",
-            (wallet_pub,)
-        ).fetchall()
-
-    return jsonify({
-        "ok": True,
-        "wallet_pub": wallet_pub,
-        "crates": [{"id": r[0], "wave_tag": r[1]} for r in crates],
-        "message": (
-            "Tap your IZZA loot crate to reveal your reward."
-            if crates else "No unopened crates for this wallet yet."
-        )
-    })
-
-
-# -------------------------------------------------------------------
-# ACTIVATE – 0.0000001 Pi payment to capture wallet_pub and grant crate
-# -------------------------------------------------------------------
-@izza_airdrop_bp.post("/api/izza_airdrop/activate/approve")
-def api_airdrop_activate_approve():
-    data = request.get_json(force=True) or {}
-    payment_id = data.get("paymentId")
-    username   = data.get("username") or ""
-
-    if not payment_id:
-        return jsonify({"ok": False, "error": "missing_payment_id"}), 400
-
-    if not PI_API_KEY:
-        log.warning("PI_API_KEY missing, activation approve running in dry mode")
-        return jsonify({"ok": True, "dry": True})
-
-    try:
-        resp = requests.post(
-            f"{PI_PLATFORM_URL}/v2/payments/{payment_id}/approve",
-            headers={"Authorization": f"Key {PI_API_KEY}"},
-            timeout=15
-        )
-        resp.raise_for_status()
-        return jsonify({"ok": True})
-    except Exception as e:
-        log.exception(
-            "IZZA airdrop activate approve error payment_id=%s user=%s err=%s",
-            payment_id, username, e
-        )
-        return jsonify({"ok": False, "error": "approve_failed"}), 500
-
-
-@izza_airdrop_bp.post("/api/izza_airdrop/activate/complete")
-def api_airdrop_activate_complete():
-    """
-    Called from Pi SDK onReadyForServerCompletion for the 0.0000001 Pi activation payment.
-    We:
-      1) Complete the payment on Pi Platform.
-      2) Look up tx on Horizon and grab source_account (user wallet_pub).
-      3) Check izza_airdrops for that wallet_pub (and AIRDROP_TAG if set).
-      4) If found, ensure a crate row exists for that wallet_pub + wave_tag.
-      5) Return wallet_pub + crate_id so front-end can load profile.
-    """
-    data       = request.get_json(force=True) or {}
-    payment_id = data.get("paymentId")
-    txid       = data.get("txid")
-    username   = data.get("username") or ""
-
-    if not payment_id or not txid:
-        return jsonify({"ok": False, "error": "missing_payment_fields"}), 400
-
-    # Complete payment on Pi Platform (even though it's tiny Pi, user pays fee)
-    if PI_API_KEY:
-        try:
-            resp = requests.post(
-                f"{PI_PLATFORM_URL}/v2/payments/{payment_id}/complete",
-                headers={"Authorization": f"Key {PI_API_KEY}"},
-                json={"txid": txid},
-                timeout=20
-            )
-            resp.raise_for_status()
-        except Exception as e:
-            log.exception(
-                "IZZA airdrop activate complete error payment_id=%s user=%s err=%s",
-                payment_id, username, e
-            )
-            return jsonify({"ok": False, "error": "complete_failed"}), 500
-
-    # Get wallet_pub from tx on Pi mainnet Horizon (with retry)
-    wallet_pub = get_tx_source_account(txid)
-    if not wallet_pub:
-        return jsonify({"ok": False, "error": "wallet_lookup_failed"}), 500
+        return
 
     now = int(time.time())
-
     with cx() as conn:
-        # Confirm that this wallet actually received an IZZA airdrop
+        # Does this wallet have any recorded airdrop
         if AIRDROP_TAG:
             row = conn.execute(
                 "SELECT amount, tag FROM izza_airdrops "
@@ -329,17 +161,13 @@ def api_airdrop_activate_complete():
             ).fetchone()
 
         if not row:
-            # No airdrop recorded for this wallet
-            return jsonify({
-                "ok": False,
-                "error": "no_airdrop_for_wallet",
-                "wallet_pub": wallet_pub
-            }), 200
+            # No airdrop for this wallet, nothing to create
+            return
 
         _amount, tag = row
         wave_tag = tag or (AIRDROP_TAG or "airdrop")
 
-        # Ensure crate exists for this wallet + wave_tag
+        # Does an unopened crate already exist for this wallet and wave
         existing = conn.execute(
             "SELECT id FROM izza_crates "
             "WHERE wallet_pub = ? AND wave_tag = ? AND opened = 0",
@@ -347,26 +175,102 @@ def api_airdrop_activate_complete():
         ).fetchone()
 
         if existing:
-            crate_id = existing[0]
+            return
+
+        conn.execute(
+            "INSERT INTO izza_crates "
+            "(username, wave_tag, opened, wallet_pub, reward_amount, rarity, created_ts, opened_ts) "
+            "VALUES (?,?,?,?,?,?,?,?)",
+            ("airdrop", wave_tag, 0, wallet_pub, None, None, now, None)
+        )
+        conn.commit()
+
+# -------------------------------------------------------------------
+# PAGE ROUTES
+# -------------------------------------------------------------------
+@izza_airdrop_bp.route("/izza-airdrop")
+def izza_airdrop_page():
+    return render_template(
+        "izza_airdrop.html",
+        PI_APP_ID=os.getenv("PI_APP_ID", ""),
+        PI_SANDBOX="true" if os.getenv("PI_SANDBOX", "true") == "true" else "false"
+    )
+
+# alias route so /airdrop works
+@izza_airdrop_bp.route("/airdrop")
+def airdrop_alias():
+    return izza_airdrop_page()
+
+# -------------------------------------------------------------------
+# OPTIONAL LOG, SET WALLET FOR USER, SAME IDEA AS 67 /api/set_wallet
+# -------------------------------------------------------------------
+@izza_airdrop_bp.post("/api/izza_airdrop/set_wallet")
+def api_set_wallet():
+    data = request.get_json(force=True) or {}
+    username   = data.get("username") or "guest"
+    wallet_pub = (data.get("wallet_pub") or "").strip()
+
+    if not wallet_pub.startswith("G") or len(wallet_pub) < 20:
+        return jsonify({"ok": False, "error": "invalid_wallet"}), 400
+
+    # For now we just log it, crate creation is handled in profile by wallet_pub
+    log.info("IZZA airdrop set_wallet user=%s wallet_pub=%s", username, wallet_pub)
+    return jsonify({"ok": True, "wallet_pub": wallet_pub})
+
+# -------------------------------------------------------------------
+# PROFILE ENDPOINT, crates by wallet_pub
+# -------------------------------------------------------------------
+@izza_airdrop_bp.get("/api/izza_airdrop/profile")
+def api_profile():
+    wallet_pub = request.args.get("wallet_pub")
+    if not wallet_pub:
+        return jsonify({"ok": False, "message": "No wallet_pub"}), 400
+
+    # Make sure this wallet gets a crate if it has an airdrop
+    ensure_crate_for_wallet(wallet_pub)
+
+    with cx() as conn:
+        crates = conn.execute(
+            "SELECT id, wave_tag FROM izza_crates "
+            "WHERE wallet_pub = ? AND opened = 0 "
+            "ORDER BY id ASC",
+            (wallet_pub,)
+        ).fetchall()
+
+        # Also check if the wallet has any airdrop at all
+        if AIRDROP_TAG:
+            drop = conn.execute(
+                "SELECT id FROM izza_airdrops WHERE wallet_pub = ? AND tag = ?",
+                (wallet_pub, AIRDROP_TAG)
+            ).fetchone()
         else:
-            cur = conn.execute(
-                "INSERT INTO izza_crates "
-                "(username, wave_tag, opened, wallet_pub, reward_amount, rarity, created_ts, opened_ts) "
-                "VALUES (?,?,?,?,?,?,?,?)",
-                (username or "unknown", wave_tag, 0, wallet_pub, None, None, now, None)
-            )
-            crate_id = cur.lastrowid
+            drop = conn.execute(
+                "SELECT id FROM izza_airdrops WHERE wallet_pub = ? LIMIT 1",
+                (wallet_pub,)
+            ).fetchone()
+
+    if not drop:
+        return jsonify({
+            "ok": True,
+            "wallet_pub": wallet_pub,
+            "crates": [],
+            "message": "This Pi Testnet wallet has no IZZA airdrop for this campaign."
+        })
+
+    message = (
+        "Tap your IZZA loot crate to reveal your reward."
+        if crates else "This wallet received an IZZA airdrop, crate already opened."
+    )
 
     return jsonify({
         "ok": True,
         "wallet_pub": wallet_pub,
-        "wave_tag": wave_tag,
-        "crate_id": crate_id
+        "crates": [{"id": r[0], "wave_tag": r[1]} for r in crates],
+        "message": message
     })
 
-
 # -------------------------------------------------------------------
-# OPEN CRATE (REAL IZZA PAYOUT)
+# OPEN CRATE, REAL IZZA PAYOUT
 # -------------------------------------------------------------------
 @izza_airdrop_bp.post("/api/izza_airdrop/open")
 def api_open():
@@ -391,17 +295,14 @@ def api_open():
 
         _id, opened, wallet_pub = row
 
-        # sanity check: if client sends wallet_pub, ensure it matches
         if wallet_in and wallet_pub and wallet_in != wallet_pub:
             return jsonify({"ok": False, "error": "wallet_mismatch"}), 400
 
         if opened:
             return jsonify({"ok": False, "error": "crate_already_opened"}), 400
 
-        # roll reward
         amount, rarity = roll_reward()
 
-        # pay it to the wallet_pub we captured from the activation payment
         ok, info = send_izza_tokens(wallet_pub, amount)
         if not ok:
             return jsonify({"ok": False, "error": info}), 400
@@ -413,6 +314,7 @@ def api_open():
             "WHERE id = ?",
             (now, str(amount), rarity, crate_id)
         )
+        conn.commit()
 
     return jsonify({
         "ok": True,
