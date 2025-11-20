@@ -72,6 +72,21 @@ def init_tables():
         );
         """)
 
+        # NEW: per-user Pi Testnet wallet used for IZZA airdrop page
+        conn.execute("""
+        CREATE TABLE IF NOT EXISTS izza_airdrop_wallets(
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          username   TEXT NOT NULL UNIQUE,
+          wallet_pub TEXT NOT NULL,
+          created_at INTEGER,
+          updated_at INTEGER
+        );
+        """)
+        conn.execute("""
+        CREATE UNIQUE INDEX IF NOT EXISTS idx_izza_airdrop_wallets_username
+        ON izza_airdrop_wallets(username);
+        """)
+
 init_tables()
 
 # -------------------------------------------------------------------
@@ -167,7 +182,7 @@ def ensure_crate_for_wallet(wallet_pub: str):
         _amount, tag = row
         wave_tag = tag or (AIRDROP_TAG or "airdrop")
 
-                # Does ANY crate already exist for this wallet and wave
+        # Does ANY crate already exist for this wallet and wave
         # Once a crate is created (opened or not) we never create another for this airdrop.
         existing = conn.execute(
             "SELECT id FROM izza_crates "
@@ -205,6 +220,7 @@ def airdrop_alias():
 
 # -------------------------------------------------------------------
 # OPTIONAL LOG, SET WALLET FOR USER, SAME IDEA AS 67 /api/set_wallet
+# NOW: persist a separate Pi Testnet airdrop wallet per username
 # -------------------------------------------------------------------
 @izza_airdrop_bp.post("/api/izza_airdrop/set_wallet")
 def api_set_wallet():
@@ -215,9 +231,47 @@ def api_set_wallet():
     if not wallet_pub.startswith("G") or len(wallet_pub) < 20:
         return jsonify({"ok": False, "error": "invalid_wallet"}), 400
 
-    # For now we just log it, crate creation is handled in profile by wallet_pub
+    now = int(time.time())
+    try:
+        with cx() as conn:
+            conn.execute(
+                """
+                INSERT INTO izza_airdrop_wallets(username, wallet_pub, created_at, updated_at)
+                VALUES(?,?,?,?)
+                ON CONFLICT(username)
+                DO UPDATE SET wallet_pub=excluded.wallet_pub,
+                              updated_at=excluded.updated_at
+                """,
+                (username, wallet_pub, now, now)
+            )
+            conn.commit()
+    except Exception as e:
+        log.exception("set_wallet failed username=%s wallet_pub=%s", username, wallet_pub)
+        return jsonify({"ok": False, "error": "db_error"}), 500
+
     log.info("IZZA airdrop set_wallet user=%s wallet_pub=%s", username, wallet_pub)
     return jsonify({"ok": True, "wallet_pub": wallet_pub})
+
+# -------------------------------------------------------------------
+# GET SAVED PI TESTNET AIRDROP WALLET FOR USER
+# Used by front-end after Pi auth to decide whether to show wallet input
+# -------------------------------------------------------------------
+@izza_airdrop_bp.get("/api/izza_airdrop/get_wallet")
+def api_get_wallet():
+    username = request.args.get("username") or ""
+    if not username:
+        return jsonify({"ok": False, "error": "missing_username"}), 400
+
+    with cx() as conn:
+        row = conn.execute(
+            "SELECT wallet_pub FROM izza_airdrop_wallets WHERE username = ?",
+            (username,)
+        ).fetchone()
+
+    if not row:
+        return jsonify({"ok": True, "wallet_pub": None})
+
+    return jsonify({"ok": True, "wallet_pub": row["wallet_pub"]})
 
 # -------------------------------------------------------------------
 # PROFILE ENDPOINT, crates by wallet_pub
