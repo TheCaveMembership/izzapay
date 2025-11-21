@@ -7,7 +7,7 @@ import time
 from decimal import Decimal
 from dotenv import load_dotenv
 from stellar_sdk import Server, Keypair, TransactionBuilder, Asset, StrKey
-from stellar_sdk.exceptions import NotFoundError
+from stellar_sdk.exceptions import NotFoundError, BadRequestError
 
 # Use the same DB as the IZZA app
 import db as app_db
@@ -220,29 +220,43 @@ def issuer_mint_payment():
 from stellar_sdk import Asset as _AssetAlias  # noqa
 
 def create_sell_offer(amount_izza: str, price_pi_per_izza: str):
-    distr_kp   = Keypair.from_secret(DISTR_SECRET)
-    distr_acct = server.load_account(distr_kp.public_key)
+    """
+    Create a sell offer with retries for tx_bad_seq.
+    """
+    distr_kp = Keypair.from_secret(DISTR_SECRET)
 
-    tx = (
-        TransactionBuilder(
-            source_account=distr_acct,
-            network_passphrase=NETWORK_PASSPHRASE,
-            base_fee=get_base_fee(),
+    for attempt in range(1, 4):
+        distr_acct = server.load_account(distr_kp.public_key)
+
+        tx = (
+            TransactionBuilder(
+                source_account=distr_acct,
+                network_passphrase=NETWORK_PASSPHRASE,
+                base_fee=get_base_fee(),
+            )
+            .append_manage_sell_offer_op(
+                selling=asset,
+                buying=Asset.native(),
+                amount=str(Decimal(amount_izza)),
+                price=str(Decimal(price_pi_per_izza)),
+                offer_id=0
+            )
+            .set_timeout(180)
+            .build()
         )
-        .append_manage_sell_offer_op(
-            selling=asset,
-            buying=Asset.native(),
-            amount=str(Decimal(amount_izza)),
-            price=str(Decimal(price_pi_per_izza)),
-            offer_id=0
-        )
-        .set_timeout(180)
-        .build()
-    )
-    tx.sign(distr_kp)
-    resp = submit_and_print(tx)
-    print(f"📈 Posted offer: {amount_izza} IZZA @ {price_pi_per_izza} Pi")
-    return resp
+        tx.sign(distr_kp)
+
+        try:
+            resp = submit_and_print(tx)
+            print(f"📈 Posted offer: {amount_izza} IZZA @ {price_pi_per_izza} Pi")
+            return resp
+        except BadRequestError as e:
+            msg = str(e)
+            if "tx_bad_seq" in msg and attempt < 3:
+                print(f"⚠️ tx_bad_seq on offer {amount_izza}@{price_pi_per_izza}, "
+                      f"retrying (attempt {attempt+1}/3)…")
+                continue
+            raise
 
 def seed_sell_ladder_basic(total_amount: int,
                            chunk_amount: int = 10_000,
@@ -259,8 +273,12 @@ def seed_sell_ladder_basic(total_amount: int,
     print("✅ Sale ladder seeded.")
 
 def cancel_all_izza_offers():
+    """
+    Cancel all IZZA sell offers in safe batches (<= 90 ops per tx).
+    """
     distr_kp = Keypair.from_secret(DISTR_SECRET)
 
+    # Fetch up to 200 offers for this seller
     page = server.offers().for_seller(distr_kp.public_key).limit(200).call()
     offers = page.get("_embedded", {}).get("records", [])
 
@@ -268,32 +286,48 @@ def cancel_all_izza_offers():
         print("No IZZA offers to cancel.")
         return
 
-    izza_offers = [o for o in offers
-                   if o.get("selling", {}).get("asset_code") == ASSET_CODE
-                   and o.get("selling", {}).get("asset_issuer") == ISSUER_PUB]
+    izza_offers = [
+        o for o in offers
+        if o.get("selling", {}).get("asset_code") == ASSET_CODE
+        and o.get("selling", {}).get("asset_issuer") == ISSUER_PUB
+    ]
 
     if not izza_offers:
         print("No IZZA offers to cancel.")
         return
 
-    distr_acct = server.load_account(distr_kp.public_key)
-    tb = TransactionBuilder(
-        source_account=distr_acct,
-        network_passphrase=NETWORK_PASSPHRASE,
-        base_fee=get_base_fee(),
-    )
-    for o in izza_offers:
-        tb.append_manage_sell_offer_op(
-            selling=asset,
-            buying=Asset.native(),
-            amount="0",
-            price=o["price"],
-            offer_id=int(o["id"])
+    print(f"Found {len(izza_offers)} IZZA offers. Cancelling in batches…")
+
+    batch_size = 90
+    total_cancelled = 0
+
+    for i in range(0, len(izza_offers), batch_size):
+        batch = izza_offers[i:i + batch_size]
+
+        distr_acct = server.load_account(distr_kp.public_key)
+        tb = TransactionBuilder(
+            source_account=distr_acct,
+            network_passphrase=NETWORK_PASSPHRASE,
+            base_fee=get_base_fee(),
         )
-    tx = tb.set_timeout(180).build()
-    tx.sign(distr_kp)
-    submit_and_print(tx)
-    print(f"🧹 Canceled {len(izza_offers)} IZZA offers.")
+
+        for o in batch:
+            tb.append_manage_sell_offer_op(
+                selling=asset,
+                buying=Asset.native(),
+                amount="0",
+                price=o["price"],
+                offer_id=int(o["id"])
+            )
+
+        tx = tb.set_timeout(180).build()
+        tx.sign(distr_kp)
+        submit_and_print(tx)
+
+        total_cancelled += len(batch)
+        print(f"🧹 Cancelled {len(batch)} offers in this batch.")
+
+    print(f"✅ Canceled {total_cancelled} IZZA offers in total.")
 
 def seed_ladder_to_target(total_amount: int,
                           chunk_amount: int,
