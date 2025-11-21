@@ -244,10 +244,10 @@ def create_sell_offer(amount_izza: str, price_pi_per_izza: str):
     print(f"📈 Posted offer: {amount_izza} IZZA @ {price_pi_per_izza} Pi")
     return resp
 
-def seed_sale_ladder(total_amount: int,
-                     chunk_amount: int = 10_000,
-                     start_price: Decimal = Decimal("0.0005"),
-                     step: Decimal = Decimal("0.001")):
+def seed_sell_ladder_basic(total_amount: int,
+                           chunk_amount: int = 10_000,
+                           start_price: Decimal = Decimal("0.0005"),
+                           step: Decimal = Decimal("0.001")):
     remaining = int(total_amount)
     i = 0
     while remaining > 0:
@@ -340,6 +340,10 @@ def seed_hype_sell_ladder(total_amount: int,
                           min_chunk: int,
                           max_chunk: int,
                           wiggle_pct: Decimal):
+    """
+    Hype ladder tuned for retail sized buys.
+    Uses many small offers, so a 50 to 100 test Pi buyer can move price.
+    """
     total_amount = int(total_amount)
     if total_amount <= 0:
         print("⚠️  Nothing to seed.")
@@ -642,7 +646,6 @@ def run_izza_airdrop():
                         "VALUES (?,?,?,?,?)",
                         (pub, tag_value, str(amt_dec), tx_hash, now_ts)
                     )
-                    # NEW commit so partial runs are saved
                     cx.commit()
                     sent += 1
                     break
@@ -716,11 +719,13 @@ def main():
         print("Step 3 of 3: Seed DEX sale ladder …")
         current_bal = get_izza_balance(DISTR_PUB)
 
-        ladder_total_env = getenv("HYPE_LADDER_TOTAL", "500000")
+        # UPDATED DEFAULTS
+        # Only use about 25k IZZA for the public ladder by default
+        ladder_total_env = getenv("HYPE_LADDER_TOTAL", "25000")
         try:
             ladder_total = Decimal(ladder_total_env)
         except Exception:
-            ladder_total = Decimal("500000")
+            ladder_total = Decimal("25000")
 
         sellable = min(current_bal, ladder_total)
         if sellable <= 0:
@@ -731,13 +736,15 @@ def main():
 
             ladder_mode = getenv("LADDER_MODE", "hype")
 
+            # Retail friendly price range, defaults 0.33 to 3.33 Pi per IZZA
             ladder_start = Decimal(getenv("LADDER_START_PRICE", "0.33"))
-            ladder_end   = Decimal(getenv("LADDER_END_PRICE",  "33.33"))
+            ladder_end   = Decimal(getenv("LADDER_END_PRICE",  "3.33"))
 
             if ladder_mode == "hype":
-                min_chunk = int(getenv("HYPE_LADDER_MIN_CHUNK", "1500"))
-                max_chunk = int(getenv("HYPE_LADDER_MAX_CHUNK", "15000"))
-                wiggle    = Decimal(getenv("HYPE_LADDER_WIGGLE", "0.08"))
+                # Small chunks tuned for wallets with 50 to 100 test Pi
+                min_chunk = int(getenv("HYPE_LADDER_MIN_CHUNK", "50"))
+                max_chunk = int(getenv("HYPE_LADDER_MAX_CHUNK", "300"))
+                wiggle    = Decimal(getenv("HYPE_LADDER_WIGGLE", "0.04"))
 
                 seed_hype_sell_ladder(
                     total_amount=sellable_int,
@@ -748,7 +755,7 @@ def main():
                     wiggle_pct=wiggle,
                 )
             else:
-                ladder_chunk = int(getenv("LADDER_CHUNK", "10000"))
+                ladder_chunk = int(getenv("LADDER_CHUNK", "250"))
                 ladder_total_int = int(getenv("LADDER_TOTAL", str(sellable_int)))
                 mode = ladder_mode if ladder_mode in ("linear", "geometric") else "geometric"
 
