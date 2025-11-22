@@ -339,6 +339,36 @@ def init_db():
         CREATE UNIQUE INDEX IF NOT EXISTS idx_bot_deposits_tx
           ON bot_deposits(tx_hash);
 
+        -- Current allocation per bucket for each account
+        CREATE TABLE IF NOT EXISTS bot_bucket_allocations(
+          id INTEGER PRIMARY KEY,
+          account_id INTEGER NOT NULL,
+          bucket_id INTEGER NOT NULL,
+          amount REAL NOT NULL DEFAULT 0,
+          created_at INTEGER,
+          updated_at INTEGER,
+          FOREIGN KEY(account_id) REFERENCES bot_accounts(id),
+          FOREIGN KEY(bucket_id) REFERENCES bot_buckets(id),
+          UNIQUE(account_id, bucket_id)
+        );
+        CREATE INDEX IF NOT EXISTS idx_bot_alloc_account
+          ON bot_bucket_allocations(account_id);
+
+        -- Optional: withdrawal requests (for later payout logic)
+        CREATE TABLE IF NOT EXISTS bot_withdrawals(
+          id INTEGER PRIMARY KEY,
+          account_id INTEGER NOT NULL,
+          amount REAL NOT NULL,
+          status TEXT NOT NULL DEFAULT 'requested', -- requested | sent | failed
+          dest_pub TEXT,
+          created_at INTEGER,
+          txid TEXT,
+          raw_json TEXT,
+          FOREIGN KEY(account_id) REFERENCES bot_accounts(id)
+        );
+        CREATE INDEX IF NOT EXISTS idx_bot_withdrawals_account
+          ON bot_withdrawals(account_id);
+
         CREATE TABLE IF NOT EXISTS bot_bucket_snapshots(
           id INTEGER PRIMARY KEY,
           bucket_id INTEGER NOT NULL,
@@ -630,6 +660,34 @@ def ensure_schema():
         );
         CREATE UNIQUE INDEX IF NOT EXISTS idx_bot_deposits_tx
           ON bot_deposits(tx_hash);
+
+        CREATE TABLE IF NOT EXISTS bot_bucket_allocations(
+          id INTEGER PRIMARY KEY,
+          account_id INTEGER NOT NULL,
+          bucket_id INTEGER NOT NULL,
+          amount REAL NOT NULL DEFAULT 0,
+          created_at INTEGER,
+          updated_at INTEGER,
+          FOREIGN KEY(account_id) REFERENCES bot_accounts(id),
+          FOREIGN KEY(bucket_id) REFERENCES bot_buckets(id),
+          UNIQUE(account_id, bucket_id)
+        );
+        CREATE INDEX IF NOT EXISTS idx_bot_alloc_account
+          ON bot_bucket_allocations(account_id);
+
+        CREATE TABLE IF NOT EXISTS bot_withdrawals(
+          id INTEGER PRIMARY KEY,
+          account_id INTEGER NOT NULL,
+          amount REAL NOT NULL,
+          status TEXT NOT NULL DEFAULT 'requested',
+          dest_pub TEXT,
+          created_at INTEGER,
+          txid TEXT,
+          raw_json TEXT,
+          FOREIGN KEY(account_id) REFERENCES bot_accounts(id)
+        );
+        CREATE INDEX IF NOT EXISTS idx_bot_withdrawals_account
+          ON bot_withdrawals(account_id);
 
         CREATE TABLE IF NOT EXISTS bot_bucket_snapshots(
           id INTEGER PRIMARY KEY,
