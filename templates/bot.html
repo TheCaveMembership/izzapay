@@ -474,11 +474,17 @@
       configStatus.textContent = "Saving bot settings…";
 
       try {
-        const res = await postJSON("/api/trading/config", {
+        const payload = {
+          username: currentUser.username,
+          wallet_pub: currentWalletPub,
           risk_level: riskSelect.value,
           time_horizon_days: parseInt(horizonSelect.value, 10),
-          target_value_back: 0.85
-        });
+          target_value_back: 0.85,
+          // Future expansion: objectives / volatility sliders
+          // For now we let backend default these if omitted.
+        };
+
+        const res = await postJSON("/api/trading/config", payload);
         if (res.ok) {
           configStatus.textContent = "Bot settings saved. Trading engine will use this profile.";
         } else {
