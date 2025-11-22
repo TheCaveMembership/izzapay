@@ -240,7 +240,8 @@
 
 <script>
 (function(){
-  const PI_SANDBOX = "{{ PI_SANDBOX }}" === "true";
+  // FORCE sandbox true on this page: bot deposits are always test Pi
+  const PI_SANDBOX = true;
   const BOT_DEPOSIT_ADDR = document.getElementById("botDepositAddr").textContent.trim();
 
   let currentUser = null;
@@ -265,6 +266,7 @@
     if(!window.Pi) return;
     try {
       Pi.init({ version:"2.0", sandbox: PI_SANDBOX });
+      console.log("Pi.init called for IZZA BOT with sandbox =", PI_SANDBOX);
     } catch(e){ console.error(e); }
   }
   initPi();
