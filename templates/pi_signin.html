@@ -50,6 +50,17 @@
     .btn.ghost:hover{border-color:#3f4e79}
     .btn.upper{text-transform:uppercase;letter-spacing:.6px}
 
+    /* Stack for IZZA TOKEN + IZZA BOT in topbar */
+    .topbar-stack{
+      display:flex;
+      flex-direction:column;
+      gap:6px;
+    }
+    .topbar-stack .btn{
+      flex:0 0 auto;
+      width:100%;
+    }
+
     /* CREATURES special button: left→right gold to purple with pulse */
     .btn.creatures{
       background:linear-gradient(90deg,var(--gold1),var(--piPurple1));
@@ -140,6 +151,10 @@
         padding:10px 10px;
         white-space:normal;
       }
+      .topbar-stack .btn{
+        flex:0 0 auto;
+        width:100%;
+      }
     }
   </style>
   <script src="https://sdk.minepi.com/pi-sdk.js"></script>
@@ -172,8 +187,10 @@
     <div class="topbar">
       <a class="btn purple upper" href="/airdrop" aria-label="IZZA Airdrop">IZZA AIRDROP</a>
       <a class="btn ghost upper" href="/explore">BROWSE STORES</a>
-      <a class="btn purple upper" href="/token/auth?next=/token/izza" aria-label="Authenticate for IZZA Token">IZZA TOKEN</a>
-      <a class="btn purple upper" href="/bot" aria-label="IZZA BOT Trading">IZZA BOT</a>
+      <div class="topbar-stack">
+        <a class="btn purple upper" href="/token/auth?next=/token/izza" aria-label="Authenticate for IZZA Token">IZZA TOKEN</a>
+        <a class="btn purple upper" href="/bot" aria-label="IZZA BOT Trading">IZZA BOT</a>
+      </div>
     </div>
 
     <!-- HERO -->
