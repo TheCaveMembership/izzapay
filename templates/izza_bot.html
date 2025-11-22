@@ -1,0 +1,497 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>IZZA BOT — Pi Testnet Trading</title>
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+
+  <link rel="stylesheet" href="{{ url_for('static', filename='css/styles.css') }}">
+
+  <!-- Pi SDK -->
+  <script src="https://sdk.minepi.com/pi-sdk.js"></script>
+
+  <style>
+    body { margin:0; padding:0; font-family: sans-serif; color:#fff; background:#050914; }
+
+    .page-wrap {
+      min-height: 100vh;
+      display: flex;
+      align-items: flex-start;
+      justify-content: center;
+      padding: 20px 16px;
+    }
+
+    .bot-card {
+      max-width: 480px;
+      width: 100%;
+      padding: 20px 18px;
+      border-radius: 18px;
+      background: rgba(4,9,20,0.9);
+      box-shadow: 0 12px 45px rgba(0,0,0,0.6);
+      backdrop-filter: blur(14px);
+      position: relative;
+      overflow: hidden;
+    }
+
+    h1 {
+      margin: 0 0 4px;
+      font-size: 22px;
+      letter-spacing: .12em;
+      text-transform: uppercase;
+    }
+    .sub {
+      margin: 0 0 14px;
+      font-size: 13px;
+      opacity: 0.8;
+    }
+
+    .badge {
+      display:inline-flex;
+      align-items:center;
+      gap:6px;
+      padding:4px 10px;
+      border-radius:999px;
+      border:1px solid rgba(255,255,255,0.15);
+      font-size:11px;
+      opacity:0.85;
+      margin-bottom:8px;
+    }
+
+    .btn {
+      border-radius: 999px;
+      padding: 10px 14px;
+      font-size: 12px;
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
+      cursor: pointer;
+    }
+    .btn-ombre {
+      background: linear-gradient(135deg,#ff2fbf,#40f0ff);
+      border:0;
+      color:#fff;
+    }
+    .btn-outline {
+      background: transparent;
+      border:1px solid rgba(255,255,255,0.4);
+      color:#fff;
+    }
+
+    .status-text {
+      font-size: 12px;
+      opacity: 0.85;
+      margin-top: 4px;
+    }
+
+    .box {
+      margin-top: 12px;
+      padding: 12px;
+      border-radius: 14px;
+      background: rgba(255,255,255,0.04);
+      font-size: 13px;
+      line-height: 1.5;
+    }
+
+    .box h3 {
+      margin: 0 0 6px;
+      font-size: 13px;
+      text-transform: uppercase;
+      letter-spacing: .12em;
+      opacity: 0.9;
+    }
+
+    .box p {
+      margin: 4px 0 8px;
+      font-size: 12px;
+      opacity: 0.82;
+    }
+
+    .box label {
+      display:block;
+      font-size:12px;
+      margin-bottom:4px;
+      opacity:0.9;
+    }
+
+    .box input,
+    .box select {
+      width:100%;
+      padding:6px 8px;
+      border-radius:8px;
+      border:none;
+      font-size:12px;
+      margin-bottom:8px;
+    }
+
+    .pill {
+      display:inline-block;
+      font-size:11px;
+      padding:3px 8px;
+      border-radius:999px;
+      border:1px solid rgba(255,255,255,0.18);
+      opacity:0.8;
+      margin-top:4px;
+    }
+
+    .muted {
+      font-size:11px;
+      opacity:0.7;
+    }
+
+    .addr-row {
+      display:flex;
+      align-items:center;
+      gap:6px;
+      margin:6px 0 4px;
+    }
+    .addr-row code {
+      font-size:11px;
+      word-break:break-all;
+      background:rgba(0,0,0,0.35);
+      padding:4px 6px;
+      border-radius:6px;
+    }
+  </style>
+</head>
+<body>
+<div class="page-wrap">
+  <div class="bot-card">
+    <div class="badge">
+      <span>IZZA BOT</span>
+      <span style="font-size:10px;opacity:.7;">Pi Testnet Only</span>
+    </div>
+
+    <h1>Automated Token Trading</h1>
+    <p class="sub">
+      Connect with Pi, link your <strong>Pi Testnet wallet</strong>, then fund the bot with test Pi.
+      IZZA BOT will trade Pi Testnet tokens based on your time horizon and risk tolerance.
+    </p>
+
+    <!-- Pi auth -->
+    <button id="piLoginBtn" class="btn btn-ombre" style="width:100%;margin-bottom:6px;">
+      Authenticate with Pi
+    </button>
+    <p id="userLabel" class="status-text"></p>
+
+    <!-- Wallet link box: we try to auto-load from previous IZZA usage -->
+    <div id="walletBox" class="box" style="display:none;">
+      <h3>1. Link your Pi Testnet wallet</h3>
+      <p id="walletExplainer">
+        If you have ever <strong>bought something with IZZA PAY</strong> or
+        <strong>opened an IZZA AIRDROP loot crate</strong>, we will try to reuse
+        that same Pi Testnet wallet for your bot deposits.
+      </p>
+
+      <div id="walletAutoRow" style="display:none;">
+        <p class="status-text" id="walletAutoStatus"></p>
+      </div>
+
+      <div id="walletManualRow" style="display:none;">
+        <label for="walletPubInput">Paste your Pi Testnet wallet address (starts with G…)</label>
+        <input id="walletPubInput"
+               type="text"
+               placeholder="G… Pi Testnet wallet pub key">
+        <button id="walletSaveBtn" class="btn btn-outline" style="width:100%;margin-top:4px;">
+          Save wallet for IZZA BOT
+        </button>
+        <p id="walletStatus" class="status-text"></p>
+      </div>
+
+      <p class="muted">
+        We never ask for your secret key. IZZA BOT only needs the <strong>public</strong>
+        Testnet address to track deposits and trading results.
+      </p>
+    </div>
+
+    <!-- Deposit instructions: shows when we have currentWalletPub -->
+    <div id="depositBox" class="box" style="display:none;">
+      <h3>2. Deposit test Pi for trading</h3>
+      <p>
+        Send <strong>test Pi</strong> from your Pi Testnet wallet into the
+        shared IZZA BOT trading account below. We credit deposits to you using
+        your wallet address.
+      </p>
+
+      <p class="muted" id="linkedWalletLabel"></p>
+
+      <label>IZZA BOT deposit address (Pi Testnet)</label>
+      <div class="addr-row">
+        <code id="botDepositAddr">
+          {{ TRADER_DEPOSIT_PUB or 'SET_TRADER_DEPOSIT_PUB_IN_APP_PY' }}
+        </code>
+        <button id="copyDepositBtn" class="btn btn-outline" style="font-size:10px;padding:6px 10px;">
+          Copy
+        </button>
+      </div>
+      <p class="muted">
+        This is a <strong>testnet-only</strong> account used for trading experiments.
+      </p>
+      <p id="depositHint" class="status-text">
+        After sending test Pi, the bot can start trading for you.
+      </p>
+    </div>
+
+    <!-- Bot config: simple V1 placeholders -->
+    <div id="configBox" class="box" style="display:none;">
+      <h3>3. Choose your bot profile</h3>
+      <label for="horizonSelect">Time horizon</label>
+      <select id="horizonSelect">
+        <option value="3">Short · about 3 days</option>
+        <option value="10" selected>Medium · about 10 days</option>
+        <option value="30">Long · about 30 days</option>
+      </select>
+
+      <label for="riskSelect">Risk tolerance</label>
+      <select id="riskSelect">
+        <option value="low">Low · focus on more stable tokens</option>
+        <option value="medium" selected>Medium · balanced risk/reward</option>
+        <option value="high">High · aggressive & volatile tokens</option>
+      </select>
+
+      <p class="muted">
+        We aim to return at least <strong>85% of your starting test Pi</strong> by the end of
+        your chosen horizon. As markets move, IZZA BOT automatically avoids tokens that
+        no longer fit your selected risk band.
+      </p>
+
+      <button id="saveConfigBtn" class="btn btn-ombre" style="width:100%;margin-top:4px;">
+        Save bot settings
+      </button>
+      <p id="configStatus" class="status-text"></p>
+    </div>
+
+    <p class="status-text" id="globalStatus" style="margin-top:10px;"></p>
+  </div>
+</div>
+
+<script>
+(function(){
+  const PI_SANDBOX = "{{ PI_SANDBOX }}" === "true";
+  const PI_APP_ID  = "{{ PI_APP_ID }}";
+
+  let currentUser      = null;
+  let currentWalletPub = null;
+  let storedLocalWallet = null;
+
+  const piLoginBtn        = document.getElementById("piLoginBtn");
+  const userLabel         = document.getElementById("userLabel");
+  const walletBox         = document.getElementById("walletBox");
+  const walletAutoRow     = document.getElementById("walletAutoRow");
+  const walletAutoStatus  = document.getElementById("walletAutoStatus");
+  const walletManualRow   = document.getElementById("walletManualRow");
+  const walletPubInput    = document.getElementById("walletPubInput");
+  const walletSaveBtn     = document.getElementById("walletSaveBtn");
+  const walletStatus      = document.getElementById("walletStatus");
+
+  const depositBox        = document.getElementById("depositBox");
+  const linkedWalletLabel = document.getElementById("linkedWalletLabel");
+  const botDepositAddr    = document.getElementById("botDepositAddr");
+  const copyDepositBtn    = document.getElementById("copyDepositBtn");
+
+  const configBox         = document.getElementById("configBox");
+  const horizonSelect     = document.getElementById("horizonSelect");
+  const riskSelect        = document.getElementById("riskSelect");
+  const saveConfigBtn     = document.getElementById("saveConfigBtn");
+  const configStatus      = document.getElementById("configStatus");
+
+  const globalStatus      = document.getElementById("globalStatus");
+
+  function initPi(){
+    if(!window.Pi) return;
+    try {
+      Pi.init({ version:"2.0", sandbox: PI_SANDBOX });
+    } catch(e){ console.error(e); }
+  }
+  initPi();
+
+  function updateUserLabel(){
+    if(currentUser && currentUser.username){
+      userLabel.textContent = "Signed in as @" + currentUser.username;
+    } else {
+      userLabel.textContent = "";
+    }
+  }
+
+  async function getJSON(url){
+    const r = await fetch(url);
+    return r.json();
+  }
+
+  async function postJSON(url, body){
+    const r = await fetch(url, {
+      method: "POST",
+      headers: { "Content-Type":"application/json" },
+      body: JSON.stringify(body || {})
+    });
+    return r.json();
+  }
+
+  (function preloadLocalWallet(){
+    try {
+      const w = localStorage.getItem("IZZA_wallet_pub");
+      if (w) storedLocalWallet = w;
+    } catch(e){}
+  })();
+
+  async function tryLoadSavedWalletForUser(){
+    if (!currentUser || !currentUser.username) {
+      walletBox.style.display = "none";
+      return;
+    }
+
+    walletBox.style.display = "block";
+    walletAutoRow.style.display = "none";
+    walletManualRow.style.display = "none";
+    walletStatus.textContent = "";
+
+    const uname = currentUser.username;
+
+    try {
+      // Reuse the airdrop mapping endpoint if available
+      const data = await getJSON(
+        "/api/izza_airdrop/get_wallet?username=" + encodeURIComponent(uname)
+      );
+
+      if (data.ok && data.wallet_pub) {
+        currentWalletPub = data.wallet_pub;
+        walletAutoRow.style.display = "block";
+        walletAutoStatus.textContent =
+          "Using your saved Pi Testnet wallet: " +
+          currentWalletPub.slice(0,6) + "…" + currentWalletPub.slice(-4) +
+          " (from prior IZZA purchase or airdrop).";
+
+        walletManualRow.style.display = "none";
+        onWalletLinked();
+        return;
+      }
+
+      // No saved wallet → let them paste one
+      walletManualRow.style.display = "block";
+      if (storedLocalWallet && !walletPubInput.value) {
+        walletPubInput.value = storedLocalWallet;
+      }
+      walletStatus.textContent =
+        "Paste your Pi Testnet wallet to use it with IZZA BOT.";
+    } catch(e) {
+      console.error(e);
+      walletManualRow.style.display = "block";
+      if (storedLocalWallet && !walletPubInput.value) {
+        walletPubInput.value = storedLocalWallet;
+      }
+      walletStatus.textContent =
+        "Paste your Pi Testnet wallet to use it with IZZA BOT.";
+    }
+  }
+
+  piLoginBtn.onclick = async function(){
+    if(!window.Pi) {
+      alert("Pi SDK not available. Open in Pi Browser.");
+      return;
+    }
+
+    try {
+      const scopes = ["username", "payments"];
+      const onIncomplete = payment => { console.log("incomplete payment", payment); };
+
+      const { user, accessToken } = await Pi.authenticate(scopes, onIncomplete);
+      currentUser = user;
+      updateUserLabel();
+      globalStatus.textContent = "";
+
+      await tryLoadSavedWalletForUser();
+    } catch(err){
+      console.error(err);
+      alert("Pi auth failed.");
+      globalStatus.textContent = "Pi auth failed. Please try again.";
+    }
+  };
+
+  async function onSaveWallet(){
+    const pub = (walletPubInput.value || "").trim();
+    if (!pub || !pub.startsWith("G") || pub.length < 20) {
+      walletStatus.textContent = "Enter a valid Pi Testnet wallet pub key starting with G…";
+      return;
+    }
+
+    walletStatus.textContent = "Saving wallet for IZZA BOT…";
+
+    try {
+      const uname = currentUser && currentUser.username ? currentUser.username : "guest";
+      // Reuse airdrop mapping endpoint, or change to /api/izza_bot/set_wallet if you prefer
+      const res = await postJSON("/api/izza_airdrop/set_wallet", {
+        username: uname,
+        wallet_pub: pub
+      });
+      if (!res.ok) {
+        walletStatus.textContent = "Save failed: " + (res.error || "server error");
+        return;
+      }
+      walletStatus.textContent = "Wallet saved. Linked to IZZA BOT.";
+    } catch(e) {
+      console.error(e);
+      walletStatus.textContent = "Network error saving wallet.";
+    }
+
+    currentWalletPub = pub;
+    try { localStorage.setItem("IZZA_wallet_pub", pub); } catch(e){}
+    onWalletLinked();
+  }
+
+  if (walletSaveBtn) {
+    walletSaveBtn.addEventListener("click", onSaveWallet);
+  }
+
+  function onWalletLinked(){
+    if (!currentWalletPub) return;
+
+    depositBox.style.display = "block";
+    configBox.style.display  = "block";
+
+    linkedWalletLabel.textContent =
+      "Linked Pi Testnet wallet: " +
+      currentWalletPub.slice(0,6) + "…" + currentWalletPub.slice(-4) +
+      ". Deposits from this wallet will be credited to your IZZA BOT balance.";
+  }
+
+  if (copyDepositBtn) {
+    copyDepositBtn.addEventListener("click", function(){
+      const txt = botDepositAddr.textContent.trim();
+      if (!txt) return;
+      navigator.clipboard?.writeText(txt).then(()=>{
+        globalStatus.textContent = "Deposit address copied to clipboard.";
+        setTimeout(()=>{ globalStatus.textContent=""; }, 2500);
+      }).catch(()=>{
+        globalStatus.textContent = "Could not copy. Long-press and copy manually.";
+      });
+    });
+  }
+
+  if (saveConfigBtn) {
+    saveConfigBtn.addEventListener("click", async function(){
+      if (!currentUser || !currentUser.username || !currentWalletPub) {
+        configStatus.textContent = "Authenticate with Pi and link a wallet first.";
+        return;
+      }
+      configStatus.textContent = "Saving bot settings…";
+
+      try {
+        const res = await postJSON("/api/trading/config", {
+          risk_level: riskSelect.value,
+          time_horizon_days: parseInt(horizonSelect.value, 10),
+          target_value_back: 0.85
+        });
+        if (res.ok) {
+          configStatus.textContent = "Bot settings saved. Trading engine will use this profile.";
+        } else {
+          configStatus.textContent = res.error || "Error saving settings.";
+        }
+      } catch(e) {
+        console.error(e);
+        configStatus.textContent = "Network error saving settings.";
+      }
+    });
+  }
+
+})();
+</script>
+</body>
+</html>
