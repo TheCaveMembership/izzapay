@@ -122,16 +122,6 @@
       margin-bottom:8px;
     }
 
-    .pill {
-      display:inline-block;
-      font-size:11px;
-      padding:3px 8px;
-      border-radius:999px;
-      border:1px solid rgba(255,255,255,0.18);
-      opacity:0.8;
-      margin-top:4px;
-    }
-
     .muted {
       font-size:11px;
       opacity:0.7;
@@ -206,7 +196,13 @@
 
     <!-- Bot config -->
     <div id="configBox" class="box" style="display:none;">
-      <h3>2. Choose your bot profile</h3>
+      <h3>2. Choose your base bot profile</h3>
+      <p class="muted">
+        This is your <strong>original IZZA BOT profile</strong>. After this, on your
+        <strong>IZZA BOT Profile</strong> page you will be able to create additional
+        buckets with different settings and allocate your deposit across them.
+      </p>
+
       <label for="horizonSelect">Time horizon</label>
       <select id="horizonSelect">
         <option value="3">Short · about 3 days</option>
@@ -228,9 +224,14 @@
       </p>
 
       <button id="saveConfigBtn" class="btn btn-ombre" style="width:100%;margin-top:4px;">
-        Save bot settings
+        Save base bot settings
       </button>
       <p id="configStatus" class="status-text"></p>
+
+      <p class="muted" style="margin-top:6px;">
+        After this step you can manage buckets and allocations on your
+        <strong>IZZA BOT Profile</strong>.
+      </p>
     </div>
 
     <p class="status-text" id="globalStatus" style="margin-top:10px;"></p>
@@ -376,14 +377,14 @@
     });
   }
 
-  // --- Save bot profile (bucket config) -------------------------------
+  // --- Save base bot profile ------------------------------------------
   if (saveConfigBtn) {
     saveConfigBtn.addEventListener("click", async function(){
       if (!currentUser || !currentUser.username) {
         configStatus.textContent = "Authenticate with Pi first.";
         return;
       }
-      configStatus.textContent = "Saving bot settings…";
+      configStatus.textContent = "Saving base bot settings…";
 
       try {
         const payload = {
@@ -395,7 +396,8 @@
 
         const res = await postJSON("/api/trading/config", payload);
         if (res.ok) {
-          configStatus.textContent = "Bot settings saved. Trading engine will use this profile.";
+          configStatus.textContent =
+            "Base bot settings saved. Manage buckets and allocations on your IZZA BOT Profile.";
         } else {
           configStatus.textContent = res.error || "Error saving settings.";
         }
