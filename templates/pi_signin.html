@@ -189,7 +189,7 @@
       <a class="btn ghost upper" href="/explore">BROWSE STORES</a>
       <div class="topbar-stack">
         <a class="btn purple upper" href="/token/auth?next=/token/izza" aria-label="Authenticate for IZZA Token">IZZA TOKEN</a>
-        <a class="btn purple upper" href="/bot" aria-label="IZZA BOT Trading">IZZA BOT</a>
+        <a class="btn purple upper" href="/bot" id="izzaBotNav" aria-label="IZZA BOT Trading">IZZA BOT</a>
       </div>
     </div>
 
@@ -270,6 +270,7 @@
     const msg = document.getElementById('msg');
     const err = document.getElementById('err');
     const btnClone = document.getElementById('piSignInBtn_clone'); // "MY STORE"
+    const botNav = document.getElementById('izzaBotNav');
     const postUrl = "/auth/exchange";
     const sandbox = {{ 'true' if sandbox else 'false' }};
 
@@ -299,6 +300,43 @@
         .catch(function(e){ console.error(e); setMsg("Authorization failed. Please try again."); setErr(e?.message||String(e)); });
     }
     btnClone?.addEventListener('click', doAuth);
+
+    async function handleBotNavClick(){
+      try{
+        if(!window.Pi || !Pi.authenticate){
+          window.location.href = "/bot";
+          return;
+        }
+        const scopes = ['username'];
+        function onIncompletePaymentFound(_p){}
+        const auth = await Pi.authenticate(scopes, onIncompletePaymentFound);
+        const user = auth && auth.user;
+        const username = user && user.username;
+        if(!username){
+          window.location.href = "/bot";
+          return;
+        }
+        const res = await fetch("/api/trading/summary?username=" + encodeURIComponent(username));
+        const j = await res.json();
+        if(!j.ok){
+          window.location.href = "/bot";
+          return;
+        }
+        if(Array.isArray(j.buckets) && j.buckets.length > 0){
+          window.location.href = "/bot/profile";
+        } else {
+          window.location.href = "/bot";
+        }
+      } catch(e){
+        console.error("IZZA BOT nav error", e);
+        window.location.href = "/bot";
+      }
+    }
+
+    botNav?.addEventListener('click', function(ev){
+      ev.preventDefault();
+      handleBotNavClick();
+    });
   })();
   </script>
 
