@@ -290,6 +290,67 @@ def init_db():
         END;
         """)
 
+        # ------------------------------------------------------------------
+        # IZZA BOT trading tables
+        # ------------------------------------------------------------------
+        cx.executescript("""
+        CREATE TABLE IF NOT EXISTS bot_accounts(
+          id INTEGER PRIMARY KEY,
+          username TEXT NOT NULL,
+          wallet_pub TEXT NOT NULL,
+          total_deposited REAL NOT NULL DEFAULT 0,
+          total_withdrawn REAL NOT NULL DEFAULT 0,
+          created_at INTEGER,
+          updated_at INTEGER,
+          UNIQUE(username, wallet_pub)
+        );
+        CREATE INDEX IF NOT EXISTS idx_bot_accounts_username
+          ON bot_accounts(username);
+
+        CREATE TABLE IF NOT EXISTS bot_buckets(
+          id INTEGER PRIMARY KEY,
+          account_id INTEGER NOT NULL,
+          name TEXT,
+          objective TEXT,
+          risk_level TEXT,
+          volatility TEXT,
+          time_horizon_days INTEGER,
+          target_value_back REAL,
+          status TEXT NOT NULL DEFAULT 'active', -- active | paused | closed
+          created_at INTEGER,
+          updated_at INTEGER,
+          FOREIGN KEY(account_id) REFERENCES bot_accounts(id)
+        );
+        CREATE INDEX IF NOT EXISTS idx_bot_buckets_account
+          ON bot_buckets(account_id);
+
+        CREATE TABLE IF NOT EXISTS bot_deposits(
+          id INTEGER PRIMARY KEY,
+          account_id INTEGER NOT NULL,
+          tx_hash TEXT,
+          amount REAL NOT NULL,
+          asset_code TEXT,
+          asset_issuer TEXT,
+          status TEXT NOT NULL DEFAULT 'pending', -- pending | confirmed | ignored
+          created_at INTEGER,
+          raw_json TEXT,
+          FOREIGN KEY(account_id) REFERENCES bot_accounts(id)
+        );
+        CREATE UNIQUE INDEX IF NOT EXISTS idx_bot_deposits_tx
+          ON bot_deposits(tx_hash);
+
+        CREATE TABLE IF NOT EXISTS bot_bucket_snapshots(
+          id INTEGER PRIMARY KEY,
+          bucket_id INTEGER NOT NULL,
+          ts INTEGER NOT NULL,
+          total_value REAL NOT NULL,
+          notes TEXT,
+          FOREIGN KEY(bucket_id) REFERENCES bot_buckets(id)
+        );
+        CREATE INDEX IF NOT EXISTS idx_bot_snapshots_bucket_ts
+          ON bot_bucket_snapshots(bucket_id, ts);
+        """)
+
 def ensure_schema():
     """Add missing columns without dropping existing data; create new NFT tables if absent."""
     with _lock, conn() as cx:
@@ -519,4 +580,65 @@ def ensure_schema():
         BEGIN
           UPDATE users SET username = NEW.pi_username WHERE id = NEW.id;
         END;
+        """)
+
+        # ------------------------------------------------------------------
+        # IZZA BOT trading tables (safe for existing DBs)
+        # ------------------------------------------------------------------
+        cx.executescript("""
+        CREATE TABLE IF NOT EXISTS bot_accounts(
+          id INTEGER PRIMARY KEY,
+          username TEXT NOT NULL,
+          wallet_pub TEXT NOT NULL,
+          total_deposited REAL NOT NULL DEFAULT 0,
+          total_withdrawn REAL NOT NULL DEFAULT 0,
+          created_at INTEGER,
+          updated_at INTEGER,
+          UNIQUE(username, wallet_pub)
+        );
+        CREATE INDEX IF NOT EXISTS idx_bot_accounts_username
+          ON bot_accounts(username);
+
+        CREATE TABLE IF NOT EXISTS bot_buckets(
+          id INTEGER PRIMARY KEY,
+          account_id INTEGER NOT NULL,
+          name TEXT,
+          objective TEXT,
+          risk_level TEXT,
+          volatility TEXT,
+          time_horizon_days INTEGER,
+          target_value_back REAL,
+          status TEXT NOT NULL DEFAULT 'active',
+          created_at INTEGER,
+          updated_at INTEGER,
+          FOREIGN KEY(account_id) REFERENCES bot_accounts(id)
+        );
+        CREATE INDEX IF NOT EXISTS idx_bot_buckets_account
+          ON bot_buckets(account_id);
+
+        CREATE TABLE IF NOT EXISTS bot_deposits(
+          id INTEGER PRIMARY KEY,
+          account_id INTEGER NOT NULL,
+          tx_hash TEXT,
+          amount REAL NOT NULL,
+          asset_code TEXT,
+          asset_issuer TEXT,
+          status TEXT NOT NULL DEFAULT 'pending',
+          created_at INTEGER,
+          raw_json TEXT,
+          FOREIGN KEY(account_id) REFERENCES bot_accounts(id)
+        );
+        CREATE UNIQUE INDEX IF NOT EXISTS idx_bot_deposits_tx
+          ON bot_deposits(tx_hash);
+
+        CREATE TABLE IF NOT EXISTS bot_bucket_snapshots(
+          id INTEGER PRIMARY KEY,
+          bucket_id INTEGER NOT NULL,
+          ts INTEGER NOT NULL,
+          total_value REAL NOT NULL,
+          notes TEXT,
+          FOREIGN KEY(bucket_id) REFERENCES bot_buckets(id)
+        );
+        CREATE INDEX IF NOT EXISTS idx_bot_snapshots_bucket_ts
+          ON bot_bucket_snapshots(bucket_id, ts);
         """)
