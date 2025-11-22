@@ -1,10 +1,21 @@
+import os
 import time
 import json
 import requests
 
 from flask import Blueprint, render_template, jsonify, request
 from db import conn
-from variables import apikey  # Pi Platform API key
+
+# Pi Platform API key: prefer variables.apikey if module is present,
+# otherwise fall back to environment variables so Render can boot.
+try:
+    from variables import apikey  # Pi Platform API key
+except ModuleNotFoundError:
+    apikey = (
+        os.environ.get("APIKEY")
+        or os.environ.get("PI_API_KEY")
+        or ""
+    )
 
 izza_bot_bp = Blueprint("izza_bot", __name__)
 
@@ -27,6 +38,9 @@ def _now() -> int:
 
 
 def _pi_headers():
+    if not PI_API_KEY:
+        # Hard fail if key missing so you notice it during testing
+        raise RuntimeError("Pi Platform API key not configured (set APIKEY or PI_API_KEY)")
     return {
         "Authorization": f"Key {PI_API_KEY}",
         "Content-Type": "application/json",
