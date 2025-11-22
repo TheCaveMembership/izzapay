@@ -1,0 +1,626 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>IZZA BOT — Profile</title>
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+
+  <link rel="stylesheet" href="{{ url_for('static', filename='css/styles.css') }}">
+
+  <!-- Pi SDK -->
+  <script src="https://sdk.minepi.com/pi-sdk.js"></script>
+
+  <style>
+    body { margin:0; padding:0; font-family: sans-serif; color:#fff; background:#050914; }
+
+    .page-wrap {
+      min-height: 100vh;
+      display: flex;
+      align-items: flex-start;
+      justify-content: center;
+      padding: 20px 16px;
+    }
+
+    .bot-card {
+      max-width: 520px;
+      width: 100%;
+      padding: 20px 18px;
+      border-radius: 18px;
+      background: rgba(4,9,20,0.9);
+      box-shadow: 0 12px 45px rgba(0,0,0,0.6);
+      backdrop-filter: blur(14px);
+      position: relative;
+      overflow: hidden;
+    }
+
+    h1 {
+      margin: 0 0 4px;
+      font-size: 22px;
+      letter-spacing: .12em;
+      text-transform: uppercase;
+    }
+    .sub {
+      margin: 0 0 14px;
+      font-size: 13px;
+      opacity: 0.8;
+    }
+
+    .badge {
+      display:inline-flex;
+      align-items:center;
+      gap:6px;
+      padding:4px 10px;
+      border-radius:999px;
+      border:1px solid rgba(255,255,255,0.15);
+      font-size:11px;
+      opacity:0.85;
+      margin-bottom:8px;
+    }
+
+    .btn {
+      border-radius: 999px;
+      padding: 8px 12px;
+      font-size: 12px;
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
+      cursor: pointer;
+    }
+    .btn-ombre {
+      background: linear-gradient(135deg,#ff2fbf,#40f0ff);
+      border:0;
+      color:#fff;
+    }
+    .btn-outline {
+      background: transparent;
+      border:1px solid rgba(255,255,255,0.4);
+      color:#fff;
+    }
+
+    .status-text {
+      font-size: 12px;
+      opacity: 0.85;
+      margin-top: 4px;
+    }
+
+    .box {
+      margin-top: 12px;
+      padding: 12px;
+      border-radius: 14px;
+      background: rgba(255,255,255,0.04);
+      font-size: 13px;
+      line-height: 1.5;
+    }
+
+    .box h3 {
+      margin: 0 0 6px;
+      font-size: 13px;
+      text-transform: uppercase;
+      letter-spacing: .12em;
+      opacity: 0.9;
+    }
+
+    .box p {
+      margin: 4px 0 8px;
+      font-size: 12px;
+      opacity: 0.82;
+    }
+
+    .box label {
+      display:block;
+      font-size:12px;
+      margin-bottom:4px;
+      opacity:0.9;
+    }
+
+    .box input,
+    .box select {
+      width:100%;
+      padding:6px 8px;
+      border-radius:8px;
+      border:none;
+      font-size:12px;
+      margin-bottom:8px;
+    }
+
+    .muted {
+      font-size:11px;
+      opacity:0.7;
+    }
+
+    .metric-row {
+      display:flex;
+      justify-content:space-between;
+      font-size:12px;
+      margin-top:4px;
+    }
+
+    .bucket-row {
+      border-radius:12px;
+      padding:8px 10px;
+      background:rgba(0,0,0,0.35);
+      margin-bottom:8px;
+    }
+
+    .bucket-header {
+      display:flex;
+      justify-content:space-between;
+      align-items:center;
+      font-size:12px;
+      margin-bottom:4px;
+    }
+
+    .bucket-name {
+      font-weight:bold;
+      font-size:12px;
+    }
+
+    .bucket-chip {
+      font-size:10px;
+      opacity:0.75;
+      padding:2px 6px;
+      border-radius:999px;
+      border:1px solid rgba(255,255,255,0.25);
+      margin-left:4px;
+    }
+
+    .bucket-alloc-row {
+      display:flex;
+      align-items:center;
+      gap:6px;
+      margin-top:4px;
+    }
+
+    .bucket-alloc-row input {
+      flex:1;
+      margin-bottom:0;
+    }
+
+    .section-title-row {
+      display:flex;
+      justify-content:space-between;
+      align-items:center;
+    }
+  </style>
+</head>
+<body>
+<div class="page-wrap">
+  <div class="bot-card">
+    <div class="badge">
+      <span>IZZA BOT</span>
+      <span style="font-size:10px;opacity:.7;">Profile · Pi Testnet</span>
+    </div>
+
+    <h1>Your Bot Buckets</h1>
+    <p class="sub">
+      This is your <strong>IZZA BOT profile</strong>. You can see your total deposits,
+      allocate test Pi into different strategy buckets, and request withdrawals back to
+      your Pi Testnet wallet.
+    </p>
+
+    <button id="piLoginBtn" class="btn btn-ombre" style="width:100%;margin-bottom:6px;">
+      Authenticate with Pi
+    </button>
+    <p id="userLabel" class="status-text"></p>
+
+    <!-- Account summary -->
+    <div id="summaryBox" class="box" style="display:none;">
+      <h3>Account summary</h3>
+      <div class="metric-row">
+        <span>Total deposited</span>
+        <span id="sumDeposited">0.00 test Pi</span>
+      </div>
+      <div class="metric-row">
+        <span>Total withdrawn</span>
+        <span id="sumWithdrawn">0.00 test Pi</span>
+      </div>
+      <div class="metric-row">
+        <span>Net deposits</span>
+        <span id="sumNet">0.00 test Pi</span>
+      </div>
+      <div class="metric-row">
+        <span>Allocated across buckets</span>
+        <span id="sumAllocated">0.00 test Pi</span>
+      </div>
+      <div class="metric-row">
+        <span>Unallocated (available)</span>
+        <span id="sumAvailable">0.00 test Pi</span>
+      </div>
+      <p class="muted" style="margin-top:6px;">
+        Tip: Let the bot handle most of the work. You can still move funds between buckets
+        if you want to tilt your strategy.
+      </p>
+    </div>
+
+    <!-- Existing buckets -->
+    <div id="bucketsBox" class="box" style="display:none;">
+      <div class="section-title-row">
+        <h3>Your buckets</h3>
+        <span id="bucketsCount" class="muted"></span>
+      </div>
+      <div id="bucketsList"></div>
+      <p id="bucketsEmptyMsg" class="muted" style="display:none;">
+        You do not have any buckets yet. Set your base profile on the main IZZA BOT page,
+        then create additional buckets here.
+      </p>
+    </div>
+
+    <!-- Create bucket -->
+    <div id="createBox" class="box" style="display:none;">
+      <h3>Create a new bucket</h3>
+      <p class="muted">
+        Each bucket can have its own time horizon and risk profile.
+        You can move test Pi between buckets using the allocation sliders.
+      </p>
+
+      <label for="newBucketName">Bucket name</label>
+      <input id="newBucketName" type="text" placeholder="Long-term Balanced" />
+
+      <label for="newHorizon">Time horizon</label>
+      <select id="newHorizon">
+        <option value="3">Short · ~3 days</option>
+        <option value="10" selected>Medium · ~10 days</option>
+        <option value="30">Long · ~30 days</option>
+      </select>
+
+      <label for="newRisk">Risk level</label>
+      <select id="newRisk">
+        <option value="low">Low</option>
+        <option value="medium" selected>Medium</option>
+        <option value="high">High</option>
+      </select>
+
+      <label for="newObjective">Objective</label>
+      <select id="newObjective">
+        <option value="balanced" selected>Balanced</option>
+        <option value="max_growth">Max Growth</option>
+        <option value="capital_preservation">Capital Preservation</option>
+      </select>
+
+      <label for="newVol">Volatility preference</label>
+      <select id="newVol">
+        <option value="low">Low</option>
+        <option value="medium" selected>Medium</option>
+        <option value="high">High</option>
+      </select>
+
+      <label for="newTarget">Target value back (fraction)</label>
+      <input id="newTarget" type="number" step="0.01" min="0" max="2" value="0.85" />
+
+      <button id="createBucketBtn" class="btn btn-ombre" style="width:100%;margin-top:6px;">
+        Create bucket
+      </button>
+      <p id="createStatus" class="status-text"></p>
+    </div>
+
+    <!-- Withdrawal -->
+    <div id="withdrawBox" class="box" style="display:none;">
+      <h3>Withdraw test Pi</h3>
+      <p class="muted">
+        You can request a withdrawal from your <strong>unallocated</strong> balance back to
+        your linked Pi Testnet wallet. Allocations stay inside the bot until you reduce them.
+      </p>
+
+      <label for="withdrawAmount">Amount to withdraw</label>
+      <input id="withdrawAmount" type="number" min="0.01" step="0.01" placeholder="5.0" />
+
+      <button id="withdrawBtn" class="btn btn-outline" style="width:100%;margin-top:4px;">
+        Request withdrawal
+      </button>
+      <p id="withdrawStatus" class="status-text"></p>
+    </div>
+
+    <p id="globalStatus" class="status-text" style="margin-top:10px;"></p>
+  </div>
+</div>
+
+<script>
+(function(){
+  const PI_SANDBOX = "{{ PI_SANDBOX }}" === "true";
+
+  let currentUser = null;
+  let currentSummary = null;
+
+  const piLoginBtn    = document.getElementById("piLoginBtn");
+  const userLabel     = document.getElementById("userLabel");
+
+  const summaryBox    = document.getElementById("summaryBox");
+  const sumDeposited  = document.getElementById("sumDeposited");
+  const sumWithdrawn  = document.getElementById("sumWithdrawn");
+  const sumNet        = document.getElementById("sumNet");
+  const sumAllocated  = document.getElementById("sumAllocated");
+  const sumAvailable  = document.getElementById("sumAvailable");
+
+  const bucketsBox     = document.getElementById("bucketsBox");
+  const bucketsList    = document.getElementById("bucketsList");
+  const bucketsCount   = document.getElementById("bucketsCount");
+  const bucketsEmptyMsg= document.getElementById("bucketsEmptyMsg");
+
+  const createBox       = document.getElementById("createBox");
+  const newBucketName   = document.getElementById("newBucketName");
+  const newHorizon      = document.getElementById("newHorizon");
+  const newRisk         = document.getElementById("newRisk");
+  const newObjective    = document.getElementById("newObjective");
+  const newVol          = document.getElementById("newVol");
+  const newTarget       = document.getElementById("newTarget");
+  const createBucketBtn = document.getElementById("createBucketBtn");
+  const createStatus    = document.getElementById("createStatus");
+
+  const withdrawBox     = document.getElementById("withdrawBox");
+  const withdrawAmount  = document.getElementById("withdrawAmount");
+  const withdrawBtn     = document.getElementById("withdrawBtn");
+  const withdrawStatus  = document.getElementById("withdrawStatus");
+
+  const globalStatus    = document.getElementById("globalStatus");
+
+  function initPi(){
+    if(!window.Pi) return;
+    try {
+      Pi.init({ version:"2.0", sandbox: PI_SANDBOX });
+    } catch(e){ console.error(e); }
+  }
+  initPi();
+
+  function fmtPi(x){
+    const n = Number(x || 0);
+    return n.toFixed(4) + " test Pi";
+  }
+
+  function updateUserLabel(){
+    if(currentUser && currentUser.username){
+      userLabel.textContent = "Signed in as @" + currentUser.username;
+    } else {
+      userLabel.textContent = "";
+    }
+  }
+
+  async function getJSON(url){
+    const r = await fetch(url);
+    return r.json();
+  }
+
+  async function postJSON(url, body){
+    const r = await fetch(url, {
+      method: "POST",
+      headers: { "Content-Type":"application/json" },
+      body: JSON.stringify(body || {})
+    });
+    return r.json();
+  }
+
+  async function loadSummary(){
+    if (!currentUser || !currentUser.username) return;
+
+    try {
+      const res = await getJSON("/api/trading/summary?username=" + encodeURIComponent(currentUser.username));
+      if (!res.ok) {
+        globalStatus.textContent = res.error || "Error loading summary.";
+        return;
+      }
+      currentSummary = res;
+      renderSummary(res);
+      renderBuckets(res);
+    } catch(e){
+      console.error(e);
+      globalStatus.textContent = "Network error loading summary.";
+    }
+  }
+
+  function renderSummary(res){
+    const acct = res.account || {};
+    const buckets = res.buckets || [];
+
+    summaryBox.style.display = "block";
+    createBox.style.display  = "block";
+    withdrawBox.style.display= "block";
+    bucketsBox.style.display = "block";
+
+    const totalDeposited = acct.total_deposited || 0;
+    const totalWithdrawn = acct.total_withdrawn || 0;
+    const netDeposit     = acct.net_deposit || 0;
+
+    let totalAlloc = 0;
+    for (const b of buckets) totalAlloc += (b.allocation || 0);
+
+    const avail = Math.max(0, netDeposit - totalAlloc);
+
+    sumDeposited.textContent = fmtPi(totalDeposited);
+    sumWithdrawn.textContent = fmtPi(totalWithdrawn);
+    sumNet.textContent       = fmtPi(netDeposit);
+    sumAllocated.textContent = fmtPi(totalAlloc);
+    sumAvailable.textContent = fmtPi(avail);
+
+    if (avail > 0) {
+      withdrawAmount.placeholder = avail.toFixed(4);
+    }
+  }
+
+  function renderBuckets(res){
+    const buckets = res.buckets || [];
+    bucketsList.innerHTML = "";
+
+    if (!buckets.length) {
+      bucketsEmptyMsg.style.display = "block";
+      bucketsCount.textContent = "";
+      return;
+    }
+    bucketsEmptyMsg.style.display = "none";
+    bucketsCount.textContent = buckets.length + " total";
+
+    buckets.forEach(b => {
+      const row = document.createElement("div");
+      row.className = "bucket-row";
+
+      const header = document.createElement("div");
+      header.className = "bucket-header";
+      const left = document.createElement("div");
+      const right = document.createElement("div");
+
+      const nameSpan = document.createElement("span");
+      nameSpan.className = "bucket-name";
+      nameSpan.textContent = b.name || ("Bucket " + b.id);
+
+      const chips = [];
+      if (b.risk_level) chips.push("Risk: " + b.risk_level);
+      if (b.time_horizon_days) chips.push(b.time_horizon_days + "d");
+      if (b.objective) chips.push(b.objective);
+
+      chips.forEach(text => {
+        const chip = document.createElement("span");
+        chip.className = "bucket-chip";
+        chip.textContent = text;
+        left.appendChild(chip);
+      });
+
+      left.insertBefore(nameSpan, left.firstChild);
+
+      const allocLabel = document.createElement("span");
+      allocLabel.className = "muted";
+      allocLabel.textContent = "Allocated: " + fmtPi(b.allocation || 0);
+      right.appendChild(allocLabel);
+
+      header.appendChild(left);
+      header.appendChild(right);
+
+      const allocRow = document.createElement("div");
+      allocRow.className = "bucket-alloc-row";
+
+      const input = document.createElement("input");
+      input.type = "number";
+      input.min = "0";
+      input.step = "0.01";
+      input.value = (b.allocation || 0).toString();
+      input.dataset.bucketId = b.id;
+
+      const button = document.createElement("button");
+      button.className = "btn btn-outline";
+      button.textContent = "Set";
+      button.onclick = async function(){
+        if (!currentUser || !currentUser.username) return;
+        const amt = parseFloat(input.value || "0");
+        globalStatus.textContent = "Updating allocation…";
+        try {
+          const res2 = await postJSON("/api/trading/allocation/set", {
+            username: currentUser.username,
+            bucket_id: b.id,
+            amount: amt
+          });
+          if (!res2.ok) {
+            globalStatus.textContent = res2.error || "Error updating allocation.";
+            return;
+          }
+          await loadSummary();
+          globalStatus.textContent = "Allocation updated.";
+          setTimeout(()=>{ globalStatus.textContent=""; }, 2000);
+        } catch(e){
+          console.error(e);
+          globalStatus.textContent = "Network error updating allocation.";
+        }
+      };
+
+      allocRow.appendChild(input);
+      allocRow.appendChild(button);
+
+      row.appendChild(header);
+      row.appendChild(allocRow);
+
+      bucketsList.appendChild(row);
+    });
+  }
+
+  // --- Pi auth ---------------------------------------------------------
+  piLoginBtn.onclick = async function(){
+    if(!window.Pi) {
+      alert("Pi SDK not available. Open in Pi Browser.");
+      return;
+    }
+
+    try {
+      const scopes = ["username"];  // payments not required just to view buckets
+      const onIncomplete = payment => { console.log("incomplete payment", payment); };
+
+      const { user, accessToken } = await Pi.authenticate(scopes, onIncomplete);
+      currentUser = user;
+      updateUserLabel();
+      globalStatus.textContent = "";
+
+      await loadSummary();
+    } catch(err){
+      console.error(err);
+      alert("Pi auth failed.");
+      globalStatus.textContent = "Pi auth failed. Please try again.";
+    }
+  };
+
+  // --- Create bucket ---------------------------------------------------
+  if (createBucketBtn) {
+    createBucketBtn.addEventListener("click", async function(){
+      if (!currentUser || !currentUser.username) {
+        createStatus.textContent = "Authenticate with Pi first.";
+        return;
+      }
+      createStatus.textContent = "Creating bucket…";
+
+      const name   = (newBucketName.value || "").trim();
+      const target = parseFloat(newTarget.value || "0.85") || 0.85;
+
+      try {
+        const res = await postJSON("/api/trading/bucket/create", {
+          username: currentUser.username,
+          name: name || "New Bucket",
+          risk_level: newRisk.value,
+          time_horizon_days: parseInt(newHorizon.value, 10),
+          target_value_back: target,
+          objective: newObjective.value,
+          volatility: newVol.value
+        });
+        if (!res.ok) {
+          createStatus.textContent = res.error || "Error creating bucket.";
+          return;
+        }
+        createStatus.textContent = "Bucket created.";
+        newBucketName.value = "";
+        await loadSummary();
+      } catch(e){
+        console.error(e);
+        createStatus.textContent = "Network error creating bucket.";
+      }
+    });
+  }
+
+  // --- Withdraw --------------------------------------------------------
+  if (withdrawBtn) {
+    withdrawBtn.addEventListener("click", async function(){
+      if (!currentUser || !currentUser.username) {
+        withdrawStatus.textContent = "Authenticate with Pi first.";
+        return;
+      }
+      const amt = parseFloat(withdrawAmount.value || "0");
+      if (!amt || amt <= 0) {
+        withdrawStatus.textContent = "Enter an amount greater than zero.";
+        return;
+      }
+      withdrawStatus.textContent = "Submitting withdrawal request…";
+
+      try {
+        const res = await postJSON("/api/trading/withdraw/request", {
+          username: currentUser.username,
+          amount: amt
+        });
+        if (!res.ok) {
+          withdrawStatus.textContent = res.error || "Error requesting withdrawal.";
+          return;
+        }
+        withdrawStatus.textContent =
+          "Withdrawal request recorded. Unallocated balance updated.";
+        await loadSummary();
+      } catch(e){
+        console.error(e);
+        withdrawStatus.textContent = "Network error requesting withdrawal.";
+      }
+    });
+  }
+
+})();
+</script>
+</body>
+</html>
