@@ -277,6 +277,7 @@
     function setMsg(t){ if(msg) msg.textContent = t || ''; }
     function setErr(t){ if(err) err.textContent = t || ''; }
 
+    // Home page Pi.init: uses app-level sandbox flag (mainnet / non-testnet)
     function initPi(){
       if (!window.Pi || !Pi.init) return false;
       try { Pi.init({ version:"2.0", sandbox:sandbox }); return true; }
@@ -284,6 +285,7 @@
     }
     if(!initPi()) setMsg("Open in Pi Browser or refresh. Pi SDK is initializing.");
 
+    // MY STORE (main app) → Pi auth here
     function doAuth(){
       setErr('');
       if (!window.Pi || !Pi.authenticate){ setMsg("Pi SDK not available. Open in Pi Browser or refresh."); return; }
@@ -301,42 +303,9 @@
     }
     btnClone?.addEventListener('click', doAuth);
 
-    async function handleBotNavClick(){
-      try{
-        if(!window.Pi || !Pi.authenticate){
-          window.location.href = "/bot";
-          return;
-        }
-        const scopes = ['username'];
-        function onIncompletePaymentFound(_p){}
-        const auth = await Pi.authenticate(scopes, onIncompletePaymentFound);
-        const user = auth && auth.user;
-        const username = user && user.username;
-        if(!username){
-          window.location.href = "/bot";
-          return;
-        }
-        const res = await fetch("/api/trading/summary?username=" + encodeURIComponent(username));
-        const j = await res.json();
-        if(!j.ok){
-          window.location.href = "/bot";
-          return;
-        }
-        if(Array.isArray(j.buckets) && j.buckets.length > 0){
-          window.location.href = "/bot/profile";
-        } else {
-          window.location.href = "/bot";
-        }
-      } catch(e){
-        console.error("IZZA BOT nav error", e);
-        window.location.href = "/bot";
-      }
-    }
-
-    botNav?.addEventListener('click', function(ev){
-      ev.preventDefault();
-      handleBotNavClick();
-    });
+    // IZZA BOT button: no Pi auth on the home page.
+    // It just follows its href="/bot"; the bot page will handle Pi auth in TESTNET.
+    // No extra JS needed here; clicking the link navigates normally.
   })();
   </script>
 
