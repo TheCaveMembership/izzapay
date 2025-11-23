@@ -74,7 +74,7 @@ def ensure_trustline(token_code: str, token_issuer: str, limit: str = "100000000
 
     # Check existing balances
     for bal in acct.get("balances", []):
-        if bal.get("asset_type") == "credit_alphanum12":
+        if bal.get("asset_type") in ("credit_alphanum4", "credit_alphanum12"):
             if bal.get("asset_code") == token_code and bal.get("asset_issuer") == token_issuer:
                 return  # already trusted
 
@@ -102,6 +102,26 @@ def ensure_trustline(token_code: str, token_issuer: str, limit: str = "100000000
 
     print(f"[BOT] Trustline created for {token_code}")
     return resp
+
+
+# ------------------------------------------------------------------
+# Balance helper (for safe sells)
+# ------------------------------------------------------------------
+
+def get_bot_token_balance(token_code: str, token_issuer: str) -> float:
+    """
+    Return the BOT wallet's actual on-chain balance for a given asset.
+    Used by the engine to ensure sells never exceed wallet holdings.
+    """
+    acct = _srv.accounts().account_id(BOT_PUB).call()
+    for bal in acct.get("balances", []):
+        if bal.get("asset_type") in ("credit_alphanum4", "credit_alphanum12"):
+            if bal.get("asset_code") == token_code and bal.get("asset_issuer") == token_issuer:
+                try:
+                    return float(bal.get("balance") or 0.0)
+                except Exception:
+                    return 0.0
+    return 0.0
 
 
 # ------------------------------------------------------------------
