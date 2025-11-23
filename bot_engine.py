@@ -35,7 +35,12 @@ from decimal import Decimal
 
 from db import conn
 from bot_markets import scan_markets_vs_pi
-from bot_trader import market_buy, market_sell, get_bot_token_balance
+from bot_trader import (
+    market_buy,
+    market_sell,
+    get_bot_token_balance,
+    cancel_blocked_buy_offers,
+)
 
 # ---------------------------------------------------------------------
 # Basic config
@@ -99,8 +104,8 @@ RISK_WEIGHTS = {
     },
 }
 
-# Tokens the bot should never buy (hard blocklist)
-# You can tweak this list any time.
+# Tokens the bot should never buy (hard blocklist).
+# We can still SELL these if we already hold them.
 BLOCKED_BUY_CODES = {
     "Archimedes",
     "AYB",
@@ -108,6 +113,14 @@ BLOCKED_BUY_CODES = {
     "DATONG",
     "DTUSD",
 }
+
+# Sell wall logic
+# If wall_value_pi > SELL_WALL_FRACTION * bucket_cash -> skip that market
+SELL_WALL_FRACTION = float(os.getenv("BOT_SELL_WALL_FRACTION", "0.4"))
+# Boost in scoring for tokens where we CAN break the wall
+WALL_BREAK_SCORE_BOOST = float(os.getenv("BOT_WALL_BREAK_SCORE_BOOST", "3.0"))
+# Fallback quick-sell markup if we don't know the next ask (percent)
+QUICK_SELL_FALLBACK_PCT = float(os.getenv("BOT_QUICK_SELL_FALLBACK_PCT", "2.0"))
 
 
 def _now() -> int:
@@ -144,6 +157,11 @@ class MarketInfo:
     total_liq: float
     num_bid_levels: int
     num_ask_levels: int
+    # Optional extended orderbook info (if available)
+    top_ask_amount: float = 0.0    # size of top-of-book ask (tokens)
+    next_ask_price: float = 0.0    # price of next ask level above best_ask
+    wall_value_pi: float = 0.0     # estimated PI value of the top sell wall
+    wall_break_candidate: bool = False  # whether this wall is breakable by a bucket
 
 
 @dataclass
@@ -276,7 +294,7 @@ def load_positions_for_bucket(bucket_id: int) -> Dict[Tuple[str, str], Position]
 
 
 # ---------------------------------------------------------------------
-# Markets normalization
+# Markets normalization (orderbook-only)
 # ---------------------------------------------------------------------
 
 def normalize_markets(raw_markets: List[Dict[str, Any]]) -> Dict[Tuple[str, str], MarketInfo]:
@@ -291,6 +309,7 @@ def normalize_markets(raw_markets: List[Dict[str, Any]]) -> Dict[Tuple[str, str]
         ob_token = m.get("orderbook_sell_token") or {}
         ob_pi = m.get("orderbook_sell_pi") or {}
 
+        # Prices and spreads strictly from orderbook
         best_bid = ob_pi.get("best_bid_price") or ob_token.get("best_bid_price")
         best_ask = ob_pi.get("best_ask_price") or ob_token.get("best_ask_price")
         mid_price = ob_pi.get("mid_price") or ob_token.get("mid_price")
@@ -313,6 +332,37 @@ def normalize_markets(raw_markets: List[Dict[str, Any]]) -> Dict[Tuple[str, str]
         except Exception:
             continue
 
+        # Try to pull full ladder info if present (Horizon style asks array)
+        top_ask_amount_f = 0.0
+        next_ask_price_f = 0.0
+
+        raw_asks = None
+        for key_name in ("asks", "ask_levels", "sell_levels", "ask_book"):
+            v = ob_pi.get(key_name) or ob_token.get(key_name)
+            if isinstance(v, list) and v:
+                raw_asks = v
+                break
+
+        if isinstance(raw_asks, list) and raw_asks:
+            first = raw_asks[0] or {}
+            try:
+                top_ask_amount_f = float(
+                    first.get("amount")
+                    or first.get("qty")
+                    or first.get("quantity")
+                    or first.get("balance")
+                    or 0.0
+                )
+            except Exception:
+                top_ask_amount_f = 0.0
+
+            if len(raw_asks) > 1:
+                second = raw_asks[1] or {}
+                try:
+                    next_ask_price_f = float(second.get("price") or 0.0)
+                except Exception:
+                    next_ask_price_f = 0.0
+
         total_liq = bid_liq_f + ask_liq_f
         if total_liq <= 0:
             depth_imbalance = 0.0
@@ -332,6 +382,8 @@ def normalize_markets(raw_markets: List[Dict[str, Any]]) -> Dict[Tuple[str, str]
             total_liq=total_liq,
             num_bid_levels=nb,
             num_ask_levels=na,
+            top_ask_amount=top_ask_amount_f,
+            next_ask_price=next_ask_price_f,
         )
 
     return markets
@@ -614,7 +666,7 @@ def execute_sells_for_bucket(
 
 
 # ---------------------------------------------------------------------
-# Buy logic
+# Buy logic (with sell-wall detection + wall-break preference)
 # ---------------------------------------------------------------------
 
 def plan_buys_for_bucket(
@@ -642,10 +694,13 @@ def plan_buys_for_bucket(
     max_spread = cfg["max_spread_pct"]
 
     scored: List[Tuple[float, MarketInfo]] = []
+
     for key, m in markets.items():
+        # Never BUY blocked tokens (we can still SELL them)
         if m.code in BLOCKED_BUY_CODES:
             continue
 
+        # Orderbook sanity
         if m.best_ask <= 0 or m.mid_price <= 0:
             continue
         if m.spread_pct <= 0 or m.spread_pct > max_spread:
@@ -653,15 +708,44 @@ def plan_buys_for_bucket(
         if m.total_liq <= 0:
             continue
 
+        # --- Sell wall detection relative to this bucket ---
+        # Try top-of-book amount if we have it, otherwise approximate
+        wall_qty_tokens = m.top_ask_amount if m.top_ask_amount > 0 else 0.0
+        if wall_qty_tokens <= 0 and m.ask_liq > 0:
+            # Fallback: approximate a top wall as average per level
+            denom = m.num_ask_levels or 1
+            wall_qty_tokens = m.ask_liq / float(denom)
+
+        wall_value_pi = float(wall_qty_tokens) * float(m.best_ask)
+        m.wall_value_pi = wall_value_pi
+        m.wall_break_candidate = False
+
+        if bucket.cash_pi > 0 and wall_value_pi > 0:
+            wall_ratio = wall_value_pi / bucket.cash_pi
+
+            # If wall is too big vs this bucket's firepower, skip entirely
+            if wall_ratio > SELL_WALL_FRACTION:
+                # Example: bucket has 1000 PI and wall is 600+ PI -> not worth touching
+                continue
+
+            # If the wall is reasonably sized, and at least MIN_TRADE_PI, mark as breakable
+            if wall_ratio <= SELL_WALL_FRACTION and wall_value_pi >= MIN_TRADE_PI:
+                m.wall_break_candidate = True
+
+        # Normal strategy score
         score = compute_score(m, cfg)
         if score <= 0:
             continue
 
-        # Prefer non "DT" style tokens, but still allow them if they are really good.
+        # Prefer non "DT" style tokens, but still allow them if we haven't blocked them
         if m.code.startswith("DT"):
             score *= 0.2
         else:
             score *= 1.2
+
+        # Strongly prefer markets where we can actually break the wall
+        if m.wall_break_candidate:
+            score *= WALL_BREAK_SCORE_BOOST
 
         scored.append((score, m))
 
@@ -733,6 +817,7 @@ def execute_buys_for_bucket(
                 f"[BUY] bucket={bucket.id} user=@{bucket.username} "
                 f"spend~{pi_budget:.6f} PI on {market.code} @ {best_ask:.6f} PI"
             )
+            # Always price off the current orderbook best ask
             resp = market_buy(
                 token_code=market.code,
                 token_issuer=market.issuer,
@@ -751,6 +836,42 @@ def execute_buys_for_bucket(
                 tx_resp=resp,
             )
             executed += 1
+
+            # If this market had a breakable wall, immediately place a quick
+            # SELL somewhere between the broken wall and the next ask.
+            if market.wall_break_candidate:
+                try:
+                    if market.next_ask_price and market.next_ask_price > market.best_ask:
+                        # Exact midpoint between the broken wall ask and the next ask
+                        target_price = (market.best_ask + market.next_ask_price) / 2.0
+                    else:
+                        # Fallback: small markup over entry (orderbook-only)
+                        target_price = market.best_ask * (1.0 + QUICK_SELL_FALLBACK_PCT / 100.0)
+
+                    wallet_qty = get_bot_token_balance(market.code, market.issuer)
+                    quick_qty = min(wallet_qty, amount_token)
+
+                    if quick_qty * target_price >= MIN_TRADE_PI:
+                        print(
+                            f"[SCALP] bucket={bucket.id} user=@{bucket.username} "
+                            f"placing quick wall-break SELL {quick_qty:.6f} {market.code} "
+                            f"@ {target_price:.6f} PI"
+                        )
+                        # Use market_sell as a generic limit-sell at target_price.
+                        # We don't log this as an executed trade here because it
+                        # may partially fill; realized PnL will show up via TP/SL.
+                        market_sell(
+                            token_code=market.code,
+                            token_issuer=market.issuer,
+                            token_amount=quick_qty,
+                            best_bid=target_price,
+                        )
+                except Exception as e:
+                    print(
+                        f"[SCALP] quick wall-break sell placement failed for "
+                        f"{market.code} in bucket {bucket.id}: {e}"
+                    )
+
         except Exception as e:
             print(f"[ERROR] buy failed for {market.code} in bucket {bucket.id}: {e}")
 
@@ -782,6 +903,13 @@ def estimate_bucket_equity_pi(
 
 def run_once():
     ensure_bot_tables()
+
+    # First, clear any legacy open BUY offers for blocked tokens
+    # so we never keep feeding Datong / stablecoins.
+    try:
+        cancel_blocked_buy_offers(list(BLOCKED_BUY_CODES))
+    except Exception as e:
+        print(f"[ENGINE] Warning: cancel_blocked_buy_offers failed: {e}")
 
     print("[ENGINE] Scanning markets on Pi Testnet...")
     raw_markets = scan_markets_vs_pi(
@@ -833,7 +961,7 @@ def run_once():
             ).fetchone()
         bucket.cash_pi = float(row["amount"] or 0.0) if row else 0.0
 
-        # Buys
+        # Buys (with sell wall logic)
         buy_plans = plan_buys_for_bucket(bucket, markets)
         buys_done = execute_buys_for_bucket(bucket, buy_plans)
         total_trades += buys_done
