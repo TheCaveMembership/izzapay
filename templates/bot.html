@@ -196,7 +196,7 @@
       <p class="muted">
         This is your <strong>original IZZA BOT profile</strong>. After this, on your
         <strong>IZZA BOT Profile</strong> page you will be able to create additional
-        buckets with different settings and allocate your test Pi deposits across them.
+        buckets with different settings and allocate your deposit across them.
       </p>
 
       <label for="horizonSelect">Time horizon</label>
@@ -342,12 +342,8 @@
   // --- Open IZZA wallet page -------------------------------------------
   if (openWalletBtn) {
     openWalletBtn.addEventListener("click", function(){
-      // Send them to token-auth, including username if we have it
-      let target = "/token-auth";
-      if (currentUser && currentUser.username) {
-        target += "?u=" + encodeURIComponent(currentUser.username);
-      }
-      window.location.href = target;
+      // Use Flask routing so this always matches the real token-auth route
+      window.location.href = "{{ url_for('token_auth') }}";
     });
   }
 
@@ -372,9 +368,10 @@
         if (res.ok) {
           configStatus.textContent =
             "Base bot settings saved. Redirecting to your IZZA BOT Profile…";
+          // Auto-redirect into the profile page so they can allocate buckets
           setTimeout(function(){
             window.location.href = "/bot/profile";
-          }, 800);
+          }, 600);
         } else {
           configStatus.textContent = res.error || "Error saving settings.";
         }
