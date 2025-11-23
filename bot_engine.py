@@ -900,6 +900,17 @@ def run_loop():
 
 
 if __name__ == "__main__":
+    # Extra debug so we can SEE what the worker is doing on Render
+    import os as _os
+
+    raw_loop = _os.getenv("BOT_LOOP_MODE")
+    print(
+        f"[ENGINE] bot_engine.py starting. "
+        f"BOT_LOOP_MODE raw={raw_loop!r} -> LOOP_MODE={LOOP_MODE}, "
+        f"SLEEP={LOOP_SLEEP_SECS}",
+        flush=True,
+    )
+
     if LOOP_MODE:
         run_loop()
     else:
