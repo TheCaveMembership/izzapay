@@ -397,6 +397,7 @@ def init_db():
           amount_pi REAL,         -- PI amount used in trading_summary
           pnl_pi REAL,            -- realized PnL in PI (optional)
           status TEXT,            -- filled / partial / cancelled
+          created_at INTEGER,     -- for trading_summary ordering
           ts INTEGER,             -- trade timestamp
           raw_json TEXT,
           FOREIGN KEY(account_id) REFERENCES bot_accounts(id),
@@ -741,6 +742,7 @@ def ensure_schema():
           amount_pi REAL,
           pnl_pi REAL,
           status TEXT,
+          created_at INTEGER,
           ts INTEGER,
           raw_json TEXT,
           FOREIGN KEY(account_id) REFERENCES bot_accounts(id),
@@ -753,5 +755,9 @@ def ensure_schema():
         # Ensure new columns exist on existing bot_trades table
         try:
             cx.execute("ALTER TABLE bot_trades ADD COLUMN amount_pi REAL")
+        except Exception:
+            pass
+        try:
+            cx.execute("ALTER TABLE bot_trades ADD COLUMN created_at INTEGER")
         except Exception:
             pass
