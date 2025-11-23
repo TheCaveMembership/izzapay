@@ -174,6 +174,10 @@ def prune_bot_offers(
     smallest and oldest ones to free subentries.
 
     Returns the number of offers cancelled.
+
+    IMPORTANT:
+      - Never cancel offers involving IZZA (either side), so the
+        distributor's IZZA sell ladder stays intact.
     """
     offers = _list_bot_offers(max_records=2000)
     count = len(offers)
@@ -195,6 +199,16 @@ def prune_bot_offers(
     for offer in offers_sorted[:to_cancel]:
         selling = offer.get("selling") or {}
         buying = offer.get("buying") or {}
+
+        # ------------------------------------------------------------------
+        # HARD PROTECT: never cancel offers involving IZZA
+        # (this keeps the IZZA sell ladder intact on the distributor wallet)
+        # ------------------------------------------------------------------
+        sell_code = selling.get("asset_code")
+        buy_code = buying.get("asset_code")
+        if (sell_code and sell_code.upper() == "IZZA") or (buy_code and buy_code.upper() == "IZZA"):
+            # skip this offer, do not cancel
+            continue
 
         # Build selling asset
         s_type = selling.get("asset_type")
