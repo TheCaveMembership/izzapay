@@ -39,7 +39,12 @@ from decimal import Decimal
 
 from db import conn
 from bot_markets import scan_markets_vs_pi
-from bot_trader import market_buy, market_sell, get_bot_token_balance  # <-- updated
+from bot_trader import (
+    market_buy,
+    market_sell,
+    get_bot_token_balance,
+    trim_offers_if_too_many,   # <-- new helper
+)
 
 # ---------------------------------------------------------------------
 # Basic config
@@ -55,6 +60,10 @@ MIN_TRADE_PI = float(os.getenv("BOT_MIN_TRADE_PI", "0.1"))
 MAX_TRADES_PER_RUN = int(os.getenv("BOT_MAX_TRADES_PER_RUN", "20"))
 MAX_BUYS_PER_BUCKET = int(os.getenv("BOT_MAX_BUYS_PER_BUCKET", "5"))
 MAX_SELLS_PER_BUCKET = int(os.getenv("BOT_MAX_SELLS_PER_BUCKET", "5"))
+
+# Max open offers we want the bot wallet to keep before it starts
+# cancelling old ones (to avoid op_too_many_subentries).
+MAX_OPEN_OFFERS = int(os.getenv("BOT_MAX_OPEN_OFFERS", "80"))
 
 # Take-profit / stop-loss by risk
 RISK_TP_SL = {
@@ -761,7 +770,18 @@ def execute_buys_for_bucket(
     """
     Execute planned buys.
     Returns count of successful buys.
+
+    Extra safety added:
+      - Before buying we trim old open offers if we're above MAX_OPEN_OFFERS.
+      - If Horizon returns op_too_many_subentries on a buy, we trim again
+        and retry that single buy once.
     """
+    if plans:
+        # Global cleanup so we don't walk into subentry limits blindly
+        removed = trim_offers_if_too_many(MAX_OPEN_OFFERS)
+        if removed > 0:
+            print(f"[ENGINE] Trimmed {removed} stale offers before new buys.")
+
     executed = 0
     for market, pi_budget in plans:
         if executed >= MAX_BUYS_PER_BUCKET:
@@ -792,18 +812,45 @@ def execute_buys_for_bucket(
         # Token amount to buy at this price
         amount_token = pi_budget / best_ask
 
-        try:
+        def _do_buy_once() -> Optional[dict]:
             print(
                 f"[BUY] bucket={bucket.id} user=@{bucket.username} "
                 f"spend~{pi_budget:.6f} PI on {market.code} @ {best_ask:.6f} PI"
             )
-            resp = market_buy(
+            return market_buy(
                 token_code=market.code,
                 token_issuer=market.issuer,
                 max_cost_pi=pi_budget,
                 best_price=best_ask,
             )
-            # Update local ledgers
+
+        try:
+            resp = _do_buy_once()
+        except Exception as e:
+            err_str = str(e)
+            print(f"[ERROR] buy failed for {market.code} in bucket {bucket.id}: {e}")
+
+            # If we hit the subentry / offer limit, clean up and retry once
+            if "op_too_many_subentries" in err_str:
+                print("[ENGINE] Detected op_too_many_subentries. "
+                      "Cancelling old offers and retrying buy once.")
+                removed = trim_offers_if_too_many(MAX_OPEN_OFFERS)
+                if removed > 0:
+                    print(f"[ENGINE] Trimmed {removed} offers; retrying buy for {market.code}.")
+                    try:
+                        resp = _do_buy_once()
+                    except Exception as e2:
+                        print(f"[ERROR] retry buy failed for {market.code} in bucket {bucket.id}: {e2}")
+                        continue
+                else:
+                    # Nothing to trim or trim failed; skip this buy
+                    continue
+            else:
+                # Different error; skip this buy
+                continue
+
+        # If we got here, resp is a successful buy
+        try:
             upsert_position(bucket.id, market, delta_qty=amount_token, trade_price_pi=best_ask)
             update_cash_for_bucket(bucket.id, delta_pi=-pi_budget)
             log_trade(
@@ -817,7 +864,7 @@ def execute_buys_for_bucket(
             )
             executed += 1
         except Exception as e:
-            print(f"[ERROR] buy failed for {market.code} in bucket {bucket.id}: {e}")
+            print(f"[ERROR] post-buy bookkeeping failed for {market.code} in bucket {bucket.id}: {e}")
 
     return executed
 
