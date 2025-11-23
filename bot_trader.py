@@ -9,7 +9,7 @@
 # All on Pi Testnet using your BOT_WALLET_* env vars.
 
 import os
-from decimal import Decimal
+from decimal import Decimal, ROUND_DOWN
 
 from stellar_sdk import (
     Server,
@@ -34,6 +34,32 @@ if not BOT_PUB or not BOT_SEC:
 
 kp_bot = Keypair.from_secret(BOT_SEC)
 
+# ------------------------------------------------------------------
+# Helpers for Horizon-compatible decimals (max 7 decimal places)
+# ------------------------------------------------------------------
+
+_AMOUNT_QUANT = Decimal("0.0000001")  # 7 decimal places
+
+
+def _to_amount_str(value: float) -> str:
+    """
+    Convert a float to a Horizon-compatible amount string
+    with at most 7 digits after the decimal, rounded DOWN.
+    """
+    d = Decimal(str(value))
+    d_q = d.quantize(_AMOUNT_QUANT, rounding=ROUND_DOWN)
+    return str(d_q)
+
+
+def _to_price_str(value: float) -> str:
+    """
+    Price helper. Not strictly required to be 7dp, but we keep it
+    consistent and safe.
+    """
+    d = Decimal(str(value))
+    d_q = d.quantize(_AMOUNT_QUANT, rounding=ROUND_DOWN)
+    return str(d_q)
+
 
 def _load_bot_account():
     return _srv.load_account(kp_bot.public_key)
@@ -55,8 +81,8 @@ def place_sell_offer(
     op = ManageSellOffer(
         selling=selling_asset,
         buying=buying_asset,
-        amount=str(Decimal(str(amount))),
-        price=str(Decimal(str(price))),
+        amount=_to_amount_str(amount),
+        price=_to_price_str(price),
         offer_id=0,  # create new
     )
 
@@ -90,8 +116,8 @@ def place_buy_offer(
     op = ManageBuyOffer(
         buying=buying_asset,
         selling=selling_asset,
-        amount=str(Decimal(str(buy_amount))),  # <-- fixed keyword here
-        price=str(Decimal(str(price))),
+        amount=_to_amount_str(buy_amount),  # SDK uses 'amount' in this version
+        price=_to_price_str(price),
         offer_id=0,
     )
 
