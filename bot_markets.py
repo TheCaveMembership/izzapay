@@ -7,13 +7,10 @@
 #   - Listing non-native assets (tokens) with basic stats
 #   - Pulling order books for token/PI pairs
 #   - Deriving simple metrics: mid price, spread, depth, etc.
-#
-# You can call these from a script, a cron job, or from your izza_bot blueprint
-# later to feed data into the DB / strategies.
 
 import os
 from decimal import Decimal
-from typing import Dict, Any, List, Tuple, Optional
+from typing import Dict, Any, List
 
 import requests
 from stellar_sdk import Asset
@@ -36,11 +33,6 @@ def _iter_horizon_collection(
     params: Dict[str, Any] | None = None,
     max_records: int = 500
 ):
-    """
-    Generic iterator over a Horizon collection endpoint that uses
-    _embedded.records + _links.next.href pagination.
-    Stops either at max_records or when Horizon has no more pages.
-    """
     base_url = HORIZON_URL.rstrip("/") + "/" + path.lstrip("/")
     params = params.copy() if params else {}
 
@@ -61,11 +53,10 @@ def _iter_horizon_collection(
         if not next_link or next_link == url:
             return
         url = next_link
-        # after first page, Horizon puts the cursor in the URL, no need for params
 
 
 # ---------------------------------------------------------
-# Asset discovery: list Pi Testnet tokens
+# Asset discovery (FIXED num_accounts handling)
 # ---------------------------------------------------------
 
 def list_testnet_assets(
@@ -74,22 +65,31 @@ def list_testnet_assets(
     exclude_native: bool = True,
 ) -> List[Dict[str, Any]]:
     """
-    Return a list of Pi testnet assets (tokens) with basic stats.
-
-    Filters:
-      - exclude_native: skip the native PI asset
-      - min_num_accounts: require at least this many accounts holding the asset
+    Fetch Pi Testnet token list.
+    FIXED: Horizon does NOT return `num_accounts`, we must derive it from:
+            accounts.authorized + accounts.unauthorized
     """
     assets: List[Dict[str, Any]] = []
 
     for rec in _iter_horizon_collection("assets", {"limit": 200, "order": "asc"}, max_records=max_records):
+
         asset_type = rec.get("asset_type")
         if exclude_native and asset_type == "native":
             continue
 
         code = rec.get("asset_code")
         issuer = rec.get("asset_issuer")
-        num_accounts = int(rec.get("num_accounts") or 0)
+
+        # FIX: derive num_accounts from `accounts` object
+        accounts_info = rec.get("accounts") or {}
+
+        if rec.get("num_accounts") is not None:
+            num_accounts = int(rec.get("num_accounts") or 0)
+        else:
+            num_accounts = int(
+                (accounts_info.get("authorized") or 0)
+                + (accounts_info.get("unauthorized") or 0)
+            )
 
         if min_num_accounts and num_accounts < min_num_accounts:
             continue
@@ -106,14 +106,11 @@ def list_testnet_assets(
 
 
 def build_asset(code: str, issuer: str) -> Asset:
-    """
-    Helper: build a stellar_sdk.Asset instance for a Pi Testnet token.
-    """
     return Asset(code, issuer)
 
 
 # ---------------------------------------------------------
-# Orderbook data: token <-> PI markets
+# Orderbook data
 # ---------------------------------------------------------
 
 def get_orderbook_token_vs_pi(
@@ -121,15 +118,7 @@ def get_orderbook_token_vs_pi(
     token_issuer: str,
     mode: str = "token_selling_pi_buying"
 ) -> Dict[str, Any]:
-    """
-    Pull the on-chain order book between a token and native PI.
 
-    mode:
-      - 'token_selling_pi_buying'  => offers where people SELL token to BUY PI
-      - 'pi_selling_token_buying'  => offers where people SELL PI to BUY token
-
-    That basically gives you the "two sides" of a token/PI market.
-    """
     token = build_asset(token_code, token_issuer)
 
     if mode == "token_selling_pi_buying":
@@ -147,23 +136,13 @@ def get_orderbook_token_vs_pi(
             "buying_asset_issuer": token.issuer,
         }
     else:
-        raise ValueError("mode must be 'token_selling_pi_buying' or 'pi_selling_token_buying'")
+        raise ValueError("Invalid orderbook mode.")
 
     url = HORIZON_URL.rstrip("/") + "/order_book"
     return _get(url, params=params)
 
 
 def analyze_orderbook(orderbook: Dict[str, Any]) -> Dict[str, Any]:
-    """
-    Given a Horizon order_book JSON, compute some basic stats:
-      - best_bid_price, best_bid_amount
-      - best_ask_price, best_ask_amount
-      - mid_price
-      - spread_abs, spread_pct
-      - total_bid_liquidity, total_ask_liquidity
-
-    If one side is empty, stats will have None for mid/spread.
-    """
     bids = orderbook.get("bids") or []
     asks = orderbook.get("asks") or []
 
@@ -210,25 +189,14 @@ def analyze_orderbook(orderbook: Dict[str, Any]) -> Dict[str, Any]:
 
 
 # ---------------------------------------------------------
-# Example: scan all tokens vs PI and rank by liquidity / spread
+# Market scanner
 # ---------------------------------------------------------
 
 def scan_markets_vs_pi(
     max_assets: int = 200,
     min_num_accounts: int = 2,
     max_spread_pct: float | None = None,
-) -> List[Dict[str, Any]]:
-    """
-    Convenience function:
-      1. List up to max_assets Pi Testnet tokens with >= min_num_accounts holders
-      2. For each token, pull token/PI orderbooks (both directions)
-      3. Compute basic stats and return a list of market snapshots.
-
-    You can then:
-      - store this in your DB,
-      - filter for tight-spread, high-liquidity markets,
-      - drive your strategies from it.
-    """
+):
     tokens = list_testnet_assets(
         max_records=max_assets,
         min_num_accounts=min_num_accounts,
@@ -247,34 +215,29 @@ def scan_markets_vs_pi(
 
             stats_sell_token = analyze_orderbook(ob_sell_token)
             stats_sell_pi    = analyze_orderbook(ob_sell_pi)
+
         except Exception as e:
-            # If any single market fetch blows up, skip this asset quietly for now
             print(f"[scan_markets_vs_pi] error for {code}:{issuer}: {e}")
             continue
 
-        # Simple combined liquidity metric in PI terms (approx) if we have mid-price
         mid_price = stats_sell_token.get("mid_price") or stats_sell_pi.get("mid_price")
         approx_liq_pi = None
         if mid_price and mid_price > 0:
-            # very rough: token-side liquidity * price + PI-side liquidity
             approx_liq_pi = (
                 (stats_sell_token.get("total_bid_liquidity") or 0) * mid_price
                 + (stats_sell_pi.get("total_bid_liquidity") or 0)
             )
 
-        # choose the 'worst' spread between the two books as a simple sanity check
-        spread_pct_candidates = [
+        spread_candidates = [
             x for x in [
                 stats_sell_token.get("spread_pct"),
                 stats_sell_pi.get("spread_pct")
             ] if x is not None
         ]
-        max_spread_for_token = max(spread_pct_candidates) if spread_pct_candidates else None
+        max_spread = max(spread_candidates) if spread_candidates else None
 
-        if max_spread_pct is not None and max_spread_for_token is not None:
-            if max_spread_for_token > max_spread_pct:
-                # skip super-wide markets if caller wants tight markets only
-                continue
+        if max_spread_pct and max_spread and max_spread > max_spread_pct:
+            continue
 
         results.append({
             "code": code,
@@ -284,18 +247,14 @@ def scan_markets_vs_pi(
             "orderbook_sell_token": stats_sell_token,
             "orderbook_sell_pi": stats_sell_pi,
             "approx_liquidity_pi": approx_liq_pi,
-            "max_spread_pct": max_spread_for_token,
+            "max_spread_pct": max_spread,
         })
 
-    # Sort by approx_liquidity_pi desc (most liquid first)
     results.sort(key=lambda r: (r["approx_liquidity_pi"] or 0), reverse=True)
     return results
 
 
 if __name__ == "__main__":
-    # Quick manual test:
-    # Run:  python bot_markets.py
-    # to print top ~10 most liquid token/PI markets on Pi Testnet (roughly).
     markets = scan_markets_vs_pi(max_assets=100, min_num_accounts=2)
     for m in markets[:10]:
         print(
