@@ -228,6 +228,36 @@
     </button>
     <p id="userLabel" class="status-text"></p>
 
+    <!-- Wallet connection / secret key -->
+    <div id="walletBox" class="box" style="display:none;">
+      <h3>Wallet connection</h3>
+      <p class="muted">
+        Your <strong>IZZA TESTNET wallet</strong> is the source of funds for deposits.
+        The <strong>secret key is never stored on the server</strong>, only in this
+        browser’s local storage on this device.
+      </p>
+
+      <div class="metric-row">
+        <span>Linked IZZA wallet</span>
+        <span id="walletPubLabel" style="font-size:11px;max-width:55%;text-align:right;word-break:break-all;">
+          (not linked)
+        </span>
+      </div>
+
+      <label for="walletSecretInput">IZZA wallet secret key</label>
+      <input
+        id="walletSecretInput"
+        type="password"
+        placeholder="Paste secret key (stays in this browser)"
+        autocomplete="off"
+      />
+
+      <button id="saveSecretBtn" class="btn btn-outline" style="width:100%;margin-top:4px;">
+        Save secret in this browser
+      </button>
+      <p id="secretStatus" class="status-text"></p>
+    </div>
+
     <!-- Account summary -->
     <div id="summaryBox" class="box" style="display:none;">
       <h3>Account summary</h3>
@@ -340,13 +370,19 @@
 (function(){
   const PI_SANDBOX = "{{ PI_SANDBOX }}" === "true";
   const BOT_USERNAME_KEY = "izza_bot_username";
-  const WALLET_SECRET_KEY = "izza_wallet_secret"; // must match your wallet page
+  const WALLET_SECRET_KEY = "izza_wallet_secret"; // same key as wallet page
 
   let currentUser = null;
   let currentSummary = null;
 
   const piLoginBtn    = document.getElementById("piLoginBtn");
   const userLabel     = document.getElementById("userLabel");
+
+  const walletBox       = document.getElementById("walletBox");
+  const walletPubLabel  = document.getElementById("walletPubLabel");
+  const walletSecretInput = document.getElementById("walletSecretInput");
+  const saveSecretBtn   = document.getElementById("saveSecretBtn");
+  const secretStatus    = document.getElementById("secretStatus");
 
   const summaryBox    = document.getElementById("summaryBox");
   const sumWalletPi   = document.getElementById("sumWalletPi");
@@ -404,6 +440,22 @@
     }
   }
 
+  function updateSecretStatus(){
+    let hasSecret = false;
+    try {
+      hasSecret = !!localStorage.getItem(WALLET_SECRET_KEY);
+    } catch(e) {
+      hasSecret = false;
+    }
+    if (hasSecret) {
+      secretStatus.textContent =
+        "A wallet secret is stored in this browser. Deposits will use it.";
+    } else {
+      secretStatus.textContent =
+        "No wallet secret stored yet. Paste your IZZA wallet secret and save it here.";
+    }
+  }
+
   async function getJSON(url){
     const r = await fetch(url);
     return r.json();
@@ -440,9 +492,10 @@
     const acct = res.account || {};
     const buckets = res.buckets || [];
 
-    summaryBox.style.display = "block";
-    createBox.style.display  = "block";
-    bucketsBox.style.display = "block";
+    walletBox.style.display   = "block";
+    summaryBox.style.display  = "block";
+    createBox.style.display   = "block";
+    bucketsBox.style.display  = "block";
 
     const walletPi      = acct.pi_balance || 0;
     const walletIzza    = acct.izza_balance || 0;
@@ -457,6 +510,11 @@
     sumBuckets.textContent    = fmtPi(totalInBuckets);
     sumDeposited.textContent  = fmtPi(totalDeposited);
     sumWithdrawn.textContent  = fmtPi(totalWithdrawn);
+
+    const walletPub = acct.wallet_pub || "";
+    walletPubLabel.textContent = walletPub ? walletPub : "(not linked)";
+
+    updateSecretStatus();
   }
 
   function makeBucketRow(b){
@@ -535,9 +593,19 @@
         secret = null;
       }
 
+      // If no saved secret, but the input field has something, use it and save it
+      if (!secret && walletSecretInput && walletSecretInput.value.trim()) {
+        secret = walletSecretInput.value.trim();
+        try {
+          localStorage.setItem(WALLET_SECRET_KEY, secret);
+        } catch(e) {}
+        walletSecretInput.value = "";
+        updateSecretStatus();
+      }
+
       if (!secret) {
         globalStatus.textContent =
-          "No IZZA wallet secret found. Open your IZZA wallet page in this browser first.";
+          "No IZZA wallet secret found. Paste it in the Wallet connection box and save it first.";
         return;
       }
 
@@ -624,7 +692,7 @@
     bucketsList.innerHTML = "";
 
     if (!buckets.length) {
-      bucketsEmptyMsg.style.display = "true";
+      bucketsEmptyMsg.style.display = "block";
       bucketsCount.textContent = "";
       return;
     }
@@ -699,6 +767,27 @@
     });
   }
 
+  // --- Save wallet secret locally --------------------------------------
+  if (saveSecretBtn) {
+    saveSecretBtn.addEventListener("click", function(){
+      const v = (walletSecretInput.value || "").trim();
+      if (!v) {
+        secretStatus.textContent = "Paste your IZZA wallet secret key first.";
+        return;
+      }
+      try {
+        localStorage.setItem(WALLET_SECRET_KEY, v);
+        walletSecretInput.value = "";
+        secretStatus.textContent =
+          "Secret saved in this browser. Deposits will now use this wallet.";
+      } catch(e) {
+        console.error(e);
+        secretStatus.textContent =
+          "Could not save secret (local storage error). Deposits may not work.";
+      }
+    });
+  }
+
   // --- Auto-load using cached username so no re-auth needed -----------
   (function initFromCache(){
     try {
@@ -713,6 +802,7 @@
       console.warn("Could not read cached username", e);
     }
     updateUserLabel();
+    updateSecretStatus();
   })();
 
 })();
