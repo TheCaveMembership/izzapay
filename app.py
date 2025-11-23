@@ -24,7 +24,7 @@ from staking import bp_stake
 from nft_api import bp_nft
 from izza_airdrop import izza_airdrop_bp
 from izza_bot import izza_bot_bp
-from bot_markets import izza_bot_bp
+import bot_markets  # optional helpers for market scanning
 from bot_trader import *  # optional depending on how you integrate
 
 from creatures_api import bp_creatures
