@@ -1110,6 +1110,117 @@ def bucket_withdraw():
 
 
 # ----------------------------------------------------------------------
+# NEW: Direct withdrawal from IZZA wallet to ANY Pi Testnet pubkey
+# ----------------------------------------------------------------------
+@izza_bot_bp.route("/api/trading/wallet/withdraw", methods=["POST"])
+def wallet_direct_withdraw():
+    """
+    POST JSON:
+      {
+        "username": "CamMac",
+        "amount": 5.0,
+        "dest_pub": "G....",   # any Pi Testnet public key
+        "secret": "S..."       # IZZA wallet secret (in this browser only)
+      }
+
+    Flow:
+      - verify secret matches stored IZZA wallet pub for username
+      - validate dest_pub as a public key
+      - horizon check: wallet has >= amount
+      - send native payment from IZZA wallet -> dest_pub
+      - no DB changes (this is a pure wallet-level withdrawal)
+    """
+    data = request.get_json() or {}
+    username = (data.get("username") or "").strip()
+    amount = data.get("amount")
+    dest_pub = (data.get("dest_pub") or "").strip()
+    secret = (data.get("secret") or "").strip()
+
+    if not username:
+        return jsonify(ok=False, error="username is required")
+    if not secret:
+        return jsonify(ok=False, error="Missing wallet secret.")
+    if not dest_pub:
+        return jsonify(ok=False, error="Destination public key is required.")
+
+    try:
+        amount = float(amount)
+    except Exception:
+        return jsonify(ok=False, error="amount must be numeric")
+    if amount <= 0:
+        return jsonify(ok=False, error="amount must be positive")
+
+    # Validate dest_pub looks like a Stellar/Pi public key
+    try:
+        Keypair.from_public_key(dest_pub)
+    except Exception:
+        return jsonify(ok=False, error="Destination public key is invalid.")
+
+    uname = username.strip().lstrip("@").lower()
+
+    # Derive public key from secret and compare against user_wallets.pub
+    try:
+        kp = Keypair.from_secret(secret)
+    except Exception:
+        return jsonify(ok=False, error="Invalid wallet secret.")
+
+    from_pub = kp.public_key
+
+    with conn() as cx:
+        row = cx.execute(
+            "SELECT pub FROM user_wallets WHERE username = ?",
+            (uname,),
+        ).fetchone()
+
+    if not row or not row["pub"]:
+        return jsonify(ok=False, error="No IZZA wallet linked for this username.")
+
+    stored_pub = row["pub"].strip().upper()
+    if stored_pub != from_pub:
+        return jsonify(
+            ok=False,
+            error="Wallet secret does not match your linked IZZA wallet. Use the same browser you created the wallet with.",
+        )
+
+    # Horizon check: wallet has enough balance
+    try:
+        acct = _srv.accounts().account_id(from_pub).call()
+    except Exception as e:
+        return jsonify(ok=False, error=f"Could not load wallet account on Horizon: {e}")
+
+    bal = 0.0
+    for b in acct.get("balances", []):
+        if b.get("asset_type") == "native":
+            try:
+                bal = float(b.get("balance", "0") or 0)
+            except Exception:
+                bal = 0.0
+            break
+
+    if bal < amount - 1e-8:
+        return jsonify(ok=False, error="Insufficient PI balance in IZZA wallet for this withdrawal.")
+
+    # Execute payment wallet -> dest_pub
+    try:
+        tx_resp = _send_native_payment(
+            from_secret=secret,
+            to_pub=dest_pub,
+            amount=amount,
+            memo_text="IZZA BOT wallet withdraw",
+        )
+        tx_hash = tx_resp.get("hash")
+    except Exception as e:
+        return jsonify(ok=False, error=f"Network error submitting wallet withdrawal: {e}")
+
+    return jsonify(
+        ok=True,
+        tx_hash=tx_hash,
+        dest_pub=dest_pub,
+        amount=amount,
+    )
+
+
+# ----------------------------------------------------------------------
 # Helper: list buckets (optional; for debugging / admin)
 # ----------------------------------------------------------------------
 @izza_bot_bp.route("/api/trading/buckets", methods=["GET"])
