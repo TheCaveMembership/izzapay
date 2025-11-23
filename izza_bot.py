@@ -913,6 +913,7 @@ def request_withdraw():
                 error="Requested amount exceeds your unallocated balance. Reduce bucket allocations first.",
             )
 
+        # FIXED: pass the correct 4 bindings (account_id, amount, dest_pub, created_at)
         cx.execute(
             """
             INSERT INTO bot_withdrawals (
@@ -920,7 +921,7 @@ def request_withdraw():
             )
             VALUES (?, ?, 'requested', ?, ?, NULL, NULL)
             """,
-            (account_id, wallet_pub or acct["wallet_pub"], ts),
+            (account_id, amount, wallet_pub or acct["wallet_pub"], ts),
         )
 
     return jsonify(
