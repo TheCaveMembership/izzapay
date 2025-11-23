@@ -157,16 +157,13 @@ class Position:
 # ---------------------------------------------------------------------
 
 def ensure_bot_tables():
-    """
-    Create tables if missing and auto-migrate bot_trades so it has
-    the columns this engine expects (code, issuer, etc.).
-    """
     with conn() as cx:
-        # Trades log (new schema)
+        # Trades log
         cx.execute("""
         CREATE TABLE IF NOT EXISTS bot_trades(
           id INTEGER PRIMARY KEY,
           bucket_id INTEGER NOT NULL,
+          account_id INTEGER NOT NULL,
           code TEXT NOT NULL,
           issuer TEXT NOT NULL,
           side TEXT NOT NULL, -- 'buy' or 'sell'
@@ -187,29 +184,6 @@ def ensure_bot_tables():
         CREATE INDEX IF NOT EXISTS idx_bot_trades_bucket_ts
           ON bot_trades(bucket_id, created_at);
         """)
-
-        # --- lightweight migration for older versions of bot_trades ---
-        cols = [r["name"] for r in cx.execute("PRAGMA table_info(bot_trades)").fetchall()]
-        # All columns we rely on in INSERT INTO bot_trades(...)
-        needed_cols = {
-            "code": "TEXT",
-            "issuer": "TEXT",
-            "side": "TEXT",
-            "price_pi": "REAL",
-            "amount_token": "REAL",
-            "amount_pi": "REAL",
-            "mid_price": "REAL",
-            "spread_pct": "REAL",
-            "depth_imbalance": "REAL",
-            "strategy_tag": "TEXT",
-            "risk_level": "TEXT",
-            "created_at": "INTEGER",
-            "tx_hash": "TEXT",
-            "raw_json": "TEXT",
-        }
-        for name, coltype in needed_cols.items():
-            if name not in cols:
-                cx.execute(f"ALTER TABLE bot_trades ADD COLUMN {name} {coltype};")
 
         # Bucket positions per token
         cx.execute("""
@@ -398,16 +372,17 @@ def log_trade(
         cx.execute(
             """
             INSERT INTO bot_trades(
-              bucket_id, code, issuer, side,
+              bucket_id, account_id, code, issuer, side,
               price_pi, amount_token, amount_pi,
               mid_price, spread_pct, depth_imbalance,
               strategy_tag, risk_level,
               created_at, tx_hash, raw_json
             )
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 bucket.id,
+                bucket.account_id,
                 market.code,
                 market.issuer,
                 side,
@@ -886,6 +861,7 @@ def run_once():
             break
 
         # Refresh bucket cash after sells
+        # (approximate: we rely on DB update in update_cash_for_bucket)
         with conn() as cx:
             row = cx.execute(
                 """
