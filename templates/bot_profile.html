@@ -36,6 +36,18 @@
       letter-spacing: .12em;
       text-transform: uppercase;
     }
+
+    .bot-logo {
+      margin: 0 0 4px;
+      font-size: 0;
+    }
+
+    .bot-logo svg {
+      width: 100%;
+      max-width: 360px;
+      display: block;
+    }
+
     .sub {
       margin: 0 0 14px;
       font-size: 13px;
@@ -157,6 +169,7 @@
 
     .bucket-header-right {
       align-self:flex-end;
+      text-align:right;
     }
 
     .bucket-name {
@@ -202,6 +215,68 @@
       opacity:0.75;
       margin-top:2px;
     }
+
+    .bucket-perf {
+      font-size:11px;
+      margin-top:2px;
+    }
+
+    .bucket-perf span {
+      font-weight:bold;
+    }
+
+    .trades-box-list {
+      max-height: 260px;
+      overflow-y: auto;
+      margin-top: 6px;
+    }
+
+    .trade-row {
+      display:flex;
+      justify-content:space-between;
+      align-items:flex-start;
+      font-size:11px;
+      padding:4px 0;
+      border-bottom:1px solid rgba(255,255,255,0.06);
+      gap:8px;
+    }
+
+    .trade-left {
+      flex:1.2;
+    }
+
+    .trade-right {
+      flex:1;
+      text-align:right;
+    }
+
+    .trade-side {
+      font-size:10px;
+      font-weight:bold;
+      padding:1px 6px;
+      border-radius:999px;
+      border:1px solid rgba(255,255,255,0.25);
+      display:inline-block;
+      margin-right:4px;
+    }
+
+    .trade-side-buy {
+      color:#42ff9a;
+      border-color:rgba(66,255,154,0.7);
+    }
+
+    .trade-side-sell {
+      color:#ff4d7f;
+      border-color:rgba(255,77,127,0.7);
+    }
+
+    .trade-bucket {
+      opacity:0.8;
+    }
+
+    .trade-meta {
+      opacity:0.7;
+    }
   </style>
 </head>
 <body>
@@ -212,7 +287,25 @@
       <span style="font-size:10px;opacity:.7;">Profile · Pi Testnet</span>
     </div>
 
-    <h1>Your Bot Buckets</h1>
+    <h1 class="bot-logo">
+      <svg viewBox="0 0 320 40" aria-hidden="true">
+        <defs>
+          <linearGradient id="izzaBotGrad" x1="0%" y1="0%" x2="100%" y2="0%">
+            <stop offset="0%" stop-color="#18ff9c"/>
+            <stop offset="45%" stop-color="#9efc5a"/>
+            <stop offset="100%" stop-color="#ffd54a"/>
+          </linearGradient>
+        </defs>
+        <text x="0" y="28"
+              fill="url(#izzaBotGrad)"
+              font-family="system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif"
+              font-size="20"
+              letter-spacing="4">
+          YOUR BOT BUCKETS
+        </text>
+      </svg>
+    </h1>
+
     <p class="sub">
       This is your <strong>IZZA BOT profile</strong>. Your IZZA TESTNET wallet holds your
       test Pi. When you <strong>deposit into a bucket</strong>, test Pi moves from your
@@ -313,6 +406,24 @@
         Bucket balances are funds that have been moved into the bot wallet to trade on
         your behalf according to your strategies.
       </p>
+
+      <!-- Option C: view bot trades -->
+      <button id="viewTradesBtn" class="btn btn-outline" style="width:100%;margin-top:8px;">
+        View recent bot trades (Option C)
+      </button>
+    </div>
+
+    <!-- Recent trades (Option C) -->
+    <div id="tradesBox" class="box" style="display:none;">
+      <div class="section-title-row">
+        <h3>Recent bot trades</h3>
+        <span id="tradesCount" class="muted"></span>
+      </div>
+      <p class="muted">
+        These are the most recent trades your buckets have executed on Pi Testnet.
+      </p>
+      <div id="tradesList" class="trades-box-list"></div>
+      <p id="tradesStatus" class="status-text"></p>
     </div>
 
     <!-- Existing buckets -->
@@ -419,6 +530,12 @@
   const sumDeposited  = document.getElementById("sumDeposited");
   const sumWithdrawn  = document.getElementById("sumWithdrawn");
 
+  const viewTradesBtn = document.getElementById("viewTradesBtn");
+  const tradesBox     = document.getElementById("tradesBox");
+  const tradesList    = document.getElementById("tradesList");
+  const tradesStatus  = document.getElementById("tradesStatus");
+  const tradesCount   = document.getElementById("tradesCount");
+
   const bucketsBox     = document.getElementById("bucketsBox");
   const bucketsList    = document.getElementById("bucketsList");
   const bucketsCount   = document.getElementById("bucketsCount");
@@ -443,6 +560,12 @@
   function fmtIzza(x){
     const n = Number(x || 0);
     return n.toFixed(6) + " IZZA";
+  }
+
+  function fmtPct(x){
+    const n = Number(x || 0);
+    const s = n.toFixed(2);
+    return (n > 0 ? "+" : "") + s + "%";
   }
 
   function riskMaxLossPercent(riskLevel){
@@ -570,6 +693,28 @@
     balanceLine.className = "bucket-balance-line muted";
     balanceLine.textContent = "Bucket balance: " + fmtPi(b.balance || 0);
     right.appendChild(balanceLine);
+
+    // Performance % indicator (only after first SELL trade server-side)
+    const perfDiv = document.createElement("div");
+    perfDiv.className = "bucket-perf";
+    if (typeof b.perf_pct === "number") {
+      const pct = b.perf_pct;
+      const pctSpan = document.createElement("span");
+      pctSpan.textContent = fmtPct(pct);
+      if (pct > 0) {
+        pctSpan.style.color = "#42ff9a";
+      } else if (pct < 0) {
+        pctSpan.style.color = "#ff4d7f";
+      } else {
+        pctSpan.style.color = "#ffffff";
+      }
+      perfDiv.textContent = "Realized performance: ";
+      perfDiv.appendChild(pctSpan);
+    } else {
+      perfDiv.textContent = "Realized performance: awaiting first trade sell.";
+      perfDiv.style.opacity = "0.7";
+    }
+    right.appendChild(perfDiv);
 
     const riskNote = document.createElement("div");
     riskNote.className = "bucket-risk-note";
@@ -725,6 +870,58 @@
     });
   }
 
+  function renderTrades(data){
+    tradesList.innerHTML = "";
+    const trades = data.trades || [];
+    if (!trades.length) {
+      tradesCount.textContent = "";
+      tradesStatus.textContent = "No trades have been executed for your buckets yet.";
+      return;
+    }
+    tradesStatus.textContent = "";
+    tradesCount.textContent = trades.length + " shown";
+
+    trades.forEach(t => {
+      const row = document.createElement("div");
+      row.className = "trade-row";
+
+      const left = document.createElement("div");
+      left.className = "trade-left";
+
+      const side = document.createElement("span");
+      side.className = "trade-side " + (t.side === "sell" ? "trade-side-sell" : "trade-side-buy");
+      side.textContent = (t.side || "").toUpperCase();
+
+      const bucketSpan = document.createElement("span");
+      bucketSpan.className = "trade-bucket";
+      bucketSpan.textContent = (t.bucket_name || ("Bucket " + t.bucket_id)) + " · " + (t.code || "");
+
+      const meta = document.createElement("div");
+      meta.className = "trade-meta";
+      meta.textContent = t.created_at_human || "";
+
+      left.appendChild(side);
+      left.appendChild(bucketSpan);
+      left.appendChild(document.createElement("br"));
+      left.appendChild(meta);
+
+      const right = document.createElement("div");
+      right.className = "trade-right";
+      const piLine = document.createElement("div");
+      piLine.textContent = fmtPi(t.amount_pi || 0);
+      const priceLine = document.createElement("div");
+      priceLine.className = "trade-meta";
+      priceLine.textContent = "Price: " + (Number(t.price_pi || 0)).toFixed(6) + " PI";
+
+      right.appendChild(piLine);
+      right.appendChild(priceLine);
+
+      row.appendChild(left);
+      row.appendChild(right);
+      tradesList.appendChild(row);
+    });
+  }
+
   // --- Create bucket ---------------------------------------------------
   if (createBucketBtn) {
     createBucketBtn.addEventListener("click", async function(){
@@ -843,6 +1040,35 @@
       } catch(e){
         console.error(e);
         walletWithdrawStatus.textContent = "Network error during wallet withdrawal.";
+      }
+    });
+  }
+
+  // --- Option C: load trades when button clicked -----------------------
+  if (viewTradesBtn) {
+    viewTradesBtn.addEventListener("click", async function(){
+      tradesStatus.textContent = "";
+      if (!currentUser || !currentUser.username) {
+        tradesStatus.textContent = "No username found. Open IZZA BOT from your main entry point.";
+        tradesBox.style.display = "block";
+        return;
+      }
+      tradesStatus.textContent = "Loading recent trades…";
+      tradesBox.style.display = "block";
+      try {
+        const res = await getJSON(
+          "/api/trading/trades?username=" +
+          encodeURIComponent(currentUser.username) +
+          "&limit=50"
+        );
+        if (!res.ok) {
+          tradesStatus.textContent = res.error || "Error loading trades.";
+          return;
+        }
+        renderTrades(res);
+      } catch(e){
+        console.error(e);
+        tradesStatus.textContent = "Network error loading trades.";
       }
     });
   }
