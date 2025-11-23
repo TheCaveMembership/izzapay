@@ -539,7 +539,7 @@ def complete_bot_deposit():
 
 
 # ----------------------------------------------------------------------
-# Summary: wallet + buckets
+# Summary: wallet + buckets + realized performance
 # ----------------------------------------------------------------------
 @izza_bot_bp.route("/api/trading/summary", methods=["GET"])
 def trading_summary():
@@ -560,7 +560,9 @@ def trading_summary():
         buckets: [
           { id, name, risk_level, objective, volatility,
             time_horizon_days, target_value_back,
-            balance }         # REAL Pi sitting in this bucket on the bot
+            balance,          # REAL Pi sitting in this bucket on the bot
+            perf_pct          # optional realized PnL % after first SELL trade
+          }
         ]
       }
     """
@@ -627,9 +629,40 @@ def trading_summary():
             (account_id,),
         ).fetchall()
 
+        bucket_ids = [r["id"] for r in rows]
+        perf_map = {}
+
+        if bucket_ids:
+            placeholders = ",".join("?" for _ in bucket_ids)
+            perf_rows = cx.execute(
+                f"""
+                SELECT
+                  bucket_id,
+                  SUM(CASE WHEN side='buy'  THEN amount_pi ELSE 0 END) AS buy_pi,
+                  SUM(CASE WHEN side='sell' THEN amount_pi ELSE 0 END) AS sell_pi,
+                  MIN(CASE WHEN side='sell' THEN created_at ELSE NULL END) AS first_sell_ts
+                FROM bot_trades
+                WHERE bucket_id IN ({placeholders})
+                GROUP BY bucket_id
+                """,
+                bucket_ids,
+            ).fetchall()
+            for pr in perf_rows:
+                perf_map[pr["bucket_id"]] = pr
+
     buckets = []
     for r in rows:
-        buckets.append({
+        perf_pct = None
+        perf_row = perf_map.get(r["id"])
+        # Only compute performance after at least one SELL trade
+        if perf_row and perf_row["first_sell_ts"] is not None:
+            buy_pi = float(perf_row["buy_pi"] or 0.0)
+            sell_pi = float(perf_row["sell_pi"] or 0.0)
+            if buy_pi > 0:
+                realized_pnl = sell_pi - buy_pi
+                perf_pct = 100.0 * realized_pnl / buy_pi
+
+        b = {
             "id": r["id"],
             "name": r["name"],
             "objective": r["objective"],
@@ -638,7 +671,10 @@ def trading_summary():
             "time_horizon_days": r["time_horizon_days"],
             "target_value_back": r["target_value_back"],
             "balance": float(r["balance"] or 0),
-        })
+        }
+        if perf_pct is not None:
+            b["perf_pct"] = perf_pct
+        buckets.append(b)
 
     return jsonify(
         ok=True,
@@ -886,7 +922,8 @@ def bucket_deposit():
                   account_id, bucket_id, amount, created_at, updated_at
                 )
                 VALUES (?, ?, ?, ?, ?)
-                """,
+                """
+                ,
                 (account_id, bucket_id, amount, ts, ts),
             )
 
@@ -898,7 +935,8 @@ def bucket_deposit():
               status, created_at, raw_json
             )
             VALUES (?, ?, ?, ?, ?, 'confirmed', ?, ?)
-            """,
+            """
+            ,
             (
                 account_id,
                 tx_hash,
@@ -1301,3 +1339,93 @@ def list_buckets():
 
     buckets = [dict(r) for r in rows]
     return jsonify(ok=True, buckets=buckets)
+
+
+# ----------------------------------------------------------------------
+# NEW: Option C – list recent trades for this user
+# ----------------------------------------------------------------------
+@izza_bot_bp.route("/api/trading/trades", methods=["GET"])
+def list_trades():
+    """
+    GET /api/trading/trades?username=...&limit=50
+
+    Returns the most recent trades across all buckets for this user.
+    Only reads from bot_trades + joins with bot_buckets + bot_accounts.
+    """
+    username = (request.args.get("username") or "").strip()
+    limit = request.args.get("limit", "50").strip() or "50"
+
+    if not username:
+        return jsonify(ok=False, error="username is required")
+
+    try:
+        limit_i = int(limit)
+    except Exception:
+        limit_i = 50
+    if limit_i <= 0:
+        limit_i = 50
+    if limit_i > 200:
+        limit_i = 200
+
+    uname = username.strip().lstrip("@").lower()
+
+    with conn() as cx:
+        acct = cx.execute(
+            "SELECT id FROM bot_accounts WHERE username = ?",
+            (uname,),
+        ).fetchone()
+        if not acct:
+            return jsonify(ok=True, trades=[])
+
+        rows = cx.execute(
+            """
+            SELECT
+              t.id,
+              t.bucket_id,
+              b.name AS bucket_name,
+              t.code,
+              t.issuer,
+              t.side,
+              t.price_pi,
+              t.amount_token,
+              t.amount_pi,
+              t.strategy_tag,
+              t.risk_level,
+              t.created_at,
+              t.tx_hash
+            FROM bot_trades t
+            JOIN bot_buckets b
+              ON b.id = t.bucket_id
+            JOIN bot_accounts a
+              ON a.id = b.account_id
+           WHERE a.id = ?
+           ORDER BY t.id DESC
+           LIMIT ?
+            """,
+            (acct["id"], limit_i),
+        ).fetchall()
+
+    trades = []
+    for r in rows:
+        ts = int(r["created_at"] or 0)
+        created_at_human = time.strftime("%Y-%m-%d %H:%M:%S", time.gmtime(ts)) if ts else ""
+        trades.append(
+            {
+                "id": r["id"],
+                "bucket_id": r["bucket_id"],
+                "bucket_name": r["bucket_name"],
+                "code": r["code"],
+                "issuer": r["issuer"],
+                "side": r["side"],
+                "price_pi": float(r["price_pi"] or 0.0),
+                "amount_token": float(r["amount_token"] or 0.0),
+                "amount_pi": float(r["amount_pi"] or 0.0),
+                "strategy_tag": r["strategy_tag"],
+                "risk_level": r["risk_level"],
+                "created_at": ts,
+                "created_at_human": created_at_human,
+                "tx_hash": r["tx_hash"],
+            }
+        )
+
+    return jsonify(ok=True, trades=trades)
