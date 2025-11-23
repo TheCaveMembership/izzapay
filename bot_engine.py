@@ -820,12 +820,17 @@ def run_once():
     print("[ENGINE] Scanning markets on Pi Testnet...")
     raw_markets = scan_markets_vs_pi(
         max_assets=200,
-        min_num_accounts=2,
-        max_spread_pct=None,  # we filter again per risk
+        min_num_accounts=1,        # relaxed so we see more markets
+        max_spread_pct=None,       # we filter again per risk
     )
+    print(f"[ENGINE] scan_markets_vs_pi returned {len(raw_markets)} raw markets")
+
     markets = normalize_markets(raw_markets)
+    print(f"[ENGINE] normalize_markets produced {len(markets)} usable markets")
+
     if not markets:
-        print("[ENGINE] No markets found, exiting this run.")
+        print("[ENGINE] No markets found after normalization, "
+              "check HORIZON_URL / network or loosen filters.")
         return
 
     buckets = load_active_buckets()
