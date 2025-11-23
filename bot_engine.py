@@ -39,7 +39,7 @@ from decimal import Decimal
 
 from db import conn
 from bot_markets import scan_markets_vs_pi
-from bot_trader import market_buy, market_sell
+from bot_trader import market_buy, market_sell, get_bot_token_balance  # <-- updated
 
 # ---------------------------------------------------------------------
 # Basic config
@@ -592,6 +592,12 @@ def execute_sells_for_bucket(
     """
     Execute the planned sells.
     Returns count of successful sells.
+
+    Additional safety:
+      - Only sell up to the BOT wallet's actual on-chain balance
+        for that asset.
+      - Skip sells entirely if the wallet balance is zero or the
+        PI value of the sell is below MIN_TRADE_PI.
     """
     executed = 0
     for pos, market, amount_to_sell in plans:
@@ -601,6 +607,28 @@ def execute_sells_for_bucket(
         # Sell at best bid
         best_bid = market.best_bid
         if best_bid <= 0:
+            continue
+
+        # Check real on-chain wallet balance for this asset
+        wallet_qty = get_bot_token_balance(market.code, market.issuer)
+        if wallet_qty <= 0:
+            # Wallet does not actually own this token, skip this sell
+            print(
+                f"[SELL] skip bucket={bucket.id} user=@{bucket.username} "
+                f"{market.code} – wallet balance is 0"
+            )
+            continue
+
+        # Clamp amount_to_sell to wallet_qty
+        if amount_to_sell > wallet_qty:
+            print(
+                f"[SELL] clamp bucket={bucket.id} user=@{bucket.username} "
+                f"{market.code} planned={amount_to_sell:.6f}, wallet={wallet_qty:.6f}"
+            )
+            amount_to_sell = wallet_qty
+
+        # If after clamping the trade is too small in PI terms, skip
+        if amount_to_sell * best_bid < MIN_TRADE_PI:
             continue
 
         try:
