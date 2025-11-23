@@ -152,8 +152,9 @@
 
     <h1>Automated Token Trading</h1>
     <p class="sub">
-      Connect with Pi, fund your <strong>IZZA BOT testnet account</strong> with test Pi,
-      then let the bot trade Pi Testnet tokens based on your time horizon and risk tolerance.
+      Authenticate with Pi, link your <strong>IZZA TESTNET wallet</strong>, deposit test Pi
+      to that wallet, then let IZZA BOT trade Pi Testnet tokens based on your time horizon
+      and risk tolerance.
     </p>
 
     <!-- Pi auth -->
@@ -162,36 +163,31 @@
     </button>
     <p id="userLabel" class="status-text"></p>
 
-    <!-- Deposit via Pi payments -->
+    <!-- IZZA wallet link / info -->
     <div id="depositBox" class="box" style="display:none;">
-      <h3>1. Deposit test Pi for trading</h3>
+      <h3>1. Create or link your IZZA wallet</h3>
       <p>
-        When you deposit, a <strong>Pi payment</strong> is created from your Pi Testnet wallet
-        directly to the shared IZZA BOT trading account. We read the payment details from Pi
-        (PaymentDTO) to credit your IZZA BOT balance and link your wallet.
+        IZZA BOT uses the <strong>Pi Testnet (native) balance</strong> in your
+        <strong>IZZA wallet</strong> as trading capital.
+        Create your IZZA wallet, then send TEST PI to it from your Pi Testnet wallet.
       </p>
 
-      <label for="depositAmountInput">Amount of test Pi to deposit</label>
-      <input id="depositAmountInput"
-             type="number"
-             min="0.01"
-             step="0.01"
-             placeholder="10.0">
+      <p class="muted">
+        Your linked IZZA TESTNET wallet:
+      </p>
+      <div class="addr-row" id="walletInfoRow" style="display:none;">
+        <code id="walletPubCode"></code>
+      </div>
+      <p id="walletStatus" class="status-text"></p>
 
-      <button id="startDepositBtn" class="btn btn-ombre" style="width:100%;margin-top:4px;">
-        Deposit with Pi
+      <button id="openWalletBtn" class="btn btn-ombre" style="width:100%;margin-top:4px;">
+        Open IZZA Wallet Page
       </button>
 
       <p class="muted" style="margin-top:6px;">
-        Funds are sent to the shared testnet bot wallet:
+        On the IZZA wallet page you can create / view your IZZA TESTNET wallet and deposit TEST PI.
+        IZZA BOT automatically reads that balance and shows it on your BOT profile.
       </p>
-      <div class="addr-row">
-        <code id="botDepositAddr">
-          {{ TRADER_DEPOSIT_PUB or 'GAIXMJ22FKXXGDPQMZWR3GL24PM5UEPUCFNK4FSMJOZ3HTGPXSEQZ5AF' }}
-        </code>
-      </div>
-
-      <p id="depositStatus" class="status-text"></p>
     </div>
 
     <!-- Bot config -->
@@ -240,27 +236,27 @@
 
 <script>
 (function(){
-  // FORCE sandbox true on this page: bot deposits are always test Pi
+  // FORCE sandbox true on this page: we are only using Pi for auth here
   const PI_SANDBOX = true;
-  const BOT_DEPOSIT_ADDR = document.getElementById("botDepositAddr").textContent.trim();
 
   let currentUser = null;
 
-  const piLoginBtn        = document.getElementById("piLoginBtn");
-  const userLabel         = document.getElementById("userLabel");
+  const piLoginBtn   = document.getElementById("piLoginBtn");
+  const userLabel    = document.getElementById("userLabel");
 
-  const depositBox        = document.getElementById("depositBox");
-  const depositAmountInput= document.getElementById("depositAmountInput");
-  const startDepositBtn   = document.getElementById("startDepositBtn");
-  const depositStatus     = document.getElementById("depositStatus");
+  const depositBox   = document.getElementById("depositBox");
+  const walletInfoRow= document.getElementById("walletInfoRow");
+  const walletPubCode= document.getElementById("walletPubCode");
+  const walletStatus = document.getElementById("walletStatus");
+  const openWalletBtn= document.getElementById("openWalletBtn");
 
-  const configBox         = document.getElementById("configBox");
-  const horizonSelect     = document.getElementById("horizonSelect");
-  const riskSelect        = document.getElementById("riskSelect");
-  const saveConfigBtn     = document.getElementById("saveConfigBtn");
-  const configStatus      = document.getElementById("configStatus");
+  const configBox    = document.getElementById("configBox");
+  const horizonSelect= document.getElementById("horizonSelect");
+  const riskSelect   = document.getElementById("riskSelect");
+  const saveConfigBtn= document.getElementById("saveConfigBtn");
+  const configStatus = document.getElementById("configStatus");
 
-  const globalStatus      = document.getElementById("globalStatus");
+  const globalStatus = document.getElementById("globalStatus");
 
   function initPi(){
     if(!window.Pi) return;
@@ -288,6 +284,31 @@
     return r.json();
   }
 
+  async function loadWalletInfo(){
+    if (!currentUser || !currentUser.username) return;
+    try {
+      walletStatus.textContent = "Checking your IZZA wallet…";
+
+      const u = encodeURIComponent(currentUser.username);
+      const r = await fetch("/api/wallet/active?u=" + u);
+      const data = await r.json();
+
+      if (data && data.pub) {
+        walletInfoRow.style.display = "flex";
+        walletPubCode.textContent = data.pub;
+        walletStatus.textContent =
+          "IZZA wallet linked. Deposit TEST PI to this wallet from your Pi testnet wallet.";
+      } else {
+        walletInfoRow.style.display = "none";
+        walletStatus.textContent =
+          "No IZZA wallet linked yet. Use the button below to open the IZZA wallet page and create one.";
+      }
+    } catch(e) {
+      console.error(e);
+      walletStatus.textContent = "Could not load IZZA wallet info yet.";
+    }
+  }
+
   // --- Pi auth ---------------------------------------------------------
   piLoginBtn.onclick = async function(){
     if(!window.Pi) {
@@ -296,7 +317,8 @@
     }
 
     try {
-      const scopes = ["username", "payments"];
+      // We only need username here
+      const scopes = ["username"];
       const onIncomplete = payment => { console.log("incomplete payment", payment); };
 
       const { user, accessToken } = await Pi.authenticate(scopes, onIncomplete);
@@ -304,9 +326,12 @@
       updateUserLabel();
       globalStatus.textContent = "";
 
-      // Once authenticated, allow deposits and config
+      // Once authenticated, show wallet + config boxes
       depositBox.style.display = "block";
       configBox.style.display  = "block";
+
+      // Load IZZA wallet info for this user
+      await loadWalletInfo();
     } catch(err){
       console.error(err);
       alert("Pi auth failed.");
@@ -314,68 +339,12 @@
     }
   };
 
-  // --- Deposit flow via Pi payments -----------------------------------
-  if (startDepositBtn) {
-    startDepositBtn.addEventListener("click", async function(){
-      if(!currentUser || !currentUser.username){
-        depositStatus.textContent = "Authenticate with Pi first.";
-        return;
-      }
-      if(!window.Pi){
-        depositStatus.textContent = "Pi SDK not available. Open in Pi Browser.";
-        return;
-      }
-
-      const amt = parseFloat(depositAmountInput.value || "0");
-      if (!amt || amt <= 0) {
-        depositStatus.textContent = "Enter a positive amount of test Pi to deposit.";
-        return;
-      }
-
-      depositStatus.textContent = "Opening Pi payment…";
-
-      try {
-        await Pi.createPayment(
-          {
-            amount: amt,
-            memo: "IZZA BOT testnet deposit",
-            metadata: { kind: "bot_deposit" },
-            to: BOT_DEPOSIT_ADDR
-          },
-          {
-            onReadyForServerApproval: async function(paymentId){
-              const res = await postJSON("/api/trading/deposit/approve", { paymentId });
-              if (!res.ok) {
-                throw new Error(res.error || "Server approval failed.");
-              }
-              depositStatus.textContent = "Waiting for Pi wallet confirmation…";
-            },
-            onReadyForServerCompletion: async function(paymentId, txid){
-              const res = await postJSON("/api/trading/deposit/complete", {
-                paymentId: paymentId,
-                txid: txid
-              });
-              if (!res.ok) {
-                throw new Error(res.error || "Server completion failed.");
-              }
-              depositStatus.textContent =
-                "Deposit confirmed. Credited " + res.amount + " test Pi to your IZZA BOT account.";
-            },
-            onCancel: function(){
-              depositStatus.textContent = "Deposit cancelled in Pi wallet.";
-            },
-            onError: function(error){
-              console.error(error);
-              depositStatus.textContent =
-                "Payment error: " + (error && error.message ? error.message : "unknown");
-            }
-          }
-        );
-      } catch(e){
-        console.error(e);
-        globalStatus.textContent =
-          "Deposit failed: " + (e && e.message ? e.message : String(e));
-      }
+  // --- Open IZZA wallet page -------------------------------------------
+  if (openWalletBtn) {
+    openWalletBtn.addEventListener("click", function(){
+      // Entry point to your IZZA token / wallet flow
+      // Adjust this path if your route is different.
+      window.location.href = "/token-auth";
     });
   }
 
