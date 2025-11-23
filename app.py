@@ -24,6 +24,9 @@ from staking import bp_stake
 from nft_api import bp_nft
 from izza_airdrop import izza_airdrop_bp
 from izza_bot import izza_bot_bp
+from bot_markets import bot_markets_bp
+from bot_trader import *  # optional depending on how you integrate
+
 from creatures_api import bp_creatures
 from friends_api import bp as friends_bp
 # 🟢 Wallet API blueprint import (needs to be at top-level)
@@ -157,6 +160,7 @@ app.register_blueprint(bp_stake)
 app.register_blueprint(bp_nft)
 app.register_blueprint(izza_airdrop_bp)
 app.register_blueprint(izza_bot_bp)
+app.register_blueprint(bot_markets_bp)
 app.register_blueprint(bp_creatures) 
 app.register_blueprint(friends_bp)
 
