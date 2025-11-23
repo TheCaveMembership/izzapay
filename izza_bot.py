@@ -55,6 +55,12 @@ BOT_PI_SANDBOX = "true"
 PI_PLATFORM_API_BASE = "https://api.minepi.com/v2"
 PI_API_KEY = apikey
 
+# ---------------------------------------------------------
+# Short-term trading fee: 24h window + 1 test Pi fee
+# ---------------------------------------------------------
+SHORT_TERM_WINDOW_SECS = 24 * 3600
+SHORT_TERM_WITHDRAW_FEE = 1.0  # test Pi
+
 
 def _now() -> int:
     return int(time.time())
@@ -941,11 +947,13 @@ def bucket_withdraw():
       - ensure BOT_WALLET_SEC configured
       - look up user's IZZA wallet pub
       - ensure bucket belongs to user and has >= amount
-      - (optional) check BOT wallet balance >= amount
+      - (optional) check BOT wallet balance >= payout_amount
       - send native payment from BOT_WALLET_SEC -> user wallet
-      - decrement bot_bucket_allocations.amount
-      - increment bot_accounts.total_withdrawn
+      - decrement bot_bucket_allocations.amount by requested amount
+      - increment bot_accounts.total_withdrawn by requested amount
       - insert bot_withdrawals row (status='sent')
+      - if withdrawal occurs within 24h of last bucket change,
+        apply 1.0 test Pi fee (user receives amount - 1.0)
     """
     data = request.get_json() or {}
     username = (data.get("username") or "").strip()
@@ -1001,10 +1009,10 @@ def bucket_withdraw():
         if not b_row or b_row["account_id"] != account_id:
             return jsonify(ok=False, error="Bucket not found for this user.")
 
-        # current bucket balance
+        # current bucket balance (+ last updated_at for short-term fee)
         alloc_row = cx.execute(
             """
-            SELECT id, amount FROM bot_bucket_allocations
+            SELECT id, amount, updated_at FROM bot_bucket_allocations
              WHERE account_id = ? AND bucket_id = ?
             """,
             (account_id, bucket_id),
@@ -1016,7 +1024,28 @@ def bucket_withdraw():
         if amount > current_balance + 1e-9:
             return jsonify(ok=False, error="Requested amount exceeds bucket balance.")
 
-    # (Optional) check BOT wallet has enough balance
+        last_change_ts = int(alloc_row["updated_at"] or 0)
+
+    # Decide if short-term fee applies (within 24h of last bucket change)
+    fee = 0.0
+    short_term_fee_applied = False
+    if last_change_ts and (ts - last_change_ts) < SHORT_TERM_WINDOW_SECS:
+        # Only apply fee if amount is large enough
+        if amount <= SHORT_TERM_WITHDRAW_FEE + 1e-8:
+            return jsonify(
+                ok=False,
+                error=(
+                    f"Short-term withdrawal fee of {SHORT_TERM_WITHDRAW_FEE:.4f} test Pi "
+                    "applies within 24 hours of your last bucket change. "
+                    "Please withdraw a larger amount or wait until 24 hours have passed."
+                ),
+            )
+        fee = SHORT_TERM_WITHDRAW_FEE
+        short_term_fee_applied = True
+
+    payout_amount = amount - fee
+
+    # (Optional) check BOT wallet has enough balance to send payout_amount
     try:
         bot_acct = _srv.accounts().account_id(BOT_WALLET_PUB).call()
         bot_bal = 0.0
@@ -1027,17 +1056,17 @@ def bucket_withdraw():
                 except Exception:
                     bot_bal = 0.0
                 break
-        if bot_bal < amount - 1e-8:
+        if bot_bal < payout_amount - 1e-8:
             return jsonify(ok=False, error="Bot wallet does not have enough test Pi for this withdrawal.")
     except Exception as e:
         return jsonify(ok=False, error=f"Could not load bot wallet from Horizon: {e}")
 
-    # Execute payment: BOT -> user
+    # Execute payment: BOT -> user (only payout_amount; fee stays in bot wallet)
     try:
         tx_resp = _send_native_payment(
             from_secret=BOT_WALLET_SEC,
             to_pub=wallet_pub,
-            amount=amount,
+            amount=payout_amount,
             memo_text=f"IZZA BOT withdraw bucket {bucket_id}",
         )
         tx_hash = tx_resp.get("hash")
@@ -1063,6 +1092,7 @@ def bucket_withdraw():
         if amount > current_balance + 1e-9:
             return jsonify(ok=False, error="Requested amount exceeds bucket balance (race condition).")
 
+        # Bucket balance is reduced by the full requested amount (fee is a cost of using the bucket)
         new_balance = max(0.0, current_balance - amount)
         cx.execute(
             """
@@ -1073,6 +1103,7 @@ def bucket_withdraw():
             (new_balance, ts, alloc_row["id"]),
         )
 
+        # total_withdrawn tracks requested amount (how much the user pulled from the bot system)
         new_total_withdrawn = total_withdrawn + amount
         cx.execute(
             """
@@ -1083,6 +1114,15 @@ def bucket_withdraw():
             (new_total_withdrawn, ts, account_id),
         )
 
+        # Store payout and fee info inside raw_json for audit
+        audit_payload = {
+            "requested_amount": amount,
+            "payout_amount": payout_amount,
+            "short_term_fee_applied": short_term_fee_applied,
+            "fee_amount": fee,
+            "tx": tx_resp,
+        }
+
         cx.execute(
             """
             INSERT INTO bot_withdrawals(
@@ -1092,11 +1132,11 @@ def bucket_withdraw():
             """,
             (
                 account_id,
-                amount,
+                payout_amount,  # amount that actually left the bot wallet
                 wallet_pub,
                 ts,
                 tx_hash,
-                json.dumps(tx_resp),
+                json.dumps(audit_payload),
             ),
         )
 
@@ -1106,6 +1146,9 @@ def bucket_withdraw():
         bucket_id=bucket_id,
         new_balance=new_balance,
         new_total_withdrawn=new_total_withdrawn,
+        short_term_fee_applied=short_term_fee_applied,
+        fee_amount=fee,
+        payout_amount=payout_amount,
     )
 
 
