@@ -90,7 +90,7 @@ def place_buy_offer(
     op = ManageBuyOffer(
         buying=buying_asset,
         selling=selling_asset,
-        buy_amount=str(Decimal(str(buy_amount))),
+        amount=str(Decimal(str(buy_amount))),  # <-- fixed keyword here
         price=str(Decimal(str(price))),
         offer_id=0,
     )
