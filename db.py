@@ -394,6 +394,7 @@ def init_db():
           amount REAL,            -- base amount
           price REAL,             -- price in counter
           value_pi REAL,          -- approximate value in PI
+          amount_pi REAL,         -- PI amount used in trading_summary
           pnl_pi REAL,            -- realized PnL in PI (optional)
           status TEXT,            -- filled / partial / cancelled
           ts INTEGER,             -- trade timestamp
@@ -737,6 +738,7 @@ def ensure_schema():
           amount REAL,
           price REAL,
           value_pi REAL,
+          amount_pi REAL,
           pnl_pi REAL,
           status TEXT,
           ts INTEGER,
@@ -747,3 +749,9 @@ def ensure_schema():
         CREATE INDEX IF NOT EXISTS idx_bot_trades_bucket_ts
           ON bot_trades(bucket_id, ts);
         """)
+
+        # Ensure new columns exist on existing bot_trades table
+        try:
+            cx.execute("ALTER TABLE bot_trades ADD COLUMN amount_pi REAL")
+        except Exception:
+            pass
