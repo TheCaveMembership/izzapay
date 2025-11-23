@@ -192,7 +192,7 @@
 
     <h1>Your Bot Buckets</h1>
     <p class="sub">
-      This is your <strong>IZZA BOT profile</strong>. You can see your total deposits,
+      This is your <strong>IZZA BOT profile</strong>. You can see your IZZA wallet balances,
       allocate test Pi into different strategy buckets, and request withdrawals back to
       your Pi Testnet wallet.
     </p>
@@ -205,8 +205,18 @@
     <!-- Account summary -->
     <div id="summaryBox" class="box" style="display:none;">
       <h3>Account summary</h3>
+
       <div class="metric-row">
-        <span>Total deposited</span>
+        <span>Wallet PI balance</span>
+        <span id="sumWalletPi">0.0000 test Pi</span>
+      </div>
+      <div class="metric-row">
+        <span>Wallet IZZA balance</span>
+        <span id="sumWalletIzza">0.0000000 IZZA</span>
+      </div>
+
+      <div class="metric-row" style="margin-top:8px;">
+        <span>Total deposited (for bot)</span>
         <span id="sumDeposited">0.00 test Pi</span>
       </div>
       <div class="metric-row">
@@ -222,12 +232,12 @@
         <span id="sumAllocated">0.00 test Pi</span>
       </div>
       <div class="metric-row">
-        <span>Unallocated (available)</span>
+        <span>Unallocated (available to allocate)</span>
         <span id="sumAvailable">0.00 test Pi</span>
       </div>
       <p class="muted" style="margin-top:6px;">
-        Tip: Let the bot handle most of the work. You can still move funds between buckets
-        if you want to tilt your strategy.
+        Your IZZA TESTNET wallet holds the actual test Pi. The bot uses your
+        <strong>unallocated</strong> balance as capital you can deposit into strategy buckets below.
       </p>
     </div>
 
@@ -240,7 +250,7 @@
       <div id="bucketsList"></div>
       <p id="bucketsEmptyMsg" class="muted" style="display:none;">
         You do not have any buckets yet. Set your base profile on the main IZZA BOT page,
-        then create additional buckets here.
+        then create additional buckets here and deposit test Pi into them by adjusting allocations.
       </p>
     </div>
 
@@ -249,7 +259,7 @@
       <h3>Create a new bucket</h3>
       <p class="muted">
         Each bucket can have its own time horizon and risk profile.
-        You can move test Pi between buckets using the allocation sliders.
+        You can move test Pi between buckets using the allocation controls.
       </p>
 
       <label for="newBucketName">Bucket name</label>
@@ -324,6 +334,8 @@
   const userLabel     = document.getElementById("userLabel");
 
   const summaryBox    = document.getElementById("summaryBox");
+  const sumWalletPi   = document.getElementById("sumWalletPi");
+  const sumWalletIzza = document.getElementById("sumWalletIzza");
   const sumDeposited  = document.getElementById("sumDeposited");
   const sumWithdrawn  = document.getElementById("sumWithdrawn");
   const sumNet        = document.getElementById("sumNet");
@@ -363,6 +375,11 @@
   function fmtPi(x){
     const n = Number(x || 0);
     return n.toFixed(4) + " test Pi";
+  }
+
+  function fmtIzza(x){
+    const n = Number(x || 0);
+    return n.toFixed(7) + " IZZA";
   }
 
   function updateUserLabel(){
@@ -418,16 +435,21 @@
     const totalWithdrawn = acct.total_withdrawn || 0;
     const netDeposit     = acct.net_deposit || 0;
 
+    const walletPi   = (acct.pi_balance != null ? acct.pi_balance : totalDeposited) || 0;
+    const walletIzza = acct.izza_balance != null ? acct.izza_balance : 0;
+
     let totalAlloc = 0;
     for (const b of buckets) totalAlloc += (b.allocation || 0);
 
     const avail = Math.max(0, netDeposit - totalAlloc);
 
-    sumDeposited.textContent = fmtPi(totalDeposited);
-    sumWithdrawn.textContent = fmtPi(totalWithdrawn);
-    sumNet.textContent       = fmtPi(netDeposit);
-    sumAllocated.textContent = fmtPi(totalAlloc);
-    sumAvailable.textContent = fmtPi(avail);
+    sumWalletPi.textContent   = fmtPi(walletPi);
+    sumWalletIzza.textContent = fmtIzza(walletIzza);
+    sumDeposited.textContent  = fmtPi(totalDeposited);
+    sumWithdrawn.textContent  = fmtPi(totalWithdrawn);
+    sumNet.textContent        = fmtPi(netDeposit);
+    sumAllocated.textContent  = fmtPi(totalAlloc);
+    sumAvailable.textContent  = fmtPi(avail);
 
     if (avail > 0) {
       withdrawAmount.placeholder = avail.toFixed(4);
