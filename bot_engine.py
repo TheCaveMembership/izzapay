@@ -861,7 +861,6 @@ def run_once():
             break
 
         # Refresh bucket cash after sells
-        # (approximate: we rely on DB update in update_cash_for_bucket)
         with conn() as cx:
             row = cx.execute(
                 """
@@ -888,29 +887,28 @@ def run_loop():
     Loop mode: keep running with sleep in between.
     """
     print(
-        f"[ENGINE] Starting loop mode. Sleep={LOOP_SLEEP_SECS}s. "
-        "Ctrl+C to stop."
+        f"[ENGINE] Starting loop mode. LOOP_MODE={LOOP_MODE}, "
+        f"SLEEP={LOOP_SLEEP_SECS}s"
     )
+    iteration = 0
     while True:
+        iteration += 1
+        print(f"[ENGINE] Loop iteration {iteration} at ts={_now()}")
         try:
             run_once()
         except Exception as e:
-            print(f"[ENGINE] ERROR in run_once: {e}")
+            print(f"[ENGINE] ERROR in run_once: {e!r}")
+        print(f"[ENGINE] Sleeping {LOOP_SLEEP_SECS}s before next iteration...")
         time.sleep(LOOP_SLEEP_SECS)
 
 
 if __name__ == "__main__":
-    # Extra debug so we can SEE what the worker is doing on Render
-    import os as _os
-
-    raw_loop = _os.getenv("BOT_LOOP_MODE")
+    raw = os.getenv("BOT_LOOP_MODE", "false")
     print(
         f"[ENGINE] bot_engine.py starting. "
-        f"BOT_LOOP_MODE raw={raw_loop!r} -> LOOP_MODE={LOOP_MODE}, "
-        f"SLEEP={LOOP_SLEEP_SECS}",
-        flush=True,
+        f"BOT_LOOP_MODE raw='{raw}' -> LOOP_MODE={LOOP_MODE}, "
+        f"SLEEP={LOOP_SLEEP_SECS}"
     )
-
     if LOOP_MODE:
         run_loop()
     else:
