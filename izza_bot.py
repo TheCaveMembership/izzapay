@@ -29,6 +29,9 @@ HORIZON_URL = os.getenv("HORIZON_URL", "https://api.testnet.minepi.com").strip()
 NETWORK_PASSPHRASE = os.getenv("NETWORK_PASSPHRASE", "Pi Testnet").strip()
 _srv = Server(horizon_url=HORIZON_URL)
 
+# Pi Testnet base fee: 0.01 Pi = 100,000 stroops
+PI_BASE_FEE_STROOPS = int(os.getenv("PI_BASE_FEE_STROOPS", "100000"))
+
 # IZZA asset on TESTNET (for wallet IZZA balance)
 IZZA_ASSET_CODE = os.getenv("IZZA_ASSET_CODE", "IZZA")
 IZZA_ASSET_ISSUER = os.getenv(
@@ -390,11 +393,10 @@ def _send_native_payment(from_secret: str, to_pub: str, amount: float, memo_text
     from_pub = kp.public_key
 
     account = _srv.load_account(from_pub)
-    base_fee = 1000
     builder = TransactionBuilder(
         source_account=account,
         network_passphrase=NETWORK_PASSPHRASE,
-        base_fee=base_fee,
+        base_fee=PI_BASE_FEE_STROOPS,
     )
 
     builder.append_payment_op(
@@ -406,7 +408,8 @@ def _send_native_payment(from_secret: str, to_pub: str, amount: float, memo_text
     if memo_text:
         builder.add_text_memo(memo_text[:28])
 
-    tx = builder.build()
+    # Set a timeout to satisfy Horizon best practices and avoid warnings
+    tx = builder.set_timeout(300).build()
     tx.sign(kp)
     resp = _srv.submit_transaction(tx)
     return resp
