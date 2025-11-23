@@ -2,17 +2,19 @@
 #
 # Handles:
 #   - ensure trustlines automatically
+#   - manage open offers
 #   - place sell offers
 #   - place buy offers
 #   - cancel offers
 #   - simple market_buy / market_sell helpers
-#   - manage open-offer count to avoid op_too_many_subentries
 #
 # All on Pi Testnet using your BOT_WALLET_* env vars.
 
 import os
 from decimal import Decimal, ROUND_DOWN
+from typing import List, Dict, Any
 
+import requests
 from stellar_sdk import (
     Server,
     Keypair,
@@ -38,7 +40,7 @@ if not BOT_PUB or not BOT_SEC:
 kp_bot = Keypair.from_secret(BOT_SEC)
 
 # ------------------------------------------------------------------
-# Helpers for Horizon-compatible decimals (max 7 decimal places)
+# Helpers for Horizon compatible decimals (max 7 decimal places)
 # ------------------------------------------------------------------
 
 _AMOUNT_QUANT = Decimal("0.0000001")  # 7 dp
@@ -61,13 +63,13 @@ def _load_bot_account():
 
 
 # ------------------------------------------------------------------
-# Trustline Management
+# Trustline management
 # ------------------------------------------------------------------
 
 def ensure_trustline(token_code: str, token_issuer: str, limit: str = "1000000000"):
     """
-    Ensures the BOT wallet has a trustline to the asset.
-    If not, creates it automatically.
+    Ensure the BOT wallet has a trustline to the asset.
+    If not, create it automatically.
     """
     asset = Asset(token_code, token_issuer)
 
@@ -111,7 +113,7 @@ def ensure_trustline(token_code: str, token_issuer: str, limit: str = "100000000
 
 def get_bot_token_balance(token_code: str, token_issuer: str) -> float:
     """
-    Return the BOT wallet's actual on-chain balance for a given asset.
+    Return the BOT wallet actual on chain balance for a given asset.
     Used by the engine to ensure sells never exceed wallet holdings.
     """
     acct = _srv.accounts().account_id(BOT_PUB).call()
@@ -126,77 +128,131 @@ def get_bot_token_balance(token_code: str, token_issuer: str) -> float:
 
 
 # ------------------------------------------------------------------
-# Offer / subentry helpers
+# Open offers helpers  (for subentry limit control)
 # ------------------------------------------------------------------
 
-def _asset_from_offer_side(side: dict) -> Asset:
+def _list_bot_offers(max_records: int = 1000) -> List[Dict[str, Any]]:
     """
-    Convert offer["selling"] or offer["buying"] into a stellar_sdk.Asset.
+    Fetch all open offers for the bot wallet via Horizon.
+    Used so we can understand and manage subentry limits.
     """
-    a_type = side.get("asset_type")
-    if a_type == "native":
-        return Asset.native()
-    return Asset(side.get("asset_code"), side.get("asset_issuer"))
+    offers: List[Dict[str, Any]] = []
+    url = HORIZON_URL.rstrip("/") + "/offers"
+    params = {
+        "seller": BOT_PUB,
+        "limit": 200,
+        "order": "asc",
+    }
+
+    while True:
+        r = requests.get(url, params=params, timeout=15)
+        r.raise_for_status()
+        data = r.json()
+        recs = (data.get("_embedded") or {}).get("records") or []
+        offers.extend(recs)
+
+        if len(offers) >= max_records:
+            break
+
+        links = data.get("_links") or {}
+        next_href = links.get("next", {}).get("href")
+        if not next_href or next_href == url:
+            break
+        url = next_href
+        params = None  # cursor is already encoded in next_href
+
+    return offers
 
 
-def get_open_offers(limit: int = 200) -> list[dict]:
+def prune_bot_offers(
+    max_offers: int = 900,
+    target_keep: int = 750,
+) -> int:
     """
-    Fetch current open offers for the BOT wallet (up to `limit`).
-    Oldest first (order=asc).
+    If the bot wallet has too many open offers, cancel a batch of the
+    smallest and oldest ones to free subentries.
+
+    Returns the number of offers cancelled.
     """
-    resp = (
-        _srv.offers()
-        .for_seller(BOT_PUB)
-        .limit(limit)
-        .order("asc")
-        .call()
-    )
-    records = (resp.get("_embedded") or {}).get("records") or []
-    return records
-
-
-def trim_offers_if_too_many(max_offers: int) -> int:
-    """
-    If the bot has more than `max_offers` open offers, cancel the oldest ones
-    until we're back under the cap. Returns the number of offers cancelled.
-
-    This is how the engine "understands" Stellar's subentry / offer limits:
-    it actively cleans up stale open orders before submitting new ones.
-    """
-    if max_offers <= 0:
-        return 0
-
-    offers = get_open_offers(limit=200)
+    offers = _list_bot_offers(max_records=2000)
     count = len(offers)
     if count <= max_offers:
         return 0
 
-    to_remove = count - max_offers
-    removed = 0
+    # Cancel up to count - target_keep offers, smallest size first.
+    # That naturally clears lots of tiny dust orders created by past trading.
+    to_cancel = max(0, count - target_keep)
+    offers_sorted = sorted(
+        offers,
+        key=lambda o: (
+            float(o.get("amount") or "0"),
+            int(o.get("last_modified_ledger") or 0),
+        ),
+    )
 
-    for off in offers[:to_remove]:
+    cancelled = 0
+    for offer in offers_sorted[:to_cancel]:
+        selling = offer.get("selling") or {}
+        buying = offer.get("buying") or {}
+
+        # Build selling asset
+        s_type = selling.get("asset_type")
+        if s_type == "native":
+            selling_asset = Asset.native()
+        else:
+            selling_asset = Asset(
+                selling.get("asset_code"),
+                selling.get("asset_issuer"),
+            )
+
+        # Build buying asset
+        b_type = buying.get("asset_type")
+        if b_type == "native":
+            buying_asset = Asset.native()
+        else:
+            buying_asset = Asset(
+                buying.get("asset_code"),
+                buying.get("asset_issuer"),
+            )
+
+        offer_id = int(offer.get("id"))
+
         try:
-            offer_id = int(off.get("id"))
-        except Exception:
-            continue
-
-        selling_info = off.get("selling") or {}
-        buying_info = off.get("buying") or {}
-        selling_asset = _asset_from_offer_side(selling_info)
-        buying_asset = _asset_from_offer_side(buying_info)
-
-        try:
-            cancel_offer(offer_id=offer_id, selling_asset=selling_asset, buying_asset=buying_asset)
-            removed += 1
-            print(f"[BOT] Cancelled stale offer id={offer_id} to free subentries.")
+            print(
+                f"[BOT] Cancelling offer id={offer_id} "
+                f"amount={offer.get('amount')} selling={selling} buying={buying}"
+            )
+            cancel_offer(offer_id, selling_asset, buying_asset)
+            cancelled += 1
         except Exception as e:
-            print(f"[BOT] Failed to cancel offer id={offer_id}: {e}")
+            print(f"[BOT] Error cancelling offer {offer_id}: {e}")
 
-    return removed
+    print(
+        f"[BOT] prune_bot_offers: had={count}, cancelled={cancelled}, "
+        f"target_keep={target_keep}"
+    )
+    return cancelled
+
+
+def ensure_offer_capacity(
+    min_free_slots: int = 20,
+    max_offers: int = 950,
+):
+    """
+    Make sure the bot account has room for new offers.
+    If we are close to the subentry cap, prune before submitting.
+    """
+    offers = _list_bot_offers(max_records=2000)
+    count = len(offers)
+    if count >= max_offers - min_free_slots:
+        print(
+            f"[BOT] Offer count={count} close to limit, pruning before new trade..."
+        )
+        prune_bot_offers(max_offers=max_offers, target_keep=max_offers - 80)
 
 
 # ------------------------------------------------------------------
-# Sell Offers
+# Sell offers
 # ------------------------------------------------------------------
 
 def place_sell_offer(selling_asset: Asset, buying_asset: Asset, amount: float, price: float) -> dict:
@@ -225,7 +281,7 @@ def place_sell_offer(selling_asset: Asset, buying_asset: Asset, amount: float, p
 
 
 # ------------------------------------------------------------------
-# Buy Offers
+# Buy offers
 # ------------------------------------------------------------------
 
 def place_buy_offer(buying_asset: Asset, selling_asset: Asset, buy_amount: float, price: float) -> dict:
@@ -234,7 +290,7 @@ def place_buy_offer(buying_asset: Asset, selling_asset: Asset, buy_amount: float
     op = ManageBuyOffer(
         buying=buying_asset,
         selling=selling_asset,
-        amount=_to_amount_str(buy_amount),  # correct keyword
+        amount=_to_amount_str(buy_amount),
         price=_to_price_str(price),
         offer_id=0,
     )
@@ -290,7 +346,10 @@ def market_buy(token_code: str, token_issuer: str, max_cost_pi: float, best_pric
     if best_price <= 0:
         raise ValueError("best_price must be positive")
 
-    # Ensure trustline first
+    # Control subentries first
+    ensure_offer_capacity()
+
+    # Ensure trustline
     ensure_trustline(token_code, token_issuer)
 
     token = Asset(token_code, token_issuer)
@@ -313,6 +372,9 @@ def market_buy(token_code: str, token_issuer: str, max_cost_pi: float, best_pric
 def market_sell(token_code: str, token_issuer: str, token_amount: float, best_bid: float) -> dict:
     if best_bid <= 0:
         raise ValueError("best_bid must be positive")
+
+    # Control subentries first
+    ensure_offer_capacity()
 
     # Ensure trustline exists so balance tracking works
     ensure_trustline(token_code, token_issuer)
