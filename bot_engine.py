@@ -466,7 +466,7 @@ def upsert_position(bucket_id: int, market: MarketInfo, delta_qty: float, trade_
         if not row:
             # New position
             if delta_qty <= 0:
-                # selling from zero position doesn't make sense, ignore
+                # selling from zero position does not make sense, ignore
                 return
             cx.execute(
                 """
@@ -572,7 +572,7 @@ def plan_sells_for_bucket(
         if not market or market.mid_price <= 0 or pos.quantity <= 0:
             continue
 
-        # % gain/loss vs average cost
+        # % gain or loss vs average cost
         pnl_pct = (market.mid_price - pos.avg_price_pi) / pos.avg_price_pi * 100.0
 
         # Take profit or cut loss
@@ -711,6 +711,13 @@ def plan_buys_for_bucket(
         score = compute_score(m, cfg)
         if score <= 0:
             continue
+
+        # Prefer non DT tokens but still allow DT when they are clearly best
+        if m.code.startswith("DT"):
+            score *= 0.6
+        else:
+            score *= 1.15
+
         scored.append((score, m))
 
     if not scored:
