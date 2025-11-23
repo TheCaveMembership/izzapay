@@ -168,8 +168,8 @@
       <h3>1. Create or link your IZZA wallet</h3>
       <p>
         IZZA BOT uses the <strong>Pi Testnet (native) balance</strong> in your
-        <strong>IZZA wallet</strong> as trading capital.
-        Create your IZZA wallet, then send TEST PI to it from your Pi Testnet wallet.
+        <strong>IZZA wallet</strong> as the source for deposits.
+        First, create your IZZA wallet, then send TEST PI to it from your Pi Testnet wallet.
       </p>
 
       <p class="muted">
@@ -186,7 +186,8 @@
 
       <p class="muted" style="margin-top:6px;">
         On the IZZA wallet page you can create / view your IZZA TESTNET wallet and deposit TEST PI.
-        IZZA BOT automatically reads that balance and shows it on your BOT profile.
+        When you later <strong>deposit into a bucket</strong> on your IZZA BOT Profile,
+        funds move from this wallet into your chosen bucket.
       </p>
     </div>
 
@@ -196,7 +197,8 @@
       <p class="muted">
         This is your <strong>original IZZA BOT profile</strong>. After this, on your
         <strong>IZZA BOT Profile</strong> page you will be able to create additional
-        buckets with different settings and allocate your deposit across them.
+        buckets with different settings and <strong>deposit</strong> from your IZZA wallet
+        into each bucket independently.
       </p>
 
       <label for="horizonSelect">Time horizon</label>
@@ -225,7 +227,8 @@
       <p id="configStatus" class="status-text"></p>
 
       <p class="muted" style="margin-top:6px;">
-        After this step you can manage buckets and allocations on your
+        After this step you can manage buckets, <strong>deposit</strong> into them, and
+        <strong>withdraw</strong> back to your IZZA wallet on your
         <strong>IZZA BOT Profile</strong>.
       </p>
     </div>
@@ -238,6 +241,7 @@
 (function(){
   // FORCE sandbox true on this page: we are only using Pi for auth here
   const PI_SANDBOX = true;
+  const BOT_USERNAME_KEY = "izza_bot_username";
 
   let currentUser = null;
 
@@ -317,12 +321,21 @@
     }
 
     try {
-      // We only need username here
       const scopes = ["username"];
       const onIncomplete = payment => { console.log("incomplete payment", payment); };
 
       const { user, accessToken } = await Pi.authenticate(scopes, onIncomplete);
       currentUser = user;
+
+      // Cache username so /bot/profile does NOT require re-auth
+      try {
+        if (currentUser && currentUser.username) {
+          localStorage.setItem(BOT_USERNAME_KEY, currentUser.username);
+        }
+      } catch(e) {
+        console.warn("Could not write username to localStorage", e);
+      }
+
       updateUserLabel();
       globalStatus.textContent = "";
 
@@ -342,7 +355,6 @@
   // --- Open IZZA wallet page -------------------------------------------
   if (openWalletBtn) {
     openWalletBtn.addEventListener("click", function(){
-      // Use Flask routing so this always matches the real token-auth route
       window.location.href = "{{ url_for('token_auth') }}";
     });
   }
@@ -368,7 +380,6 @@
         if (res.ok) {
           configStatus.textContent =
             "Base bot settings saved. Redirecting to your IZZA BOT Profile…";
-          // Auto-redirect into the profile page so they can allocate buckets
           setTimeout(function(){
             window.location.href = "/bot/profile";
           }, 600);
