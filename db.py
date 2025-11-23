@@ -379,6 +379,30 @@ def init_db():
         );
         CREATE INDEX IF NOT EXISTS idx_bot_snapshots_bucket_ts
           ON bot_bucket_snapshots(bucket_id, ts);
+
+        -- NEW: per-trade ledger for each bucket/account
+        CREATE TABLE IF NOT EXISTS bot_trades(
+          id INTEGER PRIMARY KEY,
+          account_id INTEGER NOT NULL,
+          bucket_id INTEGER NOT NULL,
+          market_code TEXT,
+          base_code TEXT,
+          base_issuer TEXT,
+          counter_code TEXT,
+          counter_issuer TEXT,
+          side TEXT,              -- buy / sell
+          amount REAL,            -- base amount
+          price REAL,             -- price in counter
+          value_pi REAL,          -- approximate value in PI
+          pnl_pi REAL,            -- realized PnL in PI (optional)
+          status TEXT,            -- filled / partial / cancelled
+          ts INTEGER,             -- trade timestamp
+          raw_json TEXT,
+          FOREIGN KEY(account_id) REFERENCES bot_accounts(id),
+          FOREIGN KEY(bucket_id) REFERENCES bot_buckets(id)
+        );
+        CREATE INDEX IF NOT EXISTS idx_bot_trades_bucket_ts
+          ON bot_trades(bucket_id, ts);
         """)
 
 def ensure_schema():
@@ -699,4 +723,27 @@ def ensure_schema():
         );
         CREATE INDEX IF NOT EXISTS idx_bot_snapshots_bucket_ts
           ON bot_bucket_snapshots(bucket_id, ts);
+
+        CREATE TABLE IF NOT EXISTS bot_trades(
+          id INTEGER PRIMARY KEY,
+          account_id INTEGER NOT NULL,
+          bucket_id INTEGER NOT NULL,
+          market_code TEXT,
+          base_code TEXT,
+          base_issuer TEXT,
+          counter_code TEXT,
+          counter_issuer TEXT,
+          side TEXT,
+          amount REAL,
+          price REAL,
+          value_pi REAL,
+          pnl_pi REAL,
+          status TEXT,
+          ts INTEGER,
+          raw_json TEXT,
+          FOREIGN KEY(account_id) REFERENCES bot_accounts(id),
+          FOREIGN KEY(bucket_id) REFERENCES bot_buckets(id)
+        );
+        CREATE INDEX IF NOT EXISTS idx_bot_trades_bucket_ts
+          ON bot_trades(bucket_id, ts);
         """)
