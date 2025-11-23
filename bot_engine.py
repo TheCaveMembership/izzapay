@@ -106,6 +106,9 @@ RISK_WEIGHTS = {
     },
 }
 
+# Tokens the bot should never buy (hard blocklist)
+BLOCKED_BUY_CODES = {"Archimedes", "AYB"}
+
 
 def _now() -> int:
     return int(time.time())
@@ -694,6 +697,10 @@ def plan_buys_for_bucket(
     # Score markets
     scored: List[Tuple[float, MarketInfo]] = []
     for key, m in markets.items():
+        # Skip blocked tokens completely
+        if m.code in BLOCKED_BUY_CODES:
+            continue
+
         if m.best_ask <= 0 or m.mid_price <= 0:
             continue
         if m.spread_pct <= 0 or m.spread_pct > max_spread:
