@@ -355,6 +355,24 @@ def _validate_profile(
     return True, None
 
 
+def _risk_floor_for_level(risk_level: str) -> float:
+    """
+    Internal downside floor derived from risk level.
+    Interpreted as: bot should not allow bucket value to fall below this
+    fraction of the initial deposit for that bucket.
+
+    low    => keep >= 85%  (max ~15% loss)
+    medium => keep >= 70%  (max ~30% loss)
+    high   => keep >= 55%  (max ~45% loss)
+    """
+    rl = (risk_level or "medium").lower()
+    if rl == "low":
+        return 0.85
+    if rl == "high":
+        return 0.55
+    return 0.70  # medium
+
+
 # ---------------------------------------------------------
 # Stellar helpers: send native payments on TESTNET
 # ---------------------------------------------------------
@@ -435,19 +453,19 @@ def save_trading_config():
         "username": "CamMac",
         "risk_level": "medium",
         "time_horizon_days": 10,
-        "target_value_back": 0.85,
         "objective": "balanced",   # optional
         "volatility": "medium"     # optional
       }
+
+    target_value_back is NOT provided by the user; it is derived from risk_level.
     """
     data = request.get_json() or {}
 
-    username          = (data.get("username") or "").strip()
-    risk_level        = (data.get("risk_level") or "medium").lower()
-    horizon_days      = data.get("time_horizon_days") or 10
-    target_value_back = float(data.get("target_value_back") or 0.85)
-    objective         = (data.get("objective") or "balanced").lower()
-    volatility        = (data.get("volatility") or risk_level).lower()
+    username     = (data.get("username") or "").strip()
+    risk_level   = (data.get("risk_level") or "medium").lower()
+    horizon_days = data.get("time_horizon_days") or 10
+    objective    = (data.get("objective") or "balanced").lower()
+    volatility   = (data.get("volatility") or risk_level).lower()
 
     if not username:
         return jsonify(ok=False, error="Missing username from request.")
@@ -460,6 +478,9 @@ def save_trading_config():
     ok, msg = _validate_profile(horizon_days, risk_level, objective, volatility)
     if not ok:
         return jsonify(ok=False, error=msg)
+
+    # Internal downside floor from risk, not user input
+    target_value_back = _risk_floor_for_level(risk_level)
 
     try:
         account_id = _get_or_create_bot_account(username, wallet_pub=None)
@@ -636,20 +657,20 @@ def create_bucket():
         "name": "High Risk YOLO",
         "risk_level": "high",
         "time_horizon_days": 7,
-        "target_value_back": 0.7,
         "objective": "max_growth",
         "volatility": "high"
       }
+
+    target_value_back is derived from risk_level internally.
     """
     data = request.get_json() or {}
 
-    username          = (data.get("username") or "").strip()
-    name              = (data.get("name") or "").strip()
-    risk_level        = (data.get("risk_level") or "medium").lower()
-    horizon_days      = data.get("time_horizon_days") or 10
-    target_value_back = float(data.get("target_value_back") or 0.85)
-    objective         = (data.get("objective") or "balanced").lower()
-    volatility        = (data.get("volatility") or risk_level).lower()
+    username     = (data.get("username") or "").strip()
+    name         = (data.get("name") or "").strip()
+    risk_level   = (data.get("risk_level") or "medium").lower()
+    horizon_days = data.get("time_horizon_days") or 10
+    objective    = (data.get("objective") or "balanced").lower()
+    volatility   = (data.get("volatility") or risk_level).lower()
 
     if not username:
         return jsonify(ok=False, error="Missing username from request.")
@@ -664,6 +685,9 @@ def create_bucket():
     ok, msg = _validate_profile(horizon_days, risk_level, objective, volatility)
     if not ok:
         return jsonify(ok=False, error=msg)
+
+    # Internal downside floor from risk
+    target_value_back = _risk_floor_for_level(risk_level)
 
     try:
         account_id = _get_or_create_bot_account(username, wallet_pub=None)
