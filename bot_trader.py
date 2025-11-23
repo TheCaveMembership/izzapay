@@ -6,6 +6,7 @@
 #   - place sell offers
 #   - place buy offers
 #   - cancel offers
+#   - cancel open BUY offers for blocked tokens
 #   - simple market_buy / market_sell helpers
 #
 # All on Pi Testnet using your BOT_WALLET_* env vars.
@@ -252,6 +253,76 @@ def ensure_offer_capacity(
 
 
 # ------------------------------------------------------------------
+# Cancel BUY offers for blocked tokens
+# ------------------------------------------------------------------
+
+def cancel_blocked_buy_offers(block_codes: List[str]) -> int:
+    """
+    Cancel any open BUY offers where the bot is buying one of the
+    blocked token codes using native PI.
+    This is used when we decide to permanently stop buying certain
+    stablecoins / Datong tokens.
+    """
+    if not block_codes:
+        return 0
+
+    codes_set = {c.upper() for c in block_codes if c}
+    offers = _list_bot_offers(max_records=2000)
+
+    cancelled = 0
+    for offer in offers:
+        buying = offer.get("buying") or {}
+        selling = offer.get("selling") or {}
+
+        code = buying.get("asset_code")
+        if not code or code.upper() not in codes_set:
+            continue
+
+        # We only care about BUY offers where we are selling native PI
+        if selling.get("asset_type") != "native":
+            continue
+
+        # Build selling asset
+        s_type = selling.get("asset_type")
+        if s_type == "native":
+            selling_asset = Asset.native()
+        else:
+            selling_asset = Asset(
+                selling.get("asset_code"),
+                selling.get("asset_issuer"),
+            )
+
+        # Build buying asset
+        b_type = buying.get("asset_type")
+        if b_type == "native":
+            buying_asset = Asset.native()
+        else:
+            buying_asset = Asset(
+                buying.get("asset_code"),
+                buying.get("asset_issuer"),
+            )
+
+        offer_id = int(offer.get("id") or 0)
+
+        try:
+            print(
+                f"[BOT] Cancelling BLOCKED BUY offer id={offer_id} "
+                f"code={code} selling={selling} buying={buying}"
+            )
+            cancel_offer(offer_id, selling_asset, buying_asset)
+            cancelled += 1
+        except Exception as e:
+            print(f"[BOT] Error cancelling blocked BUY offer {offer_id} ({code}): {e}")
+
+    if cancelled:
+        print(
+            f"[BOT] cancel_blocked_buy_offers: cancelled {cancelled} "
+            f"open BUY offers for {sorted(codes_set)}"
+        )
+    return cancelled
+
+
+# ------------------------------------------------------------------
 # Sell offers
 # ------------------------------------------------------------------
 
@@ -339,10 +410,14 @@ def cancel_offer(offer_id: int, selling_asset: Asset, buying_asset: Asset) -> di
 
 
 # ------------------------------------------------------------------
-# Market BUY
+# Market BUY (orderbook-only: use best ask / current market price)
 # ------------------------------------------------------------------
 
 def market_buy(token_code: str, token_issuer: str, max_cost_pi: float, best_price: float) -> dict:
+    """
+    Place a BUY limited at the current best ask / market price.
+    We always price off the orderbook, never LP.
+    """
     if best_price <= 0:
         raise ValueError("best_price must be positive")
 
@@ -366,10 +441,16 @@ def market_buy(token_code: str, token_issuer: str, max_cost_pi: float, best_pric
 
 
 # ------------------------------------------------------------------
-# Market SELL
+# Market SELL (used also for quick wall-break limit sells)
 # ------------------------------------------------------------------
 
 def market_sell(token_code: str, token_issuer: str, token_amount: float, best_bid: float) -> dict:
+    """
+    Place a SELL limited at the given price.
+    Normally this is the current best bid (orderbook market price),
+    but the engine can also pass a higher target price when it wants
+    to scalp after breaking a wall.
+    """
     if best_bid <= 0:
         raise ValueError("best_bid must be positive")
 
