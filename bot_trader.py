@@ -6,6 +6,7 @@
 #   - place buy offers
 #   - cancel offers
 #   - simple market_buy / market_sell helpers
+#   - manage open-offer count to avoid op_too_many_subentries
 #
 # All on Pi Testnet using your BOT_WALLET_* env vars.
 
@@ -122,6 +123,76 @@ def get_bot_token_balance(token_code: str, token_issuer: str) -> float:
                 except Exception:
                     return 0.0
     return 0.0
+
+
+# ------------------------------------------------------------------
+# Offer / subentry helpers
+# ------------------------------------------------------------------
+
+def _asset_from_offer_side(side: dict) -> Asset:
+    """
+    Convert offer["selling"] or offer["buying"] into a stellar_sdk.Asset.
+    """
+    a_type = side.get("asset_type")
+    if a_type == "native":
+        return Asset.native()
+    return Asset(side.get("asset_code"), side.get("asset_issuer"))
+
+
+def get_open_offers(limit: int = 200) -> list[dict]:
+    """
+    Fetch current open offers for the BOT wallet (up to `limit`).
+    Oldest first (order=asc).
+    """
+    resp = (
+        _srv.offers()
+        .for_seller(BOT_PUB)
+        .limit(limit)
+        .order("asc")
+        .call()
+    )
+    records = (resp.get("_embedded") or {}).get("records") or []
+    return records
+
+
+def trim_offers_if_too_many(max_offers: int) -> int:
+    """
+    If the bot has more than `max_offers` open offers, cancel the oldest ones
+    until we're back under the cap. Returns the number of offers cancelled.
+
+    This is how the engine "understands" Stellar's subentry / offer limits:
+    it actively cleans up stale open orders before submitting new ones.
+    """
+    if max_offers <= 0:
+        return 0
+
+    offers = get_open_offers(limit=200)
+    count = len(offers)
+    if count <= max_offers:
+        return 0
+
+    to_remove = count - max_offers
+    removed = 0
+
+    for off in offers[:to_remove]:
+        try:
+            offer_id = int(off.get("id"))
+        except Exception:
+            continue
+
+        selling_info = off.get("selling") or {}
+        buying_info = off.get("buying") or {}
+        selling_asset = _asset_from_offer_side(selling_info)
+        buying_asset = _asset_from_offer_side(buying_info)
+
+        try:
+            cancel_offer(offer_id=offer_id, selling_asset=selling_asset, buying_asset=buying_asset)
+            removed += 1
+            print(f"[BOT] Cancelled stale offer id={offer_id} to free subentries.")
+        except Exception as e:
+            print(f"[BOT] Failed to cancel offer id={offer_id}: {e}")
+
+    return removed
 
 
 # ------------------------------------------------------------------
