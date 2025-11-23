@@ -199,6 +199,12 @@
       justify-content:space-between;
       align-items:center;
     }
+
+    .bucket-risk-note {
+      font-size:11px;
+      opacity:0.75;
+      margin-top:2px;
+    }
   </style>
 </head>
 <body>
@@ -272,8 +278,21 @@
     <div id="createBox" class="box" style="display:none;">
       <h3>Create a new bucket</h3>
       <p class="muted">
-        Each bucket can have its own time horizon and risk profile.
-        You can deposit test Pi from your IZZA wallet into any bucket at any time.
+        Each bucket has a <strong>downside limit based on its risk level</strong>.
+        The bot will be coded so it does not allow this bucket to lose more than
+        that percentage of your deposit.
+      </p>
+      <p class="muted">
+        Approximate max loss per risk:
+        <br>
+        • Low risk: up to <strong>15%</strong> drawdown
+        <br>
+        • Medium risk: up to <strong>30%</strong> drawdown
+        <br>
+        • High risk: up to <strong>45%</strong> drawdown
+        <br>
+        If you are not willing to risk up to that loss on this bucket,
+        <strong>do not deposit funds into it yet.</strong>
       </p>
 
       <label for="newBucketName">Bucket name</label>
@@ -306,9 +325,6 @@
         <option value="medium" selected>Medium</option>
         <option value="high">High</option>
       </select>
-
-      <label for="newTarget">Target value back (fraction)</label>
-      <input id="newTarget" type="number" step="0.01" min="0" max="2" value="0.85" />
 
       <button id="createBucketBtn" class="btn btn-ombre" style="width:100%;margin-top:6px;">
         Create bucket
@@ -350,7 +366,6 @@
   const newRisk         = document.getElementById("newRisk");
   const newObjective    = document.getElementById("newObjective");
   const newVol          = document.getElementById("newVol");
-  const newTarget       = document.getElementById("newTarget");
   const createBucketBtn = document.getElementById("createBucketBtn");
   const createStatus    = document.getElementById("createStatus");
 
@@ -372,6 +387,13 @@
   function fmtIzza(x){
     const n = Number(x || 0);
     return n.toFixed(6) + " IZZA";
+  }
+
+  function riskMaxLossPercent(riskLevel){
+    const rl = (riskLevel || "medium").toLowerCase();
+    if (rl === "low") return 15;
+    if (rl === "high") return 45;
+    return 30; // medium
   }
 
   function updateUserLabel(){
@@ -471,8 +493,15 @@
     balanceLine.textContent = "Bucket balance: " + fmtPi(b.balance || 0);
     right.appendChild(balanceLine);
 
+    const riskNote = document.createElement("div");
+    riskNote.className = "bucket-risk-note";
+    const maxLoss = riskMaxLossPercent(b.risk_level);
+    riskNote.textContent =
+      "Planned max drawdown: ~" + maxLoss + "% of the amount you deposit into this bucket.";
+
     header.appendChild(left);
     header.appendChild(right);
+    header.appendChild(riskNote);
     row.appendChild(header);
 
     // Deposit row
@@ -645,8 +674,7 @@
       }
       createStatus.textContent = "Creating bucket…";
 
-      const name   = (newBucketName.value || "").trim();
-      const target = parseFloat(newTarget.value || "0.85") || 0.85;
+      const name = (newBucketName.value || "").trim();
 
       try {
         const res = await postJSON("/api/trading/bucket/create", {
@@ -654,7 +682,6 @@
           name: name || "New Bucket",
           risk_level: newRisk.value,
           time_horizon_days: parseInt(newHorizon.value, 10),
-          target_value_back: target,
           objective: newObjective.value,
           volatility: newVol.value
         });
