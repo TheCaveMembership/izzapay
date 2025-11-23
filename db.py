@@ -17,10 +17,15 @@ def conn():
     _ensure_dirs()
     cx = sqlite3.connect(DB_PATH, check_same_thread=False, detect_types=sqlite3.PARSE_DECLTYPES)
     cx.row_factory = sqlite3.Row
-    cx.execute("PRAGMA foreign_keys=ON;")
-    cx.execute("PRAGMA journal_mode=WAL;")
-    cx.execute("PRAGMA synchronous=NORMAL;")
-    cx.execute(f"PRAGMA busy_timeout={BUSY_TIMEOUT_MS};")
+    # PRAGMAs – keep the ones that are safe, drop WAL (causing disk I/O error on Render)
+    try:
+        cx.execute("PRAGMA foreign_keys=ON;")
+        # WAL removed to avoid sqlite3.OperationalError: disk I/O error
+        # cx.execute("PRAGMA journal_mode=WAL;")
+        cx.execute("PRAGMA synchronous=NORMAL;")
+        cx.execute(f"PRAGMA busy_timeout={BUSY_TIMEOUT_MS};")
+    except Exception as e:
+        print("[DB] PRAGMA error:", e)
     return cx
 
 def init_db():
