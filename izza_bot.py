@@ -92,24 +92,27 @@ def _pi_complete_payment(payment_id: str, txid: str) -> dict:
 HORIZON_URL = os.getenv("HORIZON_URL", "https://api.testnet.minepi.com").strip()
 _srv = Server(horizon_url=HORIZON_URL)
 
-# IZZA asset for testnet balance display
-IZZA_CODE = os.getenv("IZZA_TOKEN_CODE", "IZZA").strip()
-IZZA_ISS = os.getenv("IZZA_TOKEN_ISSUER", "").strip()
+# IZZA asset on TESTNET (for wallet IZZA balance)
+IZZA_ASSET_CODE = os.getenv("IZZA_ASSET_CODE", "IZZA")
+IZZA_ASSET_ISSUER = os.getenv(
+    "IZZA_ASSET_ISSUER",
+    "GDKS3KFAM5RBBTSYTFUEHHN7GYRPHV7A6K2BI44LL3QQKXCA6ODBCS57",
+)
 
 
-def _get_testnet_pi_balance_for_username(username: str) -> tuple[str | None, float]:
+def _get_testnet_wallet_balances_for_username(username: str) -> tuple[str | None, float, float]:
     """
     Look up the user's IZZA wallet (user_wallets.pub) by username and
-    return (pub, native PI balance on TESTNET).
+    return (pub, native PI balance on TESTNET, IZZA balance on TESTNET).
 
-    If no wallet or account not funded, returns (None, 0.0).
+    If no wallet or account not funded, returns (None, 0.0, 0.0).
     """
     if not username:
-        return None, 0.0
+        return None, 0.0, 0.0
 
     uname = username.strip().lstrip("@").lower()
     if not uname:
-        return None, 0.0
+        return None, 0.0, 0.0
 
     with conn() as cx:
         row = cx.execute(
@@ -118,73 +121,46 @@ def _get_testnet_pi_balance_for_username(username: str) -> tuple[str | None, flo
         ).fetchone()
 
     if not row or not row["pub"]:
-        return None, 0.0
+        return None, 0.0, 0.0
 
     pub = row["pub"].strip().upper()
     if not pub:
-        return None, 0.0
+        return None, 0.0, 0.0
 
     try:
         acct = _srv.accounts().account_id(pub).call()
     except Exception:
         # account not found or horizon error
-        return pub, 0.0
+        return pub, 0.0, 0.0
 
-    bal = 0.0
-    for b in acct.get("balances", []):
-        if b.get("asset_type") == "native":
-            try:
-                bal = float(b.get("balance", "0") or 0)
-            except Exception:
-                bal = 0.0
-            break
-
-    return pub, bal
-
-
-def _get_testnet_izza_balance_for_username(username: str) -> float:
-    """
-    Return the IZZA asset balance for the user's IZZA wallet on TESTNET.
-    If no IZZA asset or no wallet, returns 0.0.
-    """
-    if not username or not IZZA_CODE or not IZZA_ISS:
-        return 0.0
-
-    uname = username.strip().lstrip("@").lower()
-    if not uname:
-        return 0.0
-
-    with conn() as cx:
-        row = cx.execute(
-            "SELECT pub FROM user_wallets WHERE username=?",
-            (uname,),
-        ).fetchone()
-
-    if not row or not row["pub"]:
-        return 0.0
-
-    pub = row["pub"].strip().upper()
-    if not pub:
-        return 0.0
-
-    try:
-        acct = _srv.accounts().account_id(pub).call()
-    except Exception:
-        return 0.0
-
+    pi_bal = 0.0
     izza_bal = 0.0
     for b in acct.get("balances", []):
-        if (
-            b.get("asset_code") == IZZA_CODE
-            and b.get("asset_issuer") == IZZA_ISS
-        ):
+        atype = b.get("asset_type")
+        if atype == "native":
             try:
-                izza_bal = float(b.get("balance", "0") or 0)
+                pi_bal = float(b.get("balance", "0") or 0)
             except Exception:
-                izza_bal = 0.0
-            break
+                pi_bal = 0.0
+        elif atype in ("credit_alphanum4", "credit_alphanum12"):
+            code = b.get("asset_code")
+            issuer = b.get("asset_issuer")
+            if code == IZZA_ASSET_CODE and issuer == IZZA_ASSET_ISSUER:
+                try:
+                    izza_bal = float(b.get("balance", "0") or 0)
+                except Exception:
+                    izza_bal = 0.0
 
-    return izza_bal
+    return pub, pi_bal, izza_bal
+
+
+def _get_testnet_pi_balance_for_username(username: str) -> tuple[str | None, float]:
+    """
+    Backwards-compatible helper used by some endpoints that only
+    care about native test Pi balance.
+    """
+    pub, pi_bal, _ = _get_testnet_wallet_balances_for_username(username)
+    return pub, pi_bal
 
 
 def _get_or_create_bot_account(username: str, wallet_pub: str | None = None) -> int:
@@ -218,8 +194,9 @@ def _get_or_create_bot_account(username: str, wallet_pub: str | None = None) -> 
 
         cur = cx.execute(
             """
-            INSERT INTO bot_accounts (username, wallet_pub, created_at, updated_at)
-            VALUES (?, ?, ?, ?)
+            INSERT INTO bot_accounts (username, wallet_pub, total_deposited,
+                                      total_withdrawn, created_at, updated_at)
+            VALUES (?, ?, 0, 0, ?, ?)
             """,
             (username_norm, wallet_pub, ts, ts),
         )
@@ -400,7 +377,7 @@ def bot_home():
       2) Deposit TEST PI into that wallet from their Pi testnet wallet.
       3) The bot reads that testnet PI balance directly via Horizon.
 
-    The bot.html template has been updated so that the 'deposit' card is
+    The bot.html template should be updated so that the 'deposit' card is
     replaced with:
       - A button that links to your IZZA wallet page
         (token-auth -> token_showcase).
@@ -467,7 +444,7 @@ def save_trading_config():
         return jsonify(ok=False, error=msg)
 
     try:
-        # wallet_pub is learned later from IZZA wallet linkage / Horizon
+        # Link wallet_pub lazily later from IZZA wallet if needed
         account_id = _get_or_create_bot_account(username, wallet_pub=None)
         bucket_id = _upsert_default_bucket(
             account_id=account_id,
@@ -549,13 +526,13 @@ def trading_summary():
         ok: true,
         account: {
           username,
-          total_deposited,       # derived from IZZA TESTNET wallet PI balance
-          total_withdrawn,       # still tracked in DB if you wire payouts later
-          net_deposit,           # = total_deposited - total_withdrawn
           wallet_pub,            # IZZA TESTNET wallet pub
-          available_unallocated, # net_deposit - bucket allocations
-          pi_balance,            # alias of total_deposited for clarity
-          izza_balance           # IZZA asset balance on testnet
+          pi_balance,            # wallet native test Pi
+          izza_balance,          # wallet IZZA balance
+          total_deposited,       # alias of pi_balance for now
+          total_withdrawn,
+          net_deposit,
+          available_unallocated
         },
         buckets: [
           { id, name, risk_level, objective, volatility,
@@ -584,33 +561,27 @@ def trading_summary():
         # If no bot account yet, we still want to surface the wallet
         # and a zero balance.
         if not acct:
-            # Try to discover IZZA wallet
-            wallet_pub, pi_balance = _get_testnet_pi_balance_for_username(uname)
-            izza_balance = _get_testnet_izza_balance_for_username(uname)
+            wallet_pub, pi_balance, izza_balance = _get_testnet_wallet_balances_for_username(uname)
             return jsonify(
                 ok=True,
                 account={
                     "username": uname,
                     "wallet_pub": wallet_pub or "",
+                    "pi_balance": pi_balance,
+                    "izza_balance": izza_balance,
                     "total_deposited": pi_balance,
                     "total_withdrawn": 0.0,
                     "net_deposit": pi_balance,
                     "available_unallocated": pi_balance,
-                    "pi_balance": pi_balance,
-                    "izza_balance": izza_balance,
                 },
                 buckets=[],
             )
 
         account_id = acct["id"]
 
-    # Refresh wallet + balance from IZZA wallet linkage
-    wallet_pub, pi_balance = _get_testnet_pi_balance_for_username(uname)
-    izza_balance = _get_testnet_izza_balance_for_username(uname)
+    # Refresh wallet + balances from IZZA wallet linkage
+    wallet_pub, pi_balance, izza_balance = _get_testnet_wallet_balances_for_username(uname)
 
-    # We continue to track total_withdrawn in DB (for when you implement
-    # real payouts later). For now it's safe to treat total_deposited as
-    # the LIVE testnet PI balance.
     with conn() as cx:
         acct2 = cx.execute(
             """
@@ -672,12 +643,12 @@ def trading_summary():
         account={
             "username": uname,
             "wallet_pub": wallet_pub or "",
+            "pi_balance": total_deposited,
+            "izza_balance": izza_balance,
             "total_deposited": total_deposited,
             "total_withdrawn": total_withdrawn,
             "net_deposit": net_deposit,
             "available_unallocated": available_unallocated,
-            "pi_balance": total_deposited,
-            "izza_balance": izza_balance,
         },
         buckets=buckets,
     )
@@ -784,6 +755,8 @@ def set_bucket_allocation():
     except Exception:
         return jsonify(ok=False, error="bucket_id must be integer")
 
+    if amount is None:
+        return jsonify(ok=False, error="amount is required")
     try:
         amount = float(amount)
     except Exception:
