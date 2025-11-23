@@ -7,9 +7,6 @@
 
   <link rel="stylesheet" href="{{ url_for('static', filename='css/styles.css') }}">
 
-  <!-- Pi SDK (only needed as fallback if username isn't cached) -->
-  <script src="https://sdk.minepi.com/pi-sdk.js"></script>
-
   <style>
     body { margin:0; padding:0; font-family: sans-serif; color:#fff; background:#050914; }
 
@@ -223,9 +220,6 @@
       <strong>withdraw from a bucket</strong>, it moves back to your IZZA wallet.
     </p>
 
-    <button id="piLoginBtn" class="btn btn-ombre" style="width:100%;margin-bottom:6px;">
-      Authenticate with Pi (fallback)
-    </button>
     <p id="userLabel" class="status-text"></p>
 
     <!-- Wallet connection / secret key -->
@@ -256,6 +250,36 @@
         Save secret in this browser
       </button>
       <p id="secretStatus" class="status-text"></p>
+
+      <!-- NEW: direct withdrawal from IZZA wallet to any Pi Testnet pubkey -->
+      <hr style="border:none;border-top:1px solid rgba(255,255,255,0.1);margin:8px 0;">
+      <h3>Direct wallet withdrawal</h3>
+      <p class="muted">
+        Send <strong>native test Pi directly from your IZZA wallet</strong> to any
+        Pi Testnet public key. This does <strong>not</strong> affect your bot buckets.
+      </p>
+
+      <label for="walletWithdrawDest">Destination Pi Testnet public key</label>
+      <input
+        id="walletWithdrawDest"
+        type="text"
+        placeholder="G... destination pub key"
+        autocomplete="off"
+      />
+
+      <label for="walletWithdrawAmount">Amount to withdraw from IZZA wallet</label>
+      <input
+        id="walletWithdrawAmount"
+        type="number"
+        min="0.0001"
+        step="0.0001"
+        placeholder="0.0000"
+      />
+
+      <button id="walletWithdrawBtn" class="btn btn-outline" style="width:100%;margin-top:4px;">
+        Withdraw from IZZA wallet
+      </button>
+      <p id="walletWithdrawStatus" class="status-text"></p>
     </div>
 
     <!-- Account summary -->
@@ -375,7 +399,6 @@
   let currentUser = null;
   let currentSummary = null;
 
-  const piLoginBtn    = document.getElementById("piLoginBtn");
   const userLabel     = document.getElementById("userLabel");
 
   const walletBox       = document.getElementById("walletBox");
@@ -383,6 +406,11 @@
   const walletSecretInput = document.getElementById("walletSecretInput");
   const saveSecretBtn   = document.getElementById("saveSecretBtn");
   const secretStatus    = document.getElementById("secretStatus");
+
+  const walletWithdrawDest   = document.getElementById("walletWithdrawDest");
+  const walletWithdrawAmount = document.getElementById("walletWithdrawAmount");
+  const walletWithdrawBtn    = document.getElementById("walletWithdrawBtn");
+  const walletWithdrawStatus = document.getElementById("walletWithdrawStatus");
 
   const summaryBox    = document.getElementById("summaryBox");
   const sumWalletPi   = document.getElementById("sumWalletPi");
@@ -407,14 +435,6 @@
 
   const globalStatus    = document.getElementById("globalStatus");
 
-  function initPi(){
-    if(!window.Pi) return;
-    try {
-      Pi.init({ version:"2.0", sandbox: PI_SANDBOX });
-    } catch(e){ console.error(e); }
-  }
-  initPi();
-
   function fmtPi(x){
     const n = Number(x || 0);
     return n.toFixed(4) + " test Pi";
@@ -436,7 +456,7 @@
     if(currentUser && currentUser.username){
       userLabel.textContent = "Using profile for @" + currentUser.username;
     } else {
-      userLabel.textContent = "Not signed in yet.";
+      userLabel.textContent = "No bot profile username found in this browser yet.";
     }
   }
 
@@ -449,7 +469,7 @@
     }
     if (hasSecret) {
       secretStatus.textContent =
-        "A wallet secret is stored in this browser. Deposits will use it.";
+        "A wallet secret is stored in this browser. Deposits and wallet withdrawals will use it.";
     } else {
       secretStatus.textContent =
         "No wallet secret stored yet. Paste your IZZA wallet secret and save it here.";
@@ -577,7 +597,7 @@
 
     depBtn.onclick = async function(){
       if (!currentUser || !currentUser.username) {
-        globalStatus.textContent = "Authenticate first.";
+        globalStatus.textContent = "No username found. Open IZZA BOT from your main entry point.";
         return;
       }
       const amt = parseFloat(depInput.value || "0");
@@ -650,7 +670,7 @@
 
     wdBtn.onclick = async function(){
       if (!currentUser || !currentUser.username) {
-        globalStatus.textContent = "Authenticate first.";
+        globalStatus.textContent = "No username found. Open IZZA BOT from your main entry point.";
         return;
       }
       const amt = parseFloat(wdInput.value || "0");
@@ -705,39 +725,11 @@
     });
   }
 
-  // --- Pi auth fallback ------------------------------------------------
-  piLoginBtn.onclick = async function(){
-    if(!window.Pi) {
-      alert("Pi SDK not available. Open in Pi Browser.");
-      return;
-    }
-
-    try {
-      const scopes = ["username"];  // just need username as fallback
-      const onIncomplete = payment => { console.log("incomplete payment", payment); };
-
-      const { user, accessToken } = await Pi.authenticate(scopes, onIncomplete);
-      currentUser = user;
-      try {
-        if (currentUser && currentUser.username) {
-          localStorage.setItem(BOT_USERNAME_KEY, currentUser.username);
-        }
-      } catch(e){}
-      updateUserLabel();
-      globalStatus.textContent = "";
-      await loadSummary();
-    } catch(err){
-      console.error(err);
-      alert("Pi auth failed.");
-      globalStatus.textContent = "Pi auth failed. Please try again.";
-    }
-  };
-
   // --- Create bucket ---------------------------------------------------
   if (createBucketBtn) {
     createBucketBtn.addEventListener("click", async function(){
       if (!currentUser || !currentUser.username) {
-        createStatus.textContent = "Authenticate with Pi (or come from the main IZZA BOT page) first.";
+        createStatus.textContent = "No username found. Open IZZA BOT from your main entry point first.";
         return;
       }
       createStatus.textContent = "Creating bucket…";
@@ -779,11 +771,78 @@
         localStorage.setItem(WALLET_SECRET_KEY, v);
         walletSecretInput.value = "";
         secretStatus.textContent =
-          "Secret saved in this browser. Deposits will now use this wallet.";
+          "Secret saved in this browser. Deposits and wallet withdrawals will now use this wallet.";
       } catch(e) {
         console.error(e);
         secretStatus.textContent =
           "Could not save secret (local storage error). Deposits may not work.";
+      }
+      updateSecretStatus();
+    });
+  }
+
+  // --- Direct wallet withdrawal (IZZA wallet -> any Pi Testnet pubkey) ---
+  if (walletWithdrawBtn) {
+    walletWithdrawBtn.addEventListener("click", async function(){
+      walletWithdrawStatus.textContent = "";
+      if (!currentUser || !currentUser.username) {
+        walletWithdrawStatus.textContent =
+          "No username found. Open IZZA BOT from your main entry point.";
+        return;
+      }
+
+      const dest = (walletWithdrawDest.value || "").trim();
+      const amt = parseFloat(walletWithdrawAmount.value || "0");
+
+      if (!dest) {
+        walletWithdrawStatus.textContent = "Enter a destination Pi Testnet public key.";
+        return;
+      }
+      if (!amt || amt <= 0) {
+        walletWithdrawStatus.textContent = "Enter a positive withdrawal amount.";
+        return;
+      }
+
+      let secret = null;
+      try {
+        secret = localStorage.getItem(WALLET_SECRET_KEY);
+      } catch(e) {
+        secret = null;
+      }
+
+      if (!secret && walletSecretInput && walletSecretInput.value.trim()) {
+        secret = walletSecretInput.value.trim();
+        try { localStorage.setItem(WALLET_SECRET_KEY, secret); } catch(e) {}
+        walletSecretInput.value = "";
+        updateSecretStatus();
+      }
+
+      if (!secret) {
+        walletWithdrawStatus.textContent =
+          "No IZZA wallet secret found. Paste it above and save it first.";
+        return;
+      }
+
+      walletWithdrawStatus.textContent = "Submitting wallet withdrawal…";
+      try {
+        const res = await postJSON("/api/trading/wallet/withdraw", {
+          username: currentUser.username,
+          amount: amt,
+          dest_pub: dest,
+          secret: secret
+        });
+        if (!res.ok) {
+          walletWithdrawStatus.textContent = res.error || "Error submitting wallet withdrawal.";
+          return;
+        }
+        walletWithdrawStatus.textContent = "Withdrawal submitted. Tx: " + (res.tx_hash || "");
+        walletWithdrawAmount.value = "";
+        // balances changed, refresh
+        await loadSummary();
+        setTimeout(()=>{ walletWithdrawStatus.textContent=""; }, 4000);
+      } catch(e){
+        console.error(e);
+        walletWithdrawStatus.textContent = "Network error during wallet withdrawal.";
       }
     });
   }
