@@ -92,6 +92,10 @@ def _pi_complete_payment(payment_id: str, txid: str) -> dict:
 HORIZON_URL = os.getenv("HORIZON_URL", "https://api.testnet.minepi.com").strip()
 _srv = Server(horizon_url=HORIZON_URL)
 
+# IZZA asset for testnet balance display
+IZZA_CODE = os.getenv("IZZA_TOKEN_CODE", "IZZA").strip()
+IZZA_ISS = os.getenv("IZZA_TOKEN_ISSUER", "").strip()
+
 
 def _get_testnet_pi_balance_for_username(username: str) -> tuple[str | None, float]:
     """
@@ -136,6 +140,51 @@ def _get_testnet_pi_balance_for_username(username: str) -> tuple[str | None, flo
             break
 
     return pub, bal
+
+
+def _get_testnet_izza_balance_for_username(username: str) -> float:
+    """
+    Return the IZZA asset balance for the user's IZZA wallet on TESTNET.
+    If no IZZA asset or no wallet, returns 0.0.
+    """
+    if not username or not IZZA_CODE or not IZZA_ISS:
+        return 0.0
+
+    uname = username.strip().lstrip("@").lower()
+    if not uname:
+        return 0.0
+
+    with conn() as cx:
+        row = cx.execute(
+            "SELECT pub FROM user_wallets WHERE username=?",
+            (uname,),
+        ).fetchone()
+
+    if not row or not row["pub"]:
+        return 0.0
+
+    pub = row["pub"].strip().upper()
+    if not pub:
+        return 0.0
+
+    try:
+        acct = _srv.accounts().account_id(pub).call()
+    except Exception:
+        return 0.0
+
+    izza_bal = 0.0
+    for b in acct.get("balances", []):
+        if (
+            b.get("asset_code") == IZZA_CODE
+            and b.get("asset_issuer") == IZZA_ISS
+        ):
+            try:
+                izza_bal = float(b.get("balance", "0") or 0)
+            except Exception:
+                izza_bal = 0.0
+            break
+
+    return izza_bal
 
 
 def _get_or_create_bot_account(username: str, wallet_pub: str | None = None) -> int:
@@ -351,7 +400,7 @@ def bot_home():
       2) Deposit TEST PI into that wallet from their Pi testnet wallet.
       3) The bot reads that testnet PI balance directly via Horizon.
 
-    The bot.html template should be updated so that the 'deposit' card is
+    The bot.html template has been updated so that the 'deposit' card is
     replaced with:
       - A button that links to your IZZA wallet page
         (token-auth -> token_showcase).
@@ -505,7 +554,8 @@ def trading_summary():
           net_deposit,           # = total_deposited - total_withdrawn
           wallet_pub,            # IZZA TESTNET wallet pub
           available_unallocated, # net_deposit - bucket allocations
-          pi_balance             # alias of total_deposited for clarity
+          pi_balance,            # alias of total_deposited for clarity
+          izza_balance           # IZZA asset balance on testnet
         },
         buckets: [
           { id, name, risk_level, objective, volatility,
@@ -536,6 +586,7 @@ def trading_summary():
         if not acct:
             # Try to discover IZZA wallet
             wallet_pub, pi_balance = _get_testnet_pi_balance_for_username(uname)
+            izza_balance = _get_testnet_izza_balance_for_username(uname)
             return jsonify(
                 ok=True,
                 account={
@@ -546,6 +597,7 @@ def trading_summary():
                     "net_deposit": pi_balance,
                     "available_unallocated": pi_balance,
                     "pi_balance": pi_balance,
+                    "izza_balance": izza_balance,
                 },
                 buckets=[],
             )
@@ -554,6 +606,7 @@ def trading_summary():
 
     # Refresh wallet + balance from IZZA wallet linkage
     wallet_pub, pi_balance = _get_testnet_pi_balance_for_username(uname)
+    izza_balance = _get_testnet_izza_balance_for_username(uname)
 
     # We continue to track total_withdrawn in DB (for when you implement
     # real payouts later). For now it's safe to treat total_deposited as
@@ -624,6 +677,7 @@ def trading_summary():
             "net_deposit": net_deposit,
             "available_unallocated": available_unallocated,
             "pi_balance": total_deposited,
+            "izza_balance": izza_balance,
         },
         buckets=buckets,
     )
@@ -805,8 +859,7 @@ def set_bucket_allocation():
                   account_id, bucket_id, amount, created_at, updated_at
                 )
                 VALUES (?, ?, ?, ?, ?)
-                """
-                ,
+                """,
                 (account_id, bucket_id, amount, ts, ts),
             )
 
