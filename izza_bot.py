@@ -6,6 +6,9 @@ import requests
 from flask import Blueprint, render_template, jsonify, request
 from db import conn
 
+# NEW: Horizon client for reading TESTNET balances
+from stellar_sdk import Server
+
 # Pi Platform API key: prefer variables.apikey if module is present,
 # otherwise fall back to environment variables so Render can boot.
 try:
@@ -21,14 +24,19 @@ izza_bot_bp = Blueprint("izza_bot", __name__)
 
 # ---------------------------------------------------------
 # HARD-CODED TESTNET TRADING-BOT DEPOSIT ACCOUNT
-# (Users send TEST PI here)
+# (Users send TEST PI here)  -- NO LONGER USED FOR DEPOSITS
 # ---------------------------------------------------------
 TRADING_BOT_TESTNET_DEPOSIT = "GAIXMJ22FKXXGDPQMZWR3GL24PM5UEPUCFNK4FSMJOZ3HTGPXSEQZ5AF"
 
-# Always force Pi SDK sandbox for the bot
+# Always force Pi SDK sandbox for the bot (no longer required on UI,
+# but we keep it in case templates still reference it)
 BOT_PI_SANDBOX = "true"
 
-# Pi Platform API base
+# Pi Platform API base (MAINNET ONLY)
+# NOTE: For the trading bot we are NO LONGER using user_to_app payments
+# at all, because the app is registered on mainnet and there is no
+# separate "testnet" payment flow. Bot deposits come from the user's
+# IZZA testnet wallet instead.
 PI_PLATFORM_API_BASE = "https://api.minepi.com/v2"
 PI_API_KEY = apikey
 
@@ -78,22 +86,75 @@ def _pi_complete_payment(payment_id: str, txid: str) -> dict:
     return r.json()
 
 
+# ---------------------------------------------------------
+# TESTNET HORIZON CLIENT (for IZZA wallets)
+# ---------------------------------------------------------
+HORIZON_URL = os.getenv("HORIZON_URL", "https://api.testnet.minepi.com").strip()
+_srv = Server(horizon_url=HORIZON_URL)
+
+
+def _get_testnet_pi_balance_for_username(username: str) -> tuple[str | None, float]:
+    """
+    Look up the user's IZZA wallet (user_wallets.pub) by username and
+    return (pub, native PI balance on TESTNET).
+
+    If no wallet or account not funded, returns (None, 0.0).
+    """
+    if not username:
+        return None, 0.0
+
+    uname = username.strip().lstrip("@").lower()
+    if not uname:
+        return None, 0.0
+
+    with conn() as cx:
+        row = cx.execute(
+            "SELECT pub FROM user_wallets WHERE username=?",
+            (uname,),
+        ).fetchone()
+
+    if not row or not row["pub"]:
+        return None, 0.0
+
+    pub = row["pub"].strip().upper()
+    if not pub:
+        return None, 0.0
+
+    try:
+        acct = _srv.accounts().account_id(pub).call()
+    except Exception:
+        # account not found or horizon error
+        return pub, 0.0
+
+    bal = 0.0
+    for b in acct.get("balances", []):
+        if b.get("asset_type") == "native":
+            try:
+                bal = float(b.get("balance", "0") or 0)
+            except Exception:
+                bal = 0.0
+            break
+
+    return pub, bal
+
+
 def _get_or_create_bot_account(username: str, wallet_pub: str | None = None) -> int:
     """
     Ensure there is a bot_accounts row for this username.
-    wallet_pub is optional here; we can learn it later from PaymentDTO.
+    wallet_pub is optional here; we can learn it later from IZZA wallet linkage.
     Returns account_id.
     """
     if not username:
         raise ValueError("username required")
 
+    username_norm = username.strip().lstrip("@").lower()
     wallet_pub = wallet_pub or ""
     ts = _now()
 
     with conn() as cx:
         row = cx.execute(
             "SELECT id, wallet_pub FROM bot_accounts WHERE username = ?",
-            (username,),
+            (username_norm,),
         ).fetchone()
 
         if row:
@@ -111,7 +172,7 @@ def _get_or_create_bot_account(username: str, wallet_pub: str | None = None) -> 
             INSERT INTO bot_accounts (username, wallet_pub, created_at, updated_at)
             VALUES (?, ?, ?, ?)
             """,
-            (username, wallet_pub, ts, ts),
+            (username_norm, wallet_pub, ts, ts),
         )
         return cur.lastrowid
 
@@ -281,15 +342,25 @@ def _validate_profile(
 def bot_home():
     """
     Serves the IZZA BOT onboarding page.
-    User sets their initial default profile and can make deposits.
 
-    For repeat users, you can link them directly to /bot/profile from your home.
+    IMPORTANT:
+    We NO LONGER show a Pi SDK deposit flow here, because the app is
+    registered on MAINNET and there is no separate 'testnet' user_to_app
+    payment flow. Instead, users must:
+      1) Create / link their IZZA TESTNET wallet (token showcase flow).
+      2) Deposit TEST PI into that wallet from their Pi testnet wallet.
+      3) The bot reads that testnet PI balance directly via Horizon.
+
+    The bot.html template should be updated so that the 'deposit' card is
+    replaced with:
+      - A button that links to your IZZA wallet page
+        (token-auth -> token_showcase).
+      - A short explanation that the bot will use the IZZA wallet's
+        TEST PI balance as available capital.
     """
     return render_template(
         "bot.html",
-        TRADER_DEPOSIT_PUB=TRADING_BOT_TESTNET_DEPOSIT,
         PI_SANDBOX=BOT_PI_SANDBOX,
-        PI_APP_ID="",  # bot does not require mainnet app id here
     )
 
 
@@ -297,7 +368,7 @@ def bot_home():
 def bot_profile_page():
     """
     Main profile page:
-    - shows total deposited / available
+    - shows total deposited / available (from IZZA TESTNET wallet)
     - lists buckets and allocations
     - allows new bucket creation and withdrawals
     """
@@ -347,7 +418,7 @@ def save_trading_config():
         return jsonify(ok=False, error=msg)
 
     try:
-        # wallet_pub is learned later from payments; we only key by username here
+        # wallet_pub is learned later from IZZA wallet linkage / Horizon
         account_id = _get_or_create_bot_account(username, wallet_pub=None)
         bucket_id = _upsert_default_bucket(
             account_id=account_id,
@@ -365,7 +436,7 @@ def save_trading_config():
         ok=True,
         bucket_id=bucket_id,
         profile={
-            "username": username,
+            "username": username.strip().lstrip("@").lower(),
             "risk_level": risk_level,
             "time_horizon_days": horizon_days,
             "target_value_back": target_value_back,
@@ -376,164 +447,44 @@ def save_trading_config():
 
 
 # ----------------------------------------------------------------------
-# Deposit flow (Pi payments → bot_deposits)
+# Deposit flow (Pi payments → bot_deposits)  -- DISABLED
 # ----------------------------------------------------------------------
 @izza_bot_bp.route("/api/trading/deposit/approve", methods=["POST"])
 def approve_bot_deposit():
     """
-    Called from Pi JS onReadyForServerApproval(paymentId).
+    OLD: Called from Pi JS onReadyForServerApproval(paymentId).
 
-    We:
-      - fetch the PaymentDTO
-      - verify it's a user_to_app testnet payment to the bot account
-      - approve it via Pi Platform API
+    For the TESTNET trading bot we have DISABLED Pi SDK deposits because
+    your IZZA app is registered on MAINNET and user_to_app payments
+    cannot be forced onto testnet.
+
+    New flow:
+      - Users create / link an IZZA TESTNET wallet (token_showcase.html).
+      - They deposit TEST PI into that wallet from their Pi TESTNET wallet.
+      - The bot reads that balance directly via Horizon.
+
+    This endpoint now always returns an error so that any stray calls
+    from older front-end code fail clearly.
     """
-    data = request.get_json() or {}
-    payment_id = (data.get("paymentId") or "").strip()
-    if not payment_id:
-        return jsonify(ok=False, error="paymentId missing")
-
-    try:
-        payment = _pi_get_payment(payment_id)
-    except Exception as e:
-        return jsonify(ok=False, error=f"Error fetching payment: {e}")
-
-    try:
-        to_addr = payment.get("to_address") or payment.get("to") or ""
-        direction = payment.get("direction") or ""
-        metadata = payment.get("metadata") or {}
-        kind = metadata.get("kind")
-
-        if direction != "user_to_app":
-            return jsonify(ok=False, error="Payment must be user_to_app.")
-        if TRADING_BOT_TESTNET_DEPOSIT and to_addr != TRADING_BOT_TESTNET_DEPOSIT:
-            return jsonify(ok=False, error="Payment is not to IZZA BOT deposit account.")
-        if kind != "bot_deposit":
-            return jsonify(ok=False, error="Payment metadata.kind must be 'bot_deposit'.")
-    except Exception as e:
-        return jsonify(ok=False, error=f"Invalid payment structure: {e}")
-
-    try:
-        _pi_approve_payment(payment_id)
-    except Exception as e:
-        return jsonify(ok=False, error=f"Error approving payment: {e}")
-
-    return jsonify(ok=True)
+    return jsonify(
+        ok=False,
+        error="Pi SDK deposit flow is disabled for IZZA BOT. Deposit TEST PI to your IZZA wallet instead.",
+    ), 400
 
 
 @izza_bot_bp.route("/api/trading/deposit/complete", methods=["POST"])
 def complete_bot_deposit():
     """
-    Called from Pi JS onReadyForServerCompletion(paymentId, txid).
+    OLD: Called from Pi JS onReadyForServerCompletion(paymentId, txid).
 
-    We:
-      - fetch PaymentDTO again
-      - complete it in Pi Platform API
-      - read username, wallet pub, amount
-      - create/update bot_account
-      - insert bot_deposits row and bump total_deposited
+    This is no longer used now that deposits are based on IZZA TESTNET
+    wallet balances. We keep the endpoint only so old front-ends do not
+    crash, but it returns an error.
     """
-    data = request.get_json() or {}
-    payment_id = (data.get("paymentId") or "").strip()
-    txid = (data.get("txid") or "").strip()
-
-    if not payment_id:
-        return jsonify(ok=False, error="paymentId missing")
-    if not txid:
-        return jsonify(ok=False, error="txid missing")
-
-    try:
-        payment = _pi_get_payment(payment_id)
-    except Exception as e:
-        return jsonify(ok=False, error=f"Error fetching payment: {e}")
-
-    try:
-        to_addr = payment.get("to_address") or payment.get("to") or ""
-        direction = payment.get("direction") or ""
-        metadata = payment.get("metadata") or {}
-        kind = metadata.get("kind")
-
-        if direction != "user_to_app":
-            return jsonify(ok=False, error="Payment must be user_to_app.")
-        if TRADING_BOT_TESTNET_DEPOSIT and to_addr != TRADING_BOT_TESTNET_DEPOSIT:
-            return jsonify(ok=False, error="Payment is not to IZZA BOT deposit account.")
-        if kind != "bot_deposit":
-            return jsonify(ok=False, error="Payment metadata.kind must be 'bot_deposit'.")
-    except Exception as e:
-        return jsonify(ok=False, error=f"Invalid payment structure: {e}")
-
-    # Complete in Pi Platform
-    try:
-        _pi_complete_payment(payment_id, txid)
-    except Exception as e:
-        return jsonify(ok=False, error=f"Error completing payment: {e}")
-
-    # Extract core info
-    user_info = payment.get("user") or {}
-    username = user_info.get("username") or ""
-    amount = float(payment.get("amount") or 0)
-
-    # Try to extract wallet pub from transaction info if Pi exposes it
-    tx_info = (
-        payment.get("transaction")
-        or payment.get("blockchain_transaction")
-        or {}
-    )
-    wallet_pub = (
-        tx_info.get("source_account")
-        or tx_info.get("from_address")
-        or tx_info.get("from")
-        or ""
-    )
-
-    if not username:
-        return jsonify(ok=False, error="Payment does not include username.")
-
-    ts = _now()
-
-    try:
-        # Create / update bot account
-        account_id = _get_or_create_bot_account(username, wallet_pub or None)
-
-        with conn() as cx:
-            # Avoid double-crediting if complete endpoint called twice
-            existing = cx.execute(
-                "SELECT id FROM bot_deposits WHERE tx_hash = ?",
-                (payment_id,),
-            ).fetchone()
-            if not existing:
-                cx.execute(
-                    """
-                    INSERT INTO bot_deposits (
-                      account_id, tx_hash, amount, asset_code,
-                      asset_issuer, status, created_at, raw_json
-                    )
-                    VALUES (?, ?, ?, ?, ?, 'confirmed', ?, ?)
-                    """,
-                    (
-                        account_id,
-                        payment_id,
-                        amount,
-                        "PI",
-                        None,
-                        ts,
-                        json.dumps(payment),
-                    ),
-                )
-
-                cx.execute(
-                    """
-                    UPDATE bot_accounts
-                       SET total_deposited = total_deposited + ?,
-                           updated_at = ?
-                     WHERE id = ?
-                    """,
-                    (amount, ts, account_id),
-                )
-    except Exception as e:
-        return jsonify(ok=False, error=f"Database error crediting deposit: {e}")
-
-    return jsonify(ok=True, amount=amount)
+    return jsonify(
+        ok=False,
+        error="Pi SDK deposit completion is disabled. IZZA BOT uses your IZZA TESTNET wallet balance instead.",
+    ), 400
 
 
 # ----------------------------------------------------------------------
@@ -548,11 +499,13 @@ def trading_summary():
       {
         ok: true,
         account: {
-          total_deposited,
-          total_withdrawn,
-          net_deposit,
-          wallet_pub,
-          available_unallocated
+          username,
+          total_deposited,       # derived from IZZA TESTNET wallet PI balance
+          total_withdrawn,       # still tracked in DB if you wire payouts later
+          net_deposit,           # = total_deposited - total_withdrawn
+          wallet_pub,            # IZZA TESTNET wallet pub
+          available_unallocated, # net_deposit - bucket allocations
+          pi_balance             # alias of total_deposited for clarity
         },
         buckets: [
           { id, name, risk_level, objective, volatility,
@@ -565,6 +518,8 @@ def trading_summary():
     if not username:
         return jsonify(ok=False, error="username is required")
 
+    uname = username.strip().lstrip("@").lower()
+
     with conn() as cx:
         acct = cx.execute(
             """
@@ -573,29 +528,56 @@ def trading_summary():
               FROM bot_accounts
              WHERE username = ?
             """,
-            (username,),
+            (uname,),
         ).fetchone()
 
+        # If no bot account yet, we still want to surface the wallet
+        # and a zero balance.
         if not acct:
-            # No account yet: empty state
+            # Try to discover IZZA wallet
+            wallet_pub, pi_balance = _get_testnet_pi_balance_for_username(uname)
             return jsonify(
                 ok=True,
                 account={
-                  "username": username,
-                  "wallet_pub": "",
-                  "total_deposited": 0,
-                  "total_withdrawn": 0,
-                  "net_deposit": 0,
-                  "available_unallocated": 0,
+                    "username": uname,
+                    "wallet_pub": wallet_pub or "",
+                    "total_deposited": pi_balance,
+                    "total_withdrawn": 0.0,
+                    "net_deposit": pi_balance,
+                    "available_unallocated": pi_balance,
+                    "pi_balance": pi_balance,
                 },
                 buckets=[],
             )
 
         account_id = acct["id"]
-        total_deposited = float(acct["total_deposited"] or 0)
-        total_withdrawn = float(acct["total_withdrawn"] or 0)
-        net_deposit = total_deposited - total_withdrawn
 
+    # Refresh wallet + balance from IZZA wallet linkage
+    wallet_pub, pi_balance = _get_testnet_pi_balance_for_username(uname)
+
+    # We continue to track total_withdrawn in DB (for when you implement
+    # real payouts later). For now it's safe to treat total_deposited as
+    # the LIVE testnet PI balance.
+    with conn() as cx:
+        acct2 = cx.execute(
+            """
+            SELECT total_withdrawn
+              FROM bot_accounts
+             WHERE id = ?
+            """,
+            (account_id,),
+        ).fetchone()
+
+        total_withdrawn = float(acct2["total_withdrawn"] or 0) if acct2 else 0.0
+
+        # Keep bot_accounts.wallet_pub in sync if we discovered it
+        if wallet_pub:
+            cx.execute(
+                "UPDATE bot_accounts SET wallet_pub = ?, updated_at = ? WHERE id = ?",
+                (wallet_pub, _now(), account_id),
+            )
+
+        # Buckets + allocations as before
         rows = cx.execute(
             """
             SELECT b.id, b.name, b.objective, b.risk_level, b.volatility,
@@ -611,33 +593,37 @@ def trading_summary():
             (account_id,),
         ).fetchall()
 
-        buckets = []
-        total_alloc = 0.0
-        for r in rows:
-            alloc = float(r["allocation"] or 0)
-            total_alloc += alloc
-            buckets.append({
-                "id": r["id"],
-                "name": r["name"],
-                "objective": r["objective"],
-                "risk_level": r["risk_level"],
-                "volatility": r["volatility"],
-                "time_horizon_days": r["time_horizon_days"],
-                "target_value_back": r["target_value_back"],
-                "allocation": alloc,
-            })
+    total_deposited = pi_balance
+    net_deposit = max(0.0, total_deposited - total_withdrawn)
 
-        available_unallocated = max(0.0, net_deposit - total_alloc)
+    buckets = []
+    total_alloc = 0.0
+    for r in rows:
+        alloc = float(r["allocation"] or 0)
+        total_alloc += alloc
+        buckets.append({
+            "id": r["id"],
+            "name": r["name"],
+            "objective": r["objective"],
+            "risk_level": r["risk_level"],
+            "volatility": r["volatility"],
+            "time_horizon_days": r["time_horizon_days"],
+            "target_value_back": r["target_value_back"],
+            "allocation": alloc,
+        })
+
+    available_unallocated = max(0.0, net_deposit - total_alloc)
 
     return jsonify(
         ok=True,
         account={
-            "username": acct["username"],
-            "wallet_pub": acct["wallet_pub"],
+            "username": uname,
+            "wallet_pub": wallet_pub or "",
             "total_deposited": total_deposited,
             "total_withdrawn": total_withdrawn,
             "net_deposit": net_deposit,
             "available_unallocated": available_unallocated,
+            "pi_balance": total_deposited,
         },
         buckets=buckets,
     )
@@ -728,7 +714,7 @@ def set_bucket_allocation():
       }
 
     We ensure total allocations across all buckets
-    do not exceed net_deposit.
+    do not exceed net_deposit (derived from IZZA wallet balance).
     """
     data = request.get_json() or {}
     username = (data.get("username") or "").strip()
@@ -751,18 +737,23 @@ def set_bucket_allocation():
     if amount < 0:
         return jsonify(ok=False, error="amount cannot be negative")
 
+    uname = username.strip().lstrip("@").lower()
     ts = _now()
+
+    # Live PI balance from IZZA wallet
+    wallet_pub, pi_balance = _get_testnet_pi_balance_for_username(uname)
 
     with conn() as cx:
         acct = cx.execute(
-            "SELECT id, total_deposited, total_withdrawn FROM bot_accounts WHERE username = ?",
-            (username,),
+            "SELECT id, total_withdrawn FROM bot_accounts WHERE username = ?",
+            (uname,),
         ).fetchone()
         if not acct:
             return jsonify(ok=False, error="Bot account not found for user.")
 
         account_id = acct["id"]
-        net_deposit = float(acct["total_deposited"] or 0) - float(acct["total_withdrawn"] or 0)
+        total_withdrawn = float(acct["total_withdrawn"] or 0)
+        net_deposit = max(0.0, pi_balance - total_withdrawn)
 
         bucket = cx.execute(
             "SELECT id, account_id FROM bot_buckets WHERE id = ?",
@@ -786,7 +777,7 @@ def set_bucket_allocation():
         if total_other + amount > net_deposit + 1e-9:
             return jsonify(
                 ok=False,
-                error="Allocation exceeds your available net deposits. Reduce amount or free other buckets.",
+                error="Allocation exceeds your available net deposits (IZZA wallet balance). Reduce amount or free other buckets.",
             )
 
         # Upsert allocation
@@ -814,7 +805,8 @@ def set_bucket_allocation():
                   account_id, bucket_id, amount, created_at, updated_at
                 )
                 VALUES (?, ?, ?, ?, ?)
-                """,
+                """
+                ,
                 (account_id, bucket_id, amount, ts, ts),
             )
 
@@ -836,10 +828,12 @@ def request_withdraw():
       }
 
     We:
+      - derive net_deposit from IZZA TESTNET wallet balance minus any
+        total_withdrawn recorded so far
       - verify amount <= available_unallocated
       - insert bot_withdrawals row with status 'requested'
       - actual payout logic can be done later by a script that
-        sends app_to_user payment from the bot account.
+        sends app_to_user payment from the bot account (on TESTNET).
     """
     data = request.get_json() or {}
     username = (data.get("username") or "").strip()
@@ -854,22 +848,27 @@ def request_withdraw():
     if amount <= 0:
         return jsonify(ok=False, error="amount must be positive")
 
+    uname = username.strip().lstrip("@").lower()
     ts = _now()
+
+    # Live PI balance from IZZA wallet
+    wallet_pub, pi_balance = _get_testnet_pi_balance_for_username(uname)
 
     with conn() as cx:
         acct = cx.execute(
             """
-            SELECT id, wallet_pub, total_deposited, total_withdrawn
+            SELECT id, wallet_pub, total_withdrawn
               FROM bot_accounts
              WHERE username = ?
             """,
-            (username,),
+            (uname,),
         ).fetchone()
         if not acct:
             return jsonify(ok=False, error="Bot account not found for user.")
 
         account_id = acct["id"]
-        net_deposit = float(acct["total_deposited"] or 0) - float(acct["total_withdrawn"] or 0)
+        total_withdrawn = float(acct["total_withdrawn"] or 0)
+        net_deposit = max(0.0, pi_balance - total_withdrawn)
 
         row = cx.execute(
             """
@@ -895,13 +894,13 @@ def request_withdraw():
             )
             VALUES (?, ?, 'requested', ?, ?, NULL, NULL)
             """,
-            (account_id, amount, acct["wallet_pub"], ts),
+            (account_id, wallet_pub or acct["wallet_pub"], ts),
         )
 
     return jsonify(
         ok=True,
         available_unallocated=available_unallocated - amount,
-        note="Withdrawal request recorded. A Pi testnet payout script can send this amount later.",
+        note="Withdrawal request recorded. A TESTNET payout script can send this amount later.",
     )
 
 
@@ -919,10 +918,12 @@ def list_buckets():
     if not username:
         return jsonify(ok=False, error="username is required")
 
+    uname = username.strip().lstrip("@").lower()
+
     with conn() as cx:
         acct = cx.execute(
             "SELECT id FROM bot_accounts WHERE username = ?",
-            (username,),
+            (uname,),
         ).fetchone()
         if not acct:
             return jsonify(ok=True, buckets=[])
