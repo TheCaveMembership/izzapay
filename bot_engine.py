@@ -157,8 +157,12 @@ class Position:
 # ---------------------------------------------------------------------
 
 def ensure_bot_tables():
+    """
+    Create tables if missing and auto-migrate bot_trades so it has
+    the columns this engine expects (code, issuer, etc.).
+    """
     with conn() as cx:
-        # Trades log
+        # Trades log (new schema)
         cx.execute("""
         CREATE TABLE IF NOT EXISTS bot_trades(
           id INTEGER PRIMARY KEY,
@@ -183,6 +187,29 @@ def ensure_bot_tables():
         CREATE INDEX IF NOT EXISTS idx_bot_trades_bucket_ts
           ON bot_trades(bucket_id, created_at);
         """)
+
+        # --- lightweight migration for older versions of bot_trades ---
+        cols = [r["name"] for r in cx.execute("PRAGMA table_info(bot_trades)").fetchall()]
+        # All columns we rely on in INSERT INTO bot_trades(...)
+        needed_cols = {
+            "code": "TEXT",
+            "issuer": "TEXT",
+            "side": "TEXT",
+            "price_pi": "REAL",
+            "amount_token": "REAL",
+            "amount_pi": "REAL",
+            "mid_price": "REAL",
+            "spread_pct": "REAL",
+            "depth_imbalance": "REAL",
+            "strategy_tag": "TEXT",
+            "risk_level": "TEXT",
+            "created_at": "INTEGER",
+            "tx_hash": "TEXT",
+            "raw_json": "TEXT",
+        }
+        for name, coltype in needed_cols.items():
+            if name not in cols:
+                cx.execute(f"ALTER TABLE bot_trades ADD COLUMN {name} {coltype};")
 
         # Bucket positions per token
         cx.execute("""
@@ -859,7 +886,6 @@ def run_once():
             break
 
         # Refresh bucket cash after sells
-        # (approximate: we rely on DB update in update_cash_for_bucket)
         with conn() as cx:
             row = cx.execute(
                 """
