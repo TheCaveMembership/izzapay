@@ -313,6 +313,72 @@
     }
   }
 
+  /**
+   * Check in SQLite (via /api/trading/summary) whether this username
+   * already has one or more bot buckets.
+   *
+   * If buckets exist:
+   *   - instantly redirect to /bot/profile (skip this page)
+   *
+   * If no buckets exist:
+   *   - when called with redirectOnlyOnHit=false, show onboarding boxes
+   *   - when called with redirectOnlyOnHit=true, just stop (user still sees this page)
+   */
+  async function checkExistingProfileByUsername(username, redirectOnlyOnHit){
+    if (!username) return false;
+
+    try {
+      globalStatus.textContent = "Checking your IZZA BOT profile…";
+
+      const u = encodeURIComponent(username);
+      const resp = await fetch("/api/trading/summary?username=" + u);
+      const data = await resp.json();
+
+      if (!data.ok) {
+        console.warn("summary not ok", data);
+        globalStatus.textContent = data.error || "Error checking bot profile.";
+        if (!redirectOnlyOnHit && currentUser) {
+          depositBox.style.display = "block";
+          configBox.style.display = "block";
+          await loadWalletInfo();
+        }
+        return false;
+      }
+
+      const buckets = data.buckets || [];
+      if (buckets.length > 0) {
+        // User has at least one bucket in SQLite: skip this page forever
+        globalStatus.textContent =
+          "Existing IZZA BOT profile found. Redirecting to your buckets…";
+        setTimeout(function(){
+          window.location.href = "/bot/profile";
+        }, 600);
+        return true;
+      }
+
+      // No buckets yet: only show onboarding when this was called
+      // after Pi auth (redirectOnlyOnHit = false)
+      if (!redirectOnlyOnHit && currentUser) {
+        depositBox.style.display = "block";
+        configBox.style.display = "block";
+        await loadWalletInfo();
+        globalStatus.textContent = "";
+      } else {
+        globalStatus.textContent = "";
+      }
+      return false;
+    } catch(e){
+      console.error(e);
+      globalStatus.textContent = "Network error checking bot profile.";
+      if (!redirectOnlyOnHit && currentUser) {
+        depositBox.style.display = "block";
+        configBox.style.display = "block";
+        await loadWalletInfo();
+      }
+      return false;
+    }
+  }
+
   // --- Pi auth ---------------------------------------------------------
   piLoginBtn.onclick = async function(){
     if(!window.Pi) {
@@ -327,7 +393,7 @@
       const { user, accessToken } = await Pi.authenticate(scopes, onIncomplete);
       currentUser = user;
 
-      // Cache username so /bot/profile does NOT require re-auth
+      // Cache username so /bot/profile can auto-load later
       try {
         if (currentUser && currentUser.username) {
           localStorage.setItem(BOT_USERNAME_KEY, currentUser.username);
@@ -339,12 +405,10 @@
       updateUserLabel();
       globalStatus.textContent = "";
 
-      // Once authenticated, show wallet + config boxes
-      depositBox.style.display = "block";
-      configBox.style.display  = "block";
-
-      // Load IZZA wallet info for this user
-      await loadWalletInfo();
+      // After Pi auth: check SQLite to see if this user already has buckets.
+      // If they do, skip onboarding and go straight to profile.
+      // If not, show wallet + config boxes for FIRST-TIME setup.
+      await checkExistingProfileByUsername(currentUser.username, false);
     } catch(err){
       console.error(err);
       alert("Pi auth failed.");
@@ -392,6 +456,23 @@
       }
     });
   }
+
+  // --- On load: if we already know the username from this browser AND
+  // SQLite shows existing buckets, skip this page entirely. ----------
+  (function initFromCache(){
+    try {
+      const cached = localStorage.getItem(BOT_USERNAME_KEY);
+      if (cached) {
+        // We do NOT need Pi auth again here – this just lets a returning
+        // user skip the onboarding if their profile already exists
+        // in SQLite. If not, they can still hit "Authenticate with Pi"
+        // to go through the first-time flow.
+        checkExistingProfileByUsername(cached, true);
+      }
+    } catch(e){
+      console.warn("Could not read cached username", e);
+    }
+  })();
 
 })();
 </script>
