@@ -132,26 +132,40 @@
       justify-content:space-between;
       font-size:12px;
       margin-top:4px;
+      gap:8px;
     }
 
     .bucket-row {
       border-radius:12px;
-      padding:8px 10px;
+      padding:12px 14px;
       background:rgba(0,0,0,0.35);
-      margin-bottom:8px;
+      margin-bottom:12px;
     }
 
     .bucket-header {
       display:flex;
-      justify-content:space-between;
-      align-items:center;
+      flex-direction:column;
+      align-items:flex-start;
+      gap:4px;
       font-size:12px;
       margin-bottom:4px;
+    }
+
+    .bucket-header-left {
+      display:flex;
+      flex-wrap:wrap;
+      align-items:center;
+      gap:4px;
+    }
+
+    .bucket-header-right {
+      align-self:flex-end;
     }
 
     .bucket-name {
       font-weight:bold;
       font-size:12px;
+      margin-right:4px;
     }
 
     .bucket-chip {
@@ -160,14 +174,14 @@
       padding:2px 6px;
       border-radius:999px;
       border:1px solid rgba(255,255,255,0.25);
-      margin-left:4px;
+      margin-left:0;
     }
 
     .bucket-alloc-row {
       display:flex;
       align-items:center;
       gap:6px;
-      margin-top:4px;
+      margin-top:8px;
     }
 
     .bucket-alloc-row input {
@@ -192,7 +206,7 @@
 
     <h1>Your Bot Buckets</h1>
     <p class="sub">
-      This is your <strong>IZZA BOT profile</strong>. You can see your IZZA wallet balances,
+      This is your <strong>IZZA BOT profile</strong>. You can see your total deposits,
       allocate test Pi into different strategy buckets, and request withdrawals back to
       your Pi Testnet wallet.
     </p>
@@ -212,7 +226,7 @@
       </div>
       <div class="metric-row">
         <span>Wallet IZZA balance</span>
-        <span id="sumWalletIzza">0.0000000 IZZA</span>
+        <span id="sumWalletIzza">0.0000 IZZA</span>
       </div>
 
       <div class="metric-row" style="margin-top:8px;">
@@ -237,7 +251,8 @@
       </div>
       <p class="muted" style="margin-top:6px;">
         Your IZZA TESTNET wallet holds the actual test Pi. The bot uses your
-        <strong>unallocated</strong> balance as capital you can deposit into strategy buckets below.
+        <strong>unallocated</strong> balance as capital you can deposit into
+        strategy buckets below.
       </p>
     </div>
 
@@ -250,7 +265,7 @@
       <div id="bucketsList"></div>
       <p id="bucketsEmptyMsg" class="muted" style="display:none;">
         You do not have any buckets yet. Set your base profile on the main IZZA BOT page,
-        then create additional buckets here and deposit test Pi into them by adjusting allocations.
+        then create additional buckets here.
       </p>
     </div>
 
@@ -379,7 +394,7 @@
 
   function fmtIzza(x){
     const n = Number(x || 0);
-    return n.toFixed(7) + " IZZA";
+    return n.toFixed(6) + " IZZA";
   }
 
   function updateUserLabel(){
@@ -431,12 +446,11 @@
     withdrawBox.style.display= "block";
     bucketsBox.style.display = "block";
 
+    const walletPi   = acct.pi_balance || 0;
+    const walletIzza = acct.izza_balance || 0;
     const totalDeposited = acct.total_deposited || 0;
     const totalWithdrawn = acct.total_withdrawn || 0;
     const netDeposit     = acct.net_deposit || 0;
-
-    const walletPi   = (acct.pi_balance != null ? acct.pi_balance : totalDeposited) || 0;
-    const walletIzza = acct.izza_balance != null ? acct.izza_balance : 0;
 
     let totalAlloc = 0;
     for (const b of buckets) totalAlloc += (b.allocation || 0);
@@ -445,11 +459,12 @@
 
     sumWalletPi.textContent   = fmtPi(walletPi);
     sumWalletIzza.textContent = fmtIzza(walletIzza);
-    sumDeposited.textContent  = fmtPi(totalDeposited);
-    sumWithdrawn.textContent  = fmtPi(totalWithdrawn);
-    sumNet.textContent        = fmtPi(netDeposit);
-    sumAllocated.textContent  = fmtPi(totalAlloc);
-    sumAvailable.textContent  = fmtPi(avail);
+
+    sumDeposited.textContent = fmtPi(totalDeposited);
+    sumWithdrawn.textContent = fmtPi(totalWithdrawn);
+    sumNet.textContent       = fmtPi(netDeposit);
+    sumAllocated.textContent = fmtPi(totalAlloc);
+    sumAvailable.textContent = fmtPi(avail);
 
     if (avail > 0) {
       withdrawAmount.placeholder = avail.toFixed(4);
@@ -475,11 +490,15 @@
       const header = document.createElement("div");
       header.className = "bucket-header";
       const left = document.createElement("div");
+      left.className = "bucket-header-left";
       const right = document.createElement("div");
+      right.className = "bucket-header-right";
 
       const nameSpan = document.createElement("span");
       nameSpan.className = "bucket-name";
       nameSpan.textContent = b.name || ("Bucket " + b.id);
+
+      left.appendChild(nameSpan);
 
       const chips = [];
       if (b.risk_level) chips.push("Risk: " + b.risk_level);
@@ -492,8 +511,6 @@
         chip.textContent = text;
         left.appendChild(chip);
       });
-
-      left.insertBefore(nameSpan, left.firstChild);
 
       const allocLabel = document.createElement("span");
       allocLabel.className = "muted";
