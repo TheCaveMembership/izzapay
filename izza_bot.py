@@ -840,7 +840,7 @@ def set_bucket_allocation():
 
 
 # ----------------------------------------------------------------------
-# Withdrawal request (UI + record only for now)
+# Withdrawal request (UI + record only, now updates totals)
 # ----------------------------------------------------------------------
 @izza_bot_bp.route("/api/trading/withdraw/request", methods=["POST"])
 def request_withdraw():
@@ -857,6 +857,7 @@ def request_withdraw():
       - derive net_deposit from IZZA TESTNET wallet balance minus any
         total_withdrawn recorded so far
       - verify amount <= available_unallocated
+      - increment bot_accounts.total_withdrawn by amount
       - insert bot_withdrawals row with status 'requested'
       - actual payout logic can be done later by a script that
         sends app_to_user payment from the bot account (on TESTNET).
@@ -913,7 +914,21 @@ def request_withdraw():
                 error="Requested amount exceeds your unallocated balance. Reduce bucket allocations first.",
             )
 
-        # FIXED: pass the correct 4 bindings (account_id, amount, dest_pub, created_at)
+        # NEW: bump total_withdrawn so summary reflects the withdrawal immediately
+        new_total_withdrawn = total_withdrawn + amount
+        cx.execute(
+            """
+            UPDATE bot_accounts
+               SET total_withdrawn = ?, updated_at = ?
+             WHERE id = ?
+            """,
+            (new_total_withdrawn, ts, account_id),
+        )
+
+        # Recompute available_unallocated after this withdrawal
+        net_deposit_after = max(0.0, pi_balance - new_total_withdrawn)
+        available_unallocated_after = max(0.0, net_deposit_after - total_alloc)
+
         cx.execute(
             """
             INSERT INTO bot_withdrawals (
@@ -926,7 +941,7 @@ def request_withdraw():
 
     return jsonify(
         ok=True,
-        available_unallocated=available_unallocated - amount,
+        available_unallocated=available_unallocated_after,
         note="Withdrawal request recorded. A TESTNET payout script can send this amount later.",
     )
 
