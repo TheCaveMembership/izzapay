@@ -53,7 +53,7 @@ def fetch_all_offers():
     call = server.offers().for_seller(bot_pub).limit(200).call()
     offers.extend(call["_embedded"]["records"])
     # In newer stellar_sdk, the HTTP client is server._client rather than server._session
-    while "next" in call["_links"]:
+    while "next" in call.get("_links", {}):
         next_href = call["_links"]["next"]["href"]
         call = server._client.get(next_href).json()
         recs = call.get("_embedded", {}).get("records", [])
@@ -64,74 +64,87 @@ def fetch_all_offers():
 
 
 offers = fetch_all_offers()
-print(f"Found {len(offers)} open offers")
+total_offers = len(offers)
+print(f"Found {total_offers} open offers")
 
 if not offers:
     print("Nothing to do.")
     raise SystemExit(0)
 
-account = server.load_account(bot_pub)
 base_fee = server.fetch_base_fee()
 
-tx_builder = TransactionBuilder(
-    source_account=account,
-    network_passphrase=NETWORK_PASSPHRASE,
-    base_fee=base_fee,
-)
+# Horizon limit: max 100 operations per transaction
+BATCH_SIZE = 100
+batch_index = 0
 
-ops_count = 0
-for off in offers:
-    offer_id = int(off["id"])
-    selling = asset_from_json(off["selling"])
-    buying = asset_from_json(off["buying"])
+for start in range(0, total_offers, BATCH_SIZE):
+    batch = offers[start:start + BATCH_SIZE]
+    batch_index += 1
+    print(f"\n--- Processing batch {batch_index} ({len(batch)} offers) ---")
 
-    # price_r is more precise than price
-    pr = off.get("price_r") or {"n": 1, "d": 1}
-    price = pr["n"] / pr["d"]
+    # Reload account each batch to get fresh sequence number
+    account = server.load_account(bot_pub)
 
-    # Decide whether this was originally a buy or sell offer
-    # If the seller is selling the token and buying PI, that is a sell offer.
-    # If the seller is selling PI and buying the token, that is a buy offer.
-    is_selling_native = off["selling"]["asset_type"] == "native"
-    is_buying_native = off["buying"]["asset_type"] == "native"
+    tx_builder = TransactionBuilder(
+        source_account=account,
+        network_passphrase=NETWORK_PASSPHRASE,
+        base_fee=base_fee,
+    )
 
-    if is_buying_native:
-        # sell token for PI  -> manage sell offer
-        op = ManageSellOffer(
-            selling=selling,
-            buying=buying,
-            amount="0",        # 0 cancels the offer
-            price=str(price),
-            offer_id=offer_id,
-        )
-    elif is_selling_native:
-        # sell PI for token -> manage buy offer
-        # In this SDK version, the param is "amount", not "buy_amount"
-        op = ManageBuyOffer(
-            selling=selling,
-            buying=buying,
-            amount="0",        # 0 cancels the offer
-            price=str(price),
-            offer_id=offer_id,
-        )
-    else:
-        # token to token, treat as generic sell
-        op = ManageSellOffer(
-            selling=selling,
-            buying=buying,
-            amount="0",
-            price=str(price),
-            offer_id=offer_id,
-        )
+    ops_count = 0
+    for off in batch:
+        offer_id = int(off["id"])
+        selling = asset_from_json(off["selling"])
+        buying = asset_from_json(off["buying"])
 
-    tx_builder.append_operation(op)
-    ops_count += 1
+        # price_r is more precise than price
+        pr = off.get("price_r") or {"n": 1, "d": 1}
+        price = pr["n"] / pr["d"]
 
-print(f"Appending {ops_count} cancel operations to a single transaction")
+        # Decide whether this was originally a buy or sell offer
+        # If the seller is selling the token and buying PI, that is a sell offer.
+        # If the seller is selling PI and buying the token, that is a buy offer.
+        is_selling_native = off["selling"]["asset_type"] == "native"
+        is_buying_native = off["buying"]["asset_type"] == "native"
 
-tx = tx_builder.build()
-tx.sign(kp)
-resp = server.submit_transaction(tx)
+        if is_buying_native:
+            # sell token for PI  -> manage sell offer
+            op = ManageSellOffer(
+                selling=selling,
+                buying=buying,
+                amount="0",        # 0 cancels the offer
+                price=str(price),
+                offer_id=offer_id,
+            )
+        elif is_selling_native:
+            # sell PI for token -> manage buy offer
+            # In this SDK version, the param is "amount", not "buy_amount"
+            op = ManageBuyOffer(
+                selling=selling,
+                buying=buying,
+                amount="0",        # 0 cancels the offer
+                price=str(price),
+                offer_id=offer_id,
+            )
+        else:
+            # token to token, treat as generic sell
+            op = ManageSellOffer(
+                selling=selling,
+                buying=buying,
+                amount="0",
+                price=str(price),
+                offer_id=offer_id,
+            )
 
-print("Submit response:", resp["hash"])
-print("All current offers for the bot should now be deleted.")
+        tx_builder.append_operation(op)
+        ops_count += 1
+
+    print(f"Appending {ops_count} cancel operations in this batch")
+
+    tx = tx_builder.build()
+    tx.sign(kp)
+    resp = server.submit_transaction(tx)
+
+    print("Batch submit response hash:", resp["hash"])
+
+print("\nAll current offers for the bot should now be deleted in batches.")
