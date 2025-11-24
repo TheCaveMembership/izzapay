@@ -5,10 +5,7 @@
 # Responsibilities:
 #   - Load active buckets + available PI "cash" per bucket
 #   - Scan Pi Testnet markets via bot_markets.scan_markets_vs_pi
-#   - Build buy / sell decisions based on bucket risk profile:
-#       * Low   = mostly trend + microstructure, low vol
-#       * Med   = balanced mix
-#       * High  = heavy vol + microstructure, aggressive
+#   - Build buy / sell decisions based on bucket risk profile
 #   - Execute trades using bot_trader.market_buy / market_sell
 #   - Maintain per-bucket:
 #       * cash in PI (bot_bucket_allocations.amount)
@@ -58,7 +55,7 @@ from bot_trader import (
 LOOP_MODE = os.getenv("BOT_LOOP_MODE", "false").lower() == "true"
 LOOP_SLEEP_SECS = int(os.getenv("BOT_LOOP_SLEEP_SECS", "60"))
 
-# Minimum PI to use per trade (lowered so trades as small as 0.00001 PI can execute)
+# Minimum PI value for a trade
 MIN_TRADE_PI = float(os.getenv("BOT_MIN_TRADE_PI", "0.00001"))
 
 # Safety caps
@@ -66,50 +63,52 @@ MAX_TRADES_PER_RUN = int(os.getenv("BOT_MAX_TRADES_PER_RUN", "20"))
 MAX_BUYS_PER_BUCKET = int(os.getenv("BOT_MAX_BUYS_PER_BUCKET", "5"))
 MAX_SELLS_PER_BUCKET = int(os.getenv("BOT_MAX_SELLS_PER_BUCKET", "5"))
 
-# Take profit / stop loss by risk (tightened to react around ~5% moves)
+# Take profit / stop loss by risk
+# More aggressive scalping: small TP, wider SL for higher risk.
 RISK_TP_SL = {
     "low": {
-        "take_profit_pct": 5.0,
-        "stop_loss_pct": -5.0,
+        "take_profit_pct": 3.0,
+        "stop_loss_pct": -7.0,
     },
     "medium": {
-        "take_profit_pct": 5.0,
-        "stop_loss_pct": -5.0,
+        "take_profit_pct": 2.0,
+        "stop_loss_pct": -10.0,
     },
     "high": {
-        "take_profit_pct": 5.0,
-        "stop_loss_pct": -5.0,
+        "take_profit_pct": 1.0,
+        "stop_loss_pct": -15.0,
     },
 }
 
 # Strategy blending per risk level
+# These mostly control the fallback / non-wall trades after wall-breaking.
 RISK_WEIGHTS = {
     "low": {
-        "max_tokens": 1000,   # effectively "consider all" from scan
-        "per_run_fraction": 0.10,
-        "max_per_token_fraction": 0.30,
+        "max_tokens": 1000,
+        "per_run_fraction": 0.25,     # up to 25% of bucket cash per run
+        "max_per_token_fraction": 0.50,
         "trend_weight": 0.6,
         "micro_weight": 0.4,
         "vol_weight": 0.0,
-        "max_spread_pct": 20.0,   # widened from 5.0
+        "max_spread_pct": 30.0,
     },
     "medium": {
-        "max_tokens": 1000,   # effectively "consider all" from scan
-        "per_run_fraction": 0.20,
-        "max_per_token_fraction": 0.40,
+        "max_tokens": 1000,
+        "per_run_fraction": 0.50,     # up to 50% per run
+        "max_per_token_fraction": 0.80,
         "trend_weight": 0.4,
         "micro_weight": 0.3,
         "vol_weight": 0.3,
-        "max_spread_pct": 60.0,   # widened from 12.0
+        "max_spread_pct": 100.0,
     },
     "high": {
-        "max_tokens": 1000,   # effectively "consider all" from scan
-        "per_run_fraction": 0.35,
-        "max_per_token_fraction": 0.60,
+        "max_tokens": 1000,
+        "per_run_fraction": 0.90,     # up to 90% per run
+        "max_per_token_fraction": 1.00,
         "trend_weight": 0.15,
         "micro_weight": 0.30,
         "vol_weight": 0.55,
-        "max_spread_pct": 200.0,  # widened from 30.0 to grab big spread plays
+        "max_spread_pct": 300.0,
     },
 }
 
@@ -123,12 +122,12 @@ BLOCKED_BUY_CODES = {
     "DTUSD",
 }
 
-# Max drawdown protection (what your UI is describing)
+# Max drawdown protection (UI shows these values)
 # Based on *net deposits* into a bucket (sum deposits - sum withdrawals).
 MAX_DRAWDOWN_PCT_BY_RISK = {
-    "low": 30.0,     # tweak if you ever expose a true "low" bucket
-    "medium": 30.0,  # matches "~30%" copy in the UI
-    "high": 45.0,    # matches "~45%" copy in the UI
+    "low": 15.0,     # up to ~15% drawdown on low
+    "medium": 30.0,  # up to ~30% drawdown on medium
+    "high": 45.0,    # up to ~45% drawdown on high
 }
 
 # Sell wall logic
@@ -622,7 +621,6 @@ def get_bucket_net_deposit_pi(bucket_id: int) -> float:
       - bucket_id
       - direction ('deposit' or 'withdraw')
       - amount (PI)
-    If your table/column names differ, adjust this query.
     """
     with conn() as cx:
         row = cx.execute(
@@ -646,7 +644,7 @@ def get_bucket_net_deposit_pi(bucket_id: int) -> float:
 
 
 # ---------------------------------------------------------------------
-# Strategy scoring
+# Strategy scoring (for fallback, non-wall trades)
 # ---------------------------------------------------------------------
 
 def compute_score(m: MarketInfo, risk_cfg: Dict[str, Any]) -> float:
@@ -668,7 +666,7 @@ def compute_score(m: MarketInfo, risk_cfg: Dict[str, Any]) -> float:
 
 
 # ---------------------------------------------------------------------
-# Sell logic
+# Sell logic (aggressive scalping)
 # ---------------------------------------------------------------------
 
 def plan_sells_for_bucket(
@@ -676,6 +674,10 @@ def plan_sells_for_bucket(
     positions: Dict[Tuple[str, str], Position],
     markets: Dict[Tuple[str, str], MarketInfo],
 ) -> List[Tuple[Position, MarketInfo, float]]:
+    """
+    Plan aggressive sells:
+      - If PnL >= TP% or PnL <= SL%, sell the *entire* position for that bucket.
+    """
     if not positions:
         return []
 
@@ -687,18 +689,19 @@ def plan_sells_for_bucket(
 
     for key, pos in positions.items():
         market = markets.get(key)
-        if not market or market.mid_price <= 0 or pos.quantity <= 0:
+        if not market or market.best_bid <= 0 or pos.quantity <= 0 or pos.avg_price_pi <= 0:
             continue
 
-        pnl_pct = (market.mid_price - pos.avg_price_pi) / pos.avg_price_pi * 100.0
+        pnl_pct = (market.best_bid - pos.avg_price_pi) / pos.avg_price_pi * 100.0
 
-        # Raise floor or rotate by trimming half at TP or SL
         if pnl_pct >= tp or pnl_pct <= sl:
-            amount_to_sell = pos.quantity * 0.5
-            if amount_to_sell * market.mid_price < MIN_TRADE_PI:
+            amount_to_sell = pos.quantity
+            if amount_to_sell * market.best_bid < MIN_TRADE_PI:
                 continue
             planned.append((pos, market, amount_to_sell))
 
+    # Prioritize larger sales first
+    planned.sort(key=lambda t: t[2] * t[1].best_bid, reverse=True)
     return planned[:MAX_SELLS_PER_BUCKET]
 
 
@@ -781,8 +784,7 @@ def execute_sells_for_bucket(
                         )
                         continue
                 else:
-                    # Non-positive PnL: do not tear down our own BUY ladder,
-                    # just skip this SELL to keep previous behaviour.
+                    # Non-positive PnL: do not tear down our own BUY ladder
                     print(
                         f"[SELL] skip bucket={bucket.id} user=@{bucket.username} "
                         f"{market.code} price {best_bid:.6f} would cross own BUY offer "
@@ -826,7 +828,7 @@ def execute_sells_for_bucket(
 
 
 # ---------------------------------------------------------------------
-# Buy logic (with sell-wall detection + wall-break preference)
+# Buy logic (wall-break first, then aggressive fallback)
 # ---------------------------------------------------------------------
 
 def plan_buys_for_bucket(
@@ -835,7 +837,12 @@ def plan_buys_for_bucket(
 ) -> List[Tuple[MarketInfo, float]]:
     """
     Decide which markets to buy for this bucket.
-    Returns list of (market, pi_budget_for_this_buy).
+
+    Rules:
+      - FIRST PRIORITY: if bucket can break a sell wall, do it
+        (buy the wall value in PI) and set up a scalp.
+      - SECOND: use remaining budget on highest-score markets.
+      - No micro buys if bucket can afford >= 1 full token.
     """
     risk = bucket.risk_level if bucket.risk_level in RISK_WEIGHTS else "medium"
     cfg = RISK_WEIGHTS[risk]
@@ -843,16 +850,11 @@ def plan_buys_for_bucket(
     if bucket.cash_pi <= MIN_TRADE_PI:
         return []
 
-    per_run_budget = bucket.cash_pi * cfg["per_run_fraction"]
-    if per_run_budget <= MIN_TRADE_PI:
-        if bucket.cash_pi >= MIN_TRADE_PI:
-            per_run_budget = min(bucket.cash_pi, MAX_TRADES_PER_RUN * MIN_TRADE_PI)
-        else:
-            return []
-
-    max_per_token = bucket.cash_pi * cfg["max_per_token_fraction"]
+    remaining_cash = bucket.cash_pi
     max_spread = cfg["max_spread_pct"]
+    max_tokens_cfg = cfg["max_tokens"]
 
+    wall_candidates: List[Tuple[float, MarketInfo]] = []
     scored: List[Tuple[float, MarketInfo]] = []
 
     for key, m in markets.items():
@@ -869,10 +871,8 @@ def plan_buys_for_bucket(
             continue
 
         # --- Sell wall detection relative to this bucket ---
-        # Try top-of-book amount if we have it, otherwise approximate
         wall_qty_tokens = m.top_ask_amount if m.top_ask_amount > 0 else 0.0
         if wall_qty_tokens <= 0 and m.ask_liq > 0:
-            # Fallback: approximate a top wall as average per level
             denom = m.num_ask_levels or 1
             wall_qty_tokens = m.ask_liq / float(denom)
 
@@ -880,24 +880,20 @@ def plan_buys_for_bucket(
         m.wall_value_pi = wall_value_pi
         m.wall_break_candidate = False
 
-        if bucket.cash_pi > 0 and wall_value_pi > 0:
-            wall_ratio = wall_value_pi / bucket.cash_pi
+        potential_edge = 0.0
+        if m.next_ask_price and m.next_ask_price > m.best_ask:
+            potential_edge = (m.next_ask_price - m.best_ask) / m.best_ask
 
-            # If wall is too big vs this bucket's firepower, skip entirely
-            if wall_ratio > SELL_WALL_FRACTION:
-                # Example: bucket has 1000 PI and wall is 600+ PI -> not worth touching
-                continue
+        # If we can break the wall with this bucket's cash, mark as candidate
+        if wall_value_pi > 0 and remaining_cash >= wall_value_pi and wall_value_pi >= MIN_TRADE_PI:
+            m.wall_break_candidate = True
+            wall_candidates.append((potential_edge, m))
 
-            # If the wall is reasonably sized, and at least MIN_TRADE_PI, mark as breakable
-            if wall_ratio <= SELL_WALL_FRACTION and wall_value_pi >= MIN_TRADE_PI:
-                m.wall_break_candidate = True
+        # Normal strategy score (for fallback)
+        base_score = compute_score(m, cfg)
+        score = base_score + max(0.0, potential_edge) * 10.0
 
-        # Normal strategy score
-        score = compute_score(m, cfg)
-        if score <= 0:
-            continue
-
-        # Prefer non "DT" style tokens, but still allow them if we haven't blocked them
+        # Prefer non "DT" style tokens, still allow them if not blocked
         if m.code.startswith("DT"):
             score *= 0.2
         else:
@@ -909,34 +905,55 @@ def plan_buys_for_bucket(
 
         scored.append((score, m))
 
-    if not scored:
-        return []
-
-    scored.sort(key=lambda x: x[0], reverse=True)
-
-    max_tokens = cfg["max_tokens"]
-    scored = scored[:max_tokens]
-
-    remaining_budget = per_run_budget
     planned: List[Tuple[MarketInfo, float]] = []
 
-    for _, m in scored:
-        if remaining_budget < MIN_TRADE_PI:
+    # --- Pass 1: break sell walls if possible --------------------------
+    wall_candidates.sort(key=lambda x: x[0], reverse=True)  # best edge first
+
+    for edge, m in wall_candidates:
+        if remaining_cash < MIN_TRADE_PI:
             break
-
-        per_token_budget = min(
-            max_per_token,
-            remaining_budget / max(1, (max_tokens - len(planned))),
-        )
-
-        if per_token_budget < MIN_TRADE_PI:
-            continue
-
-        planned.append((m, per_token_budget))
-        remaining_budget -= per_token_budget
-
         if len(planned) >= MAX_BUYS_PER_BUCKET:
             break
+
+        spend = min(remaining_cash, m.wall_value_pi)
+        if spend < MIN_TRADE_PI:
+            continue
+
+        planned.append((m, spend))
+        remaining_cash -= spend
+
+    # --- Pass 2: fallback aggressive buys if we still have cash --------
+    if len(planned) < MAX_BUYS_PER_BUCKET and remaining_cash >= MIN_TRADE_PI:
+        per_run_budget = remaining_cash * cfg["per_run_fraction"]
+        if per_run_budget < MIN_TRADE_PI:
+            per_run_budget = remaining_cash
+
+        max_per_token = bucket.cash_pi * cfg["max_per_token_fraction"]
+
+        scored.sort(key=lambda x: x[0], reverse=True)
+        tokens_considered = 0
+
+        for score, m in scored:
+            if tokens_considered >= max_tokens_cfg:
+                break
+            tokens_considered += 1
+
+            # Skip markets already used as wall-breaks
+            if any(p[0].code == m.code and p[0].issuer == m.issuer for p in planned):
+                continue
+
+            if per_run_budget < MIN_TRADE_PI:
+                break
+            if len(planned) >= MAX_BUYS_PER_BUCKET:
+                break
+
+            token_budget = min(max_per_token, per_run_budget)
+            if token_budget < MIN_TRADE_PI:
+                break
+
+            planned.append((m, token_budget))
+            per_run_budget -= token_budget
 
     return planned
 
@@ -945,6 +962,14 @@ def execute_buys_for_bucket(
     bucket: Bucket,
     plans: List[Tuple[MarketInfo, float]],
 ) -> int:
+    """
+    Execute planned buys with "no micro buys unless necessary":
+
+      - If pi_budget >= best_ask:
+          buy floor(pi_budget / best_ask) whole tokens.
+      - Else:
+          use pi_budget as-is (true micro buy when you cannot afford 1 full token).
+    """
     executed = 0
     for market, pi_budget in plans:
         if executed >= MAX_BUYS_PER_BUCKET:
@@ -971,6 +996,7 @@ def execute_buys_for_bucket(
                 f"in bucket {bucket.id}: {e}"
             )
 
+        # Refresh current cash from DB in case previous trades changed it
         with conn() as cx:
             row = cx.execute(
                 """
@@ -981,43 +1007,59 @@ def execute_buys_for_bucket(
                 (bucket.id,),
             ).fetchone()
         current_cash = float(row["amount"] or 0.0) if row else 0.0
-        if current_cash < pi_budget - 1e-8:
+        if current_cash <= 0:
             continue
 
-        amount_token = pi_budget / best_ask
+        # Clamp pi_budget to what we actually have
+        pi_budget = min(pi_budget, current_cash)
+
+        # NO MICRO BUYS unless we literally cannot afford 1 full token
+        if pi_budget >= best_ask:
+            full_tokens = int(pi_budget / best_ask)
+            if full_tokens <= 0:
+                continue
+            trade_pi_budget = full_tokens * best_ask
+        else:
+            # cannot afford 1 full token, use everything (micro buy)
+            trade_pi_budget = pi_budget
+
+        if trade_pi_budget < MIN_TRADE_PI:
+            continue
+
+        amount_token = trade_pi_budget / best_ask
 
         try:
             print(
                 f"[BUY] bucket={bucket.id} user=@{bucket.username} "
-                f"spend~{pi_budget:.6f} PI on {market.code} @ {best_ask:.6f} PI"
+                f"spend~{trade_pi_budget:.6f} PI on {market.code} @ {best_ask:.6f} PI"
             )
             # Always price off the current orderbook best ask
             resp = market_buy(
                 token_code=market.code,
                 token_issuer=market.issuer,
-                max_cost_pi=pi_budget,
+                max_cost_pi=trade_pi_budget,
                 best_price=best_ask,
             )
             upsert_position(bucket.id, market, delta_qty=amount_token, trade_price_pi=best_ask)
-            update_cash_for_bucket(bucket.id, delta_pi=-pi_budget)
+            update_cash_for_bucket(bucket.id, delta_pi=-trade_pi_budget)
             log_trade(
                 bucket=bucket,
                 side="buy",
                 market=market,
                 amount_token=amount_token,
                 price_pi=best_ask,
-                strategy_tag="blend",
+                strategy_tag="wall_break" if market.wall_break_candidate else "blend",
                 tx_resp=resp,
             )
             executed += 1
 
             # If this market had a breakable wall, immediately place a quick
-            # SELL somewhere between the broken wall and the next ask.
+            # SELL just under the next ask level.
             if market.wall_break_candidate:
                 try:
                     if market.next_ask_price and market.next_ask_price > market.best_ask:
-                        # Exact midpoint between the broken wall ask and the next ask
-                        target_price = (market.best_ask + market.next_ask_price) / 2.0
+                        # Place just under the next ask
+                        target_price = market.next_ask_price * 0.999
                     else:
                         # Fallback: small markup over entry (orderbook-only)
                         target_price = market.best_ask * (1.0 + QUICK_SELL_FALLBACK_PCT / 100.0)
@@ -1039,9 +1081,6 @@ def execute_buys_for_bucket(
                             f"placing quick wall-break SELL {quick_qty:.6f} {market.code} "
                             f"@ {target_price:.6f} PI"
                         )
-                        # Use market_sell as a generic limit-sell at target_price.
-                        # We do not log this as an executed trade here because it
-                        # may partially fill; realized PnL will show up via TP/SL.
                         market_sell(
                             token_code=market.code,
                             token_issuer=market.issuer,
@@ -1061,7 +1100,7 @@ def execute_buys_for_bucket(
 
 
 # ---------------------------------------------------------------------
-# Bucket equity estimation
+# Bucket equity estimation / drawdown
 # ---------------------------------------------------------------------
 
 def estimate_bucket_equity_pi(
@@ -1185,7 +1224,7 @@ def run_once():
             )
             continue
 
-        # Buys (with sell wall logic)
+        # Buys (with wall-break logic)
         buy_plans = plan_buys_for_bucket(bucket, markets)
         buys_done = execute_buys_for_bucket(bucket, buy_plans)
         total_trades += buys_done
