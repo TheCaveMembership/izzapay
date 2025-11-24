@@ -15,19 +15,25 @@
 #       * positions per token (bot_positions)
 #   - Log all trades into bot_trades
 #
-# How to run once:
+# How to run once (manual):
 #     python bot_engine.py
 #
-# How to run in a loop:
+# How to run in a loop (manual):
 #   - BOT_LOOP_MODE=true
 #   - BOT_LOOP_SLEEP_SECS=60
 #   - python bot_engine.py
+#
+# How it runs in production (Render):
+#   - gunicorn imports wsgi.py
+#   - wsgi.py calls start_bot_in_background()
+#   - bot runs in ONE background thread inside the gunicorn worker
 #
 # TESTNET only.
 
 import os
 import time
 import json
+import threading
 from dataclasses import dataclass
 from typing import Dict, Any, List, Tuple, Optional
 
@@ -86,7 +92,7 @@ RISK_WEIGHTS = {
     },
     "medium": {
         "max_tokens": 6,
-        "per_run_fraction": 0.20,
+            "per_run_fraction": 0.20,
         "max_per_token_fraction": 0.40,
         "trend_weight": 0.4,
         "micro_weight": 0.3,
@@ -171,6 +177,15 @@ class Position:
     issuer: str
     quantity: float
     avg_price_pi: float
+
+
+# ---------------------------------------------------------------------
+# Background thread state (for running inside gunicorn)
+# ---------------------------------------------------------------------
+
+_engine_thread: Optional[threading.Thread] = None
+_engine_running: bool = False
+_engine_lock = threading.Lock()
 
 
 # ---------------------------------------------------------------------
@@ -505,7 +520,8 @@ def upsert_position(bucket_id: int, market: MarketInfo, delta_qty: float, trade_
                   created_at, updated_at
                 )
                 VALUES (?, ?, ?, ?, ?, ?, ?)
-                """,
+                """
+                ,
                 (
                     bucket_id,
                     code,
@@ -989,10 +1005,56 @@ def run_loop():
         time.sleep(LOOP_SLEEP_SECS)
 
 
+# ---------------------------------------------------------------------
+# Background entrypoint for gunicorn (single process)
+# ---------------------------------------------------------------------
+
+def bot_loop_forever():
+    """
+    Continuous loop for background thread.
+    Always loops, ignoring LOOP_MODE – this is what we want in production.
+    """
+    print(
+        f"[ENGINE] Background trading loop started inside app process. "
+        f"SLEEP={LOOP_SLEEP_SECS}s"
+    )
+    iteration = 0
+    while True:
+        iteration += 1
+        print(f"[ENGINE] [BG] iteration {iteration} at ts={_now()}")
+        try:
+            run_once()
+        except Exception as e:
+            print(f"[ENGINE] [BG] ERROR in run_once: {e!r}")
+        print(f"[ENGINE] [BG] sleeping {LOOP_SLEEP_SECS}s...")
+        time.sleep(LOOP_SLEEP_SECS)
+
+
+def start_bot_in_background():
+    """
+    Idempotent starter. Safe to call on import.
+    Called from wsgi.py so the bot runs in the same process as gunicorn.
+    """
+    global _engine_thread, _engine_running
+    with _engine_lock:
+        if _engine_running:
+            # Already started in this process
+            return
+        t = threading.Thread(target=bot_loop_forever, daemon=True)
+        _engine_thread = t
+        _engine_running = True
+        t.start()
+        print("[ENGINE] start_bot_in_background(): thread launched")
+
+
+# ---------------------------------------------------------------------
+# CLI entrypoint (manual runs)
+# ---------------------------------------------------------------------
+
 if __name__ == "__main__":
     raw = os.getenv("BOT_LOOP_MODE", "false")
     print(
-        f"[ENGINE] bot_engine.py starting. "
+        f"[ENGINE] bot_engine.py starting (CLI). "
         f"BOT_LOOP_MODE raw='{raw}' -> LOOP_MODE={LOOP_MODE}, "
         f"SLEEP={LOOP_SLEEP_SECS}"
     )
