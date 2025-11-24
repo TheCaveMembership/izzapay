@@ -8,6 +8,7 @@ from flask import Blueprint, render_template, jsonify, request
 from db import conn
 
 from stellar_sdk import Server, Keypair, TransactionBuilder, Network, Asset
+from bot_engine import compute_bucket_realized_perf_pct  # <-- new import
 
 # Pi Platform API key: prefer variables.apikey if module is present,
 # otherwise fall back to environment variables so Render can boot.
@@ -561,7 +562,7 @@ def trading_summary():
           { id, name, risk_level, objective, volatility,
             time_horizon_days, target_value_back,
             balance,          # REAL Pi sitting in this bucket on the bot
-            perf_pct          # optional realized PnL % after first SELL trade
+            perf_pct          # optional realized PnL % based on realized sells
           }
         ]
       }
@@ -630,38 +631,11 @@ def trading_summary():
             (account_id,),
         ).fetchall()
 
-        bucket_ids = [r["id"] for r in rows]
-        perf_map = {}
-
-        if bucket_ids:
-            placeholders = ",".join("?" for _ in bucket_ids)
-            perf_rows = cx.execute(
-                f"""
-                SELECT
-                  bucket_id,
-                  SUM(CASE WHEN side='buy'  THEN amount_pi ELSE 0 END) AS buy_pi,
-                  SUM(CASE WHEN side='sell' THEN amount_pi ELSE 0 END) AS sell_pi,
-                  MIN(CASE WHEN side='sell' THEN created_at ELSE NULL END) AS first_sell_ts
-                FROM bot_trades
-                WHERE bucket_id IN ({placeholders})
-                GROUP BY bucket_id
-                """,
-                bucket_ids,
-            ).fetchall()
-            for pr in perf_rows:
-                perf_map[pr["bucket_id"]] = pr
-
     buckets = []
     for r in rows:
-        perf_pct = None
-        perf_row = perf_map.get(r["id"])
-        # Only compute performance after at least one SELL trade
-        if perf_row and perf_row["first_sell_ts"] is not None:
-            buy_pi = float(perf_row["buy_pi"] or 0.0)
-            sell_pi = float(perf_row["sell_pi"] or 0.0)
-            if buy_pi > 0:
-                realized_pnl = sell_pi - buy_pi
-                perf_pct = 100.0 * realized_pnl / buy_pi
+        # Use engine helper to compute realized performance based on
+        # realized sells and net deposits for this bucket.
+        perf_pct = compute_bucket_realized_perf_pct(r["id"])
 
         b = {
             "id": r["id"],
