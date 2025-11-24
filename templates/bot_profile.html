@@ -725,19 +725,32 @@
     });
 
     const balance = Number(b.balance || 0);
+    const balanceInBuys  = Number(b.balance_in_buys || 0);
+    const balanceInSells = Number(b.balance_in_sells || 0);
 
-    const balanceLine = document.createElement("span");
-    balanceLine.className = "bucket-balance-line muted";
-    balanceLine.textContent = "Bucket balance: " + fmtPi(balance);
-
+    // Full precision bucket balance
     const fullBalanceLine = document.createElement("div");
     fullBalanceLine.className = "bucket-balance-line muted";
-    fullBalanceLine.style.fontSize = "10px";
     fullBalanceLine.textContent =
-      "Full bucket balance (stroops): " + fmtPiFull(balance);
+      "Full bucket balance: " + fmtPiFull(balance);
 
-    right.appendChild(balanceLine);
+    // Balance currently locked in BUY offers
+    const buyBalanceLine = document.createElement("div");
+    buyBalanceLine.className = "bucket-balance-line muted";
+    buyBalanceLine.style.fontSize = "10px";
+    buyBalanceLine.textContent =
+      "Balance in buy offers: " + fmtPiFull(balanceInBuys);
+
+    // Balance currently locked in SELL offers
+    const sellBalanceLine = document.createElement("div");
+    sellBalanceLine.className = "bucket-balance-line muted";
+    sellBalanceLine.style.fontSize = "10px";
+    sellBalanceLine.textContent =
+      "Balance in sell offers: " + fmtPiFull(balanceInSells);
+
     right.appendChild(fullBalanceLine);
+    right.appendChild(buyBalanceLine);
+    right.appendChild(sellBalanceLine);
 
     // Performance % indicator (only after first SELL trade server-side)
     const perfDiv = document.createElement("div");
