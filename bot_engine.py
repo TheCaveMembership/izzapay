@@ -21,9 +21,9 @@
 #   - python bot_engine.py
 #
 # How it runs in production (Render):
-#   - gunicorn imports wsgi.py
-#   - wsgi.py calls start_bot_in_background()
-#   - bot runs in ONE background thread inside the gunicorn worker
+#   - In production we now typically run:
+#       ./start.sh
+#     where start.sh launches gunicorn and then, after a delay, python bot_engine.py
 #
 # TESTNET only.
 
@@ -624,10 +624,9 @@ def get_bucket_deposit_stats(bucket_id: int) -> Tuple[float, float, float]:
   - total_withdraws: all 'withdraw' transfers out of this bucket
   - net_deposit: max(total_deposits - total_withdraws, 0)
 
-  We use:
-    - net_deposit for BOTH:
-        * drawdown protection
-        * realized performance % denominator
+  We use net_deposit as the denominator for BOTH:
+    - planned max drawdown
+    - realized performance %
   """
   with conn() as cx:
     row = cx.execute(
@@ -652,6 +651,39 @@ def get_bucket_deposit_stats(bucket_id: int) -> Tuple[float, float, float]:
   return total_deposits, total_withdraws, net
 
 
+def get_bucket_first_deposit_ts(bucket_id: int) -> Optional[int]:
+  """
+  Return the timestamp of the first deposit into this bucket, or None.
+
+  We use this to ensure that "realized performance" for a bucket only
+  considers trades that happened AFTER the bucket was actually funded.
+
+  This prevents old experimental trades (re-using bucket ids etc) from
+  leaking into a brand-new bucket's performance.
+  """
+  with conn() as cx:
+    row = cx.execute(
+      """
+      SELECT MIN(created_at) AS first_ts
+      FROM bot_bucket_transfers
+      WHERE bucket_id = ? AND direction = 'deposit'
+      """,
+      (bucket_id,),
+    ).fetchone()
+
+  if not row:
+    return None
+
+  first_ts = row["first_ts"]
+  if first_ts is None:
+    return None
+
+  try:
+    return int(first_ts)
+  except Exception:
+    return None
+
+
 def get_planned_max_drawdown_pct(bucket: Bucket) -> Optional[float]:
   risk = (bucket.risk_level or "medium").lower()
   return MAX_DRAWDOWN_PCT_BY_RISK.get(risk)
@@ -673,27 +705,53 @@ def compute_bucket_realized_pnl_pi(bucket_id: int) -> float:
   """
   Compute realized PnL in PI for a bucket, using only SELL trades.
 
-  For each asset:
-    - compute average buy price = total_buy_pi / total_buy_qty
-    - realized PnL = total_sell_pi - (total_sell_qty * avg_buy_price)
+  For each asset (code, issuer) within THIS bucket:
+    - Consider trades only AFTER the first deposit into this bucket.
+    - Compute average buy price:
+          avg_buy_price = total_buy_pi / total_buy_qty
+    - Realized PnL for that asset:
+          realized_asset = total_sell_pi - (total_sell_qty * avg_buy_price)
 
-  Buys themselves do not move realized PnL, they just update inventory
-  cost basis. Only sells at a higher or lower price than that basis move PnL.
+  Then sum realized_asset across all assets.
+
+  Buys themselves do NOT move realized PnL, they just build inventory and
+  update average cost. Only sells at a price higher or lower than that cost
+  move realized PnL.
   """
+  start_ts = get_bucket_first_deposit_ts(bucket_id)
+
   with conn() as cx:
-    rows = cx.execute(
-      """
-      SELECT code,
-             issuer,
-             side,
-             SUM(amount_token) AS qty,
-             SUM(amount_pi)    AS pi
-      FROM bot_trades
-      WHERE bucket_id = ?
-      GROUP BY code, issuer, side
-      """,
-      (bucket_id,),
-    ).fetchall()
+    if start_ts is not None:
+      rows = cx.execute(
+        """
+        SELECT code,
+               issuer,
+               side,
+               SUM(amount_token) AS qty,
+               SUM(amount_pi)    AS pi
+        FROM bot_trades
+        WHERE bucket_id = ?
+          AND created_at >= ?
+        GROUP BY code, issuer, side
+        """,
+        (bucket_id, start_ts),
+      ).fetchall()
+    else:
+      # If the bucket somehow has trades but no deposit rows,
+      # we still compute, but this should be rare.
+      rows = cx.execute(
+        """
+        SELECT code,
+               issuer,
+               side,
+               SUM(amount_token) AS qty,
+               SUM(amount_pi)    AS pi
+        FROM bot_trades
+        WHERE bucket_id = ?
+        GROUP BY code, issuer, side
+        """,
+        (bucket_id,),
+      ).fetchall()
 
   per_asset: Dict[Tuple[str, str], Dict[str, float]] = {}
   for r in rows:
@@ -718,6 +776,7 @@ def compute_bucket_realized_pnl_pi(bucket_id: int) -> float:
     buy_pi = d["buy_pi"]
     sell_qty = d["sell_qty"]
     sell_pi = d["sell_pi"]
+    # If we never bought, or never sold, nothing to realize.
     if sell_qty <= 0 or buy_qty <= 0 or buy_pi <= 0:
       continue
     avg_buy_price = buy_pi / buy_qty          # PI per token
@@ -731,20 +790,34 @@ def compute_bucket_realized_perf_pct(bucket_id: int) -> Optional[float]:
   """
   Realized performance percent for this bucket:
 
-      realized_perf = realized_PnL / net_deposit * 100
+      realized_perf_pct = (realized_PnL / net_deposit) * 100
 
   where:
-    - net_deposit = total_deposits - total_withdraws for this bucket
-    - realized_PnL includes ONLY SELL trades, buys are just inventory
+    - net_deposit = total_deposits - total_withdraws for THIS bucket
+    - realized_PnL is computed from THIS bucket's trades only, and only
+      after the first deposit into this bucket.
+
+  This means:
+    - One small losing round-trip on a 2,000 PI deposit will show as a
+      very small negative percent.
+    - You only see big negative percentages if the bucket actually lost
+      a large chunk of its net deposits across *all* closed trades.
   """
   total_deposits, total_withdraws, net_deposit = get_bucket_deposit_stats(bucket_id)
 
-  # If user never really funded this bucket, or has effectively zero net deposit,
-  # skip the percent to avoid crazy numbers.
+  # If user never really funded this bucket, or has effectively zero
+  # net deposit, skip the percent to avoid crazy numbers.
   if net_deposit <= 1e-8:
     return None
 
   realized_pnl = compute_bucket_realized_pnl_pi(bucket_id)
+
+  # Optional safety: in a sane, non-leveraged world, realized losses
+  # should not exceed the net deposit. If they do due to rounding or
+  # some edge case, clamp at -100%.
+  if realized_pnl < -net_deposit:
+    realized_pnl = -net_deposit
+
   return (realized_pnl / net_deposit) * 100.0
 
 
@@ -1414,13 +1487,15 @@ def run_loop():
 
 
 # ---------------------------------------------------------------------
-# Background entrypoint for gunicorn (single process)
+# Background entrypoint (legacy: running inside gunicorn)
 # ---------------------------------------------------------------------
 
 def bot_loop_forever():
   """
   Continuous loop for background thread.
-  Always loops, ignoring LOOP_MODE, this is what we want in production.
+  Always loops, ignoring LOOP_MODE, this was originally used when the
+  bot ran inside the web app process. We now generally run the bot as
+  a separate process (python bot_engine.py) from start.sh.
   """
   print(
     f"[ENGINE] Background trading loop started inside app process. "
@@ -1440,8 +1515,9 @@ def bot_loop_forever():
 
 def start_bot_in_background():
   """
-  Idempotent starter. Safe to call on import.
-  Called from wsgi.py so the bot runs in the same process as gunicorn.
+  Idempotent starter for legacy mode (bot inside gunicorn process).
+  Left here for compatibility; usually not used when the bot is
+  launched separately via start.sh.
   """
   global _engine_thread, _engine_running
   with _engine_lock:
