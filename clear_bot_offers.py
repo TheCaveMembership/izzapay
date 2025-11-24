@@ -27,7 +27,7 @@ BOT_SECRET = (
 
 if not BOT_SECRET:
     raise RuntimeError(
-        "Set BOT_SECRET or TRADER_SECRET or BOT_TRADER_SECRET in the environment"
+        "Set BOT_SECRET or TRADER_SECRET or BOT_TRADER_SECRET or BOT_WALLET_SEC in the environment"
     )
 
 server = Server(HORIZON_URL)
@@ -35,6 +35,7 @@ kp = Keypair.from_secret(BOT_SECRET)
 bot_pub = kp.public_key
 
 print(f"Clearing offers for bot account {bot_pub}")
+
 
 def asset_from_json(j):
     """Convert Horizon asset JSON into a stellar_sdk Asset."""
@@ -45,19 +46,23 @@ def asset_from_json(j):
     issuer = j["asset_issuer"]
     return Asset(code, issuer)
 
+
 def fetch_all_offers():
     """Fetch all offers for the bot account, following pagination."""
     offers = []
     call = server.offers().for_seller(bot_pub).limit(200).call()
     offers.extend(call["_embedded"]["records"])
+    # In newer stellar_sdk, the HTTP client is server._client rather than server._session
     while "next" in call["_links"]:
         next_href = call["_links"]["next"]["href"]
-        call = server._session.get(next_href).json()
+        # Follow the "next" link using the underlying HTTP client
+        call = server._client.get(next_href).json()
         recs = call.get("_embedded", {}).get("records", [])
         if not recs:
             break
         offers.extend(recs)
     return offers
+
 
 offers = fetch_all_offers()
 print(f"Found {len(offers)} open offers")
@@ -92,7 +97,7 @@ for off in offers:
     is_buying_native = off["buying"]["asset_type"] == "native"
 
     if is_buying_native:
-        # sell token for PI  manage sell offer
+        # sell token for PI -> manage sell offer
         op = ManageSellOffer(
             selling=selling,
             buying=buying,
@@ -101,7 +106,7 @@ for off in offers:
             offer_id=offer_id,
         )
     elif is_selling_native:
-        # sell PI for token  manage buy offer
+        # sell PI for token -> manage buy offer
         op = ManageBuyOffer(
             selling=selling,
             buying=buying,
