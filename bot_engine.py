@@ -55,6 +55,9 @@ from bot_trader import (
 LOOP_MODE = os.getenv("BOT_LOOP_MODE", "false").lower() == "true"
 LOOP_SLEEP_SECS = int(os.getenv("BOT_LOOP_SLEEP_SECS", "60"))
 
+# Global liquidation switch: when true we sell everything and skip buys
+LIQUIDATE_ALL = os.getenv("BOT_LIQUIDATE_ALL", "false").lower() == "true"
+
 # Minimum PI value for a trade
 MIN_TRADE_PI = float(os.getenv("BOT_MIN_TRADE_PI", "0.00001"))
 
@@ -748,7 +751,7 @@ def compute_score(m: MarketInfo, risk_cfg: Dict[str, Any]) -> float:
 
 
 # ---------------------------------------------------------------------
-# Sell logic (aggressive scalping)
+# Sell logic (aggressive scalping + liquidation mode)
 # ---------------------------------------------------------------------
 
 def plan_sells_for_bucket(
@@ -757,12 +760,32 @@ def plan_sells_for_bucket(
   markets: Dict[Tuple[str, str], MarketInfo],
 ) -> List[Tuple[Position, MarketInfo, float]]:
   """
-  Plan aggressive sells:
+  Normal mode:
     - If PnL >= TP% or PnL <= SL%, sell the *entire* position for that bucket.
+  Liquidation mode (LIQUIDATE_ALL=True):
+    - Sell ALL positions at current best_bid.
   """
   if not positions:
     return []
 
+  # Full liquidation: ignore TP / SL, just dump everything
+  if LIQUIDATE_ALL:
+    planned: List[Tuple[Position, MarketInfo, float]] = []
+    for key, pos in positions.items():
+      market = markets.get(key)
+      if not market or market.best_bid <= 0 or pos.quantity <= 0:
+        continue
+      # Skip microscopic trash that would fail on chain
+      if pos.quantity * market.best_bid < MIN_TRADE_PI:
+        continue
+      if pos.quantity < MIN_TOKEN_SIZE:
+        continue
+      planned.append((pos, market, pos.quantity))
+    # Largest value first
+    planned.sort(key=lambda t: t[2] * t[1].best_bid, reverse=True)
+    return planned
+
+  # Normal TP / SL mode
   cfg = RISK_TP_SL.get(bucket.risk_level, RISK_TP_SL["medium"])
   tp = cfg["take_profit_pct"]
   sl = cfg["stop_loss_pct"]
@@ -793,7 +816,7 @@ def execute_sells_for_bucket(
 ) -> int:
   executed = 0
   for pos, market, amount_to_sell in plans:
-    if executed >= MAX_SELLS_PER_BUCKET:
+    if not LIQUIDATE_ALL and executed >= MAX_SELLS_PER_BUCKET:
       break
 
     best_bid = market.best_bid
@@ -839,54 +862,57 @@ def execute_sells_for_bucket(
     except Exception:
       pnl_pct = None
 
-    # Avoid op_cross_self: if this price would hit our own BUY offer
-    # on this pair, consider cancelling blocking BUYs if the trade
-    # is profitable for this bucket.
-    try:
-      if would_cross_self_sell(market.code, market.issuer, best_bid):
-        is_profit = pnl_pct is not None and pnl_pct > 0.0
+    # In liquidation mode we don't care about PnL or ladders,
+    # just dump at best_bid and let self-cross protection handle it.
+    if not LIQUIDATE_ALL:
+      # Avoid op_cross_self: if this price would hit our own BUY offer
+      # on this pair, consider cancelling blocking BUYs if the trade
+      # is profitable for this bucket.
+      try:
+        if would_cross_self_sell(market.code, market.issuer, best_bid):
+          is_profit = pnl_pct is not None and pnl_pct > 0.0
 
-        if is_profit:
-          # Try to cancel blocking BUY offers on this pair at/above best_bid
-          try:
-            cancelled = cancel_blocking_buy_offers_for_pair(
-              market.code,
-              market.issuer,
-              best_bid,
-            )
-            print(
-              f"[SELL] bucket={bucket.id} user=@{bucket.username} "
-              f"{market.code} cancelled {cancelled} blocking BUY offers "
-              f"to realize profitable SELL"
-            )
-          except Exception as e:
-            print(
-              f"[SELL] warning: failed to cancel blocking BUY offers for "
-              f"{market.code} in bucket {bucket.id}: {e}"
-            )
+          if is_profit:
+            # Try to cancel blocking BUY offers on this pair at/above best_bid
+            try:
+              cancelled = cancel_blocking_buy_offers_for_pair(
+                market.code,
+                market.issuer,
+                best_bid,
+              )
+              print(
+                f"[SELL] bucket={bucket.id} user=@{bucket.username} "
+                f"{market.code} cancelled {cancelled} blocking BUY offers "
+                f"to realize profitable SELL"
+              )
+            except Exception as e:
+              print(
+                f"[SELL] warning: failed to cancel blocking BUY offers for "
+                f"{market.code} in bucket {bucket.id}: {e}"
+              )
 
-          # Re-check self-cross after cancellations; if still crossing,
-          # skip to avoid Horizon op_cross_self.
-          if would_cross_self_sell(market.code, market.issuer, best_bid):
+            # Re-check self-cross after cancellations; if still crossing,
+            # skip to avoid Horizon op_cross_self.
+            if would_cross_self_sell(market.code, market.issuer, best_bid):
+              print(
+                f"[SELL] skip bucket={bucket.id} user=@{bucket.username} "
+                f"{market.code} price {best_bid:.6f} would still cross own BUY offer "
+                f"after cancel attempt"
+              )
+              continue
+          else:
+            # Non-positive PnL: do not tear down our own BUY ladder
             print(
               f"[SELL] skip bucket={bucket.id} user=@{bucket.username} "
-              f"{market.code} price {best_bid:.6f} would still cross own BUY offer "
-              f"after cancel attempt"
+              f"{market.code} price {best_bid:.6f} would cross own BUY offer "
+              f"(PnL not positive, keeping BUY ladder)"
             )
             continue
-        else:
-          # Non-positive PnL: do not tear down our own BUY ladder
-          print(
-            f"[SELL] skip bucket={bucket.id} user=@{bucket.username} "
-            f"{market.code} price {best_bid:.6f} would cross own BUY offer "
-            f"(PnL not positive, keeping BUY ladder)"
-          )
-          continue
-    except Exception as e:
-      print(
-        f"[SELL] warning: self cross check failed for {market.code} "
-        f"in bucket {bucket.id}: {e}"
-      )
+      except Exception as e:
+        print(
+          f"[SELL] warning: self cross check failed for {market.code} "
+          f"in bucket {bucket.id}: {e}"
+        )
 
     try:
       print(
@@ -908,7 +934,7 @@ def execute_sells_for_bucket(
         market=market,
         amount_token=amount_to_sell,
         price_pi=best_bid,
-        strategy_tag="tp_sl",
+        strategy_tag="liquidate" if LIQUIDATE_ALL else "tp_sl",
         tx_resp=resp,
       )
       executed += 1
@@ -935,6 +961,10 @@ def plan_buys_for_bucket(
     - SECOND: use remaining budget on highest-score markets.
     - No micro buys if bucket can afford >= 1 full token.
   """
+  if LIQUIDATE_ALL:
+    # In liquidation mode we never open new positions
+    return []
+
   risk = bucket.risk_level if bucket.risk_level in RISK_WEIGHTS else "medium"
   cfg = RISK_WEIGHTS[risk]
 
@@ -1065,6 +1095,10 @@ def execute_buys_for_bucket(
     - Else:
         use pi_budget as-is (true micro buy when you cannot afford 1 full token).
   """
+  if LIQUIDATE_ALL:
+    # Never buy in liquidation mode
+    return 0
+
   executed = 0
   for market, pi_budget in plans:
     if executed >= MAX_BUYS_PER_BUCKET:
@@ -1279,6 +1313,9 @@ def run_once():
     print("[ENGINE] No active buckets with cash, nothing to do.")
     return
 
+  if LIQUIDATE_ALL:
+    print("[ENGINE] LIQUIDATE_ALL=true – selling all positions and skipping buys.")
+
   total_trades = 0
 
   for bucket in buckets:
@@ -1295,7 +1332,8 @@ def run_once():
     sell_plans = plan_sells_for_bucket(bucket, positions, markets)
     sells_done = execute_sells_for_bucket(bucket, sell_plans)
     total_trades += sells_done
-    if total_trades >= MAX_TRADES_PER_RUN:
+
+    if not LIQUIDATE_ALL and total_trades >= MAX_TRADES_PER_RUN:
       print("[ENGINE] Hit MAX_TRADES_PER_RUN, stopping further trades this run.")
       break
 
@@ -1311,6 +1349,14 @@ def run_once():
       ).fetchone()
     bucket.cash_pi = float(row["amount"] or 0.0) if row else 0.0
 
+    if LIQUIDATE_ALL:
+      # In liquidation mode we never open new positions, just move to next bucket
+      print(
+        f"[ENGINE] Bucket {bucket.id} liquidation pass complete – "
+        f"cash≈{bucket.cash_pi:.4f} PI"
+      )
+      continue
+
     # Enforce planned max drawdown: if hit, skip BUYS for this bucket.
     if bucket_hit_max_drawdown(bucket, positions, markets):
       print(
@@ -1323,7 +1369,7 @@ def run_once():
     buy_plans = plan_buys_for_bucket(bucket, markets)
     buys_done = execute_buys_for_bucket(bucket, buy_plans)
     total_trades += buys_done
-    if total_trades >= MAX_TRADES_PER_RUN:
+    if not LIQUIDATE_ALL and total_trades >= MAX_TRADES_PER_RUN:
       print("[ENGINE] Hit MAX_TRADES_PER_RUN, stopping further trades this run.")
       break
 
