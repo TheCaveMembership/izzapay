@@ -22,6 +22,7 @@ BOT_SECRET = (
     os.getenv("BOT_SECRET")
     or os.getenv("TRADER_SECRET")
     or os.getenv("BOT_TRADER_SECRET")
+    or os.getenv("BOT_WALLET_SEC")
 )
 
 if not BOT_SECRET:
