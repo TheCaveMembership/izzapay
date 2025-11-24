@@ -324,6 +324,15 @@ def load_positions_for_bucket(bucket_id: int) -> Dict[Tuple[str, str], Position]
 # ---------------------------------------------------------------------
 
 def normalize_markets(raw_markets: List[Dict[str, Any]]) -> Dict[Tuple[str, str], MarketInfo]:
+    """
+    Normalize raw market data into PI-per-token prices.
+
+    We treat `orderbook_sell_token` as the ground truth:
+      - it is the book where you SELL the token to receive PI
+      - its prices are PI per 1 token, matching wallet "Market Rate"
+
+    If that is missing for some asset, we fall back to `orderbook_sell_pi`.
+    """
     markets: Dict[Tuple[str, str], MarketInfo] = {}
 
     for m in raw_markets:
@@ -335,16 +344,37 @@ def normalize_markets(raw_markets: List[Dict[str, Any]]) -> Dict[Tuple[str, str]
         ob_token = m.get("orderbook_sell_token") or {}
         ob_pi = m.get("orderbook_sell_pi") or {}
 
-        # Prices and spreads strictly from orderbook
-        best_bid = ob_pi.get("best_bid_price") or ob_token.get("best_bid_price")
-        best_ask = ob_pi.get("best_ask_price") or ob_token.get("best_ask_price")
-        mid_price = ob_pi.get("mid_price") or ob_token.get("mid_price")
-        spread_pct = ob_pi.get("spread_pct") or ob_token.get("spread_pct")
+        # Prefer the token-sell book for prices (PI per token).
+        price_ob = ob_token if ob_token else ob_pi
+        other_ob = ob_pi if price_ob is ob_token else ob_token
 
-        bid_liq = ob_pi.get("total_bid_liquidity") or ob_token.get("total_bid_liquidity") or 0.0
-        ask_liq = ob_pi.get("total_ask_liquidity") or ob_token.get("total_ask_liquidity") or 0.0
-        num_bid_levels = ob_pi.get("num_bid_levels") or ob_token.get("num_bid_levels") or 0
-        num_ask_levels = ob_pi.get("num_ask_levels") or ob_token.get("num_ask_levels") or 0
+        # Prices and spreads strictly from the chosen orderbook
+        best_bid = price_ob.get("best_bid_price")
+        best_ask = price_ob.get("best_ask_price")
+        mid_price = price_ob.get("mid_price")
+        spread_pct = price_ob.get("spread_pct")
+
+        # Liquidity details – prefer from same book, fall back to the other if needed
+        bid_liq = (
+            price_ob.get("total_bid_liquidity")
+            or other_ob.get("total_bid_liquidity")
+            or 0.0
+        )
+        ask_liq = (
+            price_ob.get("total_ask_liquidity")
+            or other_ob.get("total_ask_liquidity")
+            or 0.0
+        )
+        num_bid_levels = (
+            price_ob.get("num_bid_levels")
+            or other_ob.get("num_bid_levels")
+            or 0
+        )
+        num_ask_levels = (
+            price_ob.get("num_ask_levels")
+            or other_ob.get("num_ask_levels")
+            or 0
+        )
 
         try:
             best_bid_f = float(best_bid or 0.0)
@@ -358,13 +388,13 @@ def normalize_markets(raw_markets: List[Dict[str, Any]]) -> Dict[Tuple[str, str]
         except Exception:
             continue
 
-        # Try to pull full ladder info if present (Horizon style asks array)
+        # Try to pull full ladder info (asks) from the same orientation we use for prices
         top_ask_amount_f = 0.0
         next_ask_price_f = 0.0
 
         raw_asks = None
         for key_name in ("asks", "ask_levels", "sell_levels", "ask_book"):
-            v = ob_pi.get(key_name) or ob_token.get(key_name)
+            v = price_ob.get(key_name) or other_ob.get(key_name)
             if isinstance(v, list) and v:
                 raw_asks = v
                 break
