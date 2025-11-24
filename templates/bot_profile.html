@@ -532,6 +532,10 @@
   const BOT_USERNAME_KEY = "izza_bot_username";
   const WALLET_SECRET_KEY = "izza_wallet_secret"; // same key as wallet page
 
+  // Short-term fee and stroop precision for client messaging
+  const SHORT_TERM_WITHDRAW_FEE = 1.0; // test Pi
+  const EPS = 1e-7;
+
   let currentUser = null;
   let currentSummary = null;
 
@@ -580,6 +584,12 @@
   function fmtPi(x){
     const n = Number(x || 0);
     return n.toFixed(4) + " test Pi";
+  }
+
+  // Full stroop precision for buckets
+  function fmtPiFull(x){
+    const n = Number(x || 0);
+    return n.toFixed(7) + " test Pi";
   }
 
   function fmtIzza(x){
@@ -714,10 +724,20 @@
       left.appendChild(chip);
     });
 
+    const balance = Number(b.balance || 0);
+
     const balanceLine = document.createElement("span");
     balanceLine.className = "bucket-balance-line muted";
-    balanceLine.textContent = "Bucket balance: " + fmtPi(b.balance || 0);
+    balanceLine.textContent = "Bucket balance: " + fmtPi(balance);
+
+    const fullBalanceLine = document.createElement("div");
+    fullBalanceLine.className = "bucket-balance-line muted";
+    fullBalanceLine.style.fontSize = "10px";
+    fullBalanceLine.textContent =
+      "Full bucket balance (stroops): " + fmtPiFull(balance);
+
     right.appendChild(balanceLine);
+    right.appendChild(fullBalanceLine);
 
     // Performance % indicator (only after first SELL trade server-side)
     const perfDiv = document.createElement("div");
@@ -757,8 +777,8 @@
     depRow.className = "bucket-io-row";
     const depInput = document.createElement("input");
     depInput.type = "number";
-    depInput.min = "0.0001";
-    depInput.step = "0.0001";
+    depInput.min = "0.0000001";
+    depInput.step = "0.0000001";
     depInput.placeholder = "Amount to deposit";
 
     const depBtn = document.createElement("button");
@@ -830,8 +850,8 @@
     wdRow.className = "bucket-io-row";
     const wdInput = document.createElement("input");
     wdInput.type = "number";
-    wdInput.min = "0.0001";
-    wdInput.step = "0.0001";
+    wdInput.min = "0.0000001";
+    wdInput.step = "0.0000001";
     wdInput.placeholder = "Amount to withdraw";
 
     const wdBtn = document.createElement("button");
@@ -874,40 +894,91 @@
     wdRow.appendChild(wdBtn);
     row.appendChild(wdRow);
 
-    // Delete bucket button, only if bucket has zero balance
-    if ((b.balance || 0) <= 0) {
-      const delBtn = document.createElement("button");
-      delBtn.className = "btn btn-outline";
-      delBtn.textContent = "Delete bucket";
-      delBtn.style.marginTop = "6px";
+    // Delete bucket button and explanation based on balance
+    const delBtn = document.createElement("button");
+    delBtn.className = "btn btn-outline";
+    delBtn.textContent = "Delete bucket";
+    delBtn.style.marginTop = "6px";
 
-      delBtn.onclick = async function(){
-        if (!currentUser || !currentUser.username) {
-          globalStatus.textContent =
-            "No username found. Open IZZA BOT from your main entry point.";
+    const delNote = document.createElement("p");
+    delNote.className = "muted";
+    delNote.style.fontSize = "10px";
+    delNote.style.marginTop = "4px";
+
+    let deleteMode = "zero";
+
+    if (balance <= EPS) {
+      deleteMode = "zero";
+      delNote.textContent =
+        "This bucket has zero balance. Deleting it will simply archive the strategy. No funds are affected.";
+    } else if (balance < SHORT_TERM_WITHDRAW_FEE - EPS) {
+      deleteMode = "dust";
+      delNote.textContent =
+        "If you delete now, the remaining " + fmtPiFull(balance) +
+        " will stay permanently in the IZZA BOT wallet and cannot be withdrawn.";
+    } else if (Math.abs(balance - SHORT_TERM_WITHDRAW_FEE) <= 1e-6) {
+      deleteMode = "fee";
+      delNote.textContent =
+        "If you delete now, a short-term trading fee of 1.0000000 test Pi will be kept by the bot wallet and this bucket will be closed.";
+    } else {
+      deleteMode = "blocked";
+      delBtn.disabled = true;
+      delNote.textContent =
+        "This bucket currently holds more than 1 test Pi. Withdraw funds down to 1.0000000 test Pi or less if you want to delete it. Then you can either abandon less than 1 test Pi, or leave exactly 1.0000000 test Pi as a short-term trading fee when deleting.";
+    }
+
+    delBtn.onclick = async function(){
+      if (!currentUser || !currentUser.username) {
+        globalStatus.textContent =
+          "No username found. Open IZZA BOT from your main entry point.";
+        return;
+      }
+      if (deleteMode === "blocked") {
+        globalStatus.textContent =
+          "Withdraw this bucket down to 1.0000000 test Pi or less before deleting it.";
+        return;
+      }
+      globalStatus.textContent = "Deleting bucket…";
+      try {
+        const res = await postJSON("/api/trading/bucket/delete", {
+          username: currentUser.username,
+          bucket_id: b.id
+        });
+        if (!res.ok) {
+          globalStatus.textContent = res.error || "Error deleting bucket.";
           return;
         }
-        globalStatus.textContent = "Deleting bucket…";
-        try {
-          const res = await postJSON("/api/trading/bucket/delete", {
-            username: currentUser.username,
-            bucket_id: b.id
-          });
-          if (!res.ok) {
-            globalStatus.textContent = res.error || "Error deleting bucket.";
-            return;
-          }
-          globalStatus.textContent = "Bucket deleted.";
-          await loadSummary();
-          setTimeout(()=>{ globalStatus.textContent = ""; }, 2000);
-        } catch(e){
-          console.error(e);
-          globalStatus.textContent = "Network error deleting bucket.";
-        }
-      };
 
-      row.appendChild(delBtn);
-    }
+        let msg = "Bucket deleted.";
+        if (res.mode === "dust") {
+          const abandoned = (typeof res.abandoned_balance === "number")
+            ? res.abandoned_balance
+            : balance;
+          msg =
+            "Bucket deleted. Remaining " +
+            fmtPiFull(abandoned) +
+            " stays permanently in the IZZA BOT wallet.";
+        } else if (res.mode === "fee") {
+          const fee = (typeof res.fee_amount === "number")
+            ? res.fee_amount
+            : SHORT_TERM_WITHDRAW_FEE;
+          msg =
+            "Bucket deleted. A short-term trading fee of " +
+            fee.toFixed(4) +
+            " test Pi was kept by the bot wallet.";
+        }
+
+        globalStatus.textContent = msg;
+        await loadSummary();
+        setTimeout(()=>{ globalStatus.textContent = ""; }, 4000);
+      } catch(e){
+        console.error(e);
+        globalStatus.textContent = "Network error deleting bucket.";
+      }
+    };
+
+    row.appendChild(delBtn);
+    row.appendChild(delNote);
 
     return row;
   }
