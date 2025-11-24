@@ -613,24 +613,21 @@ def upsert_position(bucket_id: int, market: MarketInfo, delta_qty: float, trade_
 
 
 # ---------------------------------------------------------------------
-# Drawdown helpers
+# Drawdown + deposit / performance helpers
 # ---------------------------------------------------------------------
 
-def get_planned_max_drawdown_pct(bucket: Bucket) -> Optional[float]:
-  risk = (bucket.risk_level or "medium").lower()
-  return MAX_DRAWDOWN_PCT_BY_RISK.get(risk)
-
-
-def get_bucket_net_deposit_pi(bucket_id: int) -> float:
+def get_bucket_deposit_stats(bucket_id: int) -> Tuple[float, float, float]:
   """
-  Net deposits for this bucket across *all time*:
+  Return (total_deposits, total_withdraws, net_deposit) for this bucket.
 
-      net_deposit = sum(deposits) - sum(withdrawals)
+  - total_deposits: all 'deposit' transfers into this bucket
+  - total_withdraws: all 'withdraw' transfers out of this bucket
+  - net_deposit: max(total_deposits - total_withdraws, 0)
 
-  Assumes you have a bot_bucket_transfers table with:
-    - bucket_id
-    - direction ('deposit' or 'withdraw')
-    - amount (PI)
+  We use:
+    - net_deposit for BOTH:
+        * drawdown protection
+        * realized performance % denominator
   """
   with conn() as cx:
     row = cx.execute(
@@ -645,15 +642,32 @@ def get_bucket_net_deposit_pi(bucket_id: int) -> float:
     ).fetchone()
 
   if not row:
-    return 0.0
+    return 0.0, 0.0, 0.0
 
   total_deposits = float(row["total_deposits"] or 0.0)
   total_withdraws = float(row["total_withdraws"] or 0.0)
   net = total_deposits - total_withdraws
-  return max(net, 0.0)
+  if net < 0:
+    net = 0.0
+  return total_deposits, total_withdraws, net
 
 
-# NEW: realized PnL helpers (buys are inventory, only sells realize PnL)
+def get_planned_max_drawdown_pct(bucket: Bucket) -> Optional[float]:
+  risk = (bucket.risk_level or "medium").lower()
+  return MAX_DRAWDOWN_PCT_BY_RISK.get(risk)
+
+
+def get_bucket_net_deposit_pi(bucket_id: int) -> float:
+  """
+  Net deposits for this bucket across *all time*:
+
+      net_deposit = sum(deposits) - sum(withdrawals)
+
+  This is the base we compare equity and realized PnL against.
+  """
+  _, _, net = get_bucket_deposit_stats(bucket_id)
+  return net
+
 
 def compute_bucket_realized_pnl_pi(bucket_id: int) -> float:
   """
@@ -663,8 +677,8 @@ def compute_bucket_realized_pnl_pi(bucket_id: int) -> float:
     - compute average buy price = total_buy_pi / total_buy_qty
     - realized PnL = total_sell_pi - (total_sell_qty * avg_buy_price)
 
-  Buys themselves do not move realized PnL; they just update inventory
-  cost basis. Only sells at a higher/lower price than that basis move PnL.
+  Buys themselves do not move realized PnL, they just update inventory
+  cost basis. Only sells at a higher or lower price than that basis move PnL.
   """
   with conn() as cx:
     rows = cx.execute(
@@ -706,8 +720,8 @@ def compute_bucket_realized_pnl_pi(bucket_id: int) -> float:
     sell_pi = d["sell_pi"]
     if sell_qty <= 0 or buy_qty <= 0 or buy_pi <= 0:
       continue
-    avg_buy_price = buy_pi / buy_qty
-    cost_of_sold = sell_qty * avg_buy_price
+    avg_buy_price = buy_pi / buy_qty          # PI per token
+    cost_of_sold = sell_qty * avg_buy_price   # PI
     realized += (sell_pi - cost_of_sold)
 
   return realized
@@ -715,15 +729,21 @@ def compute_bucket_realized_pnl_pi(bucket_id: int) -> float:
 
 def compute_bucket_realized_perf_pct(bucket_id: int) -> Optional[float]:
   """
-  Realized performance = realized_PnL_from_sells / net_deposit * 100.
+  Realized performance percent for this bucket:
 
-  - net_deposit = lifetime deposits - withdrawals for this bucket
-  - realized PnL includes only SELL trades, with buys treated purely
-    as inventory at average cost.
+      realized_perf = realized_PnL / net_deposit * 100
+
+  where:
+    - net_deposit = total_deposits - total_withdraws for this bucket
+    - realized_PnL includes ONLY SELL trades, buys are just inventory
   """
-  net_deposit = get_bucket_net_deposit_pi(bucket_id)
-  if net_deposit <= 0:
+  total_deposits, total_withdraws, net_deposit = get_bucket_deposit_stats(bucket_id)
+
+  # If user never really funded this bucket, or has effectively zero net deposit,
+  # skip the percent to avoid crazy numbers.
+  if net_deposit <= 1e-8:
     return None
+
   realized_pnl = compute_bucket_realized_pnl_pi(bucket_id)
   return (realized_pnl / net_deposit) * 100.0
 
@@ -862,7 +882,7 @@ def execute_sells_for_bucket(
     except Exception:
       pnl_pct = None
 
-    # In liquidation mode we don't care about PnL or ladders,
+    # In liquidation mode we do not care about PnL or ladders,
     # just dump at best_bid and let self-cross protection handle it.
     if not LIQUIDATE_ALL:
       # Avoid op_cross_self: if this price would hit our own BUY offer
@@ -873,7 +893,7 @@ def execute_sells_for_bucket(
           is_profit = pnl_pct is not None and pnl_pct > 0.0
 
           if is_profit:
-            # Try to cancel blocking BUY offers on this pair at/above best_bid
+            # Try to cancel blocking BUY offers on this pair at or above best_bid
             try:
               cancelled = cancel_blocking_buy_offers_for_pair(
                 market.code,
@@ -891,7 +911,7 @@ def execute_sells_for_bucket(
                 f"{market.code} in bucket {bucket.id}: {e}"
               )
 
-            # Re-check self-cross after cancellations; if still crossing,
+            # Re check self cross after cancellations, if still crossing,
             # skip to avoid Horizon op_cross_self.
             if would_cross_self_sell(market.code, market.issuer, best_bid):
               print(
@@ -901,7 +921,7 @@ def execute_sells_for_bucket(
               )
               continue
           else:
-            # Non-positive PnL: do not tear down our own BUY ladder
+            # Non positive PnL, do not tear down our own BUY ladder
             print(
               f"[SELL] skip bucket={bucket.id} user=@{bucket.username} "
               f"{market.code} price {best_bid:.6f} would cross own BUY offer "
@@ -979,7 +999,7 @@ def plan_buys_for_bucket(
   scored: List[Tuple[float, MarketInfo]] = []
 
   for key, m in markets.items():
-    # Never BUY blocked tokens (we can still SELL them)
+    # Never BUY blocked tokens, we can still SELL them
     if m.code in BLOCKED_BUY_CODES:
       continue
 
@@ -995,7 +1015,7 @@ def plan_buys_for_bucket(
     if m.best_ask < MIN_BUY_PRICE or m.best_ask > MAX_BUY_PRICE:
       continue
 
-    # --- Sell wall detection relative to this bucket ---
+    # Sell wall detection relative to this bucket
     wall_qty_tokens = m.top_ask_amount if m.top_ask_amount > 0 else 0.0
     if wall_qty_tokens <= 0 and m.ask_liq > 0:
       denom = m.num_ask_levels or 1
@@ -1014,7 +1034,7 @@ def plan_buys_for_bucket(
       m.wall_break_candidate = True
       wall_candidates.append((potential_edge, m))
 
-    # Normal strategy score (for fallback)
+    # Normal strategy score, fallback
     base_score = compute_score(m, cfg)
     score = base_score + max(0.0, potential_edge) * 10.0
 
@@ -1032,7 +1052,7 @@ def plan_buys_for_bucket(
 
   planned: List[Tuple[MarketInfo, float]] = []
 
-  # --- Pass 1: break sell walls if possible --------------------------
+  # Pass 1, break sell walls if possible
   wall_candidates.sort(key=lambda x: x[0], reverse=True)  # best edge first
 
   for edge, m in wall_candidates:
@@ -1048,7 +1068,7 @@ def plan_buys_for_bucket(
     planned.append((m, spend))
     remaining_cash -= spend
 
-  # --- Pass 2: fallback aggressive buys if we still have cash --------
+  # Pass 2, fallback aggressive buys if we still have cash
   if len(planned) < MAX_BUYS_PER_BUCKET and remaining_cash >= MIN_TRADE_PI:
     per_run_budget = remaining_cash * cfg["per_run_fraction"]
     if per_run_budget < MIN_TRADE_PI:
@@ -1064,7 +1084,7 @@ def plan_buys_for_bucket(
         break
       tokens_considered += 1
 
-      # Skip markets already used as wall-breaks
+      # Skip markets already used as wall breaks
       if any(p[0].code == m.code and p[0].issuer == m.issuer for p in planned):
         continue
 
@@ -1088,12 +1108,12 @@ def execute_buys_for_bucket(
   plans: List[Tuple[MarketInfo, float]],
 ) -> int:
   """
-  Execute planned buys with "no micro buys unless necessary":
+  Execute planned buys with "no micro buys unless necessary".
 
-    - If pi_budget >= best_ask:
-        buy floor(pi_budget / best_ask) whole tokens.
-    - Else:
-        use pi_budget as-is (true micro buy when you cannot afford 1 full token).
+    If pi_budget >= best_ask,
+      buy floor(pi_budget / best_ask) whole tokens.
+    Else,
+      use pi_budget as is, true micro buy when you cannot afford one full token.
   """
   if LIQUIDATE_ALL:
     # Never buy in liquidation mode
@@ -1111,7 +1131,7 @@ def execute_buys_for_bucket(
     if best_ask <= 0:
       continue
 
-    # Avoid op_cross_self on the buy side: skip if this price would hit our own SELL offer
+    # Avoid op_cross_self on the buy side, skip if this price would hit our own SELL offer
     try:
       if would_cross_self_buy(market.code, market.issuer, best_ask):
         print(
@@ -1142,14 +1162,14 @@ def execute_buys_for_bucket(
     # Clamp pi_budget to what we actually have
     pi_budget = min(pi_budget, current_cash)
 
-    # NO MICRO BUYS unless we literally cannot afford 1 full token
+    # No micro buys unless we literally cannot afford one full token
     if pi_budget >= best_ask:
       full_tokens = int(pi_budget / best_ask)
       if full_tokens <= 0:
         continue
       trade_pi_budget = full_tokens * best_ask
     else:
-      # cannot afford 1 full token, use everything (micro buy)
+      # cannot afford one full token, use everything, micro buy
       trade_pi_budget = pi_budget
 
     if trade_pi_budget < MIN_TRADE_PI:
@@ -1190,7 +1210,7 @@ def execute_buys_for_bucket(
             # Place just under the next ask
             target_price = market.next_ask_price * 0.999
           else:
-            # Fallback: small markup over entry (orderbook-only)
+            # Fallback, small markup over entry, orderbook only
             target_price = market.best_ask * (1.0 + QUICK_SELL_FALLBACK_PCT / 100.0)
 
           # Skip quick SELL if it would cross our own BUY offer
@@ -1287,7 +1307,7 @@ def run_once():
   ensure_bot_tables()
 
   # First, clear any legacy open BUY offers for blocked tokens
-  # so we never keep feeding Datong / stablecoins.
+  # so we never keep feeding Datong or stablecoins.
   try:
     cancel_blocked_buy_offers(list(BLOCKED_BUY_CODES))
   except Exception as e:
@@ -1357,15 +1377,15 @@ def run_once():
       )
       continue
 
-    # Enforce planned max drawdown: if hit, skip BUYS for this bucket.
+    # Enforce planned max drawdown, if hit, skip BUYS for this bucket.
     if bucket_hit_max_drawdown(bucket, positions, markets):
       print(
-        f"[ENGINE] Bucket {bucket.id} hit planned max drawdown; "
+        f"[ENGINE] Bucket {bucket.id} hit planned max drawdown, "
         f"skipping new BUYS this run (SELLS still allowed)."
       )
       continue
 
-    # Buys (with wall-break logic)
+    # Buys, with wall-break logic
     buy_plans = plan_buys_for_bucket(bucket, markets)
     buys_done = execute_buys_for_bucket(bucket, buy_plans)
     total_trades += buys_done
@@ -1400,7 +1420,7 @@ def run_loop():
 def bot_loop_forever():
   """
   Continuous loop for background thread.
-  Always loops, ignoring LOOP_MODE – this is what we want in production.
+  Always loops, ignoring LOOP_MODE, this is what we want in production.
   """
   print(
     f"[ENGINE] Background trading loop started inside app process. "
