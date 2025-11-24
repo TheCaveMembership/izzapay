@@ -353,6 +353,88 @@ def would_cross_self_buy(token_code: str, token_issuer: str, new_price: float) -
     return new_price_f >= best_own_sell - 1e-12
 
 
+def cancel_blocking_buy_offers_for_pair(
+    token_code: str,
+    token_issuer: str,
+    min_price: float,
+) -> int:
+    """
+    Cancel any open BUY offers on (token, PI) for this wallet where:
+      - selling native PI
+      - buying (token_code, token_issuer)
+      - offer price >= min_price
+
+    Used by the engine when a profitable SELL would otherwise
+    cross our own BUY offer; we tear down those BUYs first so we
+    can realize gains.
+    """
+    try:
+        min_price_f = float(min_price)
+    except Exception:
+        return 0
+
+    offers = _list_bot_offers(max_records=1000)
+    cancelled = 0
+
+    for offer in offers:
+        selling = offer.get("selling") or {}
+        buying = offer.get("buying") or {}
+
+        # Must be: selling native PI, buying this token
+        if selling.get("asset_type") != "native":
+            continue
+        if buying.get("asset_code") != token_code or buying.get("asset_issuer") != token_issuer:
+            continue
+
+        try:
+            p = float(offer.get("price") or "0")
+        except Exception:
+            continue
+
+        # Only cancel BUYs that are at or above the SELL price
+        if p + 1e-12 < min_price_f:
+            continue
+
+        # Build selling asset (native PI)
+        s_type = selling.get("asset_type")
+        if s_type == "native":
+            selling_asset = Asset.native()
+        else:
+            selling_asset = Asset(
+                selling.get("asset_code"),
+                selling.get("asset_issuer"),
+            )
+
+        # Build buying asset (the token)
+        b_type = buying.get("asset_type")
+        if b_type == "native":
+            buying_asset = Asset.native()
+        else:
+            buying_asset = Asset(
+                buying.get("asset_code"),
+                buying.get("asset_issuer"),
+            )
+
+        offer_id = int(offer.get("id") or 0)
+
+        try:
+            print(
+                f"[BOT] Cancelling blocking BUY offer id={offer_id} "
+                f"code={token_code} price={p} selling={selling} buying={buying}"
+            )
+            cancel_offer(offer_id, selling_asset, buying_asset)
+            cancelled += 1
+        except Exception as e:
+            print(f"[BOT] Error cancelling blocking BUY offer {offer_id} ({token_code}): {e}")
+
+    if cancelled:
+        print(
+            f"[BOT] cancel_blocking_buy_offers_for_pair: cancelled {cancelled} "
+            f"BUY offers for {token_code} at/above {min_price_f}"
+        )
+    return cancelled
+
+
 # ------------------------------------------------------------------
 # Cancel BUY offers for blocked tokens
 # ------------------------------------------------------------------
