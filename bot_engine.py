@@ -58,58 +58,58 @@ from bot_trader import (
 LOOP_MODE = os.getenv("BOT_LOOP_MODE", "false").lower() == "true"
 LOOP_SLEEP_SECS = int(os.getenv("BOT_LOOP_SLEEP_SECS", "60"))
 
-# Minimum PI to use per trade
-MIN_TRADE_PI = float(os.getenv("BOT_MIN_TRADE_PI", "0.1"))
+# Minimum PI to use per trade (lowered so trades as small as 0.00001 PI can execute)
+MIN_TRADE_PI = float(os.getenv("BOT_MIN_TRADE_PI", "0.00001"))
 
 # Safety caps
 MAX_TRADES_PER_RUN = int(os.getenv("BOT_MAX_TRADES_PER_RUN", "20"))
 MAX_BUYS_PER_BUCKET = int(os.getenv("BOT_MAX_BUYS_PER_BUCKET", "5"))
 MAX_SELLS_PER_BUCKET = int(os.getenv("BOT_MAX_SELLS_PER_BUCKET", "5"))
 
-# Take profit / stop loss by risk
+# Take profit / stop loss by risk (tightened to react around ~5% moves)
 RISK_TP_SL = {
     "low": {
         "take_profit_pct": 5.0,
         "stop_loss_pct": -5.0,
     },
     "medium": {
-        "take_profit_pct": 10.0,
-        "stop_loss_pct": -8.0,
+        "take_profit_pct": 5.0,
+        "stop_loss_pct": -5.0,
     },
     "high": {
-        "take_profit_pct": 20.0,
-        "stop_loss_pct": -15.0,
+        "take_profit_pct": 5.0,
+        "stop_loss_pct": -5.0,
     },
 }
 
 # Strategy blending per risk level
 RISK_WEIGHTS = {
     "low": {
-        "max_tokens": 2,
+        "max_tokens": 1000,   # effectively "consider all" from scan
         "per_run_fraction": 0.10,
         "max_per_token_fraction": 0.30,
         "trend_weight": 0.6,
         "micro_weight": 0.4,
         "vol_weight": 0.0,
-        "max_spread_pct": 5.0,
+        "max_spread_pct": 20.0,   # widened from 5.0
     },
     "medium": {
-        "max_tokens": 6,
+        "max_tokens": 1000,   # effectively "consider all" from scan
         "per_run_fraction": 0.20,
         "max_per_token_fraction": 0.40,
         "trend_weight": 0.4,
         "micro_weight": 0.3,
         "vol_weight": 0.3,
-        "max_spread_pct": 12.0,
+        "max_spread_pct": 60.0,   # widened from 12.0
     },
     "high": {
-        "max_tokens": 10,
+        "max_tokens": 1000,   # effectively "consider all" from scan
         "per_run_fraction": 0.35,
         "max_per_token_fraction": 0.60,
         "trend_weight": 0.15,
         "micro_weight": 0.30,
         "vol_weight": 0.55,
-        "max_spread_pct": 30.0,
+        "max_spread_pct": 200.0,  # widened from 30.0 to grab big spread plays
     },
 }
 
