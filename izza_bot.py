@@ -923,8 +923,7 @@ def bucket_deposit():
                   account_id, bucket_id, amount, created_at, updated_at
                 )
                 VALUES (?, ?, ?, ?, ?)
-                """
-                ,
+                """,
                 (account_id, bucket_id, amount, ts, ts),
             )
 
@@ -936,8 +935,7 @@ def bucket_deposit():
               status, created_at, raw_json
             )
             VALUES (?, ?, ?, ?, ?, 'confirmed', ?, ?)
-            """
-            ,
+            """,
             (
                 account_id,
                 tx_hash,
@@ -1200,7 +1198,7 @@ def bucket_withdraw():
 
 
 # ----------------------------------------------------------------------
-# NEW: Delete a bucket (only when balance is zero)
+# NEW: Delete a bucket with dust / fee rules
 # ----------------------------------------------------------------------
 @izza_bot_bp.route("/api/trading/bucket/delete", methods=["POST"])
 def bucket_delete():
@@ -1213,8 +1211,13 @@ def bucket_delete():
 
     Rules:
       - bucket must belong to this user
-      - bucket allocation amount must be zero (no test Pi remaining)
-      - marks bucket status='deleted' and zeroes allocation amount
+      - if balance <= 0 (within EPS) → free delete
+      - if 0 < balance < 1 test Pi → allow delete, entire remaining balance
+        stays in the bot wallet permanently and cannot be withdrawn
+      - if balance ≈ 1 test Pi → allow delete, treat 1 test Pi as a
+        short-term trading fee that stays in the bot wallet
+      - if balance > 1 test Pi → block delete and tell user to withdraw
+        down to 1.0000000 or less before deleting
     """
     data = request.get_json() or {}
     username = (data.get("username") or "").strip()
@@ -1230,6 +1233,7 @@ def bucket_delete():
 
     uname = username.strip().lstrip("@").lower()
     ts = _now()
+    EPS = 1e-7
 
     with conn() as cx:
         acct_row = cx.execute(
@@ -1269,15 +1273,37 @@ def bucket_delete():
             (account_id, bucket_id),
         ).fetchone()
 
+        mode = "zero"
+        abandoned_balance = 0.0
+        fee_amount = 0.0
+
         if alloc_row:
             balance = float(alloc_row["amount"] or 0.0)
-            if balance > 1e-8:
-                return jsonify(
-                    ok=False,
-                    error="Bucket still has test Pi. Withdraw all funds before deleting.",
-                )
 
-            # ensure allocation amount is zeroed for clarity
+            if balance > EPS:
+                # dust delete: 0 < balance < 1 test Pi
+                if balance < SHORT_TERM_WITHDRAW_FEE - EPS:
+                    mode = "dust"
+                    abandoned_balance = balance
+                # fee delete: balance is basically exactly 1 test Pi
+                elif abs(balance - SHORT_TERM_WITHDRAW_FEE) <= 1e-6:
+                    mode = "fee"
+                    fee_amount = SHORT_TERM_WITHDRAW_FEE
+                else:
+                    # More than 1 test Pi – user must withdraw first
+                    return jsonify(
+                        ok=False,
+                        error=(
+                            "Bucket still has more than 1 test Pi. "
+                            "Withdraw funds down to 1.0000000 test Pi or less before deleting. "
+                            "You can then either abandon less than 1 test Pi "
+                            "(which will stay in the IZZA BOT wallet forever) "
+                            "or leave exactly 1.0000000 test Pi as a short-term trading fee "
+                            "when deleting."
+                        ),
+                    )
+
+            # ensure allocation amount is zeroed for clarity (funds stay in bot wallet)
             cx.execute(
                 """
                 UPDATE bot_bucket_allocations
@@ -1297,7 +1323,13 @@ def bucket_delete():
             (ts, bucket_id),
         )
 
-    return jsonify(ok=True, bucket_id=bucket_id)
+    return jsonify(
+        ok=True,
+        bucket_id=bucket_id,
+        mode=mode,
+        abandoned_balance=abandoned_balance,
+        fee_amount=fee_amount,
+    )
 
 
 # ----------------------------------------------------------------------
