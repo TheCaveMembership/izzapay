@@ -114,17 +114,26 @@ def ensure_trustline(token_code: str, token_issuer: str, limit: str = "100000000
 
 def get_bot_token_balance(token_code: str, token_issuer: str) -> float:
     """
-    Return the BOT wallet actual on chain balance for a given asset.
-    Used by the engine to ensure sells never exceed wallet holdings.
+    Return the BOT wallet available balance for a given asset.
+    This subtracts selling_liabilities so we never try to sell
+    tokens already locked in open sell offers.
     """
     acct = _srv.accounts().account_id(BOT_PUB).call()
     for bal in acct.get("balances", []):
         if bal.get("asset_type") in ("credit_alphanum4", "credit_alphanum12"):
             if bal.get("asset_code") == token_code and bal.get("asset_issuer") == token_issuer:
                 try:
-                    return float(bal.get("balance") or 0.0)
+                    balance = float(bal.get("balance") or 0.0)
                 except Exception:
                     return 0.0
+                try:
+                    selling_liab = float(bal.get("selling_liabilities") or 0.0)
+                except Exception:
+                    selling_liab = 0.0
+                available = balance - selling_liab
+                if available < 0:
+                    available = 0.0
+                return available
     return 0.0
 
 
@@ -264,6 +273,84 @@ def ensure_offer_capacity(
             f"[BOT] Offer count={count} close to limit, pruning before new trade..."
         )
         prune_bot_offers(max_offers=max_offers, target_keep=max_offers - 80)
+
+
+# ------------------------------------------------------------------
+# Self cross protection
+# ------------------------------------------------------------------
+
+def would_cross_self_sell(token_code: str, token_issuer: str, new_price: float) -> bool:
+    """
+    Return True if a new SELL offer on (token, PI) at new_price
+    would cross any of our own existing BUY offers on the same pair.
+    """
+    try:
+        new_price_f = float(new_price)
+    except Exception:
+        return False
+
+    offers = _list_bot_offers(max_records=1000)
+    best_own_buy = None
+
+    for offer in offers:
+        selling = offer.get("selling") or {}
+        buying = offer.get("buying") or {}
+
+        # Our own BUY offers for this pair are: selling native PI, buying this token
+        if selling.get("asset_type") != "native":
+            continue
+        if buying.get("asset_code") != token_code or buying.get("asset_issuer") != token_issuer:
+            continue
+
+        try:
+            p = float(offer.get("price") or "0")
+        except Exception:
+            continue
+
+        if best_own_buy is None or p > best_own_buy:
+            best_own_buy = p
+
+    if best_own_buy is None:
+        return False
+
+    return new_price_f <= best_own_buy + 1e-12
+
+
+def would_cross_self_buy(token_code: str, token_issuer: str, new_price: float) -> bool:
+    """
+    Return True if a new BUY offer on (token, PI) at new_price
+    would cross any of our own existing SELL offers on the same pair.
+    """
+    try:
+        new_price_f = float(new_price)
+    except Exception:
+        return False
+
+    offers = _list_bot_offers(max_records=1000)
+    best_own_sell = None
+
+    for offer in offers:
+        selling = offer.get("selling") or {}
+        buying = offer.get("buying") or {}
+
+        # Our own SELL offers for this pair are: selling this token, buying native PI
+        if buying.get("asset_type") != "native":
+            continue
+        if selling.get("asset_code") != token_code or selling.get("asset_issuer") != token_issuer:
+            continue
+
+        try:
+            p = float(offer.get("price") or "0")
+        except Exception:
+            continue
+
+        if best_own_sell is None or p < best_own_sell:
+            best_own_sell = p
+
+    if best_own_sell is None:
+        return False
+
+    return new_price_f >= best_own_sell - 1e-12
 
 
 # ------------------------------------------------------------------
