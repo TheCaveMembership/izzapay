@@ -999,6 +999,9 @@ def bucket_withdraw():
     bucket_id = data.get("bucket_id")
     amount = data.get("amount")
 
+    # small tolerance for float dust, so withdrawing the displayed balance works
+    EPS = 1e-7
+
     if not username:
         return jsonify(ok=False, error="username is required")
 
@@ -1060,8 +1063,13 @@ def bucket_withdraw():
             return jsonify(ok=False, error="This bucket has no funds to withdraw.")
 
         current_balance = float(alloc_row["amount"] or 0)
-        if amount > current_balance + 1e-9:
-            return jsonify(ok=False, error="Requested amount exceeds bucket balance.")
+
+        # allow for tiny rounding difference when user withdraws "everything"
+        if amount > current_balance:
+            if amount - current_balance <= EPS:
+                amount = current_balance
+            else:
+                return jsonify(ok=False, error="Requested amount exceeds bucket balance.")
 
         last_change_ts = int(alloc_row["updated_at"] or 0)
 
@@ -1128,7 +1136,7 @@ def bucket_withdraw():
             return jsonify(ok=False, error="Bucket allocation disappeared during withdrawal.")
 
         current_balance = float(alloc_row["amount"] or 0)
-        if amount > current_balance + 1e-9:
+        if amount > current_balance + EPS:
             return jsonify(ok=False, error="Requested amount exceeds bucket balance (race condition).")
 
         # Bucket balance is reduced by the full requested amount (fee is a cost of using the bucket)
