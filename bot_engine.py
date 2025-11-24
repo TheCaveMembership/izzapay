@@ -46,6 +46,8 @@ from bot_trader import (
     market_sell,
     get_bot_token_balance,
     cancel_blocked_buy_offers,
+    would_cross_self_sell,
+    would_cross_self_buy,
 )
 
 # ---------------------------------------------------------------------
@@ -700,6 +702,23 @@ def execute_sells_for_bucket(
         if amount_to_sell * best_bid < MIN_TRADE_PI:
             continue
 
+        if amount_to_sell <= 0:
+            continue
+
+        # Avoid op_cross_self: skip if this price would hit our own BUY offer on this pair
+        try:
+            if would_cross_self_sell(market.code, market.issuer, best_bid):
+                print(
+                    f"[SELL] skip bucket={bucket.id} user=@{bucket.username} "
+                    f"{market.code} price {best_bid:.6f} would cross own BUY offer"
+                )
+                continue
+        except Exception as e:
+            print(
+                f"[SELL] warning: self cross check failed for {market.code} "
+                f"in bucket {bucket.id}: {e}"
+            )
+
         try:
             print(
                 f"[SELL] bucket={bucket.id} user=@{bucket.username} "
@@ -862,6 +881,20 @@ def execute_buys_for_bucket(
         if best_ask <= 0:
             continue
 
+        # Avoid op_cross_self on the buy side: skip if this price would hit our own SELL offer
+        try:
+            if would_cross_self_buy(market.code, market.issuer, best_ask):
+                print(
+                    f"[BUY] skip bucket={bucket.id} user=@{bucket.username} "
+                    f"{market.code} price {best_ask:.6f} would cross own SELL offer"
+                )
+                continue
+        except Exception as e:
+            print(
+                f"[BUY] warning: self cross check failed for {market.code} "
+                f"in bucket {bucket.id}: {e}"
+            )
+
         with conn() as cx:
             row = cx.execute(
                 """
@@ -913,6 +946,14 @@ def execute_buys_for_bucket(
                         # Fallback: small markup over entry (orderbook-only)
                         target_price = market.best_ask * (1.0 + QUICK_SELL_FALLBACK_PCT / 100.0)
 
+                    # Skip quick SELL if it would cross our own BUY offer
+                    if would_cross_self_sell(market.code, market.issuer, target_price):
+                        print(
+                            f"[SCALP] skip quick wall-break SELL for {market.code} "
+                            f"@ {target_price:.6f} PI (would cross own BUY offer)"
+                        )
+                        continue
+
                     wallet_qty = get_bot_token_balance(market.code, market.issuer)
                     quick_qty = min(wallet_qty, amount_token)
 
@@ -923,7 +964,7 @@ def execute_buys_for_bucket(
                             f"@ {target_price:.6f} PI"
                         )
                         # Use market_sell as a generic limit-sell at target_price.
-                        # We don't log this as an executed trade here because it
+                        # We do not log this as an executed trade here because it
                         # may partially fill; realized PnL will show up via TP/SL.
                         market_sell(
                             token_code=market.code,
