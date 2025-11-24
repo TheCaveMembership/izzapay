@@ -92,7 +92,7 @@ RISK_WEIGHTS = {
     },
     "medium": {
         "max_tokens": 6,
-            "per_run_fraction": 0.20,
+        "per_run_fraction": 0.20,
         "max_per_token_fraction": 0.40,
         "trend_weight": 0.4,
         "micro_weight": 0.3,
@@ -122,7 +122,8 @@ BLOCKED_BUY_CODES = {
 
 # Sell wall logic
 # If wall_value_pi > SELL_WALL_FRACTION * bucket_cash -> skip that market
-SELL_WALL_FRACTION = float(os.getenv("BOT_SELL_WALL_FRACTION", "0.4"))
+# (default relaxed from 0.4 to 0.8 for testnet conditions)
+SELL_WALL_FRACTION = float(os.getenv("BOT_SELL_WALL_FRACTION", "0.8"))
 # Boost in scoring for tokens where we CAN break the wall
 WALL_BREAK_SCORE_BOOST = float(os.getenv("BOT_WALL_BREAK_SCORE_BOOST", "3.0"))
 # Fallback quick-sell markup if we don't know the next ask (percent)
@@ -520,8 +521,7 @@ def upsert_position(bucket_id: int, market: MarketInfo, delta_qty: float, trade_
                   created_at, updated_at
                 )
                 VALUES (?, ?, ?, ?, ?, ?, ?)
-                """
-                ,
+                """,
                 (
                     bucket_id,
                     code,
@@ -719,7 +719,8 @@ def plan_buys_for_bucket(
         # Orderbook sanity
         if m.best_ask <= 0 or m.mid_price <= 0:
             continue
-        if m.spread_pct <= 0 or m.spread_pct > max_spread:
+        # Allow 0-spread markets, only skip negative or insanely wide
+        if m.spread_pct < 0 or m.spread_pct > max_spread:
             continue
         if m.total_liq <= 0:
             continue
@@ -741,7 +742,7 @@ def plan_buys_for_bucket(
 
             # If wall is too big vs this bucket's firepower, skip entirely
             if wall_ratio > SELL_WALL_FRACTION:
-                # Example: bucket has 1000 PI and wall is 600+ PI -> not worth touching
+                # Example: bucket has 1000 PI and wall is 900+ PI -> not worth touching
                 continue
 
             # If the wall is reasonably sized, and at least MIN_TRADE_PI, mark as breakable
@@ -765,12 +766,52 @@ def plan_buys_for_bucket(
 
         scored.append((score, m))
 
+    max_tokens = cfg["max_tokens"]
+
+    # Fallback if nothing passes scoring filters
     if not scored:
-        return []
+        # Simple aggressive mode: pick top-liquidity markets with real ask/mid,
+        # still never touching BLOCKED_BUY_CODES.
+        simple_candidates = [
+            m for m in markets.values()
+            if m.code not in BLOCKED_BUY_CODES
+            and m.best_ask > 0
+            and m.mid_price > 0
+        ]
+
+        if not simple_candidates:
+            return []
+
+        # Sort by bid-side liquidity (how much people are actually bidding)
+        simple_candidates.sort(key=lambda mm: mm.bid_liq, reverse=True)
+
+        simple_candidates = simple_candidates[:max_tokens]
+
+        remaining_budget = per_run_budget
+        planned_fallback: List[Tuple[MarketInfo, float]] = []
+
+        for m in simple_candidates:
+            if remaining_budget < MIN_TRADE_PI:
+                break
+
+            per_token_budget = min(
+                max_per_token,
+                remaining_budget / max(1, (len(simple_candidates) - len(planned_fallback))),
+            )
+
+            if per_token_budget < MIN_TRADE_PI:
+                continue
+
+            planned_fallback.append((m, per_token_budget))
+            remaining_budget -= per_token_budget
+
+            if len(planned_fallback) >= MAX_BUYS_PER_BUCKET:
+                break
+
+        return planned_fallback
 
     scored.sort(key=lambda x: x[0], reverse=True)
 
-    max_tokens = cfg["max_tokens"]
     scored = scored[:max_tokens]
 
     remaining_budget = per_run_budget
@@ -977,7 +1018,7 @@ def run_once():
             ).fetchone()
         bucket.cash_pi = float(row["amount"] or 0.0) if row else 0.0
 
-        # Buys (with sell wall logic)
+        # Buys (with sell wall logic + fallback)
         buy_plans = plan_buys_for_bucket(bucket, markets)
         buys_done = execute_buys_for_bucket(bucket, buy_plans)
         total_trades += buys_done
