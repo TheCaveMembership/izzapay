@@ -55,7 +55,6 @@ def fetch_all_offers():
     # In newer stellar_sdk, the HTTP client is server._client rather than server._session
     while "next" in call["_links"]:
         next_href = call["_links"]["next"]["href"]
-        # Follow the "next" link using the underlying HTTP client
         call = server._client.get(next_href).json()
         recs = call.get("_embedded", {}).get("records", [])
         if not recs:
@@ -97,7 +96,7 @@ for off in offers:
     is_buying_native = off["buying"]["asset_type"] == "native"
 
     if is_buying_native:
-        # sell token for PI -> manage sell offer
+        # sell token for PI  -> manage sell offer
         op = ManageSellOffer(
             selling=selling,
             buying=buying,
@@ -107,10 +106,11 @@ for off in offers:
         )
     elif is_selling_native:
         # sell PI for token -> manage buy offer
+        # In this SDK version, the param is "amount", not "buy_amount"
         op = ManageBuyOffer(
             selling=selling,
             buying=buying,
-            buy_amount="0",    # 0 cancels the offer
+            amount="0",        # 0 cancels the offer
             price=str(price),
             offer_id=offer_id,
         )
