@@ -48,6 +48,7 @@ from bot_trader import (
     cancel_blocked_buy_offers,
     would_cross_self_sell,
     would_cross_self_buy,
+    cancel_blocking_buy_offers_for_pair,
 )
 
 # ---------------------------------------------------------------------
@@ -705,14 +706,59 @@ def execute_sells_for_bucket(
         if amount_to_sell <= 0:
             continue
 
-        # Avoid op_cross_self: skip if this price would hit our own BUY offer on this pair
+        # Compute PnL % for this position (used for deciding whether to
+        # tear down our own BUY wall to realize gains).
+        pnl_pct = None
+        try:
+            if pos.avg_price_pi > 0 and market.mid_price > 0:
+                pnl_pct = (market.mid_price - pos.avg_price_pi) / pos.avg_price_pi * 100.0
+        except Exception:
+            pnl_pct = None
+
+        # Avoid op_cross_self: if this price would hit our own BUY offer
+        # on this pair, consider cancelling blocking BUYs if the trade
+        # is profitable for this bucket.
         try:
             if would_cross_self_sell(market.code, market.issuer, best_bid):
-                print(
-                    f"[SELL] skip bucket={bucket.id} user=@{bucket.username} "
-                    f"{market.code} price {best_bid:.6f} would cross own BUY offer"
-                )
-                continue
+                is_profit = pnl_pct is not None and pnl_pct > 0.0
+
+                if is_profit:
+                    # Try to cancel blocking BUY offers on this pair at/above best_bid
+                    try:
+                        cancelled = cancel_blocking_buy_offers_for_pair(
+                            market.code,
+                            market.issuer,
+                            best_bid,
+                        )
+                        print(
+                            f"[SELL] bucket={bucket.id} user=@{bucket.username} "
+                            f"{market.code} cancelled {cancelled} blocking BUY offers "
+                            f"to realize profitable SELL"
+                        )
+                    except Exception as e:
+                        print(
+                            f"[SELL] warning: failed to cancel blocking BUY offers for "
+                            f"{market.code} in bucket {bucket.id}: {e}"
+                        )
+
+                    # Re-check self-cross after cancellations; if still crossing,
+                    # skip to avoid Horizon op_cross_self.
+                    if would_cross_self_sell(market.code, market.issuer, best_bid):
+                        print(
+                            f"[SELL] skip bucket={bucket.id} user=@{bucket.username} "
+                            f"{market.code} price {best_bid:.6f} would still cross own BUY offer "
+                            f"after cancel attempt"
+                        )
+                        continue
+                else:
+                    # Non-positive PnL: do not tear down our own BUY ladder,
+                    # just skip this SELL to keep previous behaviour.
+                    print(
+                        f"[SELL] skip bucket={bucket.id} user=@{bucket.username} "
+                        f"{market.code} price {best_bid:.6f} would cross own BUY offer "
+                        f"(PnL not positive, keeping BUY ladder)"
+                    )
+                    continue
         except Exception as e:
             print(
                 f"[SELL] warning: self cross check failed for {market.code} "
