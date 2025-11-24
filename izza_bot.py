@@ -624,6 +624,7 @@ def trading_summary():
                 ON a.bucket_id = b.id
                AND a.account_id = b.account_id
              WHERE b.account_id = ?
+               AND (b.status IS NULL OR b.status = 'active')
              ORDER BY b.id ASC
             """,
             (account_id,),
@@ -1188,6 +1189,107 @@ def bucket_withdraw():
         fee_amount=fee,
         payout_amount=payout_amount,
     )
+
+
+# ----------------------------------------------------------------------
+# NEW: Delete a bucket (only when balance is zero)
+# ----------------------------------------------------------------------
+@izza_bot_bp.route("/api/trading/bucket/delete", methods=["POST"])
+def bucket_delete():
+    """
+    POST JSON:
+      {
+        "username": "CamMac",
+        "bucket_id": 1
+      }
+
+    Rules:
+      - bucket must belong to this user
+      - bucket allocation amount must be zero (no test Pi remaining)
+      - marks bucket status='deleted' and zeroes allocation amount
+    """
+    data = request.get_json() or {}
+    username = (data.get("username") or "").strip()
+    bucket_id = data.get("bucket_id")
+
+    if not username:
+        return jsonify(ok=False, error="username is required")
+
+    try:
+        bucket_id = int(bucket_id)
+    except Exception:
+        return jsonify(ok=False, error="bucket_id must be integer")
+
+    uname = username.strip().lstrip("@").lower()
+    ts = _now()
+
+    with conn() as cx:
+        acct_row = cx.execute(
+            """
+            SELECT id
+              FROM bot_accounts
+             WHERE username = ?
+            """,
+            (uname,),
+        ).fetchone()
+
+        if not acct_row:
+            return jsonify(ok=False, error="Bot account not found for user.")
+
+        account_id = acct_row["id"]
+
+        # bucket must belong to this account
+        b_row = cx.execute(
+            """
+            SELECT id, account_id, status
+              FROM bot_buckets
+             WHERE id = ?
+            """,
+            (bucket_id,),
+        ).fetchone()
+
+        if not b_row or b_row["account_id"] != account_id:
+            return jsonify(ok=False, error="Bucket not found for this user.")
+
+        # check allocation amount
+        alloc_row = cx.execute(
+            """
+            SELECT id, amount
+              FROM bot_bucket_allocations
+             WHERE account_id = ? AND bucket_id = ?
+            """,
+            (account_id, bucket_id),
+        ).fetchone()
+
+        if alloc_row:
+            balance = float(alloc_row["amount"] or 0.0)
+            if balance > 1e-8:
+                return jsonify(
+                    ok=False,
+                    error="Bucket still has test Pi. Withdraw all funds before deleting.",
+                )
+
+            # ensure allocation amount is zeroed for clarity
+            cx.execute(
+                """
+                UPDATE bot_bucket_allocations
+                   SET amount = 0, updated_at = ?
+                 WHERE id = ?
+                """,
+                (ts, alloc_row["id"]),
+            )
+
+        # mark bucket as deleted
+        cx.execute(
+            """
+            UPDATE bot_buckets
+               SET status = 'deleted', updated_at = ?
+             WHERE id = ?
+            """,
+            (ts, bucket_id),
+        )
+
+    return jsonify(ok=True, bucket_id=bucket_id)
 
 
 # ----------------------------------------------------------------------
