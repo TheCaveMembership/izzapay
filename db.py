@@ -359,6 +359,15 @@ def init_db():
         CREATE INDEX IF NOT EXISTS idx_bot_alloc_account
           ON bot_bucket_allocations(account_id);
 
+        -- NEW: net deposit / withdrawal history per bucket (for drawdown calc)
+        CREATE TABLE IF NOT EXISTS bot_bucket_transfers (
+          id INTEGER PRIMARY KEY,
+          bucket_id   INTEGER NOT NULL,
+          direction   TEXT    NOT NULL CHECK (direction IN ('deposit','withdraw')),
+          amount      REAL    NOT NULL,
+          created_at  INTEGER
+        );
+
         -- Optional: withdrawal requests (for later payout logic)
         CREATE TABLE IF NOT EXISTS bot_withdrawals(
           id INTEGER PRIMARY KEY,
@@ -705,6 +714,15 @@ def ensure_schema():
         );
         CREATE INDEX IF NOT EXISTS idx_bot_alloc_account
           ON bot_bucket_allocations(account_id);
+
+        -- NEW: net deposit / withdrawal history per bucket (for drawdown calc)
+        CREATE TABLE IF NOT EXISTS bot_bucket_transfers (
+          id INTEGER PRIMARY KEY,
+          bucket_id   INTEGER NOT NULL,
+          direction   TEXT    NOT NULL CHECK (direction IN ('deposit','withdraw')),
+          amount      REAL    NOT NULL,
+          created_at  INTEGER
+        );
 
         CREATE TABLE IF NOT EXISTS bot_withdrawals(
           id INTEGER PRIMARY KEY,
