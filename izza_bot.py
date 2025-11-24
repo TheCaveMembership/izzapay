@@ -614,6 +614,7 @@ def trading_summary():
                 (wallet_pub, _now(), account_id),
             )
 
+    # Fetch buckets and precompute simple buy/sell sums in case we need a fallback
     with conn() as cx:
         rows = cx.execute(
             """
@@ -631,11 +632,46 @@ def trading_summary():
             (account_id,),
         ).fetchall()
 
+        bucket_ids = [r["id"] for r in rows]
+        perf_map = {}
+        if bucket_ids:
+            placeholders = ",".join("?" for _ in bucket_ids)
+            # Case insensitive BUY / SELL so old rows with 'BUY' / 'SELL' still count
+            perf_rows = cx.execute(
+                f"""
+                SELECT
+                  bucket_id,
+                  SUM(CASE WHEN LOWER(side) = 'buy'  THEN amount_pi ELSE 0 END) AS buy_pi,
+                  SUM(CASE WHEN LOWER(side) = 'sell' THEN amount_pi ELSE 0 END) AS sell_pi
+                FROM bot_trades
+                WHERE bucket_id IN ({placeholders})
+                GROUP BY bucket_id
+                """,
+                bucket_ids,
+            ).fetchall()
+            for pr in perf_rows:
+                perf_map[pr["bucket_id"]] = {
+                    "buy_pi": float(pr["buy_pi"] or 0.0),
+                    "sell_pi": float(pr["sell_pi"] or 0.0),
+                }
+
     buckets = []
     for r in rows:
-        # Use engine helper to compute realized performance based on
-        # realized sells and net deposits for this bucket.
+        # Primary: use shared engine helper so UI matches bot_engine logic
         perf_pct = compute_bucket_realized_perf_pct(r["id"])
+
+        # Fallback: if helper returns None but we clearly have sell volume,
+        # compute a simple realized PnL from buy/sell sums so old data
+        # (with mixed-case 'side') still shows performance instead of
+        # "awaiting first trade sell".
+        if perf_pct is None:
+            perf_row = perf_map.get(r["id"])
+            if perf_row:
+                buy_pi = perf_row["buy_pi"]
+                sell_pi = perf_row["sell_pi"]
+                if sell_pi > 0 and buy_pi > 0 and abs(buy_pi) > 1e-9:
+                    realized_pnl = sell_pi - buy_pi
+                    perf_pct = 100.0 * realized_pnl / buy_pi
 
         b = {
             "id": r["id"],
