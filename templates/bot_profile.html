@@ -874,6 +874,41 @@
     wdRow.appendChild(wdBtn);
     row.appendChild(wdRow);
 
+    // Delete bucket button, only if bucket has zero balance
+    if ((b.balance || 0) <= 0) {
+      const delBtn = document.createElement("button");
+      delBtn.className = "btn btn-outline";
+      delBtn.textContent = "Delete bucket";
+      delBtn.style.marginTop = "6px";
+
+      delBtn.onclick = async function(){
+        if (!currentUser || !currentUser.username) {
+          globalStatus.textContent =
+            "No username found. Open IZZA BOT from your main entry point.";
+          return;
+        }
+        globalStatus.textContent = "Deleting bucket…";
+        try {
+          const res = await postJSON("/api/trading/bucket/delete", {
+            username: currentUser.username,
+            bucket_id: b.id
+          });
+          if (!res.ok) {
+            globalStatus.textContent = res.error || "Error deleting bucket.";
+            return;
+          }
+          globalStatus.textContent = "Bucket deleted.";
+          await loadSummary();
+          setTimeout(()=>{ globalStatus.textContent = ""; }, 2000);
+        } catch(e){
+          console.error(e);
+          globalStatus.textContent = "Network error deleting bucket.";
+        }
+      };
+
+      row.appendChild(delBtn);
+    }
+
     return row;
   }
 
