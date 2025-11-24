@@ -39,13 +39,13 @@ from decimal import Decimal
 from db import conn
 from bot_markets import scan_markets_vs_pi
 from bot_trader import (
-    market_buy,
-    market_sell,
-    get_bot_token_balance,
-    cancel_blocked_buy_offers,
-    would_cross_self_sell,
-    would_cross_self_buy,
-    cancel_blocking_buy_offers_for_pair,
+  market_buy,
+  market_sell,
+  get_bot_token_balance,
+  cancel_blocked_buy_offers,
+  would_cross_self_sell,
+  would_cross_self_buy,
+  cancel_blocking_buy_offers_for_pair,
 )
 
 # ---------------------------------------------------------------------
@@ -58,6 +58,13 @@ LOOP_SLEEP_SECS = int(os.getenv("BOT_LOOP_SLEEP_SECS", "60"))
 # Minimum PI value for a trade
 MIN_TRADE_PI = float(os.getenv("BOT_MIN_TRADE_PI", "0.00001"))
 
+# Minimum token size we are willing to send in a SELL op
+MIN_TOKEN_SIZE = float(os.getenv("BOT_MIN_TOKEN_SIZE", "0.0000001"))
+
+# Price band for BUY side: ignore insane priced tokens
+MIN_BUY_PRICE = float(os.getenv("BOT_MIN_BUY_PRICE", "0.0005"))
+MAX_BUY_PRICE = float(os.getenv("BOT_MAX_BUY_PRICE", "5000.0"))
+
 # Safety caps
 MAX_TRADES_PER_RUN = int(os.getenv("BOT_MAX_TRADES_PER_RUN", "20"))
 MAX_BUYS_PER_BUCKET = int(os.getenv("BOT_MAX_BUYS_PER_BUCKET", "5"))
@@ -66,68 +73,68 @@ MAX_SELLS_PER_BUCKET = int(os.getenv("BOT_MAX_SELLS_PER_BUCKET", "5"))
 # Take profit / stop loss by risk
 # More aggressive scalping: small TP, wider SL for higher risk.
 RISK_TP_SL = {
-    "low": {
-        "take_profit_pct": 3.0,
-        "stop_loss_pct": -7.0,
-    },
-    "medium": {
-        "take_profit_pct": 2.0,
-        "stop_loss_pct": -10.0,
-    },
-    "high": {
-        "take_profit_pct": 1.0,
-        "stop_loss_pct": -15.0,
-    },
+  "low": {
+    "take_profit_pct": 3.0,
+    "stop_loss_pct": -7.0,
+  },
+  "medium": {
+    "take_profit_pct": 2.0,
+    "stop_loss_pct": -10.0,
+  },
+  "high": {
+    "take_profit_pct": 1.0,
+    "stop_loss_pct": -15.0,
+  },
 }
 
 # Strategy blending per risk level
 # These mostly control the fallback / non-wall trades after wall-breaking.
 RISK_WEIGHTS = {
-    "low": {
-        "max_tokens": 1000,
-        "per_run_fraction": 0.25,     # up to 25% of bucket cash per run
-        "max_per_token_fraction": 0.50,
-        "trend_weight": 0.6,
-        "micro_weight": 0.4,
-        "vol_weight": 0.0,
-        "max_spread_pct": 30.0,
-    },
-    "medium": {
-        "max_tokens": 1000,
-        "per_run_fraction": 0.50,     # up to 50% per run
-        "max_per_token_fraction": 0.80,
-        "trend_weight": 0.4,
-        "micro_weight": 0.3,
-        "vol_weight": 0.3,
-        "max_spread_pct": 100.0,
-    },
-    "high": {
-        "max_tokens": 1000,
-        "per_run_fraction": 0.90,     # up to 90% per run
-        "max_per_token_fraction": 1.00,
-        "trend_weight": 0.15,
-        "micro_weight": 0.30,
-        "vol_weight": 0.55,
-        "max_spread_pct": 300.0,
-    },
+  "low": {
+    "max_tokens": 1000,
+    "per_run_fraction": 0.25,     # up to 25% of bucket cash per run
+    "max_per_token_fraction": 0.50,
+    "trend_weight": 0.6,
+    "micro_weight": 0.4,
+    "vol_weight": 0.0,
+    "max_spread_pct": 30.0,
+  },
+  "medium": {
+    "max_tokens": 1000,
+    "per_run_fraction": 0.50,     # up to 50% per run
+    "max_per_token_fraction": 0.80,
+    "trend_weight": 0.4,
+    "micro_weight": 0.3,
+    "vol_weight": 0.3,
+    "max_spread_pct": 100.0,
+  },
+  "high": {
+    "max_tokens": 1000,
+    "per_run_fraction": 0.90,     # up to 90% per run
+    "max_per_token_fraction": 1.00,
+    "trend_weight": 0.15,
+    "micro_weight": 0.30,
+    "vol_weight": 0.55,
+    "max_spread_pct": 300.0,
+  },
 }
 
 # Tokens the bot should never buy (hard blocklist).
 # We can still SELL these if we already hold them.
 BLOCKED_BUY_CODES = {
-    "Archimedes",
-    "AYB",
-    "DTCNY",
-    "DATONG",
-    "DTUSD",
+  "Archimedes",
+  "AYB",
+  "DTCNY",
+  "DATONG",
+  "DTUSD",
 }
 
 # Max drawdown protection (UI shows these values)
 # Based on *net deposits* into a bucket (sum deposits - sum withdrawals).
 MAX_DRAWDOWN_PCT_BY_RISK = {
-    "low": 15.0,     # up to ~15% drawdown on low
-    "medium": 30.0,  # up to ~30% drawdown on medium
-    "high": 45.0,    # up to ~45% drawdown on high
+  "low": 15.0,     # up to ~15% drawdown on low
+  "medium": 30.0,  # up to ~30% drawdown on medium
+  "high": 45.0,    # up to ~45% drawdown on high
 }
 
 # Sell wall logic
@@ -814,6 +821,15 @@ def execute_sells_for_bucket(
     if amount_to_sell <= 0:
       continue
 
+    # Hard guard against microscopic token sizes that would create
+    # op_malformed on Horizon (like the CSK example).
+    if amount_to_sell < MIN_TOKEN_SIZE:
+      print(
+        f"[SELL] skip bucket={bucket.id} user=@{bucket.username} "
+        f"{market.code} size {amount_to_sell:.8f} below MIN_TOKEN_SIZE"
+      )
+      continue
+
     # Compute PnL % for this position (used for deciding whether to
     # tear down our own BUY wall to realize gains).
     pnl_pct = None
@@ -943,6 +959,10 @@ def plan_buys_for_bucket(
     if m.spread_pct <= 0 or m.spread_pct > max_spread:
       continue
     if m.total_liq <= 0:
+      continue
+
+    # Ignore tokens with insane price levels on the BUY side
+    if m.best_ask < MIN_BUY_PRICE or m.best_ask > MAX_BUY_PRICE:
       continue
 
     # --- Sell wall detection relative to this bucket ---
