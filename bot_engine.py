@@ -120,10 +120,17 @@ BLOCKED_BUY_CODES = {
     "DTUSD",
 }
 
+# Max drawdown protection (what your UI is describing)
+# Based on *net deposits* into a bucket (sum deposits - sum withdrawals).
+MAX_DRAWDOWN_PCT_BY_RISK = {
+    "low": 30.0,     # tweak if you ever expose a true "low" bucket
+    "medium": 30.0,  # matches "~30%" copy in the UI
+    "high": 45.0,    # matches "~45%" copy in the UI
+}
+
 # Sell wall logic
 # If wall_value_pi > SELL_WALL_FRACTION * bucket_cash -> skip that market
-# (default relaxed from 0.4 to 0.8 for testnet conditions)
-SELL_WALL_FRACTION = float(os.getenv("BOT_SELL_WALL_FRACTION", "0.8"))
+SELL_WALL_FRACTION = float(os.getenv("BOT_SELL_WALL_FRACTION", "0.4"))
 # Boost in scoring for tokens where we CAN break the wall
 WALL_BREAK_SCORE_BOOST = float(os.getenv("BOT_WALL_BREAK_SCORE_BOOST", "3.0"))
 # Fallback quick-sell markup if we don't know the next ask (percent)
@@ -564,6 +571,48 @@ def upsert_position(bucket_id: int, market: MarketInfo, delta_qty: float, trade_
 
 
 # ---------------------------------------------------------------------
+# Drawdown helpers
+# ---------------------------------------------------------------------
+
+def get_planned_max_drawdown_pct(bucket: Bucket) -> Optional[float]:
+    risk = (bucket.risk_level or "medium").lower()
+    return MAX_DRAWDOWN_PCT_BY_RISK.get(risk)
+
+
+def get_bucket_net_deposit_pi(bucket_id: int) -> float:
+    """
+    Net deposits for this bucket across *all time*:
+
+        net_deposit = sum(deposits) - sum(withdrawals)
+
+    Assumes you have a bot_bucket_transfers table with:
+      - bucket_id
+      - direction ('deposit' or 'withdraw')
+      - amount (PI)
+    If your table/column names differ, adjust this query.
+    """
+    with conn() as cx:
+        row = cx.execute(
+            """
+            SELECT
+              IFNULL(SUM(CASE WHEN direction = 'deposit'  THEN amount ELSE 0 END), 0) AS total_deposits,
+              IFNULL(SUM(CASE WHEN direction = 'withdraw' THEN amount ELSE 0 END), 0) AS total_withdraws
+            FROM bot_bucket_transfers
+            WHERE bucket_id = ?
+            """,
+            (bucket_id,),
+        ).fetchone()
+
+    if not row:
+        return 0.0
+
+    total_deposits = float(row["total_deposits"] or 0.0)
+    total_withdraws = float(row["total_withdraws"] or 0.0)
+    net = total_deposits - total_withdraws
+    return max(net, 0.0)
+
+
+# ---------------------------------------------------------------------
 # Strategy scoring
 # ---------------------------------------------------------------------
 
@@ -719,8 +768,7 @@ def plan_buys_for_bucket(
         # Orderbook sanity
         if m.best_ask <= 0 or m.mid_price <= 0:
             continue
-        # Allow 0-spread markets, only skip negative or insanely wide
-        if m.spread_pct < 0 or m.spread_pct > max_spread:
+        if m.spread_pct <= 0 or m.spread_pct > max_spread:
             continue
         if m.total_liq <= 0:
             continue
@@ -742,7 +790,7 @@ def plan_buys_for_bucket(
 
             # If wall is too big vs this bucket's firepower, skip entirely
             if wall_ratio > SELL_WALL_FRACTION:
-                # Example: bucket has 1000 PI and wall is 900+ PI -> not worth touching
+                # Example: bucket has 1000 PI and wall is 600+ PI -> not worth touching
                 continue
 
             # If the wall is reasonably sized, and at least MIN_TRADE_PI, mark as breakable
@@ -766,52 +814,12 @@ def plan_buys_for_bucket(
 
         scored.append((score, m))
 
-    max_tokens = cfg["max_tokens"]
-
-    # Fallback if nothing passes scoring filters
     if not scored:
-        # Simple aggressive mode: pick top-liquidity markets with real ask/mid,
-        # still never touching BLOCKED_BUY_CODES.
-        simple_candidates = [
-            m for m in markets.values()
-            if m.code not in BLOCKED_BUY_CODES
-            and m.best_ask > 0
-            and m.mid_price > 0
-        ]
-
-        if not simple_candidates:
-            return []
-
-        # Sort by bid-side liquidity (how much people are actually bidding)
-        simple_candidates.sort(key=lambda mm: mm.bid_liq, reverse=True)
-
-        simple_candidates = simple_candidates[:max_tokens]
-
-        remaining_budget = per_run_budget
-        planned_fallback: List[Tuple[MarketInfo, float]] = []
-
-        for m in simple_candidates:
-            if remaining_budget < MIN_TRADE_PI:
-                break
-
-            per_token_budget = min(
-                max_per_token,
-                remaining_budget / max(1, (len(simple_candidates) - len(planned_fallback))),
-            )
-
-            if per_token_budget < MIN_TRADE_PI:
-                continue
-
-            planned_fallback.append((m, per_token_budget))
-            remaining_budget -= per_token_budget
-
-            if len(planned_fallback) >= MAX_BUYS_PER_BUCKET:
-                break
-
-        return planned_fallback
+        return []
 
     scored.sort(key=lambda x: x[0], reverse=True)
 
+    max_tokens = cfg["max_tokens"]
     scored = scored[:max_tokens]
 
     remaining_budget = per_run_budget
@@ -954,6 +962,38 @@ def estimate_bucket_equity_pi(
     return cash + value_positions
 
 
+def bucket_hit_max_drawdown(
+    bucket: Bucket,
+    positions: Dict[Tuple[str, str], Position],
+    markets: Dict[Tuple[str, str], MarketInfo],
+) -> bool:
+    """
+    Return True if this bucket has hit or exceeded its planned max drawdown
+    based on net deposits (deposits - withdrawals).
+    """
+    max_dd_pct = get_planned_max_drawdown_pct(bucket)
+    if max_dd_pct is None:
+        return False
+
+    net_deposit = get_bucket_net_deposit_pi(bucket.id)
+    if net_deposit <= 0:
+        return False
+
+    equity = estimate_bucket_equity_pi(bucket, positions, markets)
+    if equity <= 0:
+        dd_pct = 100.0
+    else:
+        dd_pct = max(0.0, (net_deposit - equity) / net_deposit * 100.0)
+
+    print(
+        f"[DRAWDOWN] bucket={bucket.id} user=@{bucket.username} "
+        f"net_deposit≈{net_deposit:.4f} PI equity≈{equity:.4f} PI "
+        f"dd≈{dd_pct:.2f}% limit={max_dd_pct:.2f}%"
+    )
+
+    return dd_pct >= max_dd_pct
+
+
 # ---------------------------------------------------------------------
 # Main engine run
 # ---------------------------------------------------------------------
@@ -997,6 +1037,7 @@ def run_once():
             f"risk={risk} cash≈{bucket.cash_pi:.4f} PI"
         )
 
+        # Load positions once at the start of the loop
         positions = load_positions_for_bucket(bucket.id)
 
         # Sells first, this both raises floors and frees cash.
@@ -1007,7 +1048,8 @@ def run_once():
             print("[ENGINE] Hit MAX_TRADES_PER_RUN, stopping further trades this run.")
             break
 
-        # Refresh cash
+        # Refresh positions (after sells) and cash from DB
+        positions = load_positions_for_bucket(bucket.id)
         with conn() as cx:
             row = cx.execute(
                 """
@@ -1018,7 +1060,15 @@ def run_once():
             ).fetchone()
         bucket.cash_pi = float(row["amount"] or 0.0) if row else 0.0
 
-        # Buys (with sell wall logic + fallback)
+        # Enforce planned max drawdown: if hit, skip BUYS for this bucket.
+        if bucket_hit_max_drawdown(bucket, positions, markets):
+            print(
+                f"[ENGINE] Bucket {bucket.id} hit planned max drawdown; "
+                f"skipping new BUYS this run (SELLS still allowed)."
+            )
+            continue
+
+        # Buys (with sell wall logic)
         buy_plans = plan_buys_for_bucket(bucket, markets)
         buys_done = execute_buys_for_bucket(bucket, buy_plans)
         total_trades += buys_done
