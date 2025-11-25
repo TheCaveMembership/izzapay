@@ -586,7 +586,8 @@ def trading_summary():
           { id, name, risk_level, objective, volatility,
             time_horizon_days, target_value_back,
             balance,          # REAL available Pi sitting in this bucket on the bot
-            active_pi         # net Pi currently in orders / token holdings (buy_pi - sell_pi, floored at 0)
+            active_pi         # net Pi currently in orders / token holdings (buy_pi - sell_pi, floored at 0),
+                             # but forced to 0 when the bucket has no open positions.
           }
         ]
       }
@@ -659,8 +660,12 @@ def trading_summary():
 
         bucket_ids = [r["id"] for r in rows]
         exposure_map: dict[int, float] = {}
+        positions_count: dict[int, int] = {}
+
         if bucket_ids:
             placeholders = ",".join("?" for _ in bucket_ids)
+
+            # Historical trade-based exposure estimate
             trade_rows = cx.execute(
                 f"""
                 SELECT
@@ -679,13 +684,34 @@ def trading_summary():
                 # Net Pi currently deployed into token holdings / outstanding exposure
                 exposure_map[tr["bucket_id"]] = max(0.0, buy_pi - sell_pi)
 
+            # Current open positions per bucket.
+            # If a bucket is flat (no rows in bot_positions), we treat active exposure as 0,
+            # even if old trades exist, so that after liquidation the UI shows all cash
+            # as "Available bucket cash" and 0 in "Active in orders / holdings".
+            pos_rows = cx.execute(
+                f"""
+                SELECT bucket_id, COUNT(*) AS cnt
+                FROM bot_positions
+                WHERE bucket_id IN ({placeholders})
+                GROUP BY bucket_id
+                """,
+                bucket_ids,
+            ).fetchall()
+            for pr in pos_rows:
+                positions_count[pr["bucket_id"]] = int(pr["cnt"] or 0)
+
     buckets = []
     total_in_buckets = 0.0
     total_active_pi = 0.0
     for r in rows:
         bal = float(r["balance"] or 0.0)
         total_in_buckets += bal
+
         active_pi = float(exposure_map.get(r["id"], 0.0))
+        # If there are no open positions for this bucket, treat active exposure as 0.
+        if positions_count.get(r["id"], 0) == 0:
+            active_pi = 0.0
+
         total_active_pi += active_pi
 
         b = {
@@ -960,7 +986,8 @@ def bucket_deposit():
               status, created_at, raw_json
             )
             VALUES (?, ?, ?, ?, ?, 'confirmed', ?, ?)
-            """,
+            """
+            ,
             (
                 account_id,
                 tx_hash,
