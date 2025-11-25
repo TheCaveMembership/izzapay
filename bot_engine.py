@@ -892,6 +892,55 @@ def compute_bucket_realized_perf_pct(bucket_id: int) -> Optional[float]:
 
 
 # ---------------------------------------------------------------------
+# Cash resync helper (for manual liquidation)
+# ---------------------------------------------------------------------
+
+def resync_bucket_cash_to_equity(bucket_id: int) -> float:
+  """
+  After a manual liquidation (positions flat and open BUY offers
+  cancelled for this bucket), we want the bucket's internal cash to
+  match its equity in PI:
+
+      equity ≈ net_deposit + realized_PnL
+
+  This makes:
+    - 'Available bucket cash' jump up to the full free amount
+    - 'Active in orders / holdings' ≈ 0 after liquidation
+  """
+  # Net deposits
+  _, _, net_deposit = get_bucket_deposit_stats(bucket_id)
+  if net_deposit < 0:
+    net_deposit = 0.0
+
+  # Realized PnL from closed trades
+  realized_pnl = compute_bucket_realized_pnl_pi(bucket_id)
+
+  target_cash = net_deposit + realized_pnl
+  if target_cash < 0:
+    target_cash = 0.0
+
+  # Clamp to stroop precision
+  target_cash = quantize_pi(target_cash)
+
+  ts = _now()
+  with conn() as cx:
+    row = cx.execute(
+      "SELECT id FROM bot_bucket_allocations WHERE bucket_id = ?",
+      (bucket_id,),
+    ).fetchone()
+    if not row:
+      return 0.0
+    cx.execute(
+      "UPDATE bot_bucket_allocations "
+      "SET amount = ?, updated_at = ? "
+      "WHERE id = ?",
+      (target_cash, ts, row["id"]),
+    )
+
+  return target_cash
+
+
+# ---------------------------------------------------------------------
 # Strategy scoring (for fallback, non-wall trades)
 # ---------------------------------------------------------------------
 
@@ -1584,20 +1633,17 @@ def liquidate_bucket_to_cash(bucket_id: int) -> Dict[str, Any]:
 
   if not markets:
     print("[LIQUIDATE] No markets found, skipping liquidation.")
-    # Return current cash if we cannot price anything
-    with conn() as cx:
-      row = cx.execute(
-        "SELECT amount FROM bot_bucket_allocations WHERE bucket_id = ?",
-        (bucket_id,),
-      ).fetchone()
-    cash_now = float(row["amount"] or 0.0) if row else 0.0
+    # Even though we could not price/sell positions, we *did* cancel
+    # BUY offers above, so snap bucket cash back to equity so at least
+    # reserved PI shows as free in the UI.
+    new_cash = resync_bucket_cash_to_equity(bucket_id)
     paused_until = pause_bucket(bucket_id, LIQUIDATE_PAUSE_SECS)
     print(
       f"[LIQUIDATE] Bucket={bucket_id} paused until {paused_until} "
-      f"(no markets found)."
+      f"(no markets found). cash≈{new_cash:.6f} PI"
     )
     return {
-      "cash_after": cash_now,
+      "cash_after": new_cash,
       "executed_sells": 0,
       "blocked_assets": [],
       "paused_until": paused_until,
@@ -1606,19 +1652,16 @@ def liquidate_bucket_to_cash(bucket_id: int) -> Dict[str, Any]:
   positions = load_positions_for_bucket(bucket_id)
   if not positions:
     print("[LIQUIDATE] No positions for this bucket, nothing to sell.")
-    with conn() as cx:
-      row = cx.execute(
-        "SELECT amount FROM bot_bucket_allocations WHERE bucket_id = ?",
-        (bucket_id,),
-      ).fetchone()
-    cash_now = float(row["amount"] or 0.0) if row else 0.0
+    # We still cancelled BUY offers above; resync so that all PI that was
+    # only reserved in orders now appears as 'Available bucket cash'.
+    new_cash = resync_bucket_cash_to_equity(bucket_id)
     paused_until = pause_bucket(bucket_id, LIQUIDATE_PAUSE_SECS)
     print(
       f"[LIQUIDATE] Bucket={bucket_id} paused until {paused_until} "
-      f"(no positions)."
+      f"(no positions). cash≈{new_cash:.6f} PI"
     )
     return {
-      "cash_after": cash_now,
+      "cash_after": new_cash,
       "executed_sells": 0,
       "blocked_assets": [],
       "paused_until": paused_until,
@@ -1647,14 +1690,9 @@ def liquidate_bucket_to_cash(bucket_id: int) -> Dict[str, Any]:
     f"after manual liquidation."
   )
 
-  # Reload final cash balance from DB
-  with conn() as cx:
-    row = cx.execute(
-      "SELECT amount FROM bot_bucket_allocations WHERE bucket_id = ?",
-      (bucket_id,),
-    ).fetchone()
-
-  new_cash = float(row["amount"] or 0.0) if row else 0.0
+  # Snap final cash to equity = net_deposit + realized_PnL so all
+  # previously reserved PI shows as free cash and active holdings go to ~0.
+  new_cash = resync_bucket_cash_to_equity(bucket_id)
   print(f"[LIQUIDATE] Finished bucket={bucket.id}, cash≈{new_cash:.6f} PI")
 
   # Pause this bucket so the engine doesn't immediately redeploy the cash.
@@ -1818,7 +1856,7 @@ def bot_loop_forever():
     try:
       run_once()
     except Exception as e:
-        print(f"[ENGINE] [BG] ERROR in run_once: {e!r}")
+      print(f"[ENGINE] [BG] ERROR in run_once: {e!r}")
     print(f"[ENGINE] [BG] sleeping {LOOP_SLEEP_SECS}s...")
     time.sleep(LOOP_SLEEP_SECS)
 
