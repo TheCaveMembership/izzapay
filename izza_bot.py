@@ -586,8 +586,8 @@ def trading_summary():
           { id, name, risk_level, objective, volatility,
             time_horizon_days, target_value_back,
             balance,          # REAL available Pi sitting in this bucket on the bot
-            active_pi         # net Pi currently in orders / token holdings (buy_pi - sell_pi, floored at 0),
-                             # but forced to 0 when the bucket has no open positions.
+            active_pi         # PI notionally deployed into CURRENT token holdings,
+                              # based on net remaining tokens, not realized PnL.
           }
         ]
       }
@@ -640,7 +640,7 @@ def trading_summary():
                 (wallet_pub, _now(), account_id),
             )
 
-    # Fetch buckets and compute active exposure from bot_trades
+    # Fetch buckets and trades once
     with conn() as cx:
         rows = cx.execute(
             """
@@ -659,46 +659,66 @@ def trading_summary():
         ).fetchall()
 
         bucket_ids = [r["id"] for r in rows]
-        exposure_map: dict[int, float] = {}
-        positions_count: dict[int, int] = {}
-
+        trade_rows = []
         if bucket_ids:
             placeholders = ",".join("?" for _ in bucket_ids)
-
-            # Historical trade-based exposure estimate
             trade_rows = cx.execute(
                 f"""
                 SELECT
                   bucket_id,
-                  SUM(CASE WHEN LOWER(side) = 'buy'  THEN amount_pi ELSE 0 END) AS buy_pi,
-                  SUM(CASE WHEN LOWER(side) = 'sell' THEN amount_pi ELSE 0 END) AS sell_pi
+                  code,
+                  issuer,
+                  side,
+                  amount_pi,
+                  amount_token
                 FROM bot_trades
                 WHERE bucket_id IN ({placeholders})
-                GROUP BY bucket_id
                 """,
                 bucket_ids,
             ).fetchall()
-            for tr in trade_rows:
-                buy_pi = float(tr["buy_pi"] or 0.0)
-                sell_pi = float(tr["sell_pi"] or 0.0)
-                # Net Pi currently deployed into token holdings / outstanding exposure
-                exposure_map[tr["bucket_id"]] = max(0.0, buy_pi - sell_pi)
 
-            # Current open positions per bucket.
-            # If a bucket is flat (no rows in bot_positions), we treat active exposure as 0,
-            # even if old trades exist, so that after liquidation the UI shows all cash
-            # as "Available bucket cash" and 0 in "Active in orders / holdings".
-            pos_rows = cx.execute(
-                f"""
-                SELECT bucket_id, COUNT(*) AS cnt
-                FROM bot_positions
-                WHERE bucket_id IN ({placeholders})
-                GROUP BY bucket_id
-                """,
-                bucket_ids,
-            ).fetchall()
-            for pr in pos_rows:
-                positions_count[pr["bucket_id"]] = int(pr["cnt"] or 0)
+    # Compute active exposure per bucket based on NET remaining tokens.
+    # Group by (bucket_id, code, issuer).
+    per_asset: dict[tuple[int, str, str], dict[str, float]] = {}
+    for tr in trade_rows:
+        b_id = tr["bucket_id"]
+        code = tr["code"]
+        issuer = tr["issuer"]
+        side = (tr["side"] or "").lower()
+        amt_pi = float(tr["amount_pi"] or 0.0)
+        amt_token = float(tr["amount_token"] or 0.0)
+
+        key = (b_id, code, issuer)
+        d = per_asset.setdefault(
+            key,
+            {"buy_token": 0.0, "sell_token": 0.0, "buy_pi": 0.0},
+        )
+
+        if side == "buy":
+            d["buy_token"] += amt_token
+            d["buy_pi"] += amt_pi
+        elif side == "sell":
+            d["sell_token"] += amt_token
+
+    exposure_map: dict[int, float] = {}
+    for (b_id, code, issuer), d in per_asset.items():
+        buy_token = d["buy_token"]
+        sell_token = d["sell_token"]
+        buy_pi = d["buy_pi"]
+
+        net_token = buy_token - sell_token
+        if net_token <= 1e-12:
+            continue  # fully flat or net short, no active exposure
+
+        if buy_token <= 1e-12:
+            continue  # safety: should not happen if net_token > 0
+
+        avg_buy_price_pi = buy_pi / buy_token
+        exposure_pi = net_token * avg_buy_price_pi
+        if exposure_pi <= 0:
+            continue
+
+        exposure_map[b_id] = exposure_map.get(b_id, 0.0) + exposure_pi
 
     buckets = []
     total_in_buckets = 0.0
@@ -706,12 +726,7 @@ def trading_summary():
     for r in rows:
         bal = float(r["balance"] or 0.0)
         total_in_buckets += bal
-
         active_pi = float(exposure_map.get(r["id"], 0.0))
-        # If there are no open positions for this bucket, treat active exposure as 0.
-        if positions_count.get(r["id"], 0) == 0:
-            active_pi = 0.0
-
         total_active_pi += active_pi
 
         b = {
@@ -986,8 +1001,7 @@ def bucket_deposit():
               status, created_at, raw_json
             )
             VALUES (?, ?, ?, ?, ?, 'confirmed', ?, ?)
-            """
-            ,
+            """,
             (
                 account_id,
                 tx_hash,
@@ -1318,6 +1332,40 @@ def bucket_liquidate():
     except Exception as e:
         return jsonify(ok=False, error=f"Error liquidating bucket positions: {e}")
 
+    # Ensure DB allocation reflects new cash_after so UI shows it as available.
+    try:
+        ts_now = _now()
+        with conn() as cx:
+            alloc_row = cx.execute(
+                """
+                SELECT id FROM bot_bucket_allocations
+                 WHERE account_id = ? AND bucket_id = ?
+                """,
+                (account_id, bucket_id),
+            ).fetchone()
+            if alloc_row:
+                cx.execute(
+                    """
+                    UPDATE bot_bucket_allocations
+                       SET amount = ?, updated_at = ?
+                     WHERE id = ?
+                    """,
+                    (cash_after, ts_now, alloc_row["id"]),
+                )
+            else:
+                cx.execute(
+                    """
+                    INSERT INTO bot_bucket_allocations(
+                      account_id, bucket_id, amount, created_at, updated_at
+                    )
+                    VALUES (?, ?, ?, ?, ?)
+                    """,
+                    (account_id, bucket_id, cash_after, ts_now, ts_now),
+                )
+    except Exception as e:
+        # Non-fatal; liquidation still succeeded on-chain.
+        print(f"[LIQUIDATE] warning: failed to sync bucket cash for bucket {bucket_id}: {e}")
+
     # Pause this bucket from trading for ~60 seconds so user can decide
     # whether to withdraw or let the bot resume.
     try:
@@ -1442,7 +1490,7 @@ def bucket_close():
             (uname,),
         ).fetchone()
         if not acct_row:
-            return jsonify(ok=False, error="Bot account not found for user.")
+            return jsonify(ok(False), error="Bot account not found for user.")
 
         account_id = acct_row["id"]
         total_withdrawn = float(acct_row["total_withdrawn"] or 0.0)
