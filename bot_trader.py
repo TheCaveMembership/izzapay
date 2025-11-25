@@ -441,10 +441,13 @@ def cancel_blocking_buy_offers_for_pair(
 
 def cancel_blocked_buy_offers(block_codes: List[str]) -> int:
     """
-    Cancel any open BUY offers where the bot is buying one of the
-    blocked token codes using native PI.
-    This is used when we decide to permanently stop buying certain
-    stablecoins / Datong tokens.
+    Cancel any open offers (BUY or SELL) where either side's asset_code
+    is in block_codes, while still protecting IZZA ladder offers.
+
+    Used for:
+      - permanently blocked tokens (e.g., Datong / stables),
+      - per-bucket liquidation, where we want no open offers remaining
+        for that bucket's traded asset codes.
     """
     if not block_codes:
         return 0
@@ -457,12 +460,19 @@ def cancel_blocked_buy_offers(block_codes: List[str]) -> int:
         buying = offer.get("buying") or {}
         selling = offer.get("selling") or {}
 
-        code = buying.get("asset_code")
-        if not code or code.upper() not in codes_set:
+        sell_code = selling.get("asset_code")
+        buy_code = buying.get("asset_code")
+
+        # Does this offer touch any of the blocked codes?
+        touches_block = (
+            (sell_code and sell_code.upper() in codes_set) or
+            (buy_code and buy_code.upper() in codes_set)
+        )
+        if not touches_block:
             continue
 
-        # We only care about BUY offers where we are selling native PI
-        if selling.get("asset_type") != "native":
+        # HARD PROTECT: never cancel offers involving IZZA
+        if (sell_code and sell_code.upper() == "IZZA") or (buy_code and buy_code.upper() == "IZZA"):
             continue
 
         # Build selling asset
@@ -489,18 +499,19 @@ def cancel_blocked_buy_offers(block_codes: List[str]) -> int:
 
         try:
             print(
-                f"[BOT] Cancelling BLOCKED BUY offer id={offer_id} "
-                f"code={code} selling={selling} buying={buying}"
+                f"[BOT] Cancelling BLOCKED offer id={offer_id} "
+                f"sell_code={sell_code} buy_code={buy_code} "
+                f"selling={selling} buying={buying}"
             )
             cancel_offer(offer_id, selling_asset, buying_asset)
             cancelled += 1
         except Exception as e:
-            print(f"[BOT] Error cancelling blocked BUY offer {offer_id} ({code}): {e}")
+            print(f"[BOT] Error cancelling blocked offer {offer_id} (sell={sell_code}, buy={buy_code}): {e}")
 
     if cancelled:
         print(
             f"[BOT] cancel_blocked_buy_offers: cancelled {cancelled} "
-            f"open BUY offers for {sorted(codes_set)}"
+            f"open offers (buy/sell) for {sorted(codes_set)}"
         )
     return cancelled
 
