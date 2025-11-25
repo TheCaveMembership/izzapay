@@ -1,7 +1,7 @@
 import os
 import time
 import json
-from decimal import Decimal
+from decimal import Decimal, ROUND_HALF_UP
 
 import requests
 from flask import Blueprint, render_template, jsonify, request
@@ -62,6 +62,31 @@ PI_API_KEY = apikey
 
 def _now() -> int:
     return int(time.time())
+
+
+# ---------------------------------------------------------
+# Stellar amount helper: clamp to 7 decimals as string
+# ---------------------------------------------------------
+
+_STROOP_QUANTUM = Decimal("0.0000001")
+
+def _to_stellar_amount(value) -> str:
+    """
+    Convert any numeric value into a Horizon-safe PI amount string
+    with at most 7 decimal places, no scientific notation.
+
+    This also fixes float noise like:
+      0.0013799999998753698  ->  0.0013800
+      9.999987536971587E-8   ->  0.0000001
+    """
+    d = Decimal(str(value))
+    if d <= 0:
+        raise ValueError("amount must be positive")
+    dq = d.quantize(_STROOP_QUANTUM, rounding=ROUND_HALF_UP)
+    if dq <= 0:
+        raise ValueError("amount too small to send (minimum 0.0000001)")
+    # Format without scientific notation
+    return format(dq, "f")
 
 
 def _pi_headers():
@@ -403,9 +428,10 @@ def _send_native_payment(from_secret: str, to_pub: str, amount: float, memo_text
         base_fee=PI_BASE_FEE_STROOPS,
     )
 
+    # Always send a Horizon-safe 7-decimal amount string
     builder.append_payment_op(
         destination=to_pub,
-        amount=str(Decimal(str(amount))),
+        amount=_to_stellar_amount(amount),
         asset=Asset.native()
     )
 
