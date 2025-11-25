@@ -635,6 +635,9 @@
   const BOT_USERNAME_KEY = "izza_bot_username";
   const WALLET_SECRET_KEY = "izza_wallet_secret"; // same key as wallet page
 
+  // Horizon for Pi Testnet – used to fetch live orderbook prices for manual sells
+  const HORIZON_URL = "https://api.testnet.minepi.com";
+
   // Keep EPS so we can treat tiny balances as zero
   const SHORT_TERM_WITHDRAW_FEE = 1.0; // test Pi (kept for compatibility, not used in UI logic now)
   const EPS = 1e-7;
@@ -712,6 +715,33 @@
     if (rl === "low") return 15;
     if (rl === "high") return 45;
     return 30; // medium
+  }
+
+  // Fetch current best bid price for selling a token into native PI from Horizon
+  async function fetchBestBidPrice(code, issuer){
+    const assetType = code.length <= 4 ? "credit_alphanum4" : "credit_alphanum12";
+    const params = new URLSearchParams({
+      selling_asset_type: assetType,
+      selling_asset_code: code,
+      selling_asset_issuer: issuer,
+      buying_asset_type: "native",
+      limit: "1"
+    });
+    const res = await fetch(HORIZON_URL + "/orderbook?" + params.toString());
+    if (!res.ok) {
+      throw new Error("Horizon error " + res.status);
+    }
+    const data = await res.json();
+    const bids = data.bids || [];
+    if (!bids.length) return null;
+    const top = bids[0];
+    let price = top.price;
+    if (price === undefined && top.price_r && top.price_r.n && top.price_r.d) {
+      price = Number(top.price_r.n) / Number(top.price_r.d);
+    }
+    const num = Number(price);
+    if (!num || num <= 0) return null;
+    return num;
   }
 
   function updateUserLabel(){
@@ -1100,7 +1130,48 @@
               holdingsStatus.textContent = "No net token to sell for " + (pos.code || "") + ".";
               return;
             }
-            holdingsStatus.textContent = "Submitting sell for " + (pos.code || "") + "…";
+
+            // Step 1: fetch current market price from Horizon
+            holdingsStatus.textContent =
+              "Fetching current market price for " + (pos.code || "") + "…";
+            let bestPrice = null;
+            try {
+              bestPrice = await fetchBestBidPrice(pos.code, pos.issuer);
+            } catch(err) {
+              console.error(err);
+              holdingsStatus.textContent =
+                "Could not load current market price from Horizon. Try again in a moment.";
+              return;
+            }
+
+            if (!bestPrice) {
+              holdingsStatus.textContent =
+                "No active buy-side liquidity for " + (pos.code || "") +
+                " right now. The bot cannot sell this token at market.";
+              return;
+            }
+
+            const estPi = amt * bestPrice;
+
+            // Step 2: show the user exactly what rate and approximate Pi they'll receive
+            const msg =
+              "You are about to sell " + amt.toFixed(6) + " " + (pos.code || "") +
+              " from this bucket at market.\n\n" +
+              "Current best bid: " + bestPrice.toFixed(6) + " test Pi per " + (pos.code || "") + ".\n" +
+              "Estimated proceeds: " + estPi.toFixed(7) + " test Pi (before network fees).\n\n" +
+              "Prices can change at any time on the Pi Testnet orderbook. " +
+              "Press OK to submit this sell now, or Cancel to abort.";
+
+            const ok = window.confirm(msg);
+            if (!ok) {
+              holdingsStatus.textContent =
+                "Sell cancelled. No order was submitted for " + (pos.code || "") + ".";
+              return;
+            }
+
+            // Step 3: actually submit the sell to the bot backend
+            holdingsStatus.textContent =
+              "Submitting sell for " + (pos.code || "") + " at market…";
             try {
               const resSell = await postJSON("/api/trading/bucket/sell_token", {
                 username: currentUser.username,
@@ -1113,9 +1184,17 @@
                 holdingsStatus.textContent = resSell.error || "Error submitting manual sell.";
                 return;
               }
+
+              // Show final executed stats using backend response when available
+              const execPrice = Number(resSell.price_pi || bestPrice || 0);
+              const execPi = Number(resSell.amount_pi || estPi || 0);
+
               amountInput.value = "";
               holdingsStatus.textContent =
-                "Sell submitted for " + (pos.code || "") + ". Updating…";
+                "Sell executed for " + (pos.code || "") +
+                " at ~" + execPrice.toFixed(6) + " PI, " +
+                "you received about " + execPi.toFixed(7) + " test Pi. Updating…";
+
               await loadSummary();
               await loadHoldings();
               setTimeout(()=>{ holdingsStatus.textContent=""; }, 4000);
