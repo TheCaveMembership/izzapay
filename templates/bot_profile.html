@@ -727,7 +727,7 @@
       buying_asset_type: "native",
       limit: "1"
     });
-    const res = await fetch(HORIZON_URL + "/orderbook?" + params.toString());
+    const res = await fetch(HORIZON_URL + "/order_book?" + params.toString());
     if (!res.ok) {
       throw new Error("Horizon error " + res.status);
     }
