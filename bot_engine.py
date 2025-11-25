@@ -148,6 +148,9 @@ WALL_BREAK_SCORE_BOOST = float(os.getenv("BOT_WALL_BREAK_SCORE_BOOST", "3.0"))
 # Fallback quick-sell markup if we don't know the next ask (percent)
 QUICK_SELL_FALLBACK_PCT = float(os.getenv("BOT_QUICK_SELL_FALLBACK_PCT", "2.0"))
 
+# Pause duration (seconds) after a manual bucket liquidation
+LIQUIDATE_PAUSE_SECS = int(os.getenv("BOT_LIQUIDATE_PAUSE_SECS", "60"))
+
 
 def _now() -> int:
   return int(time.time())
@@ -1495,6 +1498,26 @@ def get_bucket_traded_asset_codes(bucket_id: int) -> List[str]:
 
 
 # ---------------------------------------------------------------------
+# Pause helper
+# ---------------------------------------------------------------------
+
+def pause_bucket(bucket_id: int, seconds: int) -> int:
+  """
+  Set paused_until for this bucket so the engine skips trading it
+  for the given number of seconds.
+  """
+  now_ts = _now()
+  secs = max(0, int(seconds))
+  paused_until = now_ts + secs
+  with conn() as cx:
+    cx.execute(
+      "UPDATE bot_buckets SET paused_until = ? WHERE id = ?",
+      (paused_until, bucket_id),
+    )
+  return paused_until
+
+
+# ---------------------------------------------------------------------
 # Per-bucket liquidation helper (used by API)
 # ---------------------------------------------------------------------
 
@@ -1508,6 +1531,11 @@ def liquidate_bucket_to_cash(bucket_id: int) -> Dict[str, Any]:
   bucket has traded, so reserved test Pi in the orderbook is released
   back to the wallet.
 
+  After liquidation, we:
+    - Clear all positions for this bucket from bot_positions
+    - Pause this bucket for LIQUIDATE_PAUSE_SECS so the engine does
+      not immediately redeploy the cash.
+
   Returns a dict:
     {
       "cash_after": <float>,              # updated bucket cash balance in PI
@@ -1515,14 +1543,15 @@ def liquidate_bucket_to_cash(bucket_id: int) -> Dict[str, Any]:
       "blocked_assets": [                 # assets we could not liquidate
         {"code": "CP", "issuer": "G..."},
         ...
-      ]
+      ],
+      "paused_until": <int>,              # unix timestamp until which the bucket is paused
     }
   """
   ensure_bot_tables()
 
   bucket = load_bucket_by_id(bucket_id)
   if not bucket:
-    return {"cash_after": 0.0, "executed_sells": 0, "blocked_assets": []}
+    return {"cash_after": 0.0, "executed_sells": 0, "blocked_assets": [], "paused_until": 0}
 
   print(f"[LIQUIDATE] Starting per-bucket liquidation for bucket={bucket.id} user=@{bucket.username}")
 
@@ -1562,7 +1591,17 @@ def liquidate_bucket_to_cash(bucket_id: int) -> Dict[str, Any]:
         (bucket_id,),
       ).fetchone()
     cash_now = float(row["amount"] or 0.0) if row else 0.0
-    return {"cash_after": cash_now, "executed_sells": 0, "blocked_assets": []}
+    paused_until = pause_bucket(bucket_id, LIQUIDATE_PAUSE_SECS)
+    print(
+      f"[LIQUIDATE] Bucket={bucket_id} paused until {paused_until} "
+      f"(no markets found)."
+    )
+    return {
+      "cash_after": cash_now,
+      "executed_sells": 0,
+      "blocked_assets": [],
+      "paused_until": paused_until,
+    }
 
   positions = load_positions_for_bucket(bucket_id)
   if not positions:
@@ -1573,7 +1612,17 @@ def liquidate_bucket_to_cash(bucket_id: int) -> Dict[str, Any]:
         (bucket_id,),
       ).fetchone()
     cash_now = float(row["amount"] or 0.0) if row else 0.0
-    return {"cash_after": cash_now, "executed_sells": 0, "blocked_assets": []}
+    paused_until = pause_bucket(bucket_id, LIQUIDATE_PAUSE_SECS)
+    print(
+      f"[LIQUIDATE] Bucket={bucket_id} paused until {paused_until} "
+      f"(no positions)."
+    )
+    return {
+      "cash_after": cash_now,
+      "executed_sells": 0,
+      "blocked_assets": [],
+      "paused_until": paused_until,
+    }
 
   sell_plans = plan_sells_for_bucket(bucket, positions, markets, liquidate=True)
 
@@ -1586,6 +1635,18 @@ def liquidate_bucket_to_cash(bucket_id: int) -> Dict[str, Any]:
   )
   print(f"[LIQUIDATE] Executed {sells_done} SELLs for bucket={bucket.id}, blocked={len(blocked_assets)}")
 
+  # After liquidation, we clear all positions for this bucket so the
+  # bucket is flat from the perspective of IZZA BOT accounting.
+  with conn() as cx:
+    deleted = cx.execute(
+      "DELETE FROM bot_positions WHERE bucket_id = ?",
+      (bucket_id,),
+    ).rowcount
+  print(
+    f"[LIQUIDATE] Cleared {deleted} remaining positions for bucket={bucket.id} "
+    f"after manual liquidation."
+  )
+
   # Reload final cash balance from DB
   with conn() as cx:
     row = cx.execute(
@@ -1595,10 +1656,19 @@ def liquidate_bucket_to_cash(bucket_id: int) -> Dict[str, Any]:
 
   new_cash = float(row["amount"] or 0.0) if row else 0.0
   print(f"[LIQUIDATE] Finished bucket={bucket.id}, cash≈{new_cash:.6f} PI")
+
+  # Pause this bucket so the engine doesn't immediately redeploy the cash.
+  paused_until = pause_bucket(bucket.id, LIQUIDATE_PAUSE_SECS)
+  print(
+    f"[LIQUIDATE] Bucket={bucket.id} user=@{bucket.username} "
+    f"paused_until={paused_until} (≈{LIQUIDATE_PAUSE_SECS}s pause after liquidation)."
+  )
+
   return {
     "cash_after": new_cash,
     "executed_sells": int(sells_done),
     "blocked_assets": blocked_assets,
+    "paused_until": paused_until,
   }
 
 
