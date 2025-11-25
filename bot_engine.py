@@ -65,8 +65,9 @@ MIN_TRADE_PI = float(os.getenv("BOT_MIN_TRADE_PI", "0.00001"))
 MIN_TOKEN_SIZE = float(os.getenv("BOT_MIN_TOKEN_SIZE", "0.0000001"))
 
 # Price band for BUY side: ignore insane priced tokens
-MIN_BUY_PRICE = float(os.getenv("BOT_MIN_BUY_PRICE", "0.0005"))
-MAX_BUY_PRICE = float(os.getenv("BOT_MAX_BUY_PRICE", "5000.0"))
+# (tuned: only buy tokens between 0.05 and 100 test Pi)
+MIN_BUY_PRICE = float(os.getenv("BOT_MIN_BUY_PRICE", "0.05"))
+MAX_BUY_PRICE = float(os.getenv("BOT_MAX_BUY_PRICE", "100.0"))
 
 # Safety caps
 MAX_TRADES_PER_RUN = int(os.getenv("BOT_MAX_TRADES_PER_RUN", "20"))
@@ -118,7 +119,8 @@ RISK_WEIGHTS = {
     "trend_weight": 0.15,
     "micro_weight": 0.30,
     "vol_weight": 0.55,
-    "max_spread_pct": 300.0,
+    # tuned: only buy markets with spread <= 150% even for high risk
+    "max_spread_pct": 150.0,
   },
 }
 
@@ -1223,6 +1225,7 @@ def plan_buys_for_bucket(
       continue
 
     # Ignore tokens with insane price levels on the BUY side
+    # tuned: only between 0.05 and 100 test Pi
     if m.best_ask < MIN_BUY_PRICE or m.best_ask > MAX_BUY_PRICE:
       continue
 
@@ -1414,15 +1417,19 @@ def execute_buys_for_bucket(
       executed += 1
 
       # If this market had a breakable wall, immediately place a quick
-      # SELL just under the next ask level.
+      # SELL just under the next ask level (for fast fills).
       if market.wall_break_candidate:
         try:
           if market.next_ask_price and market.next_ask_price > market.best_ask:
-            # Place just under the next ask
+            # Place just under the next best sell offer for a quick gain
             target_price = market.next_ask_price * 0.999
           else:
-            # Fallback, small markup over entry, orderbook only
-            target_price = market.best_ask * (1.0 + QUICK_SELL_FALLBACK_PCT / 100.0)
+            # No clear next ask level: keep it simple and skip auto quick-sell
+            print(
+              f"[SCALP] no clean next_ask_price for {market.code}, "
+              f"skipping auto quick-sell"
+            )
+            continue
 
           # Skip quick SELL if it would cross our own BUY offer
           if would_cross_self_sell(market.code, market.issuer, target_price):
@@ -1696,7 +1703,7 @@ def liquidate_bucket_to_cash(bucket_id: int) -> Dict[str, Any]:
   print(f"[LIQUIDATE] Finished bucket={bucket.id}, cash≈{new_cash:.6f} PI")
 
   # Pause this bucket so the engine doesn't immediately redeploy the cash.
-  paused_until = pause_bucket(bucket.id, LIQUIDATE_PAUSE_SECS)
+  paused_until = pause_bucket(bucket_id, LIQUIDATE_PAUSE_SECS)
   print(
     f"[LIQUIDATE] Bucket={bucket.id} user=@{bucket.username} "
     f"paused_until={paused_until} (≈{LIQUIDATE_PAUSE_SECS}s pause after liquidation)."
