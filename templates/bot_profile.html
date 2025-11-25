@@ -569,24 +569,31 @@
 
     <!-- Create bucket -->
     <div id="createBox" class="box" style="display:none;">
-      <h3>Create a new bucket</h3>
-      <p class="muted">
-        Each bucket has a <strong>downside limit based on its risk level</strong>.
-        The bot will be coded so it does not allow this bucket to lose more than
-        that percentage of your deposit.
-      </p>
-      <p class="muted">
-        Approximate max loss per risk:
-        <br>
-        • Low risk: up to <strong>15%</strong> drawdown
-        <br>
-        • Medium risk: up to <strong>30%</strong> drawdown
-        <br>
-        • High risk: up to <strong>45%</strong> drawdown
-        <br>
-        If you are not willing to risk up to that loss on this bucket,
-        <strong>do not deposit funds into it yet.</strong>
-      </p>
+  <h3>Create a new bucket</h3>
+  <p class="muted">
+    IZZA BOT is currently in <strong>test mode on Pi Testnet</strong>. In crypto,
+    prices can move very quickly and tokens can crash. There is
+    <strong>no guarantee that any deposit is safe</strong>, and the bot cannot
+    promise to stop losses at a specific level. Only deposit test Pi that you
+    are fully prepared to lose.
+  </p>
+  <p class="muted">
+    Each bucket has a <strong>downside target based on its risk level</strong>.
+    The bot logic is designed to <strong>do its best</strong> to keep drawdowns
+    around these ranges for that bucket, but extreme market moves can still push
+    losses beyond them.
+    <br><br>
+    Approximate target max loss per risk:
+    <br>
+    • Low risk: target up to <strong>15%</strong> drawdown
+    <br>
+    • Medium risk: target up to <strong>30%</strong> drawdown
+    <br>
+    • High risk: target up to <strong>45%</strong> drawdown
+    <br><br>
+    If you are not willing to risk <strong>up to this loss or more</strong> on this
+    bucket, <strong>do not deposit funds into it yet.</strong>
+  </p>
 
       <label for="newBucketName">Bucket name</label>
       <input id="newBucketName" type="text" placeholder="Long-term Balanced" />
