@@ -156,6 +156,10 @@ WALL_BREAK_SCORE_BOOST = float(os.getenv("BOT_WALL_BREAK_SCORE_BOOST", "3.0"))
 # Fallback quick-sell markup if we don't know the next ask (percent)
 QUICK_SELL_FALLBACK_PCT = float(os.getenv("BOT_QUICK_SELL_FALLBACK_PCT", "2.0"))
 
+# Maximum size at the *lowest* sell price we are willing to buy into.
+# Example: skip DORIS if lowest ask has 985,910 DORIS on that level.
+MAX_TOP_ASK_TOKENS = float(os.getenv("BOT_MAX_TOP_ASK_TOKENS", "1000.0"))
+
 # Pause duration (seconds) after a manual bucket liquidation
 LIQUIDATE_PAUSE_SECS = int(os.getenv("BOT_LIQUIDATE_PAUSE_SECS", "60"))
 
@@ -214,7 +218,7 @@ class MarketInfo:
   num_bid_levels: int
   num_ask_levels: int
   # Optional extended orderbook info (if available)
-  top_ask_amount: float = 0.0    # size of top-of-book ask (tokens)
+  top_ask_amount: float = 0.0    # size of top-of-book ask (tokens, lowest sell)
   next_ask_price: float = 0.0    # price of next ask level above best_ask
   wall_value_pi: float = 0.0     # estimated PI value of the top sell wall
   wall_break_candidate: bool = False  # whether this wall is breakable by a bucket
@@ -1204,7 +1208,9 @@ def plan_buys_for_bucket(
   Decide which markets to buy for this bucket.
 
   Rules:
-    - FIRST PRIORITY: if bucket can break a sell wall, do it
+    - Skip tokens whose *lowest* sell wall has more than MAX_TOP_ASK_TOKENS
+      available (e.g. 985,910 DORIS @ 10.0).
+    - FIRST PRIORITY: if bucket can break a reasonable sell wall, do it
       (buy the wall value in PI) and set up a scalp.
     - SECOND: use remaining budget on highest-score markets.
     - No micro buys if bucket can afford >= 1 full token.
@@ -1242,6 +1248,17 @@ def plan_buys_for_bucket(
     # Ignore tokens with insane price levels on the BUY side
     # tuned: only between 0.05 and 100 test Pi
     if m.best_ask < MIN_BUY_PRICE or m.best_ask > MAX_BUY_PRICE:
+      continue
+
+    # NEW: skip tokens whose lowest sell wall is gigantic
+    # (e.g. 985,910 DORIS @ 10.0).
+    lowest_ask_tokens = m.top_ask_amount if m.top_ask_amount > 0 else 0.0
+    if lowest_ask_tokens > MAX_TOP_ASK_TOKENS:
+      print(
+        f"[BUY] skip bucket={bucket.id} user=@{bucket.username} "
+        f"{m.code} lowest ask size {lowest_ask_tokens:.6f} > "
+        f"MAX_TOP_ASK_TOKENS={MAX_TOP_ASK_TOKENS}"
+      )
       continue
 
     # Sell wall detection relative to this bucket
