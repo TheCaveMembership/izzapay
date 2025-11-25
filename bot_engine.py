@@ -34,7 +34,7 @@ import threading
 from dataclasses import dataclass
 from typing import Dict, Any, List, Tuple, Optional
 
-from decimal import Decimal
+from decimal import Decimal, ROUND_HALF_UP  # <- extended import
 
 from db import conn
 from bot_markets import scan_markets_vs_pi
@@ -151,6 +151,24 @@ QUICK_SELL_FALLBACK_PCT = float(os.getenv("BOT_QUICK_SELL_FALLBACK_PCT", "2.0"))
 
 def _now() -> int:
   return int(time.time())
+
+
+# ---------------------------------------------------------------------
+# PI amount helper: clamp to 7 decimals (stroop precision)
+# ---------------------------------------------------------------------
+
+_PI_QUANTUM = Decimal("0.0000001")
+
+def quantize_pi(value: float) -> float:
+  """
+  Clamp a PI amount to at most 7 decimal places using Decimal,
+  removing float noise like 0.0013799999998753698.
+
+  Always returns a normal float with <= 7 decimal precision.
+  """
+  d = Decimal(str(value))
+  dq = d.quantize(_PI_QUANTUM, rounding=ROUND_HALF_UP)
+  return float(dq)
 
 
 # ---------------------------------------------------------------------
@@ -576,6 +594,9 @@ def update_cash_for_bucket(bucket_id: int, delta_pi: float):
     if new_amt < 0:
       new_amt = 0.0
 
+    # Clamp bucket cash to 7 decimal places to remove float noise
+    new_amt = quantize_pi(new_amt)
+
     cx.execute(
       """
       UPDATE bot_bucket_allocations
@@ -712,7 +733,7 @@ def get_bucket_first_deposit_ts(bucket_id: int) -> Optional[int]:
       """
       SELECT MIN(created_at) AS first_ts
       FROM bot_bucket_transfers
-      WHERE bucket_id = ? AND direction = 'deposit'
+      WHERE bucket_id = ?
       """,
       (bucket_id,),
     ).fetchone()
