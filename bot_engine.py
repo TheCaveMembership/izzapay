@@ -167,6 +167,7 @@ class Bucket:
   volatility: str
   time_horizon_days: int
   cash_pi: float
+  paused_until: int = 0   # if > now, bucket is temporarily paused from trading
 
 
 @dataclass
@@ -276,7 +277,8 @@ def load_active_buckets() -> List[Bucket]:
         b.objective,
         b.volatility,
         b.time_horizon_days,
-        IFNULL(alloc.amount, 0) AS cash_pi
+        IFNULL(alloc.amount, 0) AS cash_pi,
+        IFNULL(b.paused_until, 0) AS paused_until
       FROM bot_buckets b
       JOIN bot_accounts a ON a.id = b.account_id
       LEFT JOIN bot_bucket_allocations alloc
@@ -299,6 +301,7 @@ def load_active_buckets() -> List[Bucket]:
         volatility=(r["volatility"] or "medium").lower(),
         time_horizon_days=int(r["time_horizon_days"] or 10),
         cash_pi=float(r["cash_pi"] or 0.0),
+        paused_until=int(r["paused_until"] or 0),
       )
     )
   return buckets
@@ -319,7 +322,8 @@ def load_bucket_by_id(bucket_id: int) -> Optional[Bucket]:
         b.objective,
         b.volatility,
         b.time_horizon_days,
-        IFNULL(alloc.amount, 0) AS cash_pi
+        IFNULL(alloc.amount, 0) AS cash_pi,
+        IFNULL(b.paused_until, 0) AS paused_until
       FROM bot_buckets b
       JOIN bot_accounts a ON a.id = b.account_id
       LEFT JOIN bot_bucket_allocations alloc
@@ -342,6 +346,7 @@ def load_bucket_by_id(bucket_id: int) -> Optional[Bucket]:
     volatility=(r["volatility"] or "medium").lower(),
     time_horizon_days=int(r["time_horizon_days"] or 10),
     cash_pi=float(r["cash_pi"] or 0.0),
+    paused_until=int(r["paused_until"] or 0),
   )
 
 
@@ -898,12 +903,12 @@ def plan_sells_for_bucket(
   Normal mode:
     - If PnL >= TP% or PnL <= SL%, sell the *entire* position for that bucket.
   Liquidation mode (LIQUIDATE_ALL=True or liquidate=True):
-    - Sell ALL positions at current best_bid.
+    - Sell ALL positions at current best_bid (subject to self-cross protections).
   """
   if not positions:
     return []
 
-  # Full liquidation: ignore TP / SL, just dump everything
+  # Full liquidation: ignore TP / SL, just plan to dump everything
   if LIQUIDATE_ALL or liquidate:
     planned: List[Tuple[Position, MarketInfo, float]] = []
     for key, pos in positions.items():
@@ -949,7 +954,16 @@ def execute_sells_for_bucket(
   bucket: Bucket,
   plans: List[Tuple[Position, MarketInfo, float]],
   liquidate: bool = False,
+  blocked_assets: Optional[List[Dict[str, str]]] = None,
 ) -> int:
+  """
+  Execute SELL plans for this bucket.
+
+  In liquidation mode:
+    - We still avoid op_cross_self. If a SELL would cross the bot's own
+      BUY offers, we SKIP that asset and optionally record it in
+      blocked_assets instead of trying to tear down our own ladder.
+  """
   executed = 0
   for pos, market, amount_to_sell in plans:
     if not (LIQUIDATE_ALL or liquidate) and executed >= MAX_SELLS_PER_BUCKET:
@@ -990,7 +1004,7 @@ def execute_sells_for_bucket(
       continue
 
     # Compute PnL % for this position (used for deciding whether to
-    # tear down our own BUY wall to realize gains).
+    # tear down our own BUY wall to realize gains in normal mode).
     pnl_pct = None
     try:
       if pos.avg_price_pi > 0 and market.mid_price > 0:
@@ -998,57 +1012,65 @@ def execute_sells_for_bucket(
     except Exception:
       pnl_pct = None
 
-    # In liquidation mode we do not care about PnL or ladders,
-    # just dump at best_bid and let self-cross protection handle it.
-    if not (LIQUIDATE_ALL or liquidate):
-      # Avoid op_cross_self: if this price would hit our own BUY offer
-      # on this pair, consider cancelling blocking BUYs if the trade
-      # is profitable for this bucket.
-      try:
-        if would_cross_self_sell(market.code, market.issuer, best_bid):
-          is_profit = pnl_pct is not None and pnl_pct > 0.0
+    # Avoid op_cross_self on SELL side
+    try:
+      if would_cross_self_sell(market.code, market.issuer, best_bid):
+        # In liquidation mode we do NOT tear down ladders. We simply mark
+        # this asset as blocked and skip it this pass so the API can warn
+        # the user instead of wasting test Pi on failing txs.
+        if LIQUIDATE_ALL or liquidate:
+          print(
+            f"[SELL] cannot liquidate bucket={bucket.id} user=@{bucket.username} "
+            f"{market.code} @ {best_bid:.6f} PI because it would cross own BUY offer"
+          )
+          if blocked_assets is not None:
+            blocked_assets.append({"code": market.code, "issuer": market.issuer})
+          continue
 
-          if is_profit:
-            # Try to cancel blocking BUY offers on this pair at or above best_bid
-            try:
-              cancelled = cancel_blocking_buy_offers_for_pair(
-                market.code,
-                market.issuer,
-                best_bid,
-              )
-              print(
-                f"[SELL] bucket={bucket.id} user=@{bucket.username} "
-                f"{market.code} cancelled {cancelled} blocking BUY offers "
-                f"to realize profitable SELL"
-              )
-            except Exception as e:
-              print(
-                f"[SELL] warning: failed to cancel blocking BUY offers for "
-                f"{market.code} in bucket {bucket.id}: {e}"
-              )
+        # Normal mode: we may tear down profitable BUY ladders to realize gains
+        is_profit = pnl_pct is not None and pnl_pct > 0.0
 
-            # Re check self cross after cancellations, if still crossing,
-            # skip to avoid Horizon op_cross_self.
-            if would_cross_self_sell(market.code, market.issuer, best_bid):
-              print(
-                f"[SELL] skip bucket={bucket.id} user=@{bucket.username} "
-                f"{market.code} price {best_bid:.6f} would still cross own BUY offer "
-                f"after cancel attempt"
-              )
-              continue
-          else:
-            # Non positive PnL, do not tear down our own BUY ladder
+        if is_profit:
+          # Try to cancel blocking BUY offers on this pair at or above best_bid
+          try:
+            cancelled = cancel_blocking_buy_offers_for_pair(
+              market.code,
+              market.issuer,
+              best_bid,
+            )
+            print(
+              f"[SELL] bucket={bucket.id} user=@{bucket.username} "
+              f"{market.code} cancelled {cancelled} blocking BUY offers "
+              f"to realize profitable SELL"
+            )
+          except Exception as e:
+            print(
+              f"[SELL] warning: failed to cancel blocking BUY offers for "
+              f"{market.code} in bucket {bucket.id}: {e}"
+            )
+
+          # Re-check self cross after cancellations, if still crossing,
+          # skip to avoid Horizon op_cross_self.
+          if would_cross_self_sell(market.code, market.issuer, best_bid):
             print(
               f"[SELL] skip bucket={bucket.id} user=@{bucket.username} "
-              f"{market.code} price {best_bid:.6f} would cross own BUY offer "
-              f"(PnL not positive, keeping BUY ladder)"
+              f"{market.code} price {best_bid:.6f} would still cross own BUY offer "
+              f"after cancel attempt"
             )
             continue
-      except Exception as e:
-        print(
-          f"[SELL] warning: self cross check failed for {market.code} "
-          f"in bucket {bucket.id}: {e}"
-        )
+        else:
+          # Non positive PnL, do not tear down our own BUY ladder
+          print(
+            f"[SELL] skip bucket={bucket.id} user=@{bucket.username} "
+            f"{market.code} price {best_bid:.6f} would cross own BUY offer "
+            f"(PnL not positive, keeping BUY ladder)"
+          )
+          continue
+    except Exception as e:
+      print(
+        f"[SELL] warning: self cross check failed for {market.code} "
+        f"in bucket {bucket.id}: {e}"
+      )
 
     try:
       print(
@@ -1419,19 +1441,27 @@ def bucket_hit_max_drawdown(
 # Per-bucket liquidation helper (used by API)
 # ---------------------------------------------------------------------
 
-def liquidate_bucket_to_cash(bucket_id: int) -> float:
+def liquidate_bucket_to_cash(bucket_id: int) -> Dict[str, Any]:
   """
   Sell all positions for a single bucket into PI, using liquidation
-  semantics (ignoring TP/SL and max-sells-per-run caps for that bucket).
+  semantics (ignoring TP/SL caps, but still respecting self-cross
+  protections).
 
-  Returns the updated cash balance (bot_bucket_allocations.amount) for
-  that bucket after liquidation.
+  Returns a dict:
+    {
+      "cash_after": <float>,              # updated bucket cash balance in PI
+      "executed_sells": <int>,            # number of successful SELL trades
+      "blocked_assets": [                 # assets we could not liquidate
+        {"code": "CP", "issuer": "G..."},
+        ...
+      ]
+    }
   """
   ensure_bot_tables()
 
   bucket = load_bucket_by_id(bucket_id)
   if not bucket:
-    return 0.0
+    return {"cash_after": 0.0, "executed_sells": 0, "blocked_assets": []}
 
   print(f"[LIQUIDATE] Starting per-bucket liquidation for bucket={bucket.id} user=@{bucket.username}")
 
@@ -1453,7 +1483,8 @@ def liquidate_bucket_to_cash(bucket_id: int) -> float:
         "SELECT amount FROM bot_bucket_allocations WHERE bucket_id = ?",
         (bucket_id,),
       ).fetchone()
-    return float(row["amount"] or 0.0) if row else 0.0
+    cash_now = float(row["amount"] or 0.0) if row else 0.0
+    return {"cash_after": cash_now, "executed_sells": 0, "blocked_assets": []}
 
   positions = load_positions_for_bucket(bucket_id)
   if not positions:
@@ -1463,11 +1494,19 @@ def liquidate_bucket_to_cash(bucket_id: int) -> float:
         "SELECT amount FROM bot_bucket_allocations WHERE bucket_id = ?",
         (bucket_id,),
       ).fetchone()
-    return float(row["amount"] or 0.0) if row else 0.0
+    cash_now = float(row["amount"] or 0.0) if row else 0.0
+    return {"cash_after": cash_now, "executed_sells": 0, "blocked_assets": []}
 
   sell_plans = plan_sells_for_bucket(bucket, positions, markets, liquidate=True)
-  sells_done = execute_sells_for_bucket(bucket, sell_plans, liquidate=True)
-  print(f"[LIQUIDATE] Executed {sells_done} SELLs for bucket={bucket.id}")
+
+  blocked_assets: List[Dict[str, str]] = []
+  sells_done = execute_sells_for_bucket(
+    bucket,
+    sell_plans,
+    liquidate=True,
+    blocked_assets=blocked_assets,
+  )
+  print(f"[LIQUIDATE] Executed {sells_done} SELLs for bucket={bucket.id}, blocked={len(blocked_assets)}")
 
   # Reload final cash balance from DB
   with conn() as cx:
@@ -1478,7 +1517,11 @@ def liquidate_bucket_to_cash(bucket_id: int) -> float:
 
   new_cash = float(row["amount"] or 0.0) if row else 0.0
   print(f"[LIQUIDATE] Finished bucket={bucket.id}, cash≈{new_cash:.6f} PI")
-  return new_cash
+  return {
+    "cash_after": new_cash,
+    "executed_sells": int(sells_done),
+    "blocked_assets": blocked_assets,
+  }
 
 
 # ---------------------------------------------------------------------
@@ -1519,8 +1562,18 @@ def run_once():
     print("[ENGINE] LIQUIDATE_ALL=true – selling all positions and skipping buys.")
 
   total_trades = 0
+  now_ts = _now()
 
   for bucket in buckets:
+    # Respect per-bucket pause after manual liquidation
+    if bucket.paused_until and bucket.paused_until > now_ts:
+      remaining = bucket.paused_until - now_ts
+      print(
+        f"[ENGINE] Bucket {bucket.id} (@{bucket.username}) is paused for "
+        f"{remaining}s after manual liquidation, skipping this run."
+      )
+      continue
+
     risk = bucket.risk_level if bucket.risk_level in RISK_WEIGHTS else "medium"
     print(
       f"[ENGINE] Bucket {bucket.id} (@{bucket.username}) "
