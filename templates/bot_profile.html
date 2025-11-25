@@ -285,6 +285,105 @@
     .trade-meta {
       opacity:0.7;
     }
+
+    /* NEW: bucket holdings section under each bucket */
+
+    .bucket-holdings-box {
+      margin-top: 10px;
+      padding-top: 8px;
+      border-top: 1px solid rgba(255,255,255,0.08);
+      font-size: 11px;
+    }
+
+    .bucket-holdings-header-row {
+      display:flex;
+      justify-content:space-between;
+      align-items:center;
+      margin-bottom:4px;
+      gap:8px;
+    }
+
+    .bucket-holdings-title {
+      font-size:11px;
+      text-transform:uppercase;
+      letter-spacing:.12em;
+      opacity:0.85;
+    }
+
+    .bucket-holdings-header-right {
+      display:flex;
+      align-items:center;
+      gap:6px;
+    }
+
+    .bucket-holdings-refresh-btn {
+      padding:4px 8px;
+      font-size:9px;
+      letter-spacing:.08em;
+    }
+
+    .bucket-holdings-count {
+      font-size:10px;
+    }
+
+    .bucket-holdings-list {
+      margin-top:2px;
+      max-height:180px;
+      overflow-y:auto;
+    }
+
+    .bucket-holding-row {
+      display:flex;
+      justify-content:space-between;
+      align-items:flex-start;
+      gap:8px;
+      padding:4px 0;
+      border-bottom:1px solid rgba(255,255,255,0.06);
+    }
+
+    .bucket-holding-left {
+      flex:1.2;
+    }
+
+    .bucket-holding-right {
+      flex:1;
+      text-align:right;
+    }
+
+    .bucket-holding-title {
+      font-size:11px;
+      font-weight:bold;
+      margin-bottom:2px;
+    }
+
+    .bucket-holding-meta {
+      font-size:10px;
+      opacity:0.75;
+    }
+
+    .bucket-holding-right input {
+      width:100%;
+      margin-bottom:4px;
+      font-size:10px;
+      padding:4px 6px;
+    }
+
+    .bucket-holding-actions {
+      display:flex;
+      justify-content:flex-end;
+      flex-wrap:wrap;
+      gap:4px;
+    }
+
+    .bucket-holding-sell-btn {
+      font-size:10px;
+      padding:4px 8px;
+    }
+
+    .bucket-holding-cancel-btn {
+      font-size:9px;
+      padding:3px 6px;
+    }
   </style>
 </head>
 <body>
@@ -879,6 +978,244 @@
     wdRow.appendChild(wdInput);
     wdRow.appendChild(wdBtn);
     row.appendChild(wdRow);
+
+    // --- NEW: Holdings section for this bucket ---------------------------
+    const holdingsBox = document.createElement("div");
+    holdingsBox.className = "bucket-holdings-box";
+
+    const holdingsHeaderRow = document.createElement("div");
+    holdingsHeaderRow.className = "bucket-holdings-header-row";
+
+    const holdingsTitle = document.createElement("div");
+    holdingsTitle.className = "bucket-holdings-title";
+    holdingsTitle.textContent = "Bucket holdings";
+
+    const holdingsHeaderRight = document.createElement("div");
+    holdingsHeaderRight.className = "bucket-holdings-header-right";
+
+    const holdingsCount = document.createElement("span");
+    holdingsCount.className = "bucket-holdings-count muted";
+
+    const holdingsRefreshBtn = document.createElement("button");
+    holdingsRefreshBtn.className = "btn btn-outline bucket-holdings-refresh-btn";
+    holdingsRefreshBtn.textContent = "Refresh";
+
+    holdingsHeaderRight.appendChild(holdingsCount);
+    holdingsHeaderRight.appendChild(holdingsRefreshBtn);
+
+    holdingsHeaderRow.appendChild(holdingsTitle);
+    holdingsHeaderRow.appendChild(holdingsHeaderRight);
+
+    const holdingsList = document.createElement("div");
+    holdingsList.className = "bucket-holdings-list";
+
+    const holdingsStatus = document.createElement("p");
+    holdingsStatus.className = "status-text";
+    holdingsStatus.style.marginTop = "4px";
+
+    holdingsBox.appendChild(holdingsHeaderRow);
+    holdingsBox.appendChild(holdingsList);
+    holdingsBox.appendChild(holdingsStatus);
+    row.appendChild(holdingsBox);
+
+    async function loadHoldings(){
+      holdingsStatus.textContent = "";
+      holdingsList.innerHTML = "";
+      holdingsCount.textContent = "";
+
+      if (!currentUser || !currentUser.username) {
+        holdingsStatus.textContent = "No username found. Open IZZA BOT from your main entry point.";
+        return;
+      }
+
+      try {
+        holdingsStatus.textContent = "Loading holdings…";
+        const res = await getJSON(
+          "/api/trading/bucket/holdings?username=" +
+          encodeURIComponent(currentUser.username) +
+          "&bucket_id=" + b.id
+        );
+        if (!res.ok) {
+          holdingsStatus.textContent = res.error || "Error loading holdings.";
+          return;
+        }
+        const positions = res.positions || [];
+        if (!positions.length) {
+          holdingsStatus.textContent = "No net token holdings in this bucket yet.";
+          holdingsCount.textContent = "";
+          return;
+        }
+        holdingsStatus.textContent = "";
+        holdingsCount.textContent = positions.length + " assets";
+
+        positions.forEach(pos => {
+          const posRow = document.createElement("div");
+          posRow.className = "bucket-holding-row";
+
+          const left = document.createElement("div");
+          left.className = "bucket-holding-left";
+
+          const title = document.createElement("div");
+          title.className = "bucket-holding-title";
+          const netTok = Number(pos.net_token || 0);
+          title.textContent = (pos.code || "") + " · net: " + netTok.toFixed(6);
+
+          const meta = document.createElement("div");
+          meta.className = "bucket-holding-meta";
+          const avg = Number(pos.avg_buy_price_pi || 0);
+          const notion = Number(pos.notional_at_avg_pi || 0);
+          meta.textContent =
+            "Avg entry: " + avg.toFixed(6) + " PI · Notional: " + fmtPiFull(notion);
+
+          left.appendChild(title);
+          left.appendChild(meta);
+
+          const right = document.createElement("div");
+          right.className = "bucket-holding-right";
+
+          const amountInput = document.createElement("input");
+          amountInput.type = "number";
+          amountInput.min = "0.0000001";
+          amountInput.step = "0.0000001";
+          amountInput.placeholder = "Amount to sell (blank = all)";
+
+          const actions = document.createElement("div");
+          actions.className = "bucket-holding-actions";
+
+          const sellBtn = document.createElement("button");
+          sellBtn.className = "btn btn-ombre bucket-holding-sell-btn";
+          sellBtn.textContent = "Sell";
+
+          sellBtn.onclick = async function(){
+            if (!currentUser || !currentUser.username) {
+              holdingsStatus.textContent =
+                "No username found. Open IZZA BOT from your main entry point.";
+              return;
+            }
+            let amt = parseFloat(amountInput.value || "0");
+            if (!amt || amt <= 0) {
+              amt = Number(pos.net_token || 0);
+            }
+            if (!amt || amt <= 0) {
+              holdingsStatus.textContent = "No net token to sell for " + (pos.code || "") + ".";
+              return;
+            }
+            holdingsStatus.textContent = "Submitting sell for " + (pos.code || "") + "…";
+            try {
+              const resSell = await postJSON("/api/trading/bucket/sell_token", {
+                username: currentUser.username,
+                bucket_id: b.id,
+                code: pos.code,
+                issuer: pos.issuer,
+                amount_token: amt
+              });
+              if (!resSell.ok) {
+                holdingsStatus.textContent = resSell.error || "Error submitting manual sell.";
+                return;
+              }
+              amountInput.value = "";
+              holdingsStatus.textContent =
+                "Sell submitted for " + (pos.code || "") + ". Updating…";
+              await loadSummary();
+              await loadHoldings();
+              setTimeout(()=>{ holdingsStatus.textContent=""; }, 4000);
+            } catch(e){
+              console.error(e);
+              holdingsStatus.textContent = "Network error submitting manual sell.";
+            }
+          };
+
+          const cancelBuyBtn = document.createElement("button");
+          cancelBuyBtn.className = "btn btn-outline bucket-holding-cancel-btn";
+          cancelBuyBtn.textContent = "Cancel buys";
+
+          cancelBuyBtn.onclick = async function(){
+            if (!currentUser || !currentUser.username) {
+              holdingsStatus.textContent =
+                "No username found. Open IZZA BOT from your main entry point.";
+              return;
+            }
+            holdingsStatus.textContent =
+              "Cancelling buy offers for " + (pos.code || "") + "…";
+            try {
+              const resCancel = await postJSON("/api/trading/bucket/cancel_buy_offers", {
+                username: currentUser.username,
+                bucket_id: b.id,
+                code: pos.code,
+                issuer: pos.issuer
+              });
+              if (!resCancel.ok) {
+                holdingsStatus.textContent =
+                  resCancel.error || "Error cancelling buy offers.";
+                return;
+              }
+              const c = resCancel.canceled_count || 0;
+              holdingsStatus.textContent =
+                "Cancelled " + c + " buy offer(s) for " + (pos.code || "") + ".";
+              setTimeout(()=>{ holdingsStatus.textContent=""; }, 4000);
+            } catch(e){
+              console.error(e);
+              holdingsStatus.textContent = "Network error cancelling buy offers.";
+            }
+          };
+
+          const cancelSellBtn = document.createElement("button");
+          cancelSellBtn.className = "btn btn-outline bucket-holding-cancel-btn";
+          cancelSellBtn.textContent = "Cancel sells";
+
+          cancelSellBtn.onclick = async function(){
+            if (!currentUser || !currentUser.username) {
+              holdingsStatus.textContent =
+                "No username found. Open IZZA BOT from your main entry point.";
+              return;
+            }
+            holdingsStatus.textContent =
+              "Cancelling sell offers for " + (pos.code || "") + "…";
+            try {
+              const resCancel = await postJSON("/api/trading/bucket/cancel_sell_offers", {
+                username: currentUser.username,
+                bucket_id: b.id,
+                code: pos.code,
+                issuer: pos.issuer
+              });
+              if (!resCancel.ok) {
+                holdingsStatus.textContent =
+                  resCancel.error || "Error cancelling sell offers.";
+                return;
+              }
+              const c = resCancel.canceled_count || 0;
+              holdingsStatus.textContent =
+                "Cancelled " + c + " sell offer(s) for " + (pos.code || "") + ".";
+              setTimeout(()=>{ holdingsStatus.textContent=""; }, 4000);
+            } catch(e){
+              console.error(e);
+              holdingsStatus.textContent = "Network error cancelling sell offers.";
+            }
+          };
+
+          actions.appendChild(sellBtn);
+          actions.appendChild(cancelBuyBtn);
+          actions.appendChild(cancelSellBtn);
+
+          right.appendChild(amountInput);
+          right.appendChild(actions);
+
+          posRow.appendChild(left);
+          posRow.appendChild(right);
+          holdingsList.appendChild(posRow);
+        });
+      } catch(e){
+        console.error(e);
+        holdingsStatus.textContent = "Network error loading holdings.";
+      }
+    }
+
+    holdingsRefreshBtn.onclick = function(){
+      loadHoldings();
+    };
+
+    // Load holdings once when we render the bucket
+    loadHoldings();
 
     // --- Delete bucket action ------------------------------------
     const actionsRow = document.createElement("div");
