@@ -436,18 +436,112 @@ def cancel_blocking_buy_offers_for_pair(
 
 
 # ------------------------------------------------------------------
+# Offer cancellation with PI recovery (for liquidation)
+# ------------------------------------------------------------------
+
+def cancel_offers_for_codes_and_sum_pi(block_codes: List[str]):
+    """
+    Cancel ALL open offers (BUY or SELL) involving any of block_codes.
+
+    Returns:
+        (cancelled_count, reclaimed_pi)
+
+    reclaimed_pi is the estimated PI that was previously locked in
+    BUY offers (selling native PI, buying a blocked token):
+
+        reclaimed_pi += amount_to_buy * price
+
+    This is used during per-bucket liquidation so we can move that
+    freed PI back into the bucket's internal cash ledger.
+    """
+    if not block_codes:
+        return 0, 0.0
+
+    codes_set = {c.upper() for c in block_codes if c}
+    offers = _list_bot_offers(max_records=2000)
+
+    cancelled = 0
+    reclaimed_pi = 0.0
+
+    for offer in offers:
+        buying = offer.get("buying") or {}
+        selling = offer.get("selling") or {}
+
+        sell_code = selling.get("asset_code")
+        buy_code = buying.get("asset_code")
+
+        # Only touch offers where either side uses one of these codes
+        if not (
+            (sell_code and sell_code.upper() in codes_set) or
+            (buy_code and buy_code.upper() in codes_set)
+        ):
+            continue
+
+        # If this is a BUY offer (selling native PI, buying token),
+        # estimate how much PI was reserved: amount_to_buy * price.
+        if selling.get("asset_type") == "native":
+            try:
+                amt = float(offer.get("amount") or "0")
+                price = float(offer.get("price") or "0")
+                reclaimed_pi += amt * price
+            except Exception:
+                # If parsing fails, just skip reclaim for this offer
+                pass
+
+        # Build selling asset
+        s_type = selling.get("asset_type")
+        if s_type == "native":
+            selling_asset = Asset.native()
+        else:
+            selling_asset = Asset(
+                selling.get("asset_code"),
+                selling.get("asset_issuer"),
+            )
+
+        # Build buying asset
+        b_type = buying.get("asset_type")
+        if b_type == "native":
+            buying_asset = Asset.native()
+        else:
+            buying_asset = Asset(
+                buying.get("asset_code"),
+                buying.get("asset_issuer"),
+            )
+
+        offer_id = int(offer.get("id") or 0)
+
+        try:
+            print(
+                f"[BOT] Cancelling offer id={offer_id} "
+                f"selling={selling} buying={buying}"
+            )
+            cancel_offer(offer_id, selling_asset, buying_asset)
+            cancelled += 1
+        except Exception as e:
+            print(f"[BOT] Error cancelling offer {offer_id}: {e}")
+
+    if cancelled:
+        print(
+            f"[BOT] cancel_offers_for_codes_and_sum_pi: cancelled {cancelled} offers "
+            f"for codes={sorted(codes_set)}, reclaimed≈{reclaimed_pi:.7f} PI"
+        )
+    return cancelled, reclaimed_pi
+
+
+# ------------------------------------------------------------------
 # Cancel BUY offers for blocked tokens
 # ------------------------------------------------------------------
 
 def cancel_blocked_buy_offers(block_codes: List[str]) -> int:
     """
-    Cancel any open offers (BUY or SELL) where either side's asset_code
-    is in block_codes, while still protecting IZZA ladder offers.
+    Cancel any open BUY offers where the bot is buying one of the
+    blocked token codes using native PI.
+    This is used when we decide to permanently stop buying certain
+    stablecoins / Datong tokens.
 
-    Used for:
-      - permanently blocked tokens (e.g., Datong / stables),
-      - per-bucket liquidation, where we want no open offers remaining
-        for that bucket's traded asset codes.
+    NOTE:
+      This is a narrower helper than cancel_offers_for_codes_and_sum_pi:
+      it only targets BUYs (selling native PI, buying blocked token).
     """
     if not block_codes:
         return 0
@@ -460,19 +554,12 @@ def cancel_blocked_buy_offers(block_codes: List[str]) -> int:
         buying = offer.get("buying") or {}
         selling = offer.get("selling") or {}
 
-        sell_code = selling.get("asset_code")
-        buy_code = buying.get("asset_code")
-
-        # Does this offer touch any of the blocked codes?
-        touches_block = (
-            (sell_code and sell_code.upper() in codes_set) or
-            (buy_code and buy_code.upper() in codes_set)
-        )
-        if not touches_block:
+        code = buying.get("asset_code")
+        if not code or code.upper() not in codes_set:
             continue
 
-        # HARD PROTECT: never cancel offers involving IZZA
-        if (sell_code and sell_code.upper() == "IZZA") or (buy_code and buy_code.upper() == "IZZA"):
+        # We only care about BUY offers where we are selling native PI
+        if selling.get("asset_type") != "native":
             continue
 
         # Build selling asset
@@ -499,19 +586,18 @@ def cancel_blocked_buy_offers(block_codes: List[str]) -> int:
 
         try:
             print(
-                f"[BOT] Cancelling BLOCKED offer id={offer_id} "
-                f"sell_code={sell_code} buy_code={buy_code} "
-                f"selling={selling} buying={buying}"
+                f"[BOT] Cancelling BLOCKED BUY offer id={offer_id} "
+                f"code={code} selling={selling} buying={buying}"
             )
             cancel_offer(offer_id, selling_asset, buying_asset)
             cancelled += 1
         except Exception as e:
-            print(f"[BOT] Error cancelling blocked offer {offer_id} (sell={sell_code}, buy={buy_code}): {e}")
+            print(f"[BOT] Error cancelling blocked BUY offer {offer_id} ({code}): {e}")
 
     if cancelled:
         print(
             f"[BOT] cancel_blocked_buy_offers: cancelled {cancelled} "
-            f"open offers (buy/sell) for {sorted(codes_set)}"
+            f"open BUY offers for {sorted(codes_set)}"
         )
     return cancelled
 
