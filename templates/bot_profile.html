@@ -435,6 +435,11 @@
       test Pi. When you <strong>deposit into a bucket</strong>, test Pi moves from your
       IZZA wallet into the bot wallet and increases that bucket’s balance. When you
       <strong>withdraw from a bucket</strong>, it moves back to your IZZA wallet.
+      <br><br>
+      To unlock your <strong>very first deposit</strong> into the
+      <strong>Default Bot Bucket</strong>, the bot charges a
+      <strong>one-time fee of 5&nbsp;IZZA</strong> from your IZZA wallet to the bot
+      hot wallet. <strong>Every additional bucket you create also costs 5&nbsp;IZZA</strong>.
     </p>
 
     <p id="userLabel" class="status-text"></p>
@@ -533,6 +538,10 @@
         Your <strong>IZZA TESTNET wallet</strong> is the source of truth for your test Pi.
         Bucket balances are funds that have been moved into the bot wallet to trade on
         your behalf according to your strategies.
+        <br><br>
+        Note: unlocking your first <strong>Default Bot Bucket</strong> deposit and creating
+        each new bucket both cost <strong>5&nbsp;IZZA</strong>, paid from your IZZA wallet
+        into the bot hot wallet.
       </p>
 
       <!-- Option C: view bot trades -->
@@ -563,7 +572,8 @@
       <div id="bucketsList"></div>
       <p id="bucketsEmptyMsg" class="muted" style="display:none;">
         You do not have any buckets yet. Set your base profile on the main IZZA BOT page,
-        then create additional buckets here.
+        then create additional buckets here. Creating a new bucket costs <strong>5&nbsp;IZZA</strong>
+        from your IZZA wallet.
       </p>
     </div>
 
@@ -593,6 +603,10 @@
     <br><br>
     If you are not willing to risk <strong>up to this loss or more</strong> on this
     bucket, <strong>do not deposit funds into it yet.</strong>
+    <br><br>
+    <strong>Creating a new bucket costs 5&nbsp;IZZA</strong> from your IZZA wallet to
+    the bot hot wallet. Make sure you hold at least 5&nbsp;IZZA before creating
+    another bucket.
   </p>
 
       <label for="newBucketName">Bucket name</label>
@@ -627,7 +641,7 @@
       </select>
 
       <button id="createBucketBtn" class="btn btn-ombre" style="width:100%;margin-top:6px;">
-        Create bucket
+        Create bucket (cost 5 IZZA)
       </button>
       <p id="createStatus" class="status-text"></p>
     </div>
@@ -642,6 +656,10 @@
   const BOT_USERNAME_KEY = "izza_bot_username";
   const WALLET_SECRET_KEY = "izza_wallet_secret"; // same key as wallet page
 
+  // NEW: IZZA fee constants
+  const DEFAULT_BUCKET_UNLOCK_FEE_IZZA = 5.0;
+  const NEW_BUCKET_FEE_IZZA = 5.0;
+
   // Horizon for Pi Testnet – used to fetch live orderbook prices for manual sells
   const HORIZON_URL = "https://api.testnet.minepi.com";
 
@@ -651,6 +669,8 @@
 
   let currentUser = null;
   let currentSummary = null;
+  let currentWalletIzza = 0;      // NEW: track wallet IZZA balance
+  let currentAccount = null;      // NEW: keep account summary for fee logic
 
   const userLabel     = document.getElementById("userLabel");
 
@@ -835,10 +855,14 @@
     const walletPub = acct.wallet_pub || "";
     walletPubLabel.textContent = walletPub ? walletPub : "(not linked)";
 
+    // NEW: store for fee logic
+    currentWalletIzza = Number(walletIzza || 0);
+    currentAccount = acct || null;
+
     updateSecretStatus();
   }
 
-  function makeBucketRow(b){
+  function makeBucketRow(b, account){
     const row = document.createElement("div");
     row.className = "bucket-row";
 
@@ -894,6 +918,16 @@
     header.appendChild(riskNote);
     row.appendChild(header);
 
+    // NEW: identify default bucket and if any deposits have ever been made
+    const isDefaultBucket =
+      ((b.name || "").toLowerCase() === "default bot bucket") || !!b.is_default;
+    const totalDepositedEver =
+      account && typeof account.total_deposited !== "undefined"
+        ? Number(account.total_deposited || 0)
+        : 0;
+    const defaultUnlockAlreadyUsed =
+      !isDefaultBucket ? true : (totalDepositedEver > EPS || balance > EPS);
+
     // Deposit row
     const depRow = document.createElement("div");
     depRow.className = "bucket-io-row";
@@ -916,6 +950,22 @@
       if (!amt || amt <= 0) {
         globalStatus.textContent = "Enter a positive deposit amount.";
         return;
+      }
+
+      // NEW: enforce 5 IZZA requirement before first default bucket deposit
+      if (isDefaultBucket && !defaultUnlockAlreadyUsed) {
+        if (currentWalletIzza < (DEFAULT_BUCKET_UNLOCK_FEE_IZZA - 1e-6)) {
+          globalStatus.textContent =
+            "To unlock your first deposit into the Default Bot Bucket you must hold at least " +
+            DEFAULT_BUCKET_UNLOCK_FEE_IZZA.toFixed(0) + " IZZA in your IZZA wallet. " +
+            "Top up your IZZA balance first.";
+          return;
+        } else {
+          globalStatus.textContent =
+            "On your first Default Bot Bucket deposit the bot will charge a one-time " +
+            DEFAULT_BUCKET_UNLOCK_FEE_IZZA.toFixed(0) +
+            " IZZA fee from your IZZA wallet to the hot wallet, then move your test Pi.";
+        }
       }
 
       let secret = null;
@@ -941,7 +991,10 @@
         return;
       }
 
-      globalStatus.textContent = "Submitting deposit (wallet → bot)…";
+      if (!isDefaultBucket || defaultUnlockAlreadyUsed) {
+        globalStatus.textContent = "Submitting deposit (wallet → bot)…";
+      }
+
       try {
         const res = await postJSON("/api/trading/bucket/deposit", {
           username: currentUser.username,
@@ -1384,7 +1437,7 @@
     bucketsCount.textContent = buckets.length + " total";
 
     buckets.forEach(b => {
-      const row = makeBucketRow(b);
+      const row = makeBucketRow(b, res.account || null);
       bucketsList.appendChild(row);
     });
   }
@@ -1448,7 +1501,19 @@
         createStatus.textContent = "No username found. Open IZZA BOT from your main entry point first.";
         return;
       }
-      createStatus.textContent = "Creating bucket…";
+
+      // NEW: enforce 5 IZZA cost to create a new bucket
+      if (currentWalletIzza < (NEW_BUCKET_FEE_IZZA - 1e-6)) {
+        createStatus.textContent =
+          "Creating a new bucket costs " + NEW_BUCKET_FEE_IZZA.toFixed(0) +
+          " IZZA. You currently have " + currentWalletIzza.toFixed(6) +
+          " IZZA. Top up your IZZA balance before creating another bucket.";
+        return;
+      }
+
+      createStatus.textContent =
+        "Creating bucket (this will charge " + NEW_BUCKET_FEE_IZZA.toFixed(0) +
+        " IZZA from your IZZA wallet)…";
 
       const name = (newBucketName.value || "").trim();
 
@@ -1465,7 +1530,8 @@
           createStatus.textContent = res.error || "Error creating bucket.";
           return;
         }
-        createStatus.textContent = "Bucket created.";
+        createStatus.textContent =
+          "Bucket created. A 5 IZZA fee has been applied from your IZZA wallet.";
         newBucketName.value = "";
         await loadSummary();
       } catch(e){
