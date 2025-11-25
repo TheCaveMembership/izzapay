@@ -74,20 +74,26 @@ MAX_TRADES_PER_RUN = int(os.getenv("BOT_MAX_TRADES_PER_RUN", "20"))
 MAX_BUYS_PER_BUCKET = int(os.getenv("BOT_MAX_BUYS_PER_BUCKET", "5"))
 MAX_SELLS_PER_BUCKET = int(os.getenv("BOT_MAX_SELLS_PER_BUCKET", "5"))
 
-# Take profit / stop loss by risk
-# More aggressive scalping: small TP, wider SL for higher risk.
+# Take profit thresholds by risk.
+# IMPORTANT:
+#   - The bot NEVER auto-sells at a loss.
+#   - There is NO automatic stop-loss in normal mode.
+#   - Losses can only be realized by manual user actions or manual liquidation.
 RISK_TP_SL = {
   "low": {
-    "take_profit_pct": 3.0,
-    "stop_loss_pct": -7.0,
+    # was 3.0 – now tighter, takes profit earlier
+    "take_profit_pct": 1.5,
+    "stop_loss_pct": 0.0,  # unused, no auto stop-loss
   },
   "medium": {
-    "take_profit_pct": 2.0,
-    "stop_loss_pct": -10.0,
+    # was 2.0 – now tighter
+    "take_profit_pct": 1.0,
+    "stop_loss_pct": 0.0,  # unused, no auto stop-loss
   },
   "high": {
-    "take_profit_pct": 1.0,
-    "stop_loss_pct": -15.0,
+    # was 1.0 – now tighter
+    "take_profit_pct": 0.7,
+    "stop_loss_pct": 0.0,  # unused, no auto stop-loss
   },
 }
 
@@ -789,6 +795,10 @@ def compute_bucket_realized_pnl_pi(bucket_id: int) -> float:
   Buys themselves do NOT move realized PnL, they just build inventory and
   update average cost. Only sells at a price higher or lower than that cost
   move realized PnL.
+
+  Note:
+    - In normal mode the bot never auto-sells at a loss, so negative
+      realized PnL comes only from manual user actions or manual liquidation.
   """
   start_ts = get_bucket_first_deposit_ts(bucket_id)
 
@@ -868,12 +878,6 @@ def compute_bucket_realized_perf_pct(bucket_id: int) -> Optional[float]:
     - net_deposit = total_deposits - total_withdraws for THIS bucket
     - realized_PnL is computed from THIS bucket's trades only, and only
       after the first deposit into this bucket.
-
-  This means:
-    - One small losing round-trip on a 2,000 PI deposit will show as a
-      very small negative percent.
-    - You only see big negative percentages if the bucket actually lost
-      a large chunk of its net deposits across *all* closed trades.
   """
   total_deposits, total_withdraws, net_deposit = get_bucket_deposit_stats(bucket_id)
 
@@ -976,14 +980,17 @@ def plan_sells_for_bucket(
 ) -> List[Tuple[Position, MarketInfo, float]]:
   """
   Normal mode:
-    - If PnL >= TP% or PnL <= SL%, sell the *entire* position for that bucket.
+    - If PnL >= TP% (AND PnL > 0), sell the *entire* position for that bucket.
+    - The bot NEVER auto-sells at a loss or at break-even.
   Liquidation mode (LIQUIDATE_ALL=True or liquidate=True):
     - Sell ALL positions at current best_bid (subject to self-cross protections).
+    - This path is considered a manual admin action and may realize losses.
   """
   if not positions:
     return []
 
-  # Full liquidation: ignore TP / SL, just plan to dump everything
+  # Full liquidation: ignore TP in liquidation mode
+  # (still respecting min sizes + self-cross protections).
   if LIQUIDATE_ALL or liquidate:
     planned: List[Tuple[Position, MarketInfo, float]] = []
     for key, pos in positions.items():
@@ -1000,10 +1007,9 @@ def plan_sells_for_bucket(
     planned.sort(key=lambda t: t[2] * t[1].best_bid, reverse=True)
     return planned
 
-  # Normal TP / SL mode
+  # Normal TP-only mode (no automatic stop-loss)
   cfg = RISK_TP_SL.get(bucket.risk_level, RISK_TP_SL["medium"])
   tp = cfg["take_profit_pct"]
-  sl = cfg["stop_loss_pct"]
 
   planned: List[Tuple[Position, MarketInfo, float]] = []
 
@@ -1014,7 +1020,12 @@ def plan_sells_for_bucket(
 
     pnl_pct = (market.best_bid - pos.avg_price_pi) / pos.avg_price_pi * 100.0
 
-    if pnl_pct >= tp or pnl_pct <= sl:
+    # The bot never auto-sells at a loss or at break-even.
+    if pnl_pct <= 0:
+      continue
+
+    # Only take profit once we cross the TP threshold.
+    if pnl_pct >= tp:
       amount_to_sell = pos.quantity
       if amount_to_sell * market.best_bid < MIN_TRADE_PI:
         continue
@@ -1034,10 +1045,14 @@ def execute_sells_for_bucket(
   """
   Execute SELL plans for this bucket.
 
-  In liquidation mode:
-    - We still avoid op_cross_self. If a SELL would cross the bot's own
-      BUY offers, we SKIP that asset and optionally record it in
-      blocked_assets instead of trying to tear down our own ladder.
+  Normal mode:
+    - All plans come from plan_sells_for_bucket in TP-only mode,
+      so every automatic SELL is at a profit.
+  Liquidation mode:
+    - We may sell at a loss, but ONLY when:
+        * LIQUIDATE_ALL env is set, or
+        * liquidate=True via the explicit liquidation helper.
+    - This is treated as a manual admin action, not normal bot behavior.
   """
   executed = 0
   for pos, market, amount_to_sell in plans:
@@ -1167,7 +1182,7 @@ def execute_sells_for_bucket(
         market=market,
         amount_token=amount_to_sell,
         price_pi=best_bid,
-        strategy_tag="liquidate" if (LIQUIDATE_ALL or liquidate) else "tp_sl",
+        strategy_tag="liquidate" if (LIQUIDATE_ALL or liquidate) else "tp_only",
         tx_resp=resp,
       )
       executed += 1
@@ -1390,6 +1405,8 @@ def execute_buys_for_bucket(
       continue
 
     amount_token = trade_pi_budget / best_ask
+    # Record entry price so we can guarantee auto quick-sells are never at a loss
+    entry_price = best_ask
 
     try:
       print(
@@ -1428,6 +1445,14 @@ def execute_buys_for_bucket(
             print(
               f"[SCALP] no clean next_ask_price for {market.code}, "
               f"skipping auto quick-sell"
+            )
+            continue
+
+          # Hard guard: never place quick-sell at or below our entry price
+          if target_price <= entry_price:
+            print(
+              f"[SCALP] skip quick wall-break SELL for {market.code} "
+              f"@ {target_price:.6f} PI (target <= entry {entry_price:.6f})"
             )
             continue
 
@@ -1580,28 +1605,19 @@ def pause_bucket(bucket_id: int, seconds: int) -> int:
 def liquidate_bucket_to_cash(bucket_id: int) -> Dict[str, Any]:
   """
   Sell all positions for a single bucket into PI, using liquidation
-  semantics (ignoring TP/SL caps, but still respecting self-cross
+  semantics (ignoring TP caps, but still respecting self-cross
   protections).
 
   Also attempts to cancel any open BUY offers for all assets this
   bucket has traded, so reserved test Pi in the orderbook is released
   back to the wallet.
 
+  This is considered a manual admin action. It can realize losses.
+
   After liquidation, we:
     - Clear all positions for this bucket from bot_positions
     - Pause this bucket for LIQUIDATE_PAUSE_SECS so the engine does
       not immediately redeploy the cash.
-
-  Returns a dict:
-    {
-      "cash_after": <float>,              # updated bucket cash balance in PI
-      "executed_sells": <int>,            # number of successful SELL trades
-      "blocked_assets": [                 # assets we could not liquidate
-        {"code": "CP", "issuer": "G..."},
-        ...
-      ],
-      "paused_until": <int>,              # unix timestamp until which the bucket is paused
-    }
   """
   ensure_bot_tables()
 
@@ -1809,7 +1825,7 @@ def run_once():
     if bucket_hit_max_drawdown(bucket, positions, markets):
       print(
         f"[ENGINE] Bucket {bucket.id} hit planned max drawdown, "
-        f"skipping new BUYS this run (SELLS still allowed)."
+        f"skipping new BUYS this run (SELLS still allowed, but only at profit)."
       )
       continue
 
