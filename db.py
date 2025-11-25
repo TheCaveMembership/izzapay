@@ -322,6 +322,8 @@ def init_db():
           time_horizon_days INTEGER,
           target_value_back REAL,
           status TEXT NOT NULL DEFAULT 'active', -- active | paused | closed
+          paused_until INTEGER,                  -- NEW: pause window timestamp
+          liquidation_status TEXT,              -- NEW: queued | in_progress | done
           created_at INTEGER,
           updated_at INTEGER,
           FOREIGN KEY(account_id) REFERENCES bot_accounts(id)
@@ -679,6 +681,8 @@ def ensure_schema():
           time_horizon_days INTEGER,
           target_value_back REAL,
           status TEXT NOT NULL DEFAULT 'active',
+          paused_until INTEGER,          -- NEW in ensure_schema
+          liquidation_status TEXT,      -- NEW in ensure_schema
           created_at INTEGER,
           updated_at INTEGER,
           FOREIGN KEY(account_id) REFERENCES bot_accounts(id)
@@ -782,5 +786,15 @@ def ensure_schema():
             pass
         try:
             cx.execute("ALTER TABLE bot_trades ADD COLUMN created_at INTEGER")
+        except Exception:
+            pass
+
+        # NEW: ensure bot_buckets has paused_until + liquidation_status on older DBs
+        try:
+            cx.execute("ALTER TABLE bot_buckets ADD COLUMN paused_until INTEGER")
+        except Exception:
+            pass
+        try:
+            cx.execute("ALTER TABLE bot_buckets ADD COLUMN liquidation_status TEXT")
         except Exception:
             pass
