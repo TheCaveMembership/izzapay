@@ -42,6 +42,8 @@ IZZA_ASSET_ISSUER = os.getenv(
     "IZZA_ASSET_ISSUER",
     "GDKS3KFAM5RBBTSYTFUEHHN7GYRPHV7A6K2BI44LL3QQKXCA6ODBCS57",
 )
+# Fee in IZZA required to activate / create buckets
+IZZA_BUCKET_FEE = float(os.getenv("IZZA_BUCKET_FEE", "5.0"))
 
 # ---------------------------------------------------------
 # BOT wallet on TESTNET (holds bucket funds)
@@ -445,6 +447,43 @@ def _send_native_payment(from_secret: str, to_pub: str, amount: float, memo_text
     return resp
 
 
+def _send_izza_payment(from_secret: str, to_pub: str, amount: float, memo_text: str = "") -> dict:
+    """
+    Sends IZZA asset from from_secret to to_pub on TESTNET.
+    Returns Horizon submit_transaction JSON.
+    """
+    if amount <= 0:
+        raise ValueError("amount must be positive")
+    if not from_secret or not to_pub:
+        raise ValueError("Missing from_secret or to_pub")
+
+    kp = Keypair.from_secret(from_secret)
+    from_pub = kp.public_key
+
+    account = _srv.load_account(from_pub)
+    builder = TransactionBuilder(
+        source_account=account,
+        network_passphrase=NETWORK_PASSPHRASE,
+        base_fee=PI_BASE_FEE_STROOPS,
+    )
+
+    izza_asset = Asset(IZZA_ASSET_CODE, IZZA_ASSET_ISSUER)
+
+    builder.append_payment_op(
+        destination=to_pub,
+        amount=_to_stellar_amount(amount),
+        asset=izza_asset,
+    )
+
+    if memo_text:
+        builder.add_text_memo(memo_text[:28])
+
+    tx = builder.set_timeout(300).build()
+    tx.sign(kp)
+    resp = _srv.submit_transaction(tx)
+    return resp
+
+
 # ----------------------------------------------------------------------
 # PAGES
 # ----------------------------------------------------------------------
@@ -770,7 +809,8 @@ def create_bucket():
         "risk_level": "high",
         "time_horizon_days": 7,
         "objective": "max_growth",
-        "volatility": "high"
+        "volatility": "high",
+        "secret": "S..."   # IZZA wallet secret, required to pay 5 IZZA fee
       }
 
     target_value_back is derived from risk_level internally.
@@ -783,11 +823,14 @@ def create_bucket():
     horizon_days = data.get("time_horizon_days") or 10
     objective    = (data.get("objective") or "balanced").lower()
     volatility   = (data.get("volatility") or risk_level).lower()
+    secret       = (data.get("secret") or "").strip()
 
     if not username:
         return jsonify(ok=False, error="Missing username from request.")
     if not name:
         return jsonify(ok=False, error="Bucket name is required.")
+    if not secret:
+        return jsonify(ok=False, error="Missing wallet secret (open your IZZA wallet in this browser).")
 
     try:
         horizon_days = int(horizon_days)
@@ -800,6 +843,84 @@ def create_bucket():
 
     # Internal downside floor from risk
     target_value_back = _risk_floor_for_level(risk_level)
+
+    uname = username.strip().lstrip("@").lower()
+
+    # Verify secret belongs to this user's IZZA wallet
+    try:
+        kp = Keypair.from_secret(secret)
+    except Exception:
+        return jsonify(ok=False, error="Invalid wallet secret.")
+
+    from_pub = kp.public_key
+
+    with conn() as cx:
+        row = cx.execute(
+            "SELECT pub FROM user_wallets WHERE username = ?",
+            (uname,),
+        ).fetchone()
+
+    if not row or not row["pub"]:
+        return jsonify(ok=False, error="No IZZA wallet linked for this username.")
+
+    stored_pub = row["pub"].strip().upper()
+    if stored_pub != from_pub:
+        return jsonify(
+            ok=False,
+            error="Wallet secret does not match your linked IZZA wallet. Use the same browser you created the wallet with.",
+        )
+
+    # Check IZZA balance and charge 5 IZZA fee for creating this bucket
+    wallet_pub, _, izza_bal = _get_testnet_wallet_balances_for_username(uname)
+    if not wallet_pub:
+        return jsonify(ok=False, error="No IZZA wallet linked or funded for this username.")
+    if izza_bal < IZZA_BUCKET_FEE - 1e-8:
+        return jsonify(
+            ok=False,
+            error=f"You need at least {IZZA_BUCKET_FEE} IZZA in your IZZA wallet to create a new bucket.",
+        )
+    if not BOT_WALLET_PUB:
+        return jsonify(ok=False, error="BOT_WALLET_PUB not configured on server.")
+
+    try:
+        fee_tx = _send_izza_payment(
+            from_secret=secret,
+            to_pub=BOT_WALLET_PUB,
+            amount=IZZA_BUCKET_FEE,
+            memo_text="IZZA BOT new bucket fee",
+        )
+        fee_tx_hash = fee_tx.get("hash")
+    except Exception as e:
+        return jsonify(ok=False, error=f"Network error submitting IZZA bucket fee: {e}")
+
+    ts = _now()
+    # Record the IZZA fee in bot_deposits for this account
+    try:
+        account_id_for_fee = _get_or_create_bot_account(username, wallet_pub=from_pub)
+        with conn() as cx:
+            cx.execute(
+                """
+                INSERT INTO bot_deposits(
+                  account_id, tx_hash, amount, asset_code, asset_issuer,
+                  status, created_at, raw_json
+                )
+                VALUES (?, ?, ?, ?, ?, 'confirmed', ?, ?)
+                """,
+                (
+                    account_id_for_fee,
+                    fee_tx_hash,
+                    IZZA_BUCKET_FEE,
+                    IZZA_ASSET_CODE,
+                    IZZA_ASSET_ISSUER,
+                    ts,
+                    json.dumps({
+                        "type": "bucket_create_fee",
+                        "tx": fee_tx,
+                    }),
+                ),
+            )
+    except Exception as e:
+        return jsonify(ok=False, error=f"Database error recording IZZA bucket fee: {e}")
 
     try:
         account_id = _get_or_create_bot_account(username, wallet_pub=None)
@@ -831,6 +952,114 @@ def create_bucket():
     )
 
 
+def _ensure_default_bucket_entry_fee(uname: str, from_pub: str, secret: str, bucket_id: int):
+    """
+    Ensure this user has paid the one-time IZZA fee required before using
+    the Default Bot Bucket. If this bucket is not the default, this is a no-op.
+
+    Returns (True, None) on success, or (False, error_message) on failure.
+    """
+    if not BOT_WALLET_PUB:
+        return False, "BOT_WALLET_PUB not configured on server."
+
+    # Resolve / create bot account
+    with conn() as cx:
+        acct_row = cx.execute(
+            "SELECT id FROM bot_accounts WHERE username = ?",
+            (uname,),
+        ).fetchone()
+
+    if acct_row:
+        account_id = acct_row["id"]
+    else:
+        account_id = _get_or_create_bot_account(uname, wallet_pub=from_pub)
+
+    # Confirm bucket belongs to this account and check if it's the default bucket
+    with conn() as cx:
+        b_row = cx.execute(
+            """
+            SELECT id, name, account_id
+              FROM bot_buckets
+             WHERE id = ?
+            """,
+            (bucket_id,),
+        ).fetchone()
+
+    if not b_row or b_row["account_id"] != account_id:
+        return False, "Bucket not found for this user."
+
+    bucket_name = (b_row["name"] or "").strip()
+    if bucket_name != "Default Bot Bucket":
+        # Only enforce one-time IZZA fee on the Default Bot Bucket
+        return True, None
+
+    # Check if we've already recorded any IZZA deposit for this account
+    with conn() as cx:
+        fee_row = cx.execute(
+            """
+            SELECT 1
+              FROM bot_deposits
+             WHERE account_id = ?
+               AND asset_code = ?
+               AND asset_issuer = ?
+               AND status = 'confirmed'
+             LIMIT 1
+            """,
+            (account_id, IZZA_ASSET_CODE, IZZA_ASSET_ISSUER),
+        ).fetchone()
+
+    if fee_row:
+        # At least one IZZA fee / deposit already recorded – treat as paid
+        return True, None
+
+    # No IZZA fee recorded yet – charge IZZA_BUCKET_FEE from user's wallet now
+    wallet_pub, _, izza_bal = _get_testnet_wallet_balances_for_username(uname)
+    if not wallet_pub:
+        return False, "No IZZA wallet linked or funded for this username."
+    if izza_bal < IZZA_BUCKET_FEE - 1e-8:
+        return False, f"You need at least {IZZA_BUCKET_FEE} IZZA to activate your default bot bucket."
+
+    try:
+        fee_tx = _send_izza_payment(
+            from_secret=secret,
+            to_pub=BOT_WALLET_PUB,
+            amount=IZZA_BUCKET_FEE,
+            memo_text="IZZA BOT default bucket activation",
+        )
+        fee_tx_hash = fee_tx.get("hash")
+    except Exception as e:
+        return False, f"Network error submitting IZZA activation fee: {e}"
+
+    ts = _now()
+    try:
+        with conn() as cx:
+            cx.execute(
+                """
+                INSERT INTO bot_deposits(
+                  account_id, tx_hash, amount, asset_code, asset_issuer,
+                  status, created_at, raw_json
+                )
+                VALUES (?, ?, ?, ?, ?, 'confirmed', ?, ?)
+                """,
+                (
+                    account_id,
+                    fee_tx_hash,
+                    IZZA_BUCKET_FEE,
+                    IZZA_ASSET_CODE,
+                    IZZA_ASSET_ISSUER,
+                    ts,
+                    json.dumps({
+                        "type": "default_bucket_activation_fee",
+                        "tx": fee_tx,
+                    }),
+                ),
+            )
+    except Exception as e:
+        return False, f"Database error recording IZZA activation fee: {e}"
+
+    return True, None
+
+
 # ----------------------------------------------------------------------
 # Deposit into a bucket (wallet -> BOT -> bucket balance)
 # ----------------------------------------------------------------------
@@ -847,11 +1076,13 @@ def bucket_deposit():
 
     Flow:
       - verify secret matches the stored IZZA wallet pub for username
-      - horizon check: wallet has >= amount
+      - if bucket is the Default Bot Bucket, ensure a one-time 5 IZZA
+        activation fee has been paid (wallet -> BOT wallet)
+      - horizon check: wallet has >= amount (test Pi)
       - send native payment from IZZA wallet -> BOT_WALLET_PUB
       - increment bot_bucket_allocations.amount for that bucket
       - increment bot_accounts.total_deposited
-      - insert bot_deposits row
+      - insert bot_deposits row (for the PI deposit)
     """
     data = request.get_json() or {}
     username = (data.get("username") or "").strip()
@@ -910,7 +1141,12 @@ def bucket_deposit():
             error="Wallet secret does not match your linked IZZA wallet. Use the same browser you created the wallet with.",
         )
 
-    # Horizon check: wallet has enough balance
+    # Enforce one-time IZZA activation fee before using Default Bot Bucket
+    ok_fee, fee_err = _ensure_default_bucket_entry_fee(uname, from_pub, secret, bucket_id)
+    if not ok_fee:
+        return jsonify(ok=False, error=fee_err)
+
+    # Horizon check: wallet has enough PI balance for this deposit
     try:
         acct = _srv.accounts().account_id(from_pub).call()
     except Exception as e:
@@ -993,7 +1229,7 @@ def bucket_deposit():
                 (account_id, bucket_id, amount, ts, ts),
             )
 
-        # bot_deposits log
+        # bot_deposits log (for PI deposit)
         cx.execute(
             """
             INSERT INTO bot_deposits(
