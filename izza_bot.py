@@ -10,7 +10,7 @@ from db import conn
 from stellar_sdk import Server, Keypair, TransactionBuilder, Network, Asset
 from bot_engine import (
     compute_bucket_realized_perf_pct,
-    liquidate_bucket_to_cash,  # <-- new helper import
+    liquidate_bucket_to_cash,  # now returns dict with cash + blocked info
 )
 
 # Pi Platform API key: prefer variables.apikey if module is present,
@@ -58,12 +58,6 @@ BOT_PI_SANDBOX = "true"
 # we keep it in case you later add app_to_user payouts on mainnet.
 PI_PLATFORM_API_BASE = "https://api.minepi.com/v2"
 PI_API_KEY = apikey
-
-# ---------------------------------------------------------
-# Short-term trading fee: 24h window + 1 test Pi fee
-# ---------------------------------------------------------
-SHORT_TERM_WINDOW_SECS = 24 * 3600
-SHORT_TERM_WITHDRAW_FEE = 1.0  # test Pi
 
 
 def _now() -> int:
@@ -997,13 +991,15 @@ def bucket_withdraw():
       - ensure BOT_WALLET_SEC configured
       - look up user's IZZA wallet pub
       - ensure bucket belongs to user and has >= amount
-      - (optional) check BOT wallet balance >= payout_amount
+      - check BOT wallet balance >= amount
       - send native payment from BOT_WALLET_SEC -> user wallet
       - decrement bot_bucket_allocations.amount by requested amount
       - increment bot_accounts.total_withdrawn by requested amount
-      - insert bot_withdrawals row (status='sent')
-      - if withdrawal occurs within 24h of last bucket change,
-        apply 1.0 test Pi fee (user receives amount - 1.0)
+      - insert bot_withdrawals row
+
+    Note:
+      - Short-term trading fee is currently DISABLED. User receives the
+        full requested amount (within tiny rounding tolerance).
     """
     data = request.get_json() or {}
     username = (data.get("username") or "").strip()
@@ -1062,7 +1058,7 @@ def bucket_withdraw():
         if not b_row or b_row["account_id"] != account_id:
             return jsonify(ok=False, error="Bucket not found for this user.")
 
-        # current bucket balance (+ last updated_at for short-term fee)
+        # current bucket balance
         alloc_row = cx.execute(
             """
             SELECT id, amount, updated_at FROM bot_bucket_allocations
@@ -1082,26 +1078,10 @@ def bucket_withdraw():
             else:
                 return jsonify(ok=False, error="Requested amount exceeds bucket balance.")
 
-        last_change_ts = int(alloc_row["updated_at"] or 0)
-
-    # Decide if short-term fee applies (within 24h of last bucket change)
+    # No short-term fee – user receives full amount (within tolerance)
     fee = 0.0
     short_term_fee_applied = False
-    if last_change_ts and (ts - last_change_ts) < SHORT_TERM_WINDOW_SECS:
-        # Only apply fee if amount is large enough
-        if amount <= SHORT_TERM_WITHDRAW_FEE + 1e-8:
-            return jsonify(
-                ok=False,
-                error=(
-                    f"Short-term withdrawal fee of {SHORT_TERM_WITHDRAW_FEE:.4f} test Pi "
-                    "applies within 24 hours of your last bucket change. "
-                    "Please withdraw a larger amount or wait until 24 hours have passed."
-                ),
-            )
-        fee = SHORT_TERM_WITHDRAW_FEE
-        short_term_fee_applied = True
-
-    payout_amount = amount - fee
+    payout_amount = amount
 
     # (Optional) check BOT wallet has enough balance to send payout_amount
     try:
@@ -1119,7 +1099,7 @@ def bucket_withdraw():
     except Exception as e:
         return jsonify(ok=False, error=f"Could not load bot wallet from Horizon: {e}")
 
-    # Execute payment: BOT -> user (only payout_amount; fee stays in bot wallet)
+    # Execute payment: BOT -> user
     try:
         tx_resp = _send_native_payment(
             from_secret=BOT_WALLET_SEC,
@@ -1150,7 +1130,7 @@ def bucket_withdraw():
         if amount > current_balance + EPS:
             return jsonify(ok=False, error="Requested amount exceeds bucket balance (race condition).")
 
-        # Bucket balance is reduced by the full requested amount (fee is a cost of using the bucket)
+        # Bucket balance is reduced by the full requested amount
         new_balance = max(0.0, current_balance - amount)
         cx.execute(
             """
@@ -1172,7 +1152,7 @@ def bucket_withdraw():
             (new_total_withdrawn, ts, account_id),
         )
 
-        # Store payout and fee info inside raw_json for audit
+        # Store payout info inside raw_json for audit
         audit_payload = {
             "requested_amount": amount,
             "payout_amount": payout_amount,
@@ -1190,7 +1170,7 @@ def bucket_withdraw():
             """,
             (
                 account_id,
-                payout_amount,  # amount that actually left the bot wallet
+                payout_amount,
                 wallet_pub,
                 ts,
                 tx_hash,
@@ -1211,7 +1191,7 @@ def bucket_withdraw():
 
 
 # ----------------------------------------------------------------------
-# NEW: Per-bucket liquidation (turn all positions into PI, no withdrawal)
+# Per-bucket liquidation (turn all positions into PI, no withdrawal)
 # ----------------------------------------------------------------------
 @izza_bot_bp.route("/api/trading/bucket/liquidate", methods=["POST"])
 def bucket_liquidate():
@@ -1224,19 +1204,23 @@ def bucket_liquidate():
 
     Behavior:
       - Validates bucket belongs to this user and is not deleted.
-      - Sells ALL positions for this bucket at current best bids (one-shot),
-        using the same engine logic as LIQUIDATE_ALL, but scoped to THIS bucket only.
+      - Attempts to SELL all positions for this bucket at current best bids
+        (using engine liquidation logic).
+      - Sells that would cross the bot's own BUY offers are skipped and
+        reported as blocked assets instead of wasting test Pi.
       - Leaves resulting PI as bucket cash in bot_bucket_allocations.
+      - Pauses this bucket from trading for ~60 seconds so the user can
+        decide whether to withdraw or let the bot resume.
       - Does NOT withdraw or delete the bucket.
-      - Returns the new cash balance (test Pi) and an optional perf_pct.
 
-    Frontend flow:
-      - User hits "Close bucket" button →
-      - Call this endpoint to flatten to PI and get resulting balance + PnL →
-      - Show confirmation:
-          "Withdraw X PI and close bucket?"
-      - If user confirms YES → call /api/trading/bucket/close
-      - If NO → bucket remains active with new cash, bot will start over.
+    Response includes:
+      - cash_after: resulting PI cash in the bucket
+      - perf_pct: realized performance (if available)
+      - executed_sells: count of executed SELLs
+      - blocked_assets: [{code, issuer}, ...] that could NOT be liquidated
+        without crossing existing bot orders.
+      - If all assets are blocked (executed_sells == 0 and blocked_assets),
+        ok will be false and message will explain why.
     """
     data = request.get_json() or {}
     username = (data.get("username") or "").strip()
@@ -1282,9 +1266,29 @@ def bucket_liquidate():
 
     # Perform per-bucket liquidation of positions into PI
     try:
-        cash_after = float(liquidate_bucket_to_cash(bucket_id) or 0.0)
+        liqui_result = liquidate_bucket_to_cash(bucket_id) or {}
+        cash_after = float(liqui_result.get("cash_after", 0.0))
+        executed_sells = int(liqui_result.get("executed_sells", 0))
+        blocked_assets = liqui_result.get("blocked_assets", []) or []
     except Exception as e:
         return jsonify(ok=False, error=f"Error liquidating bucket positions: {e}")
+
+    # Pause this bucket from trading for ~60 seconds so user can decide
+    # whether to withdraw or let the bot resume.
+    try:
+        pause_until = _now() + 60
+        with conn() as cx:
+            cx.execute(
+                """
+                UPDATE bot_buckets
+                   SET paused_until = ?, updated_at = ?
+                 WHERE id = ?
+                """,
+                (pause_until, _now(), bucket_id),
+            )
+    except Exception as e:
+        # Non-fatal – liquidation still succeeded
+        print(f"[LIQUIDATE] warning: failed to set paused_until for bucket {bucket_id}: {e}")
 
     # Optional realized performance % (same helper used in summary)
     perf_pct = compute_bucket_realized_perf_pct(bucket_id)
@@ -1309,16 +1313,34 @@ def bucket_liquidate():
                 realized_pnl = sell_pi - buy_pi
                 perf_pct = 100.0 * realized_pnl / buy_pi
 
+    # If everything was blocked, treat as a failure so UI can show a warning
+    if executed_sells == 0 and blocked_assets:
+        return jsonify(
+            ok=False,
+            bucket_id=bucket_id,
+            cash_after=cash_after,
+            perf_pct=perf_pct,
+            executed_sells=executed_sells,
+            blocked_assets=blocked_assets,
+            message=(
+                "Unable to fully liquidate this bucket right now because some "
+                "positions would cross existing IZZA BOT orders. "
+                "Try again later, or withdraw available PI cash only."
+            ),
+        )
+
     return jsonify(
         ok=True,
         bucket_id=bucket_id,
         cash_after=cash_after,
         perf_pct=perf_pct,
+        executed_sells=executed_sells,
+        blocked_assets=blocked_assets,
     )
 
 
 # ----------------------------------------------------------------------
-# NEW: Close a bucket – withdraw all PI to user's wallet and delete bucket
+# Close a bucket – withdraw all PI to user's wallet and delete bucket
 # ----------------------------------------------------------------------
 @izza_bot_bp.route("/api/trading/bucket/close", methods=["POST"])
 def bucket_close():
@@ -1536,9 +1558,7 @@ def bucket_close():
 
 
 # ----------------------------------------------------------------------
-# OLD: Delete a bucket with dust / fee rules
-# (kept for compatibility – your frontend should now prefer
-#  /api/trading/bucket/liquidate + /api/trading/bucket/close instead)
+# Simplified: Delete a bucket (only when effectively empty)
 # ----------------------------------------------------------------------
 @izza_bot_bp.route("/api/trading/bucket/delete", methods=["POST"])
 def bucket_delete():
@@ -1549,17 +1569,13 @@ def bucket_delete():
         "bucket_id": 1
       }
 
-    Legacy behavior:
-      - Allows deleting a bucket only when its allocation is zero or below 1 test Pi,
-        with specific dust/fee semantics.
-      - Does NOT withdraw funds – used before the new close-bucket flow existed.
+    New behavior:
+      - Allows deleting a bucket ONLY when its allocation is effectively zero.
+      - Does NOT perform any withdrawals or fees.
+      - If the bucket still has funds, user must withdraw or use the
+        liquidate + close flow instead.
 
-    Your new flow should:
-      - Use /api/trading/bucket/liquidate to flatten to PI
-      - Then /api/trading/bucket/close to withdraw + delete
-
-    This route is left as-is so any old calls don't explode, but you
-    can stop using it in the frontend.
+    This is now a simple "cleanup" endpoint for empty buckets.
     """
     data = request.get_json() or {}
     username = (data.get("username") or "").strip()
@@ -1615,37 +1631,19 @@ def bucket_delete():
             (account_id, bucket_id),
         ).fetchone()
 
-        mode = "zero"
-        abandoned_balance = 0.0
-        fee_amount = 0.0
-
         if alloc_row:
             balance = float(alloc_row["amount"] or 0.0)
 
             if balance > EPS:
-                # dust delete: 0 < balance < 1 test Pi
-                if balance < SHORT_TERM_WITHDRAW_FEE - EPS:
-                    mode = "dust"
-                    abandoned_balance = balance
-                # fee delete: balance is basically exactly 1 test Pi
-                elif abs(balance - SHORT_TERM_WITHDRAW_FEE) <= 1e-6:
-                    mode = "fee"
-                    fee_amount = SHORT_TERM_WITHDRAW_FEE
-                else:
-                    # More than 1 test Pi – user must withdraw first
-                    return jsonify(
-                        ok=False,
-                        error=(
-                            "Bucket still has more than 1 test Pi. "
-                            "Withdraw funds down to 1.0000000 test Pi or less before deleting. "
-                            "You can then either abandon less than 1 test Pi "
-                            "(which will stay in the IZZA BOT wallet forever) "
-                            "or leave exactly 1.0000000 test Pi as a short-term trading fee "
-                            "when deleting."
-                        ),
-                    )
+                return jsonify(
+                    ok=False,
+                    error=(
+                        "Bucket still has funds. Withdraw your PI or use the "
+                        "liquidate + close flow before deleting this bucket."
+                    ),
+                )
 
-            # ensure allocation amount is zeroed for clarity (funds stay in bot wallet)
+            # Zero allocation for clarity
             cx.execute(
                 """
                 UPDATE bot_bucket_allocations
@@ -1668,9 +1666,9 @@ def bucket_delete():
     return jsonify(
         ok=True,
         bucket_id=bucket_id,
-        mode=mode,
-        abandoned_balance=abandoned_balance,
-        fee_amount=fee_amount,
+        mode="zero",
+        abandoned_balance=0.0,
+        fee_amount=0.0,
     )
 
 
