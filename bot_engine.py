@@ -304,6 +304,47 @@ def load_active_buckets() -> List[Bucket]:
   return buckets
 
 
+def load_bucket_by_id(bucket_id: int) -> Optional[Bucket]:
+  """
+  Load a single bucket (even if it has zero cash) for per-bucket operations.
+  """
+  with conn() as cx:
+    r = cx.execute(
+      """
+      SELECT
+        b.id AS bucket_id,
+        b.account_id,
+        a.username,
+        b.risk_level,
+        b.objective,
+        b.volatility,
+        b.time_horizon_days,
+        IFNULL(alloc.amount, 0) AS cash_pi
+      FROM bot_buckets b
+      JOIN bot_accounts a ON a.id = b.account_id
+      LEFT JOIN bot_bucket_allocations alloc
+        ON alloc.bucket_id = b.id
+       AND alloc.account_id = b.account_id
+      WHERE b.id = ?
+      """,
+      (bucket_id,),
+    ).fetchone()
+
+  if not r:
+    return None
+
+  return Bucket(
+    id=r["bucket_id"],
+    account_id=r["account_id"],
+    username=r["username"],
+    risk_level=(r["risk_level"] or "medium").lower(),
+    objective=(r["objective"] or "balanced").lower(),
+    volatility=(r["volatility"] or "medium").lower(),
+    time_horizon_days=int(r["time_horizon_days"] or 10),
+    cash_pi=float(r["cash_pi"] or 0.0),
+  )
+
+
 def load_positions_for_bucket(bucket_id: int) -> Dict[Tuple[str, str], Position]:
   pos: Dict[Tuple[str, str], Position] = {}
   with conn() as cx:
@@ -851,18 +892,19 @@ def plan_sells_for_bucket(
   bucket: Bucket,
   positions: Dict[Tuple[str, str], Position],
   markets: Dict[Tuple[str, str], MarketInfo],
+  liquidate: bool = False,
 ) -> List[Tuple[Position, MarketInfo, float]]:
   """
   Normal mode:
     - If PnL >= TP% or PnL <= SL%, sell the *entire* position for that bucket.
-  Liquidation mode (LIQUIDATE_ALL=True):
+  Liquidation mode (LIQUIDATE_ALL=True or liquidate=True):
     - Sell ALL positions at current best_bid.
   """
   if not positions:
     return []
 
   # Full liquidation: ignore TP / SL, just dump everything
-  if LIQUIDATE_ALL:
+  if LIQUIDATE_ALL or liquidate:
     planned: List[Tuple[Position, MarketInfo, float]] = []
     for key, pos in positions.items():
       market = markets.get(key)
@@ -906,10 +948,11 @@ def plan_sells_for_bucket(
 def execute_sells_for_bucket(
   bucket: Bucket,
   plans: List[Tuple[Position, MarketInfo, float]],
+  liquidate: bool = False,
 ) -> int:
   executed = 0
   for pos, market, amount_to_sell in plans:
-    if not LIQUIDATE_ALL and executed >= MAX_SELLS_PER_BUCKET:
+    if not (LIQUIDATE_ALL or liquidate) and executed >= MAX_SELLS_PER_BUCKET:
       break
 
     best_bid = market.best_bid
@@ -957,7 +1000,7 @@ def execute_sells_for_bucket(
 
     # In liquidation mode we do not care about PnL or ladders,
     # just dump at best_bid and let self-cross protection handle it.
-    if not LIQUIDATE_ALL:
+    if not (LIQUIDATE_ALL or liquidate):
       # Avoid op_cross_self: if this price would hit our own BUY offer
       # on this pair, consider cancelling blocking BUYs if the trade
       # is profitable for this bucket.
@@ -1027,7 +1070,7 @@ def execute_sells_for_bucket(
         market=market,
         amount_token=amount_to_sell,
         price_pi=best_bid,
-        strategy_tag="liquidate" if LIQUIDATE_ALL else "tp_sl",
+        strategy_tag="liquidate" if (LIQUIDATE_ALL or liquidate) else "tp_sl",
         tx_resp=resp,
       )
       executed += 1
@@ -1189,7 +1232,7 @@ def execute_buys_for_bucket(
       use pi_budget as is, true micro buy when you cannot afford one full token.
   """
   if LIQUIDATE_ALL:
-    # Never buy in liquidation mode
+    # In liquidation mode we never open new positions
     return 0
 
   executed = 0
@@ -1373,6 +1416,72 @@ def bucket_hit_max_drawdown(
 
 
 # ---------------------------------------------------------------------
+# Per-bucket liquidation helper (used by API)
+# ---------------------------------------------------------------------
+
+def liquidate_bucket_to_cash(bucket_id: int) -> float:
+  """
+  Sell all positions for a single bucket into PI, using liquidation
+  semantics (ignoring TP/SL and max-sells-per-run caps for that bucket).
+
+  Returns the updated cash balance (bot_bucket_allocations.amount) for
+  that bucket after liquidation.
+  """
+  ensure_bot_tables()
+
+  bucket = load_bucket_by_id(bucket_id)
+  if not bucket:
+    return 0.0
+
+  print(f"[LIQUIDATE] Starting per-bucket liquidation for bucket={bucket.id} user=@{bucket.username}")
+
+  raw_markets = scan_markets_vs_pi(
+    max_assets=200,
+    min_num_accounts=1,
+    max_spread_pct=None,
+  )
+  print(f"[LIQUIDATE] scan_markets_vs_pi returned {len(raw_markets)} raw markets")
+
+  markets = normalize_markets(raw_markets)
+  print(f"[LIQUIDATE] normalize_markets produced {len(markets)} usable markets")
+
+  if not markets:
+    print("[LIQUIDATE] No markets found, skipping liquidation.")
+    # Return current cash if we cannot price anything
+    with conn() as cx:
+      row = cx.execute(
+        "SELECT amount FROM bot_bucket_allocations WHERE bucket_id = ?",
+        (bucket_id,),
+      ).fetchone()
+    return float(row["amount"] or 0.0) if row else 0.0
+
+  positions = load_positions_for_bucket(bucket_id)
+  if not positions:
+    print("[LIQUIDATE] No positions for this bucket, nothing to sell.")
+    with conn() as cx:
+      row = cx.execute(
+        "SELECT amount FROM bot_bucket_allocations WHERE bucket_id = ?",
+        (bucket_id,),
+      ).fetchone()
+    return float(row["amount"] or 0.0) if row else 0.0
+
+  sell_plans = plan_sells_for_bucket(bucket, positions, markets, liquidate=True)
+  sells_done = execute_sells_for_bucket(bucket, sell_plans, liquidate=True)
+  print(f"[LIQUIDATE] Executed {sells_done} SELLs for bucket={bucket.id}")
+
+  # Reload final cash balance from DB
+  with conn() as cx:
+    row = cx.execute(
+      "SELECT amount FROM bot_bucket_allocations WHERE bucket_id = ?",
+      (bucket_id,),
+    ).fetchone()
+
+  new_cash = float(row["amount"] or 0.0) if row else 0.0
+  print(f"[LIQUIDATE] Finished bucket={bucket.id}, cash≈{new_cash:.6f} PI")
+  return new_cash
+
+
+# ---------------------------------------------------------------------
 # Main engine run
 # ---------------------------------------------------------------------
 
@@ -1508,7 +1617,7 @@ def bot_loop_forever():
     try:
       run_once()
     except Exception as e:
-      print(f"[ENGINE] [BG] ERROR in run_once: {e!r}")
+        print(f"[ENGINE] [BG] ERROR in run_once: {e!r}")
     print(f"[ENGINE] [BG] sleeping {LOOP_SLEEP_SECS}s...")
     time.sleep(LOOP_SLEEP_SECS)
 
