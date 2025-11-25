@@ -563,7 +563,7 @@ def complete_bot_deposit():
 
 
 # ----------------------------------------------------------------------
-# Summary: wallet + buckets + realized performance
+# Summary: wallet + buckets + active exposure
 # ----------------------------------------------------------------------
 @izza_bot_bp.route("/api/trading/summary", methods=["GET"])
 def trading_summary():
@@ -579,13 +579,14 @@ def trading_summary():
           pi_balance,        # wallet native test Pi (from Horizon)
           izza_balance,      # wallet IZZA balance (from Horizon)
           total_deposited,   # lifetime deposits from wallet -> bot
-          total_withdrawn    # lifetime withdrawals from bot -> wallet
+          total_withdrawn,   # lifetime withdrawals from bot -> wallet
+          active_total       # sum of active Pi in orders / holdings across buckets
         },
         buckets: [
           { id, name, risk_level, objective, volatility,
             time_horizon_days, target_value_back,
-            balance,          # REAL Pi sitting in this bucket on the bot
-            perf_pct          # optional realized PnL % based on realized sells
+            balance,          # REAL available Pi sitting in this bucket on the bot
+            active_pi         # net Pi currently in orders / token holdings (buy_pi - sell_pi, floored at 0)
           }
         ]
       }
@@ -621,6 +622,7 @@ def trading_summary():
                 "izza_balance": izza_balance,
                 "total_deposited": 0.0,
                 "total_withdrawn": 0.0,
+                "active_total": 0.0,
             },
             buckets=[],
         )
@@ -637,7 +639,7 @@ def trading_summary():
                 (wallet_pub, _now(), account_id),
             )
 
-    # Fetch buckets and precompute simple buy/sell sums in case we need a fallback
+    # Fetch buckets and compute active exposure from bot_trades
     with conn() as cx:
         rows = cx.execute(
             """
@@ -656,11 +658,10 @@ def trading_summary():
         ).fetchall()
 
         bucket_ids = [r["id"] for r in rows]
-        perf_map = {}
+        exposure_map: dict[int, float] = {}
         if bucket_ids:
             placeholders = ",".join("?" for _ in bucket_ids)
-            # Case insensitive BUY / SELL so old rows with 'BUY' / 'SELL' still count
-            perf_rows = cx.execute(
+            trade_rows = cx.execute(
                 f"""
                 SELECT
                   bucket_id,
@@ -672,29 +673,20 @@ def trading_summary():
                 """,
                 bucket_ids,
             ).fetchall()
-            for pr in perf_rows:
-                perf_map[pr["bucket_id"]] = {
-                    "buy_pi": float(pr["buy_pi"] or 0.0),
-                    "sell_pi": float(pr["sell_pi"] or 0.0),
-                }
+            for tr in trade_rows:
+                buy_pi = float(tr["buy_pi"] or 0.0)
+                sell_pi = float(tr["sell_pi"] or 0.0)
+                # Net Pi currently deployed into token holdings / outstanding exposure
+                exposure_map[tr["bucket_id"]] = max(0.0, buy_pi - sell_pi)
 
     buckets = []
+    total_in_buckets = 0.0
+    total_active_pi = 0.0
     for r in rows:
-        # Primary: use shared engine helper so UI matches bot_engine logic
-        perf_pct = compute_bucket_realized_perf_pct(r["id"])
-
-        # Fallback: if helper returns None but we clearly have sell volume,
-        # compute a simple realized PnL from buy/sell sums so old data
-        # (with mixed-case 'side') still shows performance instead of
-        # "awaiting first trade sell".
-        if perf_pct is None:
-            perf_row = perf_map.get(r["id"])
-            if perf_row:
-                buy_pi = perf_row["buy_pi"]
-                sell_pi = perf_row["sell_pi"]
-                if sell_pi > 0 and buy_pi > 0 and abs(buy_pi) > 1e-9:
-                    realized_pnl = sell_pi - buy_pi
-                    perf_pct = 100.0 * realized_pnl / buy_pi
+        bal = float(r["balance"] or 0.0)
+        total_in_buckets += bal
+        active_pi = float(exposure_map.get(r["id"], 0.0))
+        total_active_pi += active_pi
 
         b = {
             "id": r["id"],
@@ -704,10 +696,9 @@ def trading_summary():
             "volatility": r["volatility"],
             "time_horizon_days": r["time_horizon_days"],
             "target_value_back": r["target_value_back"],
-            "balance": float(r["balance"] or 0),
+            "balance": bal,
+            "active_pi": active_pi,
         }
-        if perf_pct is not None:
-            b["perf_pct"] = perf_pct
         buckets.append(b)
 
     return jsonify(
@@ -719,6 +710,7 @@ def trading_summary():
             "izza_balance": izza_balance,
             "total_deposited": total_deposited,
             "total_withdrawn": total_withdrawn,
+            "active_total": total_active_pi,
         },
         buckets=buckets,
     )
