@@ -2319,7 +2319,7 @@ def bucket_manual_sell_token():
     except Exception as e:
         return jsonify(ok=False, error=f"Network error submitting manual sell: {e}")
 
-    ts = _now()
+        ts = _now()
 
     # Record trade + credit bucket cash
     with conn() as cx:
@@ -2327,13 +2327,23 @@ def bucket_manual_sell_token():
         cx.execute(
             """
             INSERT INTO bot_trades(
-              bucket_id, code, issuer, side, price_pi,
-              amount_token, amount_pi, strategy_tag, risk_level,
-              created_at, tx_hash
+              account_id,
+              bucket_id,
+              code,
+              issuer,
+              side,
+              price_pi,
+              amount_token,
+              amount_pi,
+              strategy_tag,
+              risk_level,
+              created_at,
+              tx_hash
             )
-            VALUES (?, ?, ?, 'sell', ?, ?, ?, 'manual', ?, ?, ?)
+            VALUES (?, ?, ?, ?, 'sell', ?, ?, ?, 'manual', ?, ?, ?)
             """,
             (
+                account_id,        # <<< NEW: link trade to bot_accounts.id
                 bucket_id_int,
                 code,
                 issuer,
