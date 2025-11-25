@@ -10,7 +10,7 @@ from db import conn
 from stellar_sdk import Server, Keypair, TransactionBuilder, Network, Asset
 from bot_engine import (
     compute_bucket_realized_perf_pct,
-    liquidate_bucket_to_cash,  # now returns dict with cash + blocked info
+    liquidate_bucket_to_cash,  # still imported so existing code keeps working
 )
 
 # Pi Platform API key: prefer variables.apikey if module is present,
@@ -1490,7 +1490,7 @@ def bucket_close():
             (uname,),
         ).fetchone()
         if not acct_row:
-            return jsonify(ok(False), error="Bot account not found for user.")
+            return jsonify(ok=False, error="Bot account not found for user.")
 
         account_id = acct_row["id"]
         total_withdrawn = float(acct_row["total_withdrawn"] or 0.0)
@@ -2004,3 +2004,578 @@ def list_trades():
         )
 
     return jsonify(ok=True, trades=trades)
+
+
+# ======================================================================
+# NEW HELPERS + ENDPOINTS:
+#   - Per-bucket holdings (positions)
+#   - Manual per-token sells inside a bucket
+#   - Cancel buy offers for a token (for the bot wallet)
+#   - Cancel sell offers for a token (for the bot wallet)
+# ======================================================================
+
+def _compute_bucket_positions(bucket_id: int) -> list[dict]:
+    """
+    Aggregates bot_trades for a bucket into per-asset positions.
+
+    Returns a list of:
+      {
+        "code": str,
+        "issuer": str,
+        "buy_token": float,
+        "sell_token": float,
+        "net_token": float,
+        "buy_pi": float,
+        "sell_pi": float,
+        "avg_buy_price_pi": float,
+        "notional_at_avg_pi": float,
+      }
+    """
+    with conn() as cx:
+        rows = cx.execute(
+            """
+            SELECT code, issuer, side, amount_pi, amount_token
+            FROM bot_trades
+            WHERE bucket_id = ?
+            """,
+            (bucket_id,),
+        ).fetchall()
+
+    per_asset: dict[tuple[str, str], dict[str, float]] = {}
+    for r in rows:
+        code = r["code"]
+        issuer = r["issuer"]
+        side = (r["side"] or "").lower()
+        amt_pi = float(r["amount_pi"] or 0.0)
+        amt_token = float(r["amount_token"] or 0.0)
+
+        key = (code, issuer)
+        d = per_asset.setdefault(
+            key,
+            {
+                "buy_token": 0.0,
+                "sell_token": 0.0,
+                "buy_pi": 0.0,
+                "sell_pi": 0.0,
+            },
+        )
+
+        if side == "buy":
+            d["buy_token"] += amt_token
+            d["buy_pi"] += amt_pi
+        elif side == "sell":
+            d["sell_token"] += amt_token
+            d["sell_pi"] += amt_pi
+
+    positions: list[dict] = []
+    for (code, issuer), d in per_asset.items():
+        buy_token = d["buy_token"]
+        sell_token = d["sell_token"]
+        buy_pi = d["buy_pi"]
+        sell_pi = d["sell_pi"]
+
+        net_token = buy_token - sell_token
+        if net_token <= 1e-12:
+            continue
+
+        if buy_token <= 1e-12:
+            avg_buy_price_pi = 0.0
+        else:
+            avg_buy_price_pi = buy_pi / max(1e-12, buy_token)
+
+        notional_at_avg = net_token * avg_buy_price_pi if avg_buy_price_pi > 0 else 0.0
+
+        positions.append(
+            {
+                "code": code,
+                "issuer": issuer,
+                "buy_token": buy_token,
+                "sell_token": sell_token,
+                "net_token": net_token,
+                "buy_pi": buy_pi,
+                "sell_pi": sell_pi,
+                "avg_buy_price_pi": avg_buy_price_pi,
+                "notional_at_avg_pi": notional_at_avg,
+            }
+        )
+
+    return positions
+
+
+def _asset_from_horizon(rec: dict) -> Asset:
+    """
+    Convert a Horizon asset JSON (from offers) into stellar_sdk.Asset.
+    """
+    atype = rec.get("asset_type")
+    if atype == "native":
+        return Asset.native()
+    code = rec.get("asset_code")
+    issuer = rec.get("asset_issuer")
+    return Asset(code, issuer)
+
+
+def _get_best_bid_price_pi(code: str, issuer: str) -> float | None:
+    """
+    Fetches the current best bid for selling the given token into native PI.
+
+    We query the orderbook where we SELL the token and BUY native.
+    """
+    selling = Asset(code, issuer)
+    buying = Asset.native()
+    try:
+        ob = _srv.orderbook(selling, buying).call()
+        bids = ob.get("bids") or []
+        if not bids:
+            return None
+        top = bids[0]
+        # Horizon gives price as string "x.y" or in price_r; we use 'price'
+        return float(top.get("price"))
+    except Exception:
+        return None
+
+
+def _require_bucket_owner(username: str, bucket_id: int):
+    """
+    Shared ownership check – returns (account_id, bucket_row) or error JSON.
+    """
+    if not username:
+        return None, None, jsonify(ok=False, error="username is required")
+
+    uname = username.strip().lstrip("@").lower()
+
+    with conn() as cx:
+        acct_row = cx.execute(
+            "SELECT id FROM bot_accounts WHERE username = ?",
+            (uname,),
+        ).fetchone()
+        if not acct_row:
+            return None, None, jsonify(ok=False, error="Bot account not found for user.")
+
+        account_id = acct_row["id"]
+        b_row = cx.execute(
+            """
+            SELECT *
+            FROM bot_buckets
+            WHERE id = ? AND account_id = ?
+            """,
+            (bucket_id, account_id),
+        ).fetchone()
+        if not b_row:
+            return None, None, jsonify(ok=False, error="Bucket not found for this user.")
+
+    return account_id, b_row, None
+
+
+# ----------------------------------------------------------------------
+# NEW: Per-bucket holdings / positions endpoint
+# ----------------------------------------------------------------------
+@izza_bot_bp.route("/api/trading/bucket/holdings", methods=["GET"])
+def bucket_holdings():
+    """
+    GET /api/trading/bucket/holdings?username=...&bucket_id=...
+
+    Returns net token positions for this bucket, derived from bot_trades.
+
+    {
+      ok: true,
+      bucket_id: 1,
+      positions: [
+        {
+          code: "IZZA",
+          issuer: "...",
+          buy_token: 123.45,
+          sell_token: 100.0,
+          net_token: 23.45,
+          buy_pi: 90.0,
+          sell_pi: 80.0,
+          avg_buy_price_pi: 0.73,
+          notional_at_avg_pi: 17.11
+        },
+        ...
+      ]
+    }
+    """
+    username = (request.args.get("username") or "").strip()
+    bucket_id = request.args.get("bucket_id")
+
+    try:
+        bucket_id_int = int(bucket_id)
+    except Exception:
+        return jsonify(ok=False, error="bucket_id must be integer")
+
+    account_id, b_row, err = _require_bucket_owner(username, bucket_id_int)
+    if err is not None:
+        return err
+
+    positions = _compute_bucket_positions(bucket_id_int)
+    return jsonify(
+        ok=True,
+        bucket_id=bucket_id_int,
+        positions=positions,
+    )
+
+
+# ----------------------------------------------------------------------
+# NEW: Manual token sell for a specific bucket
+# ----------------------------------------------------------------------
+@izza_bot_bp.route("/api/trading/bucket/sell_token", methods=["POST"])
+def bucket_manual_sell_token():
+    """
+    POST JSON:
+      {
+        "username": "CamMac",
+        "bucket_id": 1,
+        "code": "IZZA",
+        "issuer": "G....",
+        "amount_token": 50.0
+      }
+
+    Behavior:
+      - Verifies bucket belongs to the username.
+      - Computes net token position for (code, issuer) in this bucket.
+      - Ensures requested amount_token <= net_token.
+      - Looks up best bid on the DEX for selling this token into native PI.
+      - Submits a manage_sell_offer for BOT_WALLET_PUB using BOT_WALLET_SEC
+        at the best bid price (or errors if no liquidity).
+      - Assumes full fill at that price (reasonable on testnet) and:
+          * Inserts a 'sell' row into bot_trades.
+          * Credits bot_bucket_allocations.amount for this bucket by amount_pi.
+
+    This gives you granular per-token manual control instead of full-bucket
+    liquidation.
+    """
+    data = request.get_json() or {}
+    username = (data.get("username") or "").strip()
+    bucket_id = data.get("bucket_id")
+    code = (data.get("code") or "").strip()
+    issuer = (data.get("issuer") or "").strip()
+    amount_token = data.get("amount_token")
+
+    if not code or not issuer:
+        return jsonify(ok=False, error="Token code and issuer are required.")
+    if not BOT_WALLET_PUB or not BOT_WALLET_SEC:
+        return jsonify(ok=False, error="BOT wallet not fully configured on server.")
+
+    try:
+        bucket_id_int = int(bucket_id)
+    except Exception:
+        return jsonify(ok=False, error="bucket_id must be integer")
+
+    try:
+        amount_token = float(amount_token)
+    except Exception:
+        return jsonify(ok=False, error="amount_token must be numeric")
+    if amount_token <= 0:
+        return jsonify(ok=False, error="amount_token must be positive")
+
+    account_id, b_row, err = _require_bucket_owner(username, bucket_id_int)
+    if err is not None:
+        return err
+
+    # Find net position for this asset in this bucket
+    positions = _compute_bucket_positions(bucket_id_int)
+    pos = next((p for p in positions if p["code"] == code and p["issuer"] == issuer), None)
+    if not pos:
+        return jsonify(ok=False, error="This bucket has no net long position for that token.")
+
+    net_token = float(pos["net_token"] or 0.0)
+    if amount_token > net_token + 1e-12:
+        return jsonify(ok=False, error="Requested sell size exceeds net token holdings in this bucket.")
+
+    # Get best bid price in PI for this token
+    best_price = _get_best_bid_price_pi(code, issuer)
+    if best_price is None or best_price <= 0:
+        return jsonify(ok=False, error="No buy-side liquidity in orderbook for this token / PI pair.")
+
+    amount_pi = amount_token * best_price
+
+    # Submit manage_sell_offer from BOT wallet – this should cross top bids
+    try:
+        kp = Keypair.from_secret(BOT_WALLET_SEC)
+        from_pub = kp.public_key
+
+        account = _srv.load_account(from_pub)
+        builder = TransactionBuilder(
+            source_account=account,
+            network_passphrase=NETWORK_PASSPHRASE,
+            base_fee=PI_BASE_FEE_STROOPS,
+        )
+
+        selling = Asset(code, issuer)
+        buying = Asset.native()
+
+        builder.append_manage_sell_offer_op(
+            selling=selling,
+            buying=buying,
+            amount=_to_stellar_amount(amount_token),
+            price=str(best_price),
+            offer_id=0,  # new offer; should cross existing bids
+        )
+
+        tx = builder.set_timeout(300).build()
+        tx.sign(kp)
+        tx_resp = _srv.submit_transaction(tx)
+        tx_hash = tx_resp.get("hash")
+    except Exception as e:
+        return jsonify(ok=False, error=f"Network error submitting manual sell: {e}")
+
+    ts = _now()
+
+    # Record trade + credit bucket cash
+    with conn() as cx:
+        # Insert trade row (side = 'sell', strategy_tag = 'manual')
+        cx.execute(
+            """
+            INSERT INTO bot_trades(
+              bucket_id, code, issuer, side, price_pi,
+              amount_token, amount_pi, strategy_tag, risk_level,
+              created_at, tx_hash
+            )
+            VALUES (?, ?, ?, 'sell', ?, ?, ?, 'manual', ?, ?, ?)
+            """,
+            (
+                bucket_id_int,
+                code,
+                issuer,
+                best_price,
+                amount_token,
+                amount_pi,
+                b_row["risk_level"],
+                ts,
+                tx_hash,
+            ),
+        )
+
+        # Credit bucket cash (bot_bucket_allocations.amount)
+        alloc_row = cx.execute(
+            """
+            SELECT id, amount
+            FROM bot_bucket_allocations
+            WHERE account_id = ? AND bucket_id = ?
+            """,
+            (account_id, bucket_id_int),
+        ).fetchone()
+
+        if alloc_row:
+            new_cash = float(alloc_row["amount"] or 0.0) + amount_pi
+            cx.execute(
+                """
+                UPDATE bot_bucket_allocations
+                   SET amount = ?, updated_at = ?
+                 WHERE id = ?
+                """,
+                (new_cash, ts, alloc_row["id"]),
+            )
+        else:
+            new_cash = amount_pi
+            cx.execute(
+                """
+                INSERT INTO bot_bucket_allocations(
+                  account_id, bucket_id, amount, created_at, updated_at
+                )
+                VALUES (?, ?, ?, ?, ?)
+                """,
+                (account_id, bucket_id_int, new_cash, ts, ts),
+            )
+
+    return jsonify(
+        ok=True,
+        bucket_id=bucket_id_int,
+        code=code,
+        issuer=issuer,
+        amount_token=amount_token,
+        amount_pi=amount_pi,
+        price_pi=best_price,
+        tx_hash=tx_hash,
+    )
+
+
+# ----------------------------------------------------------------------
+# NEW: Cancel buy / sell offers (for a given token) for the BOT wallet
+# ----------------------------------------------------------------------
+
+def _cancel_offers_for_token(side: str, code: str, issuer: str) -> tuple[int, str | None]:
+    """
+    Cancels all open offers for BOT_WALLET_PUB for the given token / PI pair.
+
+    side = "buy"  => cancel offers where BOT is buying the token with PI
+                     (selling native, buying token)
+    side = "sell" => cancel offers where BOT is selling the token for PI
+                     (selling token, buying native)
+
+    Returns (count_canceled, tx_hash or None if nothing canceled).
+    """
+    if not BOT_WALLET_PUB or not BOT_WALLET_SEC:
+        raise RuntimeError("BOT wallet not fully configured on server.")
+
+    try:
+        res = _srv.offers().for_seller(BOT_WALLET_PUB).limit(200).call()
+        records = (res.get("_embedded") or {}).get("records") or []
+    except Exception as e:
+        raise RuntimeError(f"Error loading offers from Horizon: {e}")
+
+    token_code = code
+    token_issuer = issuer
+
+    def is_token(rec_asset: dict) -> bool:
+        atype = rec_asset.get("asset_type")
+        if atype == "native":
+            return False
+        return (
+            rec_asset.get("asset_code") == token_code
+            and rec_asset.get("asset_issuer") == token_issuer
+        )
+
+    targets = []
+    for o in records:
+        sell = o.get("selling") or {}
+        buy = o.get("buying") or {}
+        sell_type = sell.get("asset_type")
+        buy_type = buy.get("asset_type")
+
+        if side == "sell":
+            # BOT selling token, buying native
+            if is_token(sell) and buy_type == "native":
+                targets.append(o)
+        else:
+            # side == "buy": BOT selling native, buying token
+            if sell_type == "native" and is_token(buy):
+                targets.append(o)
+
+    if not targets:
+        return 0, None
+
+    try:
+        kp = Keypair.from_secret(BOT_WALLET_SEC)
+        from_pub = kp.public_key
+
+        account = _srv.load_account(from_pub)
+        builder = TransactionBuilder(
+            source_account=account,
+            network_passphrase=NETWORK_PASSPHRASE,
+            base_fee=PI_BASE_FEE_STROOPS,
+        )
+
+        for o in targets:
+            selling = _asset_from_horizon(o["selling"])
+            buying = _asset_from_horizon(o["buying"])
+            price = o.get("price")
+            offer_id = int(o["id"])
+
+            # amount="0" with same offer_id = cancel
+            builder.append_manage_sell_offer_op(
+                selling=selling,
+                buying=buying,
+                amount="0",
+                price=str(price),
+                offer_id=offer_id,
+            )
+
+        tx = builder.set_timeout(300).build()
+        tx.sign(kp)
+        tx_resp = _srv.submit_transaction(tx)
+        tx_hash = tx_resp.get("hash")
+    except Exception as e:
+        raise RuntimeError(f"Error submitting cancel-offers transaction: {e}")
+
+    return len(targets), tx_hash
+
+
+@izza_bot_bp.route("/api/trading/bucket/cancel_buy_offers", methods=["POST"])
+def bucket_cancel_buy_offers():
+    """
+    POST JSON:
+      {
+        "username": "CamMac",
+        "bucket_id": 1,
+        "code": "IZZA",
+        "issuer": "G...."
+      }
+
+    Cancels all open BOT buy offers (native -> token) for this token.
+    The bucket ownership is checked for safety, but offers are per-bot-wallet,
+    not truly per-bucket on-chain.
+    """
+    data = request.get_json() or {}
+    username = (data.get("username") or "").strip()
+    bucket_id = data.get("bucket_id")
+    code = (data.get("code") or "").strip()
+    issuer = (data.get("issuer") or "").strip()
+
+    if not code or not issuer:
+        return jsonify(ok=False, error="Token code and issuer are required.")
+
+    try:
+        bucket_id_int = int(bucket_id)
+    except Exception:
+        return jsonify(ok=False, error="bucket_id must be integer")
+
+    # Ownership check – we ignore bucket_id for actual cancel logic but
+    # keep it to make sure only legitimate bucket owners call this.
+    account_id, b_row, err = _require_bucket_owner(username, bucket_id_int)
+    if err is not None:
+        return err
+
+    try:
+        count, tx_hash = _cancel_offers_for_token("buy", code, issuer)
+    except RuntimeError as e:
+        return jsonify(ok=False, error=str(e))
+
+    return jsonify(
+        ok=True,
+        bucket_id=bucket_id_int,
+        code=code,
+        issuer=issuer,
+        side="buy",
+        canceled_count=count,
+        tx_hash=tx_hash,
+    )
+
+
+@izza_bot_bp.route("/api/trading/bucket/cancel_sell_offers", methods=["POST"])
+def bucket_cancel_sell_offers():
+    """
+    POST JSON:
+      {
+        "username": "CamMac",
+        "bucket_id": 1,
+        "code": "IZZA",
+        "issuer": "G...."
+      }
+
+    Cancels all open BOT sell offers (token -> native) for this token.
+    The bucket ownership is checked for safety, but offers are per-bot-wallet,
+    not truly per-bucket on-chain.
+    """
+    data = request.get_json() or {}
+    username = (data.get("username") or "").strip()
+    bucket_id = data.get("bucket_id")
+    code = (data.get("code") or "").strip()
+    issuer = (data.get("issuer") or "").strip()
+
+    if not code or not issuer:
+        return jsonify(ok=False, error="Token code and issuer are required.")
+
+    try:
+        bucket_id_int = int(bucket_id)
+    except Exception:
+        return jsonify(ok=False, error="bucket_id must be integer")
+
+    account_id, b_row, err = _require_bucket_owner(username, bucket_id_int)
+    if err is not None:
+        return err
+
+    try:
+        count, tx_hash = _cancel_offers_for_token("sell", code, issuer)
+    except RuntimeError as e:
+        return jsonify(ok=False, error=str(e))
+
+    return jsonify(
+        ok=True,
+        bucket_id=bucket_id_int,
+        code=code,
+        issuer=issuer,
+        side="sell",
+        canceled_count=count,
+        tx_hash=tx_hash,
+    )
