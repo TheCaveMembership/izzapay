@@ -418,6 +418,10 @@
         <span id="sumBuckets">0.0000 test Pi</span>
       </div>
       <div class="metric-row">
+        <span>Active in orders / holdings</span>
+        <span id="sumActive">0.0000 test Pi</span>
+      </div>
+      <div class="metric-row">
         <span>Lifetime deposited into bot</span>
         <span id="sumDeposited">0.0000 test Pi</span>
       </div>
@@ -556,6 +560,7 @@
   const sumWalletPi   = document.getElementById("sumWalletPi");
   const sumWalletIzza = document.getElementById("sumWalletIzza");
   const sumBuckets    = document.getElementById("sumBuckets");
+  const sumActive     = document.getElementById("sumActive");
   const sumDeposited  = document.getElementById("sumDeposited");
   const sumWithdrawn  = document.getElementById("sumWithdrawn");
 
@@ -676,9 +681,10 @@
     bucketsBox.style.display  = "block";
 
     const walletPi      = acct.pi_balance || 0;
-    const walletIzza    = acct.izza_balance || 0;
+    const walletIzza    = acct.zza_balance || acct.izza_balance || 0; // keep existing behavior
     const totalDeposited= acct.total_deposited || 0;
     const totalWithdrawn= acct.total_withdrawn || 0;
+    const activeTotal   = acct.active_total || 0;
 
     let totalInBuckets = 0;
     for (const b of buckets) totalInBuckets += (b.balance || 0);
@@ -686,6 +692,7 @@
     sumWalletPi.textContent   = fmtPi(walletPi);
     sumWalletIzza.textContent = fmtIzza(walletIzza);
     sumBuckets.textContent    = fmtPi(totalInBuckets);
+    sumActive.textContent     = fmtPi(activeTotal);
     sumDeposited.textContent  = fmtPi(totalDeposited);
     sumWithdrawn.textContent  = fmtPi(totalWithdrawn);
 
@@ -725,36 +732,20 @@
     });
 
     const balance = Number(b.balance || 0);
+    const activePi = Number(b.active_pi || 0);
 
-    // Full precision bucket balance
-    const fullBalanceLine = document.createElement("div");
-    fullBalanceLine.className = "bucket-balance-line muted";
-    fullBalanceLine.textContent =
-      "Full bucket balance: " + fmtPiFull(balance);
+    const availLine = document.createElement("div");
+    availLine.className = "bucket-balance-line";
+    availLine.textContent =
+      "Available bucket cash: " + fmtPiFull(balance);
 
-    right.appendChild(fullBalanceLine);
+    const activeLine = document.createElement("div");
+    activeLine.className = "bucket-balance-line muted";
+    activeLine.textContent =
+      "Active in orders / holdings: " + fmtPiFull(activePi);
 
-    // Performance % indicator (only after first SELL trade server-side)
-    const perfDiv = document.createElement("div");
-    perfDiv.className = "bucket-perf";
-    if (typeof b.perf_pct === "number") {
-      const pct = b.perf_pct;
-      const pctSpan = document.createElement("span");
-      pctSpan.textContent = fmtPct(pct);
-      if (pct > 0) {
-        pctSpan.style.color = "#42ff9a";
-      } else if (pct < 0) {
-        pctSpan.style.color = "#ff4d7f";
-      } else {
-        pctSpan.style.color = "#ffffff";
-      }
-      perfDiv.textContent = "Realized performance: ";
-      perfDiv.appendChild(pctSpan);
-    } else {
-      perfDiv.textContent = "Realized performance: awaiting first trade sell.";
-      perfDiv.style.opacity = "0.7";
-    }
-    right.appendChild(perfDiv);
+    right.appendChild(availLine);
+    right.appendChild(activeLine);
 
     const riskNote = document.createElement("div");
     riskNote.className = "bucket-risk-note";
