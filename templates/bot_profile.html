@@ -880,97 +880,33 @@
     wdRow.appendChild(wdBtn);
     row.appendChild(wdRow);
 
-    // --- Liquidate + Delete actions ------------------------------------
+    // --- Delete bucket action ------------------------------------
     const actionsRow = document.createElement("div");
     actionsRow.style.display = "flex";
-    actionsRow.style.gap = "6px";
+    actionsRow.style.justifyContent = "flex-end";
     actionsRow.style.marginTop = "8px";
-
-    const liqBtn = document.createElement("button");
-    liqBtn.className = "btn btn-ombre";
-    liqBtn.textContent = "Liquidate holdings & offers";
-    liqBtn.style.flex = "1";
 
     const delBtn = document.createElement("button");
     delBtn.className = "btn btn-outline";
     delBtn.textContent = "Delete bucket";
-    delBtn.style.flex = "0 0 auto";
 
     const delNote = document.createElement("p");
     delNote.className = "muted";
     delNote.style.fontSize = "10px";
     delNote.style.marginTop = "4px";
 
-    // Prefer backend flags when present, else fall back to balance
+    // Prefer backend can_delete flag if provided, otherwise use balance == 0
     const bucketBalance = Number(b.balance || 0);
-
     const hasBackendCanDelete = (typeof b.can_delete === "boolean");
-    const hasBackendCanLiquidate = (typeof b.can_liquidate === "boolean");
+    const canDelete = hasBackendCanDelete ? b.can_delete : (bucketBalance <= EPS);
 
-    let canDelete = hasBackendCanDelete ? b.can_delete : (bucketBalance <= EPS);
-    let canLiquidate = hasBackendCanLiquidate ? b.can_liquidate : (bucketBalance > EPS);
-
-    // Optional: liquidation status flag from backend
-    const liquidationStatus = b.liquidation_status || "";
-    const isLiquidating =
-      liquidationStatus === "queued" ||
-      liquidationStatus === "in_progress";
-
-    // Configure liquidation button
-    if (!canLiquidate) {
-      liqBtn.disabled = true;
-      liqBtn.textContent = "Nothing to liquidate";
-    }
-    if (isLiquidating) {
-      liqBtn.disabled = true;
-      liqBtn.textContent = "Liquidation in progress…";
-    }
-
-    liqBtn.onclick = async function(){
-      if (!currentUser || !currentUser.username) {
-        globalStatus.textContent =
-          "No username found. Open IZZA BOT from your main entry point.";
-        return;
-      }
-      if (!canLiquidate) {
-        globalStatus.textContent = "This bucket has nothing left to liquidate.";
-        return;
-      }
-      globalStatus.textContent = "Requesting liquidation for this bucket…";
-      try {
-        const res = await postJSON("/api/trading/bucket/liquidate", {
-          username: currentUser.username,
-          bucket_id: b.id
-        });
-        if (!res.ok) {
-          globalStatus.textContent = res.error || "Error requesting liquidation.";
-          return;
-        }
-        liqBtn.disabled = true;
-        liqBtn.textContent = "Liquidation in progress…";
-        globalStatus.textContent =
-          res.message ||
-          "Liquidation requested. The bot will cancel offers and sell holdings for this bucket.";
-        await loadSummary();
-        setTimeout(()=>{ globalStatus.textContent=""; }, 4000);
-      } catch(e){
-        console.error(e);
-        globalStatus.textContent = "Network error requesting liquidation.";
-      }
-    };
-
-    // Configure delete button + note text
-    if (canDelete) {
-      delNote.textContent =
-        "Bucket is fully liquidated. Deleting it will simply remove this strategy. No funds are affected.";
-    } else if (isLiquidating) {
+    if (!canDelete) {
       delBtn.disabled = true;
       delNote.textContent =
-        "Liquidation has been requested. Once holdings and offers are closed and this bucket shows zero balance, the Delete button will unlock.";
+        "To delete this bucket, first withdraw all available bucket cash so its balance is zero.";
     } else {
-      delBtn.disabled = true;
       delNote.textContent =
-        "To delete this bucket, first liquidate holdings and open offers. When the bucket is empty, you will be able to delete it.";
+        "Bucket has zero available cash. Deleting it will remove this strategy only, it will not move any test Pi.";
     }
 
     delBtn.onclick = async function(){
@@ -981,7 +917,7 @@
       }
       if (!canDelete) {
         globalStatus.textContent =
-          "This bucket is not fully liquidated yet. Liquidate it first, then delete.";
+          "This bucket still has available cash. Withdraw it to your IZZA wallet before deleting.";
         return;
       }
       globalStatus.textContent = "Deleting bucket…";
@@ -1005,7 +941,6 @@
       }
     };
 
-    actionsRow.appendChild(liqBtn);
     actionsRow.appendChild(delBtn);
     row.appendChild(actionsRow);
     row.appendChild(delNote);
