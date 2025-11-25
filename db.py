@@ -14,18 +14,40 @@ def _ensure_dirs():
         pass
 
 def conn():
+    """
+    Open a SQLite connection to the persistent app.sqlite file.
+
+    Small but important bit:
+      - We *try* to force journal_mode=DELETE (simple rollback journal)
+        which is safer on Render's network disk than WAL.
+      - If the DB is busy or the PRAGMA fails, we log it and keep going.
+        Your data and schema stay intact either way.
+    """
     _ensure_dirs()
-    cx = sqlite3.connect(DB_PATH, check_same_thread=False, detect_types=sqlite3.PARSE_DECLTYPES)
+    cx = sqlite3.connect(
+        DB_PATH,
+        check_same_thread=False,
+        detect_types=sqlite3.PARSE_DECLTYPES,
+    )
     cx.row_factory = sqlite3.Row
-    # PRAGMAs – keep the ones that are safe, drop WAL (causing disk I/O error on Render)
+
+    # Try to switch away from WAL to a simple rollback journal.
+    # This does NOT drop data; it only changes how SQLite writes to disk.
+    try:
+        cx.execute("PRAGMA journal_mode=DELETE;")
+    except Exception as e:
+        # If another process has the DB locked, or Render glitches,
+        # we don't crash the app – we just log it.
+        print("[DB] PRAGMA journal_mode=DELETE failed:", e)
+
+    # Other safe PRAGMAs
     try:
         cx.execute("PRAGMA foreign_keys=ON;")
-        # WAL removed to avoid sqlite3.OperationalError: disk I/O error
-        # cx.execute("PRAGMA journal_mode=WAL;")
         cx.execute("PRAGMA synchronous=NORMAL;")
         cx.execute(f"PRAGMA busy_timeout={BUSY_TIMEOUT_MS};")
     except Exception as e:
         print("[DB] PRAGMA error:", e)
+
     return cx
 
 def init_db():
