@@ -1459,6 +1459,42 @@ def bucket_hit_max_drawdown(
 
 
 # ---------------------------------------------------------------------
+# Per-bucket asset discovery for liquidation
+# ---------------------------------------------------------------------
+
+def get_bucket_traded_asset_codes(bucket_id: int) -> List[str]:
+  """
+  Collect all asset codes this bucket has actually used, based on
+  current positions and historical trades. We use this to cancel
+  open BUY offers for those assets when the user presses
+  'LIQUIDATE HOLDINGS & OFFERS'.
+  """
+  codes = set()
+  with conn() as cx:
+    # From current positions
+    rows_pos = cx.execute(
+      "SELECT DISTINCT code FROM bot_positions WHERE bucket_id = ?",
+      (bucket_id,),
+    ).fetchall()
+    for r in rows_pos:
+      code = r["code"]
+      if code:
+        codes.add(code)
+
+    # From historical trades (in case we have open offers but no position)
+    rows_tr = cx.execute(
+      "SELECT DISTINCT code FROM bot_trades WHERE bucket_id = ?",
+      (bucket_id,),
+    ).fetchall()
+    for r in rows_tr:
+      code = r["code"]
+      if code:
+        codes.add(code)
+
+  return list(codes)
+
+
+# ---------------------------------------------------------------------
 # Per-bucket liquidation helper (used by API)
 # ---------------------------------------------------------------------
 
@@ -1467,6 +1503,10 @@ def liquidate_bucket_to_cash(bucket_id: int) -> Dict[str, Any]:
   Sell all positions for a single bucket into PI, using liquidation
   semantics (ignoring TP/SL caps, but still respecting self-cross
   protections).
+
+  Also attempts to cancel any open BUY offers for all assets this
+  bucket has traded, so reserved test Pi in the orderbook is released
+  back to the wallet.
 
   Returns a dict:
     {
@@ -1485,6 +1525,23 @@ def liquidate_bucket_to_cash(bucket_id: int) -> Dict[str, Any]:
     return {"cash_after": 0.0, "executed_sells": 0, "blocked_assets": []}
 
   print(f"[LIQUIDATE] Starting per-bucket liquidation for bucket={bucket.id} user=@{bucket.username}")
+
+  # First, cancel open BUY offers for any assets this bucket has
+  # actually touched. This frees wallet test Pi that is still tied
+  # up in the orderbook as buy_liabilities.
+  asset_codes = get_bucket_traded_asset_codes(bucket_id)
+  if asset_codes:
+    try:
+      print(
+        f"[LIQUIDATE] Cancelling open BUY offers for bucket={bucket.id} "
+        f"codes={sorted(asset_codes)}"
+      )
+      cancel_blocked_buy_offers(asset_codes)
+    except Exception as e:
+      print(
+        f"[LIQUIDATE] Warning: failed to cancel BUY offers for bucket="
+        f"{bucket.id}: {e}"
+      )
 
   raw_markets = scan_markets_vs_pi(
     max_assets=200,
