@@ -760,7 +760,7 @@
     }
     const data = await res.json();
     const bids = data.bids || [];
-    if (!bids.length) return null;
+       if (!bids.length) return null;
     const top = bids[0];
     let price = top.price;
     if (price === undefined && top.price_r && top.price_r.n && top.price_r.d) {
@@ -1511,6 +1511,30 @@
         return;
       }
 
+      // NEW: grab the same saved wallet secret used for deposits / withdrawals
+      let secret = null;
+      try {
+        secret = localStorage.getItem(WALLET_SECRET_KEY);
+      } catch(e) {
+        secret = null;
+      }
+
+      // If not in localStorage but typed into the wallet box, use that and save
+      if (!secret && walletSecretInput && walletSecretInput.value.trim()) {
+        secret = walletSecretInput.value.trim();
+        try {
+          localStorage.setItem(WALLET_SECRET_KEY, secret);
+        } catch(e) {}
+        walletSecretInput.value = "";
+        updateSecretStatus();
+      }
+
+      if (!secret) {
+        createStatus.textContent =
+          "Missing wallet secret. Open your IZZA wallet in this browser, or paste your IZZA wallet secret in the Wallet connection box and save it first.";
+        return;
+      }
+
       createStatus.textContent =
         "Creating bucket (this will charge " + NEW_BUCKET_FEE_IZZA.toFixed(0) +
         " IZZA from your IZZA wallet)…";
@@ -1524,7 +1548,9 @@
           risk_level: newRisk.value,
           time_horizon_days: parseInt(newHorizon.value, 10),
           objective: newObjective.value,
-          volatility: newVol.value
+          volatility: newVol.value,
+          // NEW: send the same wallet secret you saved for deposits / withdrawals
+          secret: secret
         });
         if (!res.ok) {
           createStatus.textContent = res.error || "Error creating bucket.";
