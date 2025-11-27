@@ -7,6 +7,11 @@ import requests
 from flask import Blueprint, render_template, jsonify, request
 from db import conn
 
+try:
+    from bot_markets import scan_markets_vs_pi
+except ImportError:
+    scan_markets_vs_pi = None
+
 from stellar_sdk import Server, Keypair, TransactionBuilder, Network, Asset
 from bot_engine import (
     compute_bucket_realized_perf_pct,
@@ -2401,7 +2406,78 @@ def _require_bucket_owner(username: str, bucket_id: int):
 
     return account_id, b_row, None
 
+@izza_bot_bp.route("/bot/markets", methods=["GET"])
+def bot_markets_snapshot():
+    """
+    GET /bot/markets
 
+    Returns a snapshot of all markets the bot sees vs PI so you can
+    dump them into a sheet and decide which ones to focus on.
+
+    Response:
+      {
+        "ok": true,
+        "count": 199,
+        "markets": [
+          {
+            "code": "BTC",
+            "issuer": "G...",
+            "mid_price": 0.000106,
+            "spread_pct": 1.23,
+            "best_bid": 0.000105,
+            "best_ask": 0.000107,
+            "total_bid_liq": 1234.56,
+            "total_ask_liq": 987.65,
+            "num_bid_levels": 12,
+            "num_ask_levels": 10
+          },
+          ...
+        ]
+      }
+    """
+    if scan_markets_vs_pi is None:
+        return jsonify(ok=False, error="bot_markets.scan_markets_vs_pi not available on this server.")
+
+    try:
+        raw_markets = scan_markets_vs_pi()
+    except Exception as e:
+        return jsonify(ok=False, error=f"Error scanning markets vs PI: {e}")
+
+    rows = []
+    for m in raw_markets or []:
+        code = m.get("code") or m.get("asset_code")
+        issuer = m.get("issuer") or m.get("asset_issuer")
+
+        # Try a few possible keys for the orderbook structure,
+        # but never crash if something is missing.
+        ob = (
+            m.get("orderbook_sell_pi")
+            or m.get("orderbook")
+            or m.get("orderbook_native")
+            or {}
+        )
+
+        rows.append({
+            "code": code,
+            "issuer": issuer,
+            "mid_price": ob.get("mid_price"),
+            "spread_pct": ob.get("spread_pct"),
+            "best_bid": ob.get("best_bid_price"),
+            "best_ask": ob.get("best_ask_price"),
+            "total_bid_liq": ob.get("total_bid_liquidity"),
+            "total_ask_liq": ob.get("total_ask_liquidity"),
+            "num_bid_levels": ob.get("num_bid_levels"),
+            "num_ask_levels": ob.get("num_ask_levels"),
+        })
+
+    # Sort for easier reading
+    rows.sort(key=lambda r: (r["code"] or "", r["issuer"] or ""))
+
+    return jsonify(
+        ok=True,
+        count=len(rows),
+        markets=rows,
+    )
 # ----------------------------------------------------------------------
 # NEW: Per-bucket holdings / positions endpoint
 # ----------------------------------------------------------------------
