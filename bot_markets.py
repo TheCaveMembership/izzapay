@@ -200,7 +200,7 @@ def analyze_orderbook(orderbook: Dict[str, Any]) -> Dict[str, Any]:
 # ---------------------------------------------------------
 
 def scan_markets_vs_pi(
-    max_assets: int = 200,
+    max_assets: int = 2500,
     min_num_accounts: int = 2,
     max_spread_pct: float | None = None,
 ):
