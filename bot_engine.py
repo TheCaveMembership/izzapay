@@ -1253,6 +1253,23 @@ def plan_buys_for_bucket(
     # NEW: skip tokens whose lowest sell wall is gigantic
     # (e.g. 985,910 DORIS @ 10.0).
     lowest_ask_tokens = m.top_ask_amount if m.top_ask_amount > 0 else 0.0
+
+    # Fallback: if we don't have a clean top-of-book size, approximate it
+    # from total ask liquidity / number of ask levels so MAX_TOP_ASK_TOKENS
+    # still works even when the raw ladder doesn't expose an "amount" field.
+    if lowest_ask_tokens <= 0 and m.ask_liq > 0 and m.num_ask_levels:
+      lowest_ask_tokens = m.ask_liq / float(m.num_ask_levels)
+      print(
+        f"[BUY] market={m.code} inferred lowest ask size≈{lowest_ask_tokens:.6f} tokens "
+        f"(top_ask_amount=0, ask_liq≈{m.ask_liq:.6f}, levels={m.num_ask_levels})"
+      )
+    elif lowest_ask_tokens > 0:
+      # Log what we see at the top of the book when we have it directly
+      print(
+        f"[BUY] market={m.code} top ask size≈{lowest_ask_tokens:.6f} tokens "
+        f"(top_ask_amount field)"
+      )
+
     if lowest_ask_tokens > MAX_TOP_ASK_TOKENS:
       print(
         f"[BUY] skip bucket={bucket.id} user=@{bucket.username} "
