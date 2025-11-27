@@ -68,6 +68,9 @@ def list_testnet_assets(
     Fetch Pi Testnet token list.
     FIXED: Horizon does NOT return `num_accounts`, we must derive it from:
             accounts.authorized + accounts.unauthorized
+
+    NOTE: We also exclude any asset whose code starts with "EGG"
+          so NFT EGG assets do not get sent to the trading bot.
     """
     assets: List[Dict[str, Any]] = []
 
@@ -79,6 +82,10 @@ def list_testnet_assets(
 
         code = rec.get("asset_code")
         issuer = rec.get("asset_issuer")
+
+        # Skip EGG* assets (IZZA NFT eggs etc.) so they never reach the bot
+        if code and code.upper().startswith("EGG"):
+            continue
 
         # FIX: derive num_accounts from `accounts` object
         accounts_info = rec.get("accounts") or {}
