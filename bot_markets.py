@@ -60,7 +60,7 @@ def _iter_horizon_collection(
 # ---------------------------------------------------------
 
 def list_testnet_assets(
-    max_records: int = 500,
+    max_records: int = 2500,
     min_num_accounts: int = 2,
     exclude_native: bool = True,
 ) -> List[Dict[str, Any]]:
