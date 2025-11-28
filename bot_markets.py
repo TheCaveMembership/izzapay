@@ -150,6 +150,12 @@ def get_orderbook_token_vs_pi(
 
 
 def analyze_orderbook(orderbook: Dict[str, Any]) -> Dict[str, Any]:
+    """
+    Summarize orderbook, but ALSO keep raw bids/asks so higher-level
+    logic (wall-breaking, quick scalps) can see the real ladder.
+
+    All prices are PI per token.
+    """
     bids = orderbook.get("bids") or []
     asks = orderbook.get("asks") or []
 
@@ -192,6 +198,9 @@ def analyze_orderbook(orderbook: Dict[str, Any]) -> Dict[str, Any]:
         "total_ask_liquidity": float(total_ask_liq),
         "num_bid_levels": len(bids),
         "num_ask_levels": len(asks),
+        # NEW: pass-through raw ladders so bot_engine can see real wall sizes
+        "bids": bids,
+        "asks": asks,
     }
 
 
