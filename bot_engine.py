@@ -415,11 +415,10 @@ def normalize_markets(raw_markets: List[Dict[str, Any]]) -> Dict[Tuple[str, str]
   """
   Normalize raw market data into PI-per-token prices.
 
-  We treat `orderbook_sell_token` as the ground truth:
-    - it is the book where you SELL the token to receive PI
-    - its prices are PI per 1 token, matching wallet "Market Rate"
-
-  If that is missing for some asset, we fall back to `orderbook_sell_pi`.
+  We treat the orderbook that actually has a real price as ground truth:
+    - if token-sell book has a mid/ask price, use that
+    - else if PI-sell book has a mid/ask price, use that
+    - else skip the market
   """
   markets: Dict[Tuple[str, str], MarketInfo] = {}
 
@@ -430,11 +429,41 @@ def normalize_markets(raw_markets: List[Dict[str, Any]]) -> Dict[Tuple[str, str]
       continue
 
     ob_token = m.get("orderbook_sell_token") or {}
-    ob_pi = m.get("orderbook_sell_pi") or {}
+    ob_pi    = m.get("orderbook_sell_pi") or {}
 
-    # Prefer the token-sell book for prices (PI per token).
-    price_ob = ob_token if ob_token else ob_pi
-    other_ob = ob_pi if price_ob is ob_token else ob_token
+    # Decide which side has a *real* market (non-zero price / mid)
+    def _has_price(ob: Dict[str, Any]) -> bool:
+      try:
+        ask = ob.get("best_ask_price") or 0.0
+        mid = ob.get("mid_price") or 0.0
+        return float(ask) > 0.0 or float(mid) > 0.0
+      except Exception:
+        return False
+
+    token_has_price = _has_price(ob_token)
+    pi_has_price    = _has_price(ob_pi)
+
+    if token_has_price and not pi_has_price:
+      price_ob, other_ob = ob_token, ob_pi
+    elif pi_has_price and not token_has_price:
+      price_ob, other_ob = ob_pi, ob_token
+    elif token_has_price and pi_has_price:
+      # Both have something – prefer the side with more bid liquidity
+      try:
+        token_bid = float(ob_token.get("total_bid_liquidity") or 0.0)
+      except Exception:
+        token_bid = 0.0
+      try:
+        pi_bid = float(ob_pi.get("total_bid_liquidity") or 0.0)
+      except Exception:
+        pi_bid = 0.0
+      if token_bid >= pi_bid:
+        price_ob, other_ob = ob_token, ob_pi
+      else:
+        price_ob, other_ob = ob_pi, ob_token
+    else:
+      # Neither side has a usable price, skip this market
+      continue
 
     # Prices and spreads strictly from the chosen orderbook
     best_bid = price_ob.get("best_bid_price")
