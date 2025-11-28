@@ -158,7 +158,7 @@ QUICK_SELL_FALLBACK_PCT = float(os.getenv("BOT_QUICK_SELL_FALLBACK_PCT", "2.0"))
 
 # Maximum size at the *lowest* sell price we are willing to buy into.
 # Example: skip DORIS if lowest ask has 985,910 DORIS on that level.
-MAX_TOP_ASK_TOKENS = float(os.getenv("BOT_MAX_TOP_ASK_TOKENS", "2500.0"))
+MAX_TOP_ASK_TOKENS = float(os.getenv("BOT_MAX_TOP_ASK_TOKENS", "2000.0"))
 
 # Pause duration (seconds) after a manual bucket liquidation
 LIQUIDATE_PAUSE_SECS = int(os.getenv("BOT_LIQUIDATE_PAUSE_SECS", "60"))
@@ -1642,9 +1642,7 @@ def liquidate_bucket_to_cash(bucket_id: int) -> Dict[str, Any]:
   semantics (ignoring TP caps, but still respecting self-cross
   protections).
 
-  Also attempts to cancel any open BUY offers for all assets this
-  bucket has traded, so reserved test Pi in the orderbook is released
-  back to the wallet.
+  Also attempts to cancel any open BUY offers for all assets this bucket has traded, so reserved test Pi in the orderbook is released back to the wallet.
 
   This is considered a manual admin action. It can realize losses.
 
