@@ -158,7 +158,7 @@ QUICK_SELL_FALLBACK_PCT = float(os.getenv("BOT_QUICK_SELL_FALLBACK_PCT", "2.0"))
 
 # Maximum size at the *lowest* sell price we are willing to buy into.
 # Example: skip DORIS if lowest ask has 985,910 DORIS on that level.
-MAX_TOP_ASK_TOKENS = float(os.getenv("BOT_MAX_TOP_ASK_TOKENS", "1000.0"))
+MAX_TOP_ASK_TOKENS = float(os.getenv("BOT_MAX_TOP_ASK_TOKENS", "2500.0"))
 
 # Pause duration (seconds) after a manual bucket liquidation
 LIQUIDATE_PAUSE_SECS = int(os.getenv("BOT_LIQUIDATE_PAUSE_SECS", "60"))
