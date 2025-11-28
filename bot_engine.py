@@ -1269,12 +1269,15 @@ def plan_buys_for_bucket(
     if m.code in BLOCKED_BUY_CODES:
       continue
 
-    # Orderbook sanity
-    if m.best_ask <= 0 or m.mid_price <= 0:
-      continue
-    if m.spread_pct <= 0 or m.spread_pct > max_spread:
+    # Orderbook sanity:
+    # - require a positive best_ask (we need something to buy)
+    # - require some total liquidity
+    # - only cap spread on the high side; allow 0 / None
+    if m.best_ask <= 0:
       continue
     if m.total_liq <= 0:
+      continue
+    if (m.spread_pct is not None) and (m.spread_pct > max_spread):
       continue
 
     # Ignore tokens with insane price levels on the BUY side
