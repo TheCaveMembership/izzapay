@@ -415,12 +415,33 @@ def normalize_markets(raw_markets: List[Dict[str, Any]]) -> Dict[Tuple[str, str]
   """
   Normalize raw market data into PI-per-token prices.
 
-  We treat the orderbook that actually has a real price as ground truth:
-    - if token-sell book has a mid/ask price, use that
-    - else if PI-sell book has a mid/ask price, use that
-    - else skip the market
+  Instead of blindly trusting orderbook_sell_token, we choose whichever
+  book (token_selling or pi_selling) actually has a usable price /
+  liquidity, so the bot sees the same markets the Pi Wallet does.
   """
   markets: Dict[Tuple[str, str], MarketInfo] = {}
+
+  def _book_score(ob: Dict[str, Any]) -> float:
+    """
+    Higher score = more usable book.
+    We reward non-zero prices and total liquidity.
+    """
+    if not ob:
+      return 0.0
+    mid = ob.get("mid_price") or 0.0
+    best_bid = ob.get("best_bid_price") or 0.0
+    best_ask = ob.get("best_ask_price") or 0.0
+    bid_liq = ob.get("total_bid_liquidity") or 0.0
+    ask_liq = ob.get("total_ask_liquidity") or 0.0
+    total_liq = float(bid_liq) + float(ask_liq)
+    has_price = any([
+      float(mid or 0.0) > 0,
+      float(best_bid or 0.0) > 0,
+      float(best_ask or 0.0) > 0,
+    ])
+    if not has_price or total_liq <= 0:
+      return 0.0
+    return total_liq
 
   for m in raw_markets:
     code = m.get("code")
@@ -431,39 +452,20 @@ def normalize_markets(raw_markets: List[Dict[str, Any]]) -> Dict[Tuple[str, str]
     ob_token = m.get("orderbook_sell_token") or {}
     ob_pi    = m.get("orderbook_sell_pi") or {}
 
-    # Decide which side has a *real* market (non-zero price / mid)
-    def _has_price(ob: Dict[str, Any]) -> bool:
-      try:
-        ask = ob.get("best_ask_price") or 0.0
-        mid = ob.get("mid_price") or 0.0
-        return float(ask) > 0.0 or float(mid) > 0.0
-      except Exception:
-        return False
+    # Decide which orientation to use for prices.
+    score_token = _book_score(ob_token)
+    score_pi    = _book_score(ob_pi)
 
-    token_has_price = _has_price(ob_token)
-    pi_has_price    = _has_price(ob_pi)
-
-    if token_has_price and not pi_has_price:
-      price_ob, other_ob = ob_token, ob_pi
-    elif pi_has_price and not token_has_price:
-      price_ob, other_ob = ob_pi, ob_token
-    elif token_has_price and pi_has_price:
-      # Both have something – prefer the side with more bid liquidity
-      try:
-        token_bid = float(ob_token.get("total_bid_liquidity") or 0.0)
-      except Exception:
-        token_bid = 0.0
-      try:
-        pi_bid = float(ob_pi.get("total_bid_liquidity") or 0.0)
-      except Exception:
-        pi_bid = 0.0
-      if token_bid >= pi_bid:
-        price_ob, other_ob = ob_token, ob_pi
-      else:
-        price_ob, other_ob = ob_pi, ob_token
-    else:
-      # Neither side has a usable price, skip this market
+    if score_token == 0.0 and score_pi == 0.0:
+      # No usable book in either direction
       continue
+
+    if score_pi > score_token:
+      price_ob = ob_pi
+      other_ob = ob_token
+    else:
+      price_ob = ob_token
+      other_ob = ob_pi
 
     # Prices and spreads strictly from the chosen orderbook
     best_bid = price_ob.get("best_bid_price")
@@ -497,7 +499,8 @@ def normalize_markets(raw_markets: List[Dict[str, Any]]) -> Dict[Tuple[str, str]
       best_bid_f = float(best_bid or 0.0)
       best_ask_f = float(best_ask or 0.0)
       mid_f = float(mid_price or 0.0)
-      spread_f = float(spread_pct or 0.0)
+      # spread can legitimately be "unknown" – keep that as None
+      spread_f = float(spread_pct) if spread_pct is not None else None
       bid_liq_f = float(bid_liq or 0.0)
       ask_liq_f = float(ask_liq or 0.0)
       nb = int(num_bid_levels or 0)
@@ -505,7 +508,7 @@ def normalize_markets(raw_markets: List[Dict[str, Any]]) -> Dict[Tuple[str, str]
     except Exception:
       continue
 
-    # Try to pull full ladder info (asks) from the same orientation we use for prices
+    # Asks ladder (for wall size etc.)
     top_ask_amount_f = 0.0
     next_ask_price_f = 0.0
 
@@ -548,7 +551,7 @@ def normalize_markets(raw_markets: List[Dict[str, Any]]) -> Dict[Tuple[str, str]
       best_bid=best_bid_f,
       best_ask=best_ask_f,
       mid_price=mid_f,
-      spread_pct=spread_f,
+      spread_pct=spread_f if spread_f is not None else 0.0,
       bid_liq=bid_liq_f,
       ask_liq=ask_liq_f,
       depth_imbalance=depth_imbalance,
