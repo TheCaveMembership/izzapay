@@ -160,6 +160,12 @@ QUICK_SELL_FALLBACK_PCT = float(os.getenv("BOT_QUICK_SELL_FALLBACK_PCT", "2.0"))
 # Example: skip DORIS if lowest ask has 985,910 DORIS on that level.
 MAX_TOP_ASK_TOKENS = float(os.getenv("BOT_MAX_TOP_ASK_TOKENS", "2000.0"))
 
+# Hard minimum total liquidity for a market (in PI). Filters out tiny pools.
+MIN_TOTAL_LIQUIDITY_PI = float(os.getenv("BOT_MIN_TOTAL_LIQUIDITY_PI", "5000.0"))
+
+# Hard cap on how much PI we ever spend in a single trade.
+MAX_PI_PER_TRADE = float(os.getenv("BOT_MAX_PI_PER_TRADE", "200.0"))
+
 # Pause duration (seconds) after a manual bucket liquidation
 LIQUIDATE_PAUSE_SECS = int(os.getenv("BOT_LIQUIDATE_PAUSE_SECS", "60"))
 
@@ -1280,6 +1286,10 @@ def plan_buys_for_bucket(
     if (m.spread_pct is not None) and (m.spread_pct > max_spread):
       continue
 
+    # Only consider reasonably deep markets – ignore tiny side pools
+    if m.total_liq < MIN_TOTAL_LIQUIDITY_PI:
+      continue
+
     # Ignore tokens with insane price levels on the BUY side
     # tuned: only between 0.05 and 100 test Pi
     if m.best_ask < MIN_BUY_PRICE or m.best_ask > MAX_BUY_PRICE:
@@ -1359,7 +1369,7 @@ def plan_buys_for_bucket(
     if len(planned) >= MAX_BUYS_PER_BUCKET:
       break
 
-    spend = min(remaining_cash, m.wall_value_pi)
+    spend = min(remaining_cash, m.wall_value_pi, MAX_PI_PER_TRADE)
     if spend < MIN_TRADE_PI:
       continue
 
@@ -1391,7 +1401,7 @@ def plan_buys_for_bucket(
       if len(planned) >= MAX_BUYS_PER_BUCKET:
         break
 
-      token_budget = min(max_per_token, per_run_budget)
+      token_budget = min(max_per_token, per_run_budget, MAX_PI_PER_TRADE)
       if token_budget < MIN_TRADE_PI:
         break
 
