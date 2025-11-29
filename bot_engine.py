@@ -1268,6 +1268,7 @@ def plan_buys_for_bucket(
 
   wall_candidates: List[Tuple[float, MarketInfo]] = []
   scored: List[Tuple[float, MarketInfo]] = []
+  usable_for_bucket: List[Dict[str, Any]] = []
 
   for key, m in markets.items():
     # Never BUY blocked tokens, we can still SELL them
@@ -1322,6 +1323,17 @@ def plan_buys_for_bucket(
       )
       continue
 
+    # At this point this market is actually usable for this bucket
+    usable_for_bucket.append(
+      {
+        "code": m.code,
+        "price": m.best_ask,
+        "liq": m.total_liq,
+        "spread": m.spread_pct,
+        "top_ask_tokens": lowest_ask_tokens,
+      }
+    )
+
     # Sell wall detection relative to this bucket
     wall_qty_tokens = m.top_ask_amount if m.top_ask_amount > 0 else 0.0
     if wall_qty_tokens <= 0 and m.ask_liq > 0:
@@ -1356,6 +1368,22 @@ def plan_buys_for_bucket(
       score *= WALL_BREAK_SCORE_BOOST
 
     scored.append((score, m))
+
+  # Log exactly which markets are usable for this bucket after filters
+  if usable_for_bucket:
+    summary = ", ".join(
+      f"{u['code']}@{u['price']:.6f} "
+      f"(liq≈{u['liq']:.2f}, top_ask≈{u['top_ask_tokens']:.4f})"
+      for u in usable_for_bucket
+    )
+    print(
+      f"[BUY] usable markets for bucket={bucket.id} user=@{bucket.username}: {summary}"
+    )
+  else:
+    print(
+      f"[BUY] no usable markets for bucket={bucket.id} user=@{bucket.username} "
+      f"after filters."
+    )
 
   planned: List[Tuple[MarketInfo, float]] = []
 
@@ -1833,6 +1861,14 @@ def run_once():
 
   markets = normalize_markets(raw_markets)
   print(f"[ENGINE] normalize_markets produced {len(markets)} usable markets")
+
+  # NEW: log which markets are actually usable after normalization
+  if markets:
+    unique_codes = sorted({code for (code, issuer) in markets.keys()})
+    print(
+      "[ENGINE] usable markets after normalization: "
+      + ", ".join(unique_codes)
+    )
 
   if not markets:
     print("[ENGINE] No markets found after normalization.")
