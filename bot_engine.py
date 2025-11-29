@@ -74,6 +74,10 @@ MAX_TRADES_PER_RUN = int(os.getenv("BOT_MAX_TRADES_PER_RUN", "20"))
 MAX_BUYS_PER_BUCKET = int(os.getenv("BOT_MAX_BUYS_PER_BUCKET", "5"))
 MAX_SELLS_PER_BUCKET = int(os.getenv("BOT_MAX_SELLS_PER_BUCKET", "5"))
 
+# How many assets to ask bot_markets for (Horizon / DEX markets).
+# This is the *global* scan limit; set via env if you want.
+MAX_ASSETS_SCAN = int(os.getenv("BOT_MAX_ASSETS_SCAN", "2000"))
+
 # Take profit thresholds by risk.
 # IMPORTANT:
 #   - The bot NEVER auto-sells at a loss.
@@ -1268,7 +1272,6 @@ def plan_buys_for_bucket(
 
   wall_candidates: List[Tuple[float, MarketInfo]] = []
   scored: List[Tuple[float, MarketInfo]] = []
-  usable_for_bucket: List[Dict[str, Any]] = []
 
   for key, m in markets.items():
     # Never BUY blocked tokens, we can still SELL them
@@ -1323,17 +1326,6 @@ def plan_buys_for_bucket(
       )
       continue
 
-    # At this point this market is actually usable for this bucket
-    usable_for_bucket.append(
-      {
-        "code": m.code,
-        "price": m.best_ask,
-        "liq": m.total_liq,
-        "spread": m.spread_pct,
-        "top_ask_tokens": lowest_ask_tokens,
-      }
-    )
-
     # Sell wall detection relative to this bucket
     wall_qty_tokens = m.top_ask_amount if m.top_ask_amount > 0 else 0.0
     if wall_qty_tokens <= 0 and m.ask_liq > 0:
@@ -1368,22 +1360,6 @@ def plan_buys_for_bucket(
       score *= WALL_BREAK_SCORE_BOOST
 
     scored.append((score, m))
-
-  # Log exactly which markets are usable for this bucket after filters
-  if usable_for_bucket:
-    summary = ", ".join(
-      f"{u['code']}@{u['price']:.6f} "
-      f"(liq≈{u['liq']:.2f}, top_ask≈{u['top_ask_tokens']:.4f})"
-      for u in usable_for_bucket
-    )
-    print(
-      f"[BUY] usable markets for bucket={bucket.id} user=@{bucket.username}: {summary}"
-    )
-  else:
-    print(
-      f"[BUY] no usable markets for bucket={bucket.id} user=@{bucket.username} "
-      f"after filters."
-    )
 
   planned: List[Tuple[MarketInfo, float]] = []
 
@@ -1453,6 +1429,18 @@ def execute_buys_for_bucket(
   if LIQUIDATE_ALL:
     # In liquidation mode we never open new positions
     return 0
+
+  # Log the markets the bucket is actually considering buying into
+  if plans:
+    summary = []
+    for m, pi_budget in plans:
+      summary.append(
+        f"{m.code}@{m.best_ask:.6f} (liq≈{m.total_liq:.2f}, top_ask≈{m.top_ask_amount:.4f})"
+      )
+    print(
+      f"[BUY] usable markets for bucket={bucket.id} user=@{bucket.username}: "
+      + ", ".join(summary)
+    )
 
   executed = 0
   for market, pi_budget in plans:
@@ -1749,11 +1737,17 @@ def liquidate_bucket_to_cash(bucket_id: int) -> Dict[str, Any]:
       )
 
   raw_markets = scan_markets_vs_pi(
-    max_assets=200,
+    max_assets=MAX_ASSETS_SCAN,
     min_num_accounts=1,
     max_spread_pct=None,
   )
   print(f"[LIQUIDATE] scan_markets_vs_pi returned {len(raw_markets)} raw markets")
+
+  try:
+    raw_codes = sorted({str(m.get("code")) for m in raw_markets if m.get("code")})
+    print(f"[LIQUIDATE] raw markets codes ({len(raw_codes)}): {', '.join(raw_codes)}")
+  except Exception:
+    pass
 
   markets = normalize_markets(raw_markets)
   print(f"[LIQUIDATE] normalize_markets produced {len(markets)} usable markets")
@@ -1853,22 +1847,25 @@ def run_once():
 
   print("[ENGINE] Scanning markets on Pi Testnet...")
   raw_markets = scan_markets_vs_pi(
-    max_assets=200,
+    max_assets=MAX_ASSETS_SCAN,
     min_num_accounts=1,
     max_spread_pct=None,
   )
   print(f"[ENGINE] scan_markets_vs_pi returned {len(raw_markets)} raw markets")
 
+  # Log all raw codes so we can see exactly what the scanner sees
+  try:
+    raw_codes = sorted({str(m.get("code")) for m in raw_markets if m.get("code")})
+    print(f"[ENGINE] raw markets codes ({len(raw_codes)}): {', '.join(raw_codes)}")
+  except Exception:
+    pass
+
   markets = normalize_markets(raw_markets)
   print(f"[ENGINE] normalize_markets produced {len(markets)} usable markets")
 
-  # NEW: log which markets are actually usable after normalization
   if markets:
-    unique_codes = sorted({code for (code, issuer) in markets.keys()})
-    print(
-      "[ENGINE] usable markets after normalization: "
-      + ", ".join(unique_codes)
-    )
+    usable_codes = sorted({mi.code for mi in markets.values()})
+    print(f"[ENGINE] usable markets after normalization: {', '.join(usable_codes)}")
 
   if not markets:
     print("[ENGINE] No markets found after normalization.")
