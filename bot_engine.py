@@ -102,31 +102,30 @@ RISK_TP_SL = {
 RISK_WEIGHTS = {
   "low": {
     "max_tokens": 1000,
-    "per_run_fraction": 0.25,     # up to 25% of bucket cash per run
+    "per_run_fraction": 0.25,
     "max_per_token_fraction": 0.50,
     "trend_weight": 0.6,
     "micro_weight": 0.4,
     "vol_weight": 0.0,
-    "max_spread_pct": 30.0,
+    "max_spread_pct": 40.0,   # was 30.0
   },
   "medium": {
     "max_tokens": 1000,
-    "per_run_fraction": 0.50,     # up to 50% per run
+    "per_run_fraction": 0.50,
     "max_per_token_fraction": 0.80,
     "trend_weight": 0.4,
     "micro_weight": 0.3,
     "vol_weight": 0.3,
-    "max_spread_pct": 100.0,
+    "max_spread_pct": 150.0,  # was 100.0
   },
   "high": {
     "max_tokens": 1000,
-    "per_run_fraction": 0.90,     # up to 90% per run
+    "per_run_fraction": 0.90,
     "max_per_token_fraction": 1.00,
     "trend_weight": 0.15,
     "micro_weight": 0.30,
     "vol_weight": 0.55,
-    # tuned: only buy markets with spread <= 150% even for high risk
-    "max_spread_pct": 150.0,
+    "max_spread_pct": 200.0,  # was 150.0
   },
 }
 
@@ -158,7 +157,7 @@ QUICK_SELL_FALLBACK_PCT = float(os.getenv("BOT_QUICK_SELL_FALLBACK_PCT", "2.0"))
 
 # Maximum size at the *lowest* sell price we are willing to buy into.
 # Example: skip DORIS if lowest ask has 985,910 DORIS on that level.
-MAX_TOP_ASK_TOKENS = float(os.getenv("BOT_MAX_TOP_ASK_TOKENS", "2000.0"))
+MAX_TOP_ASK_TOKENS = float(os.getenv("BOT_MAX_TOP_ASK_TOKENS", "5000.0"))
 
 # Hard minimum total liquidity for a market (in PI). Filters out tiny pools.
 MIN_TOTAL_LIQUIDITY_PI = float(os.getenv("BOT_MIN_TOTAL_LIQUIDITY_PI", "5000.0"))
