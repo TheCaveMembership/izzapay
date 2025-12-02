@@ -239,7 +239,6 @@
 
 <script>
 (function(){
-  // FORCE sandbox true on this page: we are only using Pi for auth here
   const PI_SANDBOX = true;
   const BOT_USERNAME_KEY = "izza_bot_username";
 
@@ -263,14 +262,10 @@
   const globalStatus = document.getElementById("globalStatus");
 
   function initPi(){
-    console.log("initPi: window.Pi present?", !!window.Pi);
     if(!window.Pi) return;
     try {
       Pi.init({ version:"2.0", sandbox: PI_SANDBOX });
-      console.log("Pi.init called for IZZA BOT with sandbox =", PI_SANDBOX);
-    } catch(e){
-      console.error("Pi.init error", e);
-    }
+    } catch(e){}
   }
   initPi();
 
@@ -311,22 +306,10 @@
           "No IZZA wallet linked yet. Use the button below to open the IZZA wallet page and create one.";
       }
     } catch(e) {
-      console.error("loadWalletInfo error", e);
       walletStatus.textContent = "Could not load IZZA wallet info yet.";
     }
   }
 
-  /**
-   * Check in SQLite (via /api/trading/summary) whether this username
-   * already has one or more bot buckets.
-   *
-   * If buckets exist:
-   *   - instantly redirect to /bot/profile (skip this page)
-   *
-   * If no buckets exist:
-   *   - when called with redirectOnlyOnHit=false, show onboarding boxes
-   *   - when called with redirectOnlyOnHit=true, just stop (user still sees this page)
-   */
   async function checkExistingProfileByUsername(username, redirectOnlyOnHit){
     if (!username) return false;
 
@@ -335,18 +318,15 @@
 
       const u = encodeURIComponent(username);
       const resp = await fetch("/api/trading/summary?username=" + u);
-
       let data;
       try {
         data = await resp.json();
       } catch (jsonErr) {
-        console.error("summary JSON parse error", jsonErr);
         globalStatus.textContent = "Error reading bot profile.";
         return false;
       }
 
       if (!data.ok) {
-        console.warn("summary not ok", data);
         globalStatus.textContent = data.error || "Error checking bot profile.";
         if (!redirectOnlyOnHit && currentUser) {
           depositBox.style.display = "block";
@@ -358,7 +338,6 @@
 
       const buckets = data.buckets || [];
       if (buckets.length > 0) {
-        // User has at least one bucket in SQLite: skip this page forever
         globalStatus.textContent =
           "Existing IZZA BOT profile found. Redirecting to your buckets…";
         setTimeout(function(){
@@ -367,8 +346,6 @@
         return true;
       }
 
-      // No buckets yet: only show onboarding when this was called
-      // after Pi auth (redirectOnlyOnHit = false)
       if (!redirectOnlyOnHit && currentUser) {
         depositBox.style.display = "block";
         configBox.style.display = "block";
@@ -379,7 +356,6 @@
       }
       return false;
     } catch(e){
-      console.error("checkExistingProfileByUsername error", e);
       globalStatus.textContent = "Network error checking bot profile.";
       if (!redirectOnlyOnHit && currentUser) {
         depositBox.style.display = "block";
@@ -391,44 +367,48 @@
   }
 
   // --- Pi auth ---------------------------------------------------------
-  if (!piLoginBtn) {
-    console.error("piLoginBtn not found in DOM");
-  } else {
+  if (piLoginBtn) {
     piLoginBtn.onclick = async function(){
-      console.log("Pi login button clicked");
+      // ping the server so we can see in logs that the click fired
+      try {
+        fetch("/__bot_click_ping?ts=" + Date.now()).catch(function(){});
+      } catch(e){}
+
       if(!window.Pi) {
-        console.error("Pi SDK not available, window.Pi =", window.Pi);
-        alert("Pi SDK not available. Open in Pi Browser.");
+        alert("Pi SDK not available. Open this page in Pi Browser.");
+        return;
+      }
+
+      // extra safety: re-init just before auth
+      try {
+        Pi.init({ version:"2.0", sandbox: PI_SANDBOX });
+      } catch(e){}
+
+      if (typeof Pi.authenticate !== "function") {
+        alert("Pi Browser / SDK not ready. Please update Pi Browser and try again.");
         return;
       }
 
       try {
         const scopes = ["username"];
-        const onIncomplete = payment => { console.log("incomplete payment", payment); };
+        const onIncomplete = function(payment){};
 
-        const { user, accessToken } = await Pi.authenticate(scopes, onIncomplete);
-        console.log("Pi.authenticate result", user);
+        const result = await Pi.authenticate(scopes, onIncomplete);
+        const user = result && result.user;
         currentUser = user;
 
-        // Cache username so /bot/profile can auto-load later
         try {
           if (currentUser && currentUser.username) {
             localStorage.setItem(BOT_USERNAME_KEY, currentUser.username);
           }
-        } catch(e) {
-          console.warn("Could not write username to localStorage", e);
-        }
+        } catch(e){}
 
         updateUserLabel();
         globalStatus.textContent = "";
 
-        // After Pi auth: check SQLite to see if this user already has buckets.
-        // If they do, skip onboarding and go straight to profile.
-        // If not, show wallet + config boxes for FIRST-TIME setup.
         await checkExistingProfileByUsername(currentUser.username, false);
       } catch(err){
-        console.error("Pi.authenticate error", err);
-        alert("Pi auth failed.");
+        alert("Pi auth failed. Please try again.");
         globalStatus.textContent = "Pi auth failed. Please try again.";
       }
     };
@@ -469,28 +449,19 @@
           configStatus.textContent = res.error || "Error saving settings.";
         }
       } catch(e) {
-        console.error("saveConfigBtn error", e);
         configStatus.textContent = "Network error saving settings.";
       }
     });
   }
 
-  // --- On load: if we already know the username from this browser AND
-  // SQLite shows existing buckets, skip this page entirely. ----------
+  // --- On load: try cached username -----------------------------------
   (function initFromCache(){
     try {
       const cached = localStorage.getItem(BOT_USERNAME_KEY);
       if (cached) {
-        // We do NOT need Pi auth again here – this just lets a returning
-        // user skip the onboarding if their profile already exists
-        // in SQLite. If not, they can still hit "Authenticate with Pi"
-        // to go through the first-time flow.
-        console.log("Found cached bot username", cached);
         checkExistingProfileByUsername(cached, true);
       }
-    } catch(e){
-      console.warn("Could not read cached username", e);
-    }
+    } catch(e){}
   })();
 
 })();
