@@ -263,11 +263,14 @@
   const globalStatus = document.getElementById("globalStatus");
 
   function initPi(){
+    console.log("initPi: window.Pi present?", !!window.Pi);
     if(!window.Pi) return;
     try {
       Pi.init({ version:"2.0", sandbox: PI_SANDBOX });
       console.log("Pi.init called for IZZA BOT with sandbox =", PI_SANDBOX);
-    } catch(e){ console.error(e); }
+    } catch(e){
+      console.error("Pi.init error", e);
+    }
   }
   initPi();
 
@@ -308,7 +311,7 @@
           "No IZZA wallet linked yet. Use the button below to open the IZZA wallet page and create one.";
       }
     } catch(e) {
-      console.error(e);
+      console.error("loadWalletInfo error", e);
       walletStatus.textContent = "Could not load IZZA wallet info yet.";
     }
   }
@@ -332,7 +335,15 @@
 
       const u = encodeURIComponent(username);
       const resp = await fetch("/api/trading/summary?username=" + u);
-      const data = await resp.json();
+
+      let data;
+      try {
+        data = await resp.json();
+      } catch (jsonErr) {
+        console.error("summary JSON parse error", jsonErr);
+        globalStatus.textContent = "Error reading bot profile.";
+        return false;
+      }
 
       if (!data.ok) {
         console.warn("summary not ok", data);
@@ -368,7 +379,7 @@
       }
       return false;
     } catch(e){
-      console.error(e);
+      console.error("checkExistingProfileByUsername error", e);
       globalStatus.textContent = "Network error checking bot profile.";
       if (!redirectOnlyOnHit && currentUser) {
         depositBox.style.display = "block";
@@ -380,41 +391,48 @@
   }
 
   // --- Pi auth ---------------------------------------------------------
-  piLoginBtn.onclick = async function(){
-    if(!window.Pi) {
-      alert("Pi SDK not available. Open in Pi Browser.");
-      return;
-    }
-
-    try {
-      const scopes = ["username"];
-      const onIncomplete = payment => { console.log("incomplete payment", payment); };
-
-      const { user, accessToken } = await Pi.authenticate(scopes, onIncomplete);
-      currentUser = user;
-
-      // Cache username so /bot/profile can auto-load later
-      try {
-        if (currentUser && currentUser.username) {
-          localStorage.setItem(BOT_USERNAME_KEY, currentUser.username);
-        }
-      } catch(e) {
-        console.warn("Could not write username to localStorage", e);
+  if (!piLoginBtn) {
+    console.error("piLoginBtn not found in DOM");
+  } else {
+    piLoginBtn.onclick = async function(){
+      console.log("Pi login button clicked");
+      if(!window.Pi) {
+        console.error("Pi SDK not available, window.Pi =", window.Pi);
+        alert("Pi SDK not available. Open in Pi Browser.");
+        return;
       }
 
-      updateUserLabel();
-      globalStatus.textContent = "";
+      try {
+        const scopes = ["username"];
+        const onIncomplete = payment => { console.log("incomplete payment", payment); };
 
-      // After Pi auth: check SQLite to see if this user already has buckets.
-      // If they do, skip onboarding and go straight to profile.
-      // If not, show wallet + config boxes for FIRST-TIME setup.
-      await checkExistingProfileByUsername(currentUser.username, false);
-    } catch(err){
-      console.error(err);
-      alert("Pi auth failed.");
-      globalStatus.textContent = "Pi auth failed. Please try again.";
-    }
-  };
+        const { user, accessToken } = await Pi.authenticate(scopes, onIncomplete);
+        console.log("Pi.authenticate result", user);
+        currentUser = user;
+
+        // Cache username so /bot/profile can auto-load later
+        try {
+          if (currentUser && currentUser.username) {
+            localStorage.setItem(BOT_USERNAME_KEY, currentUser.username);
+          }
+        } catch(e) {
+          console.warn("Could not write username to localStorage", e);
+        }
+
+        updateUserLabel();
+        globalStatus.textContent = "";
+
+        // After Pi auth: check SQLite to see if this user already has buckets.
+        // If they do, skip onboarding and go straight to profile.
+        // If not, show wallet + config boxes for FIRST-TIME setup.
+        await checkExistingProfileByUsername(currentUser.username, false);
+      } catch(err){
+        console.error("Pi.authenticate error", err);
+        alert("Pi auth failed.");
+        globalStatus.textContent = "Pi auth failed. Please try again.";
+      }
+    };
+  }
 
   // --- Open IZZA wallet page -------------------------------------------
   if (openWalletBtn) {
@@ -451,7 +469,7 @@
           configStatus.textContent = res.error || "Error saving settings.";
         }
       } catch(e) {
-        console.error(e);
+        console.error("saveConfigBtn error", e);
         configStatus.textContent = "Network error saving settings.";
       }
     });
@@ -467,6 +485,7 @@
         // user skip the onboarding if their profile already exists
         // in SQLite. If not, they can still hit "Authenticate with Pi"
         // to go through the first-time flow.
+        console.log("Found cached bot username", cached);
         checkExistingProfileByUsername(cached, true);
       }
     } catch(e){
