@@ -200,8 +200,7 @@ def ensure_trustline_for_secret(secret: str):
             base_fee=get_base_fee(),
         )
         .append_change_trust_op(
-            asset_code=ASSET_CODE,
-            asset_issuer=ISSUER_PUB,
+            asset=asset   # single change, use Asset object since SDK does not accept asset_code or asset_issuer kwargs
         )
         .set_timeout(180)
         .build()
