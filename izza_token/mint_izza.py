@@ -733,9 +733,10 @@ def main():
         cancel_all_izza_offers()
         return
 
-    print("Checking accounts exist on chain …")
-    maybe_create_account(ISSUER_PUB)
-    maybe_create_account(DISTR_PUB)
+    # Skipping maybe_create_account checks because issuer and distributor are already funded
+    print("Skipping maybe_create_account checks (issuer and distributor already funded).")
+    # maybe_create_account(ISSUER_PUB)
+    # maybe_create_account(DISTR_PUB)
 
     print("Step 1 of 3: Set issuer options …")
     set_issuer_options()
