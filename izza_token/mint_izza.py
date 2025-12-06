@@ -317,76 +317,84 @@ def seed_sell_ladder_basic(total_amount: int,
 
 def cancel_all_izza_offers():
     """
-    Cancel all sell offers for the current ASSET_CODE (and ISSUER_PUB)
-    for this distributor, scanning through all offer pages in safe
-    batches (<= 90 ops per tx).
-    """
-    distr_kp = Keypair.from_secret(DISTR_SECRET)
+    Cancel all sell offers for the current ASSET_CODE / ISSUER_PUB
+    created by the distributor account, walking all Horizon pages
+    in safe batches (<= 90 ops per tx).
 
-    # Collect all matching offers across pages
-    izza_offers = []
+    Run this with ASSET_CODE set to "89" to clear only the 89 ladder,
+    without touching other assets (for example IZZA bot ladders).
+    """
+    distr_kp   = Keypair.from_secret(DISTR_SECRET)
+    seller_pub = distr_kp.public_key
+
+    batch_size = 90
+    total_cancelled = 0
     cursor = None
+    page_index = 0
 
     while True:
-        call = server.offers().for_seller(distr_kp.public_key).limit(200)
+        call = server.offers().for_seller(seller_pub).limit(200)
         if cursor:
             call = call.cursor(cursor)
         page = call.call()
-
         offers = page.get("_embedded", {}).get("records", [])
         if not offers:
+            if page_index == 0:
+                print("No offers found for this seller.")
             break
 
-        for o in offers:
-            selling = o.get("selling", {})
-            if (
-                selling.get("asset_type") in ("credit_alphanum4", "credit_alphanum12")
-                and selling.get("asset_code") == ASSET_CODE
-                and selling.get("asset_issuer") == ISSUER_PUB
-            ):
-                izza_offers.append(o)
+        page_index += 1
+
+        # Only target offers selling this script's ASSET_CODE from this ISSUER_PUB
+        target_offers = [
+            o for o in offers
+            if o.get("selling", {}).get("asset_code") == ASSET_CODE
+            and o.get("selling", {}).get("asset_issuer") == ISSUER_PUB
+        ]
+
+        if not target_offers:
+            # Advance cursor and keep scanning
+            next_href = page.get("_links", {}).get("next", {}).get("href")
+            if not next_href or "cursor=" not in next_href:
+                break
+            cursor = next_href.split("cursor=")[-1].split("&")[0] or None
+            continue
+
+        print(f"Page {page_index}: found {len(target_offers)} {ASSET_CODE} offers to cancel.")
+
+        for i in range(0, len(target_offers), batch_size):
+            batch = target_offers[i:i + batch_size]
+
+            distr_acct = server.load_account(seller_pub)
+            tb = TransactionBuilder(
+                source_account=distr_acct,
+                network_passphrase=NETWORK_PASSPHRASE,
+                base_fee=get_base_fee(),
+            )
+
+            for o in batch:
+                tb.append_manage_sell_offer_op(
+                    selling=asset,
+                    buying=Asset.native(),
+                    amount="0",
+                    price=o["price"],
+                    offer_id=int(o["id"])
+                )
+
+            tx = tb.set_timeout(180).build()
+            tx.sign(distr_kp)
+            submit_and_print(tx)
+
+            total_cancelled += len(batch)
+            print(f"🧹 Cancelled {len(batch)} {ASSET_CODE} offers in this batch "
+                  f"(running total {total_cancelled}).")
 
         next_href = page.get("_links", {}).get("next", {}).get("href")
         if not next_href or "cursor=" not in next_href:
             break
         cursor = next_href.split("cursor=")[-1].split("&")[0] or None
 
-    if not izza_offers:
-        print(f"No {ASSET_CODE} offers to cancel.")
-        return
-
-    print(f"Found {len(izza_offers)} {ASSET_CODE} offers. Cancelling in batches…")
-
-    batch_size = 90
-    total_cancelled = 0
-
-    for i in range(0, len(izza_offers), batch_size):
-        batch = izza_offers[i:i + batch_size]
-
-        distr_acct = server.load_account(distr_kp.public_key)
-        tb = TransactionBuilder(
-            source_account=distr_acct,
-            network_passphrase=NETWORK_PASSPHRASE,
-            base_fee=get_base_fee(),
-        )
-
-        for o in batch:
-            tb.append_manage_sell_offer_op(
-                selling=asset,
-                buying=Asset.native(),
-                amount="0",
-                price=o["price"],
-                offer_id=int(o["id"])
-            )
-
-        tx = tb.set_timeout(180).build()
-        tx.sign(distr_kp)
-        submit_and_print(tx)
-
-        total_cancelled += len(batch)
-        print(f"🧹 Cancelled {len(batch)} offers in this batch.")
-
-    print(f"✅ Canceled {total_cancelled} {ASSET_CODE} offers in total.")
+    print(f"✅ Canceled {total_cancelled} {ASSET_CODE} offers in total for distributor.")
 
 def seed_ladder_to_target(total_amount: int,
                           chunk_amount: int,
@@ -689,83 +697,220 @@ def run_izza_airdrop():
             if tag_value is not None:
                 row = cx.execute(
                     "SELECT 1 FROM izza_airdrops WHERE wallet_pub = ? AND tag = ?",
+                    (pub, tag_value)
+                ).fetchone()
+            else:
+                row = cx.execute(
+                    "SELECT 1 FROM izza_airdrops WHERE wallet_pub = ? AND tag IS NULL",
+                    (pub,)
+                ).fetchone()
 
-**Oops, that hit the message length cap.**
+            if row:
+                skipped += 1
+                if idx % 50 == 0 or idx == total_candidates:
+                    remaining_for_tag = max(
+                        0,
+                        total_candidates - (already_had + sent)
+                    )
+                    print(f"[{idx}/{total_candidates}] "
+                          f"sent={sent} skipped(already tagged)={skipped} "
+                          f"failed={failed} remaining_for_tag≈{remaining_for_tag}")
+                continue
 
-The only part I actually changed is `cancel_all_izza_offers()`, everything else before and after stays exactly as in your original file.
+            def build_tx():
+                nonlocal distr_acct
+                distr_acct = server.load_account(distr_kp.public_key)
+                tb = (
+                    TransactionBuilder(
+                        source_account=distr_acct,
+                        network_passphrase=NETWORK_PASSPHRASE,
+                        base_fee=base_fee,
+                    )
+                    .append_payment_op(
+                        destination=pub,
+                        amount=str(amt_dec),
+                        asset=asset
+                    )
+                    .set_timeout(180)
+                )
+                return tb.build()
 
-To wire it in surgically, replace just your current `cancel_all_izza_offers` function with this version:
+            tx = build_tx()
+            tx.sign(distr_kp)
 
-```python
-def cancel_all_izza_offers():
-    """
-    Cancel all sell offers for the current ASSET_CODE (and ISSUER_PUB)
-    for this distributor, scanning through all offer pages in safe
-    batches (<= 90 ops per tx).
-    """
-    distr_kp = Keypair.from_secret(DISTR_SECRET)
+            for attempt in range(1, AIRDROP_MAX_RETRIES + 1):
+                try:
+                    resp = submit_and_print(tx)
+                    tx_hash = resp.get("hash")
+                    cx.execute(
+                        "INSERT OR IGNORE INTO izza_airdrops(wallet_pub, tag, amount, tx_hash, created_at) "
+                        "VALUES (?,?,?,?,?)",
+                        (pub, tag_value, str(amt_dec), tx_hash, now_ts)
+                    )
+                    cx.commit()
+                    sent += 1
+                    break
+                except Exception as e:
+                    err = str(e)
+                    transient = (
+                        "rate limit" in err.lower()
+                        or "tx_bad_seq" in err.lower()
+                        or "timeout" in err.lower()
+                    )
+                    if attempt < AIRDROP_MAX_RETRIES and transient:
+                        wait_sec = 3 * attempt
+                        print(f"⏳ Transient error for {pub} on attempt {attempt}/{AIRDROP_MAX_RETRIES}. "
+                              f"Waiting {wait_sec}s and retrying…")
+                        time.sleep(wait_sec)
+                        tx = build_tx()
+                        tx.sign(distr_kp)
+                        continue
+                    else:
+                        print(f"⚠️  Airdrop payment failed for {pub} after {attempt} attempt(s): {e}")
+                        failed += 1
+                        break
 
-    # Collect all matching offers across pages
-    izza_offers = []
-    cursor = None
+            time.sleep(AIRDROP_SLEEP_SECONDS)
 
-    while True:
-        call = server.offers().for_seller(distr_kp.public_key).limit(200)
-        if cursor:
-            call = call.cursor(cursor)
-        page = call.call()
+            if idx % 50 == 0 or idx == total_candidates:
+                remaining_for_tag = max(
+                    0,
+                    total_candidates - (already_had + sent)
+                )
+                print(f"[{idx}/{total_candidates}] "
+                      f"sent={sent} skipped(already tagged)={skipped} "
+                      f"failed={failed} remaining_for_tag≈{remaining_for_tag}")
 
-        offers = page.get("_embedded", {}).get("records", [])
-        if not offers:
-            break
+        total_now_among_holders = already_had + sent
+        remaining_for_tag = max(0, total_candidates - total_now_among_holders)
 
-        for o in offers:
-            selling = o.get("selling", {})
-            if (
-                selling.get("asset_type") in ("credit_alphanum4", "credit_alphanum12")
-                and selling.get("asset_code") == ASSET_CODE
-                and selling.get("asset_issuer") == ISSUER_PUB
-            ):
-                izza_offers.append(o)
+        print("✅ Airdrop run complete.")
+        print(f"  Total current trustline holders:            {total_candidates}")
+        print(f"  Trustline holders that had tag before run:  {already_had}")
+        print(f"  Newly sent to trustlines in this run:       {sent}")
+        print(f"  Failed in this run:                         {failed}")
+        print(f"  Trustlines still left for this tag (now):   {remaining_for_tag}")
 
-        next_href = page.get("_links", {}).get("next", {}).get("href")
-        if not next_href or "cursor=" not in next_href:
-            break
-        cursor = next_href.split("cursor=")[-1].split("&")[0] or None
+def main():
+    parser = argparse.ArgumentParser(add_help=False)
+    parser.add_argument("--cancel", action="store_true", help="Cancel all existing IZZA sell offers and exit")
+    args, _ = parser.parse_known_args()
 
-    if not izza_offers:
-        print(f"No {ASSET_CODE} offers to cancel.")
+    if args.cancel:
+        cancel_all_izza_offers()
         return
 
-    print(f"Found {len(izza_offers)} {ASSET_CODE} offers. Cancelling in batches…")
+    # Ensure trustlines for distributor and the target move wallet (if provided)
+    print("Ensuring trustlines for distributor and move destination (if provided)…")
+    ensure_trustline_for_secret(DISTR_SECRET)
+    if MOVE_IZZA_DEST and MOVE_IZZA_DEST_SECRET:
+        ensure_trustline_for_secret(MOVE_IZZA_DEST_SECRET)
 
-    batch_size = 90
-    total_cancelled = 0
+    # Skipping maybe_create_account checks because issuer and distributor are already funded
+    print("Skipping maybe_create_account checks (issuer and distributor already funded).")
+    # maybe_create_account(ISSUER_PUB)
+    # maybe_create_account(DISTR_PUB)
 
-    for i in range(0, len(izza_offers), batch_size):
-        batch = izza_offers[i:i + batch_size]
+    print("Step 1 of 3: Set issuer options …")
+    set_issuer_options()
 
-        distr_acct = server.load_account(distr_kp.public_key)
-        tb = TransactionBuilder(
-            source_account=distr_acct,
-            network_passphrase=NETWORK_PASSPHRASE,
-            base_fee=get_base_fee(),
-        )
+    print("Step 2 of 3: Mint step …")
+    current_bal = get_izza_balance(DISTR_PUB)
+    print(f"Distributor IZZA balance before mint: {current_bal}")
+    if RUN_MINT:
+        print(f"Mint enabled, minting {MINT_AMOUNT} IZZA to distributor regardless of existing balance.")
+        issuer_mint_payment()
+    else:
+        print("⏭️  RUN_MINT is 0. Mint step skipped.")
 
-        for o in batch:
-            tb.append_manage_sell_offer_op(
-                selling=asset,
-                buying=Asset.native(),
-                amount="0",
-                price=o["price"],
-                offer_id=int(o["id"])
-            )
+    if RUN_SELL_LADDER:
+        print("Step 3 of 3: Seed DEX sale ladder …")
+        current_bal = get_izza_balance(DISTR_PUB)
 
-        tx = tb.set_timeout(180).build()
-        tx.sign(distr_kp)
-        submit_and_print(tx)
+        # UPDATED DEFAULTS
+        # Only use about 25k IZZA for the public ladder by default
+        ladder_total_env = getenv("HYPE_LADDER_TOTAL", "25000")
+        try:
+            ladder_total = Decimal(ladder_total_env)
+        except Exception:
+            ladder_total = Decimal("25000")
 
-        total_cancelled += len(batch)
-        print(f"🧹 Cancelled {len(batch)} offers in this batch.")
+        sellable = min(current_bal, ladder_total)
+        if sellable <= 0:
+            print("⚠️  No IZZA available to post offers. Skipping ladder.")
+        else:
+            sellable_int = int(sellable.to_integral_value(rounding="ROUND_FLOOR"))
+            print(f"Posting ladder for {sellable_int} IZZA …")
 
-    print(f"✅ Canceled {total_cancelled} {ASSET_CODE} offers in total.")
+            ladder_mode = getenv("LADDER_MODE", "hype")
+
+            # Retail friendly price range, defaults 0.33 to 3.33 Pi per IZZA
+            ladder_start = Decimal(getenv("LADDER_START_PRICE", "0.33"))
+            ladder_end   = Decimal(getenv("LADDER_END_PRICE",  "3.33"))
+
+            if ladder_mode == "hype":
+                # Small chunks tuned for wallets with 50 to 100 test Pi
+                min_chunk = int(getenv("HYPE_LADDER_MIN_CHUNK", "50"))
+                max_chunk = int(getenv("HYPE_LADDER_MAX_CHUNK", "300"))
+                wiggle    = Decimal(getenv("HYPE_LADDER_WIGGLE", "0.04"))
+
+                seed_hype_sell_ladder(
+                    total_amount=sellable_int,
+                    start_price=ladder_start,
+                    end_price=ladder_end,
+                    min_chunk=min_chunk,
+                    max_chunk=max_chunk,
+                    wiggle_pct=wiggle,
+                )
+            else:
+                ladder_chunk = int(getenv("LADDER_CHUNK", "250"))
+                ladder_total_int = int(getenv("LADDER_TOTAL", str(sellable_int)))
+                mode = ladder_mode if ladder_mode in ("linear", "geometric") else "geometric"
+
+                seed_ladder_to_target(
+                    total_amount=ladder_total_int,
+                    chunk_amount=ladder_chunk,
+                    start_price=ladder_start,
+                    end_price=ladder_end,
+                    mode=mode,
+                )
+    else:
+        print("⏭️  RUN_SELL_LADDER is 0. Skipping offer creation.")
+
+    if RUN_AIRDROP:
+        print("\nRunning IZZA trustline holder airdrop …")
+        run_izza_airdrop()
+    else:
+        print("⏭️  RUN_AIRDROP is 0. Skipping IZZA airdrop.")
+
+    if RUN_MOVE_IZZA:
+        try:
+            amt = str(Decimal(MOVE_IZZA_AMOUNT))
+        except Exception:
+            raise ValueError("MOVE_IZZA_AMOUNT must be numeric")
+        if not MOVE_IZZA_DEST:
+            raise RuntimeError("RUN_MOVE_IZZA=1 but MOVE_IZZA_DEST is empty")
+        print(f"\nMoving {amt} {ASSET_CODE} from distributor to {MOVE_IZZA_DEST} …")
+        distributor_send_izza(MOVE_IZZA_DEST, amt)
+    else:
+        print("⏭️  RUN_MOVE_IZZA is 0. Skipping distributor to wallet IZZA move.")
+
+    if RUN_NATIVE_PAYOUT:
+        try:
+            nat_amt = str(Decimal(NATIVE_PAYOUT_AMOUNT))
+        except Exception:
+            raise ValueError("NATIVE_PAYOUT_AMOUNT must be numeric")
+        if not NATIVE_PAYOUT_DEST:
+            raise RuntimeError("RUN_NATIVE_PAYOUT=1 but NATIVE_PAYOUT_DEST is empty")
+        print(f"\nSending {nat_amt} test Pi to {NATIVE_PAYOUT_DEST} …")
+        send_native_payment(NATIVE_PAYOUT_DEST, nat_amt, memo_text=NATIVE_PAYOUT_MEMO)
+    else:
+        print("⏭️  RUN_NATIVE_PAYOUT is 0. Skipping native payout.")
+
+    print("\nAll done. Verify balances offers at:")
+    print(f"  Issuer:      {HORIZON_URL}/accounts/{ISSUER_PUB}")
+    print(f"  Distributor: {HORIZON_URL}/accounts/{DISTR_PUB}")
+    print(f"  Offers API:  {HORIZON_URL}/offers?seller={DISTR_PUB}")
+
+if __name__ == "__main__":
+    main()
