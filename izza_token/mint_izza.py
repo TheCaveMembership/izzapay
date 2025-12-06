@@ -327,7 +327,7 @@ def cancel_all_izza_offers():
     distr_kp   = Keypair.from_secret(DISTR_SECRET)
     seller_pub = distr_kp.public_key
 
-    batch_size = 90
+    batch_size = 20
     total_cancelled = 0
     cursor = None
     page_index = 0
