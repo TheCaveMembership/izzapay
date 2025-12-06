@@ -73,8 +73,9 @@ AIRDROP_SLEEP_SECONDS = float(getenv("AIRDROP_SLEEP_SECONDS", "0.9"))
 AIRDROP_MAX_RETRIES   = int(getenv("AIRDROP_MAX_RETRIES", "3"))
 
 # Move IZZA configuration
-MOVE_IZZA_DEST   = getenv("MOVE_IZZA_DEST", "")
-MOVE_IZZA_AMOUNT = getenv("MOVE_IZZA_AMOUNT", "0")
+MOVE_IZZA_DEST         = getenv("MOVE_IZZA_DEST", "")
+MOVE_IZZA_AMOUNT       = getenv("MOVE_IZZA_AMOUNT", "0")
+MOVE_IZZA_DEST_SECRET  = getenv("MOVE_IZZA_DEST_SECRET", "")
 
 # Optional native payout config
 NATIVE_PAYOUT_DEST   = getenv("NATIVE_PAYOUT_DEST", "")
@@ -164,6 +165,49 @@ def get_izza_balance(pubkey: str) -> Decimal:
         ):
             return Decimal(b.get("balance", "0"))
     return Decimal("0")
+
+def ensure_trustline_for_secret(secret: str):
+    """
+    Ensure the account identified by this secret has a trustline
+    for the current ASSET_CODE issued by ISSUER_PUB.
+    """
+    if not secret:
+        return
+
+    kp = Keypair.from_secret(secret)
+    pub = kp.public_key
+
+    try:
+        acc = server.accounts().account_id(pub).call()
+    except NotFoundError:
+        raise RuntimeError(f"Account {pub} not found on-chain. Fund it first.")
+
+    for b in acc.get("balances", []):
+        if (
+            b.get("asset_type") in ("credit_alphanum4", "credit_alphanum12")
+            and b.get("asset_code") == ASSET_CODE
+            and b.get("asset_issuer") == ISSUER_PUB
+        ):
+            print(f"✅ {pub} already has trustline for {ASSET_CODE}.")
+            return
+
+    print(f"Creating trustline for {ASSET_CODE} on {pub} …")
+    acct = server.load_account(pub)
+    tx = (
+        TransactionBuilder(
+            source_account=acct,
+            network_passphrase=NETWORK_PASSPHRASE,
+            base_fee=get_base_fee(),
+        )
+        .append_change_trust_op(
+            asset_code=ASSET_CODE,
+            asset_issuer=ISSUER_PUB,
+        )
+        .set_timeout(180)
+        .build()
+    )
+    tx.sign(kp)
+    submit_and_print(tx)
 
 # Set issuer options
 def set_issuer_options():
@@ -732,6 +776,12 @@ def main():
     if args.cancel:
         cancel_all_izza_offers()
         return
+
+    # Ensure trustlines for distributor and the target move wallet (if provided)
+    print("Ensuring trustlines for distributor and move destination (if provided)…")
+    ensure_trustline_for_secret(DISTR_SECRET)
+    if MOVE_IZZA_DEST and MOVE_IZZA_DEST_SECRET:
+        ensure_trustline_for_secret(MOVE_IZZA_DEST_SECRET)
 
     # Skipping maybe_create_account checks because issuer and distributor are already funded
     print("Skipping maybe_create_account checks (issuer and distributor already funded).")
