@@ -17,13 +17,18 @@ from stellar_sdk import Asset
 
 HORIZON_URL = os.getenv("HORIZON_URL", "https://api.testnet.minepi.com").strip()
 
+# Optional LP scan toggles (safe defaults: OFF)
+LP_SCAN_ENABLED = os.getenv("BOT_ENABLE_LP_SCAN", "false").lower() == "true"
+LP_SCAN_MAX_ASSETS = int(os.getenv("BOT_LP_SCAN_MAX_ASSETS", "200"))  # per run cap
+LP_SCAN_TIMEOUT_SECS = int(os.getenv("BOT_LP_SCAN_TIMEOUT_SECS", "10"))
+
 
 # ---------------------------------------------------------
 # Generic Horizon helpers
 # ---------------------------------------------------------
 
-def _get(url: str, params: Dict[str, Any] | None = None) -> Dict[str, Any]:
-    r = requests.get(url, params=params or {}, timeout=15)
+def _get(url: str, params: Dict[str, Any] | None = None, timeout: int = 15) -> Dict[str, Any]:
+    r = requests.get(url, params=params or {}, timeout=timeout)
     r.raise_for_status()
     return r.json()
 
@@ -114,6 +119,69 @@ def list_testnet_assets(
 
 def build_asset(code: str, issuer: str) -> Asset:
     return Asset(code, issuer)
+
+
+# ---------------------------------------------------------
+# LP helpers (AMM price)
+# ---------------------------------------------------------
+
+def get_liquidity_pool_price_token_vs_pi(
+    token_code: str,
+    token_issuer: str,
+) -> Dict[str, float] | None:
+    """
+    Try to find a liquidity pool for (PI, token) and derive:
+      - amm_price_pi: PI per token from AMM reserves
+      - amm_liquidity_pi: rough PI-side depth (2 * PI_reserve as a proxy)
+
+    This is best-effort and only used when LP_SCAN_ENABLED is true.
+    If anything fails, returns None and the caller just ignores AMM info.
+    """
+    try:
+        # Stellar-style /liquidity_pools endpoint – Pi Testnet Horizon
+        # follows the same shape.
+        url = HORIZON_URL.rstrip("/") + "/liquidity_pools"
+        # We request pools that contain BOTH native PI and this credit asset.
+        params = {
+            "reserves": f"native,{token_code}:{token_issuer}",
+            "limit": 1,
+        }
+        data = _get(url, params=params, timeout=LP_SCAN_TIMEOUT_SECS)
+        pools = (data.get("_embedded") or {}).get("records") or []
+        if not pools:
+            return None
+
+        pool = pools[0]
+        reserves = pool.get("reserves") or []
+        if len(reserves) < 2:
+            return None
+
+        pi_reserve = None
+        token_reserve = None
+        for r in reserves:
+            asset = r.get("asset")
+            amount_str = r.get("amount") or "0"
+            amt = float(amount_str)
+            if asset == "native":
+                pi_reserve = amt
+            else:
+                # asset is like "CODE:ISSUER"
+                token_reserve = amt
+
+        if not pi_reserve or not token_reserve or token_reserve <= 0:
+            return None
+
+        amm_price_pi = pi_reserve / token_reserve
+        # Simple proxy for "how deep is this pool" – 2 * PI side (x + y)
+        amm_liq_pi = 2.0 * pi_reserve
+
+        return {
+            "amm_price_pi": float(amm_price_pi),
+            "amm_liquidity_pi": float(amm_liq_pi),
+        }
+    except Exception as e:
+        print(f"[LP] get_liquidity_pool_price_token_vs_pi error for {token_code}:{token_issuer}: {e}")
+        return None
 
 
 # ---------------------------------------------------------
@@ -221,6 +289,8 @@ def scan_markets_vs_pi(
 
     results: List[Dict[str, Any]] = []
 
+    lp_scanned = 0
+
     for t in tokens:
         code = t["code"]
         issuer = t["issuer"]
@@ -255,6 +325,17 @@ def scan_markets_vs_pi(
         if max_spread_pct and max_spread and max_spread > max_spread_pct:
             continue
 
+        amm_price_pi = None
+        amm_liq_pi = None
+
+        # Optional LP scan: only when enabled + under per-run cap
+        if LP_SCAN_ENABLED and lp_scanned < LP_SCAN_MAX_ASSETS:
+            lp_info = get_liquidity_pool_price_token_vs_pi(code, issuer)
+            if lp_info:
+                amm_price_pi = lp_info.get("amm_price_pi")
+                amm_liq_pi = lp_info.get("amm_liquidity_pi")
+            lp_scanned += 1
+
         results.append({
             "code": code,
             "issuer": issuer,
@@ -264,6 +345,9 @@ def scan_markets_vs_pi(
             "orderbook_sell_pi": stats_sell_pi,
             "approx_liquidity_pi": approx_liq_pi,
             "max_spread_pct": max_spread,
+            # NEW: AMM view (if available)
+            "amm_price_pi": amm_price_pi,
+            "amm_liquidity_pi": amm_liq_pi,
         })
 
     results.sort(key=lambda r: (r["approx_liquidity_pi"] or 0), reverse=True)
@@ -277,5 +361,7 @@ if __name__ == "__main__":
             m["code"],
             "num_accounts=", m["num_accounts"],
             "liq≈", m["approx_liquidity_pi"],
-            "spread%", m["max_spread_pct"]
+            "spread%", m["max_spread_pct"],
+            "amm_price_pi=", m.get("amm_price_pi"),
+            "amm_liq_pi=", m.get("amm_liquidity_pi"),
         )
