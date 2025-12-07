@@ -1,27 +1,40 @@
 VERSION = "2.5.0"
 NETWORK_PASSPHRASE = "Pi Testnet"
 
-# The issuing account(s)
 ACCOUNTS = [
   "GDKS3KFAM5RBBTSYTFUEHHN7GYRPHV7A6K2BI44LL3QQKXCA6ODBCS57"
 ]
 
 # ---------------------------------------------------------------------
-# ASSET INFO
+# IZZA TOKEN
 # ---------------------------------------------------------------------
 [[CURRENCIES]]
 code = "IZZA"
 issuer = "GDKS3KFAM5RBBTSYTFUEHHN7GYRPHV7A6K2BI44LL3QQKXCA6ODBCS57"
 name = "Izza Pay Token"
 desc = "Utility token for Izza Pay demo on Pi Testnet."
-image = "https://izzapay.onrender.com/assets/izza.png"    # ← UPDATED
+image = "https://izzapay.onrender.com/assets/izza.png"
 conditions = "Test asset. No real value. For development only."
 status = "test"
 is_asset_anchored = false
 display_decimals = 7
 
 # ---------------------------------------------------------------------
-# IZZA CREATURES (dynamic NFT eggs / living NFTs)
+# 89 TOKEN
+# ---------------------------------------------------------------------
+[[CURRENCIES]]
+code = "89"
+issuer = "GDKS3KFAM5RBBTSYTFUEHHN7GYRPHV7A6K2BI44LL3QQKXCA6ODBCS57"
+name = "Eighty Nine Token"
+desc = "Experimental 89 meme slash utility token on Pi Testnet."
+image = "https://izzapay.onrender.com/assets/89.gif"     # create this file
+conditions = "Test asset. No real value. For development and market experiments only."
+status = "test"
+is_asset_anchored = false
+display_decimals = 7
+
+# ---------------------------------------------------------------------
+# IZZA CREATURES
 # ---------------------------------------------------------------------
 [[CURRENCIES]]
 code = "EGG12ABCD"
@@ -34,9 +47,6 @@ status = "live"
 is_asset_anchored = false
 display_decimals = 0
 
-# ---------------------------------------------------------------------
-# ORGANIZATION INFO
-# ---------------------------------------------------------------------
 [DOCUMENTATION]
 ORG_NAME = "Izza Pay"
 ORG_URL = "https://izzapay.onrender.com"
@@ -44,9 +54,6 @@ ORG_DESCRIPTION = "Demo payment app and token on Pi Testnet."
 ORG_TWITTER = "izzapay"
 ORG_GITHUB = "izzapay"
 
-# ---------------------------------------------------------------------
-# PRINCIPAL CONTACTS
-# ---------------------------------------------------------------------
 [[PRINCIPALS]]
 name = "Issuer Account"
 email = "info@izzapay.shop"
