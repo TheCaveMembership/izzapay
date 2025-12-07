@@ -231,6 +231,10 @@ class MarketInfo:
   next_ask_price: float = 0.0    # price of next ask level above best_ask
   wall_value_pi: float = 0.0     # estimated PI value of the top sell wall
   wall_break_candidate: bool = False  # whether this wall is breakable by a bucket
+  # Optional AMM / LP info (if available)
+  amm_price_pi: float = 0.0          # PI per token implied by LP reserves
+  amm_total_liq_pi: float = 0.0      # rough PI-side depth of LP
+  amm_vs_mid_edge_pct: float = 0.0   # (amm_price - mid_price) / mid_price * 100
 
 
 @dataclass
@@ -417,7 +421,7 @@ def load_positions_for_bucket(bucket_id: int) -> Dict[Tuple[str, str], Position]
 
 
 # ---------------------------------------------------------------------
-# Markets normalization (orderbook-only)
+# Markets normalization (orderbook-only + optional AMM)
 # ---------------------------------------------------------------------
 
 def normalize_markets(raw_markets: List[Dict[str, Any]]) -> Dict[Tuple[str, str], MarketInfo]:
@@ -427,6 +431,9 @@ def normalize_markets(raw_markets: List[Dict[str, Any]]) -> Dict[Tuple[str, str]
   Instead of blindly trusting orderbook_sell_token, we choose whichever
   book (token_selling or pi_selling) actually has a usable price /
   liquidity, so the bot sees the same markets the Pi Wallet does.
+
+  We also surface optional AMM (liquidity pool) price + depth if
+  scan_markets_vs_pi attached it.
   """
   markets: Dict[Tuple[str, str], MarketInfo] = {}
 
@@ -554,6 +561,29 @@ def normalize_markets(raw_markets: List[Dict[str, Any]]) -> Dict[Tuple[str, str]
     else:
       depth_imbalance = (bid_liq_f - ask_liq_f) / total_liq
 
+    # Optional AMM info from scan_markets_vs_pi
+    amm_price_pi = 0.0
+    amm_total_liq_pi = 0.0
+    amm_edge_pct = 0.0
+
+    raw_amm_price = m.get("amm_price_pi")
+    raw_amm_liq = m.get("amm_liquidity_pi")
+
+    try:
+      if raw_amm_price is not None:
+        amm_price_pi = float(raw_amm_price or 0.0)
+      if raw_amm_liq is not None:
+        amm_total_liq_pi = float(raw_amm_liq or 0.0)
+    except Exception:
+      amm_price_pi = 0.0
+      amm_total_liq_pi = 0.0
+
+    if amm_price_pi > 0 and mid_f > 0:
+      # Positive edge => AMM is more expensive than orderbook mid,
+      # so buying on OB and later exiting via pool (or reversion)
+      # should tilt in our favour.
+      amm_edge_pct = (amm_price_pi - mid_f) / mid_f * 100.0
+
     markets[(code, issuer)] = MarketInfo(
       code=code,
       issuer=issuer,
@@ -569,6 +599,11 @@ def normalize_markets(raw_markets: List[Dict[str, Any]]) -> Dict[Tuple[str, str]
       num_ask_levels=na,
       top_ask_amount=top_ask_amount_f,
       next_ask_price=next_ask_price_f,
+      wall_value_pi=0.0,
+      wall_break_candidate=False,
+      amm_price_pi=amm_price_pi,
+      amm_total_liq_pi=amm_total_liq_pi,
+      amm_vs_mid_edge_pct=amm_edge_pct,
     )
 
   return markets
@@ -1001,6 +1036,7 @@ def compute_score(m: MarketInfo, risk_cfg: Dict[str, Any]) -> float:
     trend      positive depth_imbalance
     micro      abs(depth_imbalance) * total_liq / (spread+1)
     vol        spread
+    arb        positive AMM vs orderbook mispricing (if available)
   """
   tw = risk_cfg["trend_weight"]
   mw = risk_cfg["micro_weight"]
@@ -1010,7 +1046,14 @@ def compute_score(m: MarketInfo, risk_cfg: Dict[str, Any]) -> float:
   micro = abs(m.depth_imbalance) * (m.total_liq ** 0.5) / (1.0 + max(0.0, m.spread_pct))
   vol = min(m.spread_pct / 10.0, 5.0)
 
-  return tw * trend + mw * micro + vw * vol
+  # AMM edge: if LP price > mid, buying on orderbook is cheaper than pool.
+  # Scale down so it nudges but doesn't dominate.
+  arb = 0.0
+  if m.amm_vs_mid_edge_pct > 0.0 and m.amm_total_liq_pi > 0.0:
+    # Edge in [0, +inf) %, depth in PI -> we compress it.
+    arb = (m.amm_vs_mid_edge_pct / 50.0) * min(m.amm_total_liq_pi, 10000.0) ** 0.25
+
+  return tw * trend + mw * micro + vw * vol + arb
 
 
 # ---------------------------------------------------------------------
@@ -1435,7 +1478,9 @@ def execute_buys_for_bucket(
     summary = []
     for m, pi_budget in plans:
       summary.append(
-        f"{m.code}@{m.best_ask:.6f} (liq≈{m.total_liq:.2f}, top_ask≈{m.top_ask_amount:.4f})"
+        f"{m.code}@{m.best_ask:.6f} "
+        f"(liq≈{m.total_liq:.2f}, top_ask≈{m.top_ask_amount:.4f}, "
+        f"amm≈{m.amm_price_pi:.6f}, edge%≈{m.amm_vs_mid_edge_pct:.2f})"
       )
     print(
       f"[BUY] usable markets for bucket={bucket.id} user=@{bucket.username}: "
