@@ -1,0 +1,303 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>IZZA WAR ZONE — Sign in with Pi</title>
+  <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+  <link rel="stylesheet" href="/static/themes.css">
+  <style>
+    :root{
+      --bg:#02030a;
+      --txt:#edf3ff;
+      --muted:#9fb0d6;
+      --accent1:#0ff;
+      --accent2:#ff3b6b;
+      --accent3:#ffcf4d;
+      --card:#06091a;
+      --line:#1a2340;
+    }
+    *{box-sizing:border-box}
+    html,body{margin:0;padding:0;background:radial-gradient(circle at top,#10152a 0%,#02030a 55%,#000 100%);color:var(--txt);font-family:Inter,system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;}
+    body{min-height:100vh;display:flex;align-items:center;justify-content:center;padding:16px;}
+    .shell{
+      width:100%;max-width:520px;
+      background:radial-gradient(circle at top,#182136 0%,#06091a 48%,#01020a 100%);
+      border-radius:24px;
+      border:1px solid rgba(132,153,255,.4);
+      box-shadow:
+        0 0 40px rgba(0,0,0,.8),
+        0 0 80px rgba(0,255,255,.08),
+        0 0 80px rgba(255,59,107,.12);
+      padding:22px 20px 24px;
+      position:relative;
+      overflow:hidden;
+    }
+    .scan{
+      position:absolute;inset:-40%;opacity:.14;
+      background:
+        radial-gradient(circle at 0% 0%, rgba(0,255,255,.6) 0, transparent 55%),
+        radial-gradient(circle at 100% 10%, rgba(255,59,107,.7) 0, transparent 55%),
+        radial-gradient(circle at 50% 120%, rgba(255,207,77,.65) 0, transparent 60%);
+      mix-blend-mode:screen;
+      pointer-events:none;
+    }
+    .border-lines{
+      position:absolute;inset:12px;border-radius:18px;
+      border:1px dashed rgba(114,140,255,.35);
+      opacity:.45;
+    }
+    .logo-row{
+      display:flex;align-items:center;justify-content:space-between;gap:8px;margin-bottom:6px;position:relative;z-index:2;
+    }
+    .logo-main{
+      display:flex;align-items:center;gap:10px;
+      text-transform:uppercase;
+      letter-spacing:.22em;
+      font-size:11px;
+      color:#c5d4ff;
+    }
+    .izzacoin{
+      width:32px;height:32px;border-radius:50%;
+      background:url("/assets/izza-war-coin.png") center/cover no-repeat, radial-gradient(circle at 30% 10%,#ffe9b5 0,#ffcf4d 30%,#b87910 65%,#442400 100%);
+      box-shadow:0 0 18px rgba(255,207,77,.6);
+      flex-shrink:0;
+    }
+    .badge-pi{
+      padding:4px 10px;border-radius:999px;
+      font-size:11px;
+      letter-spacing:.12em;
+      text-transform:uppercase;
+      border:1px solid rgba(120,199,255,.7);
+      color:#b5dcff;
+      background:linear-gradient(90deg,rgba(0,255,255,.16),rgba(185,132,255,.12));
+      display:flex;align-items:center;gap:6px;
+    }
+    .badge-pi span.dot{
+      width:6px;height:6px;border-radius:50%;
+      background:radial-gradient(circle at 30% 20%,#fff 0,#0ff 40%,#003a4a 100%);
+      box-shadow:0 0 8px rgba(0,255,255,.9);
+    }
+    h1{
+      margin:10px 0 4px;
+      font-size:clamp(24px,6.8vw,34px);
+      letter-spacing:.18em;
+      text-transform:uppercase;
+    }
+    .sub{
+      margin:0 0 18px;
+      font-size:13px;
+      line-height:1.5;
+      color:var(--muted);
+    }
+    .tagline{
+      font-size:12px;
+      letter-spacing:.26em;
+      text-transform:uppercase;
+      color:#7fd1ff;
+      margin-bottom:4px;
+    }
+    .cta-col{
+      margin-top:10px;
+      z-index:2;
+      position:relative;
+    }
+    .btn{
+      width:100%;
+      border:none;
+      border-radius:999px;
+      padding:14px 16px;
+      cursor:pointer;
+      font-weight:700;
+      font-size:14px;
+      letter-spacing:.16em;
+      text-transform:uppercase;
+      display:flex;
+      align-items:center;
+      justify-content:center;
+      gap:10px;
+      background:linear-gradient(90deg,#0ff,#ff3b6b);
+      color:#001520;
+      box-shadow:
+        0 0 24px rgba(0,255,255,.6),
+        0 0 34px rgba(255,59,107,.55);
+      position:relative;
+      overflow:hidden;
+    }
+    .btn::before{
+      content:"";
+      position:absolute;
+      inset:0;
+      background:linear-gradient(120deg,rgba(255,255,255,.18),transparent 40%,transparent 60%,rgba(255,255,255,.2));
+      mix-blend-mode:screen;
+      opacity:0;
+      transform:translateX(-40%);
+      transition:opacity .25s ease,transform .25s ease;
+    }
+    .btn:hover::before{
+      opacity:1;
+      transform:translateX(0);
+    }
+    .btn span.icon{
+      width:18px;height:18px;border-radius:50%;
+      border:1px solid rgba(0,0,0,.5);
+      background:radial-gradient(circle at 30% 20%,#fff 0,#ffe9b5 34%,#ffcf4d 70%,#5a3503 100%);
+      display:inline-flex;align-items:center;justify-content:center;
+      box-shadow:0 0 10px rgba(255,207,77,.9);
+      font-size:11px;
+    }
+    .btn small{
+      font-size:11px;
+      opacity:.9;
+    }
+    .note{
+      margin-top:10px;
+      font-size:11px;
+      line-height:1.5;
+      color:#8291c4;
+    }
+    .chips{
+      margin-top:14px;
+      display:flex;
+      flex-wrap:wrap;
+      gap:8px;
+      font-size:11px;
+    }
+    .chip{
+      border-radius:999px;
+      border:1px solid rgba(127,209,255,.45);
+      padding:4px 9px;
+      background:rgba(4,12,34,.9);
+      color:#a6c7ff;
+      display:inline-flex;
+      align-items:center;
+      gap:6px;
+    }
+    .chip span.dot{
+      width:6px;height:6px;border-radius:50%;
+      background:radial-gradient(circle at 30% 20%,#fff 0,#ffcf4d 40%,#7a4900 100%);
+    }
+    .footer{
+      margin-top:14px;
+      font-size:11px;
+      color:#5d6aa0;
+    }
+    .footer a{
+      color:#9fb7ff;
+      text-decoration:none;
+    }
+    .footer a:hover{text-decoration:underline;}
+    @media (max-width:480px){
+      .shell{padding:18px 16px 20px;border-radius:20px;}
+      .logo-row{flex-direction:row;align-items:center;}
+      h1{text-align:left;}
+      .sub{text-align:left;}
+      .cta-col{margin-top:12px;}
+    }
+  </style>
+  <script src="https://sdk.minepi.com/pi-sdk.js"></script>
+</head>
+<body>
+  <div class="shell">
+    <div class="scan" aria-hidden="true"></div>
+    <div class="border-lines" aria-hidden="true"></div>
+
+    <div class="logo-row">
+      <div class="logo-main">
+        <div class="izzacoin"></div>
+        <span>IZZA • WAR ZONE</span>
+      </div>
+      <div class="badge-pi">
+        <span class="dot"></span>
+        <span>Pi secured</span>
+      </div>
+    </div>
+
+    <p class="tagline">MULTIPLAYER • LOADOUTS • BATTLE ZONE</p>
+    <h1>Sign in to deploy</h1>
+    <p class="sub">
+      Use your Pi Network account to enter IZZA WAR ZONE, sync your IZZA profile,
+      and bring crafted guns, armor, and cosmetics straight into the fight.
+    </p>
+
+    <div class="cta-col">
+      <button id="warzoneAuthBtn" class="btn">
+        <span class="icon">π</span>
+        <span>Sign in with Pi</span>
+        <small>enter war zone</small>
+      </button>
+      <p class="note">
+        You’ll approve access through Pi Browser so IZZA PAY can link your
+        Pi username, payment history, and War Zone progress together.
+      </p>
+      <div class="chips">
+        <span class="chip"><span class="dot"></span> Secure Pi SDK v2 auth</span>
+        <span class="chip"><span class="dot"></span> Uses your existing IZZA account</span>
+        <span class="chip"><span class="dot"></span> No extra passwords</span>
+      </div>
+      <p class="footer">
+        Having trouble? Open this page in <b>Pi Browser</b> or go back to
+        <a href="/">IZZA PAY home</a>.
+      </p>
+    </div>
+
+    <!-- Hidden form that posts to /auth/exchange with a next=/warzone -->
+    <form id="warzoneAuthForm" method="POST" action="/auth/exchange" style="display:none">
+      <input type="hidden" name="payload" id="warzonePayload">
+      <input type="hidden" name="next" value="/warzone">
+    </form>
+  </div>
+
+  <script>
+  (function(){
+    const btn = document.getElementById('warzoneAuthBtn');
+    const payloadInput = document.getElementById('warzonePayload');
+    const form = document.getElementById('warzoneAuthForm');
+    const sandbox = {{ 'true' if sandbox else 'false' }};
+
+    function ensurePi(){
+      if (!window.Pi || !Pi.init) {
+        alert("Pi SDK not available. Please open this page inside Pi Browser.");
+        return false;
+      }
+      try {
+        Pi.init({ version: "2.0", sandbox: sandbox });
+        return true;
+      } catch (e) {
+        console.error("Pi.init failed", e);
+        alert("Pi SDK failed to initialize. Try refreshing in Pi Browser.");
+        return false;
+      }
+    }
+
+    function startAuth(){
+      if (!ensurePi()) return;
+      const scopes = ["payments","username"];
+      function onIncompletePaymentFound(_p){}
+
+      Pi.authenticate(scopes, onIncompletePaymentFound)
+        .then(function(auth){
+          if (!auth || !auth.accessToken) {
+            alert("Authorization failed. Please try again.");
+            return;
+          }
+          // send to /auth/exchange → which will redirect to /warzone
+          payloadInput.value = JSON.stringify({
+            accessToken: auth.accessToken,
+            user: auth.user
+          });
+          form.submit();
+        })
+        .catch(function(err){
+          console.error("Pi.authenticate error", err);
+          alert("Authorization was cancelled or failed. Please try again.");
+        });
+    }
+
+    btn?.addEventListener('click', function(ev){
+      ev.preventDefault();
+      startAuth();
+    });
+  })();
+  </script>
+</body>
+</html>
