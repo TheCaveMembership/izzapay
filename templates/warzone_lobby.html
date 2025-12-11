@@ -54,17 +54,17 @@
         0 0 40px rgba(0,0,0,.8),
         0 0 80px rgba(0,255,255,.08),
         0 0 80px rgba(255,59,107,.12);
-      padding:8px 10px;          /* was 10px 14px */
+      padding:8px 10px;
       display:grid;
       grid-template-rows:auto 1fr; /* top + main */
       row-gap:6px;
       position:relative;
-      overflow:auto;              /* key: allow internal scroll instead of clipping */
+      overflow:auto;              /* allow internal scroll on tiny screens */
       -webkit-overflow-scrolling:touch;
     }
     .shell::-webkit-scrollbar{
       width:0;
-      height:0;                  /* hide scrollbar so it still looks like a fixed frame */
+      height:0;
     }
 
     .top-row{
@@ -179,10 +179,20 @@
       border:1px solid rgba(39,62,130,.9);
       position:relative;
       overflow:hidden;
-      /* Neutral placeholder until real map assets are wired in */
-      background:radial-gradient(circle at 20% 0,#1a2345 0,transparent 55%),
-                 radial-gradient(circle at 80% 100%,#0b1636 0,transparent 65%),
-                 #02030c;
+      background-size:cover;
+      background-position:center;
+      background-repeat:no-repeat;
+    }
+    .zone-canvas-shell::before{
+      /* soft hologram tint over the real map image */
+      content:"";
+      position:absolute;
+      inset:0;
+      background:
+        radial-gradient(circle at 20% 0,rgba(26,35,69,.9) 0,transparent 55%),
+        radial-gradient(circle at 80% 100%,rgba(11,22,54,.9) 0,transparent 65%);
+      mix-blend-mode:soft-light;
+      pointer-events:none;
     }
     .zone-overlay-copy{
       position:absolute;
@@ -191,6 +201,7 @@
       max-width:260px;
       font-size:11px;
       color:#c3cff5;
+      z-index:1;
     }
     .zone-overlay-copy .tag{
       font-size:10px;
@@ -518,7 +529,11 @@
                 IZZA maps · rotated view
               </div>
             </div>
-            <div class="zone-canvas-shell" id="zoneCanvasShell">
+            <!-- map image comes from map_image_url, or falls back to /assets/warzone-map-izzacity.jpg -->
+            <div
+              class="zone-canvas-shell"
+              id="zoneCanvasShell"
+              style="background-image:url('{{ map_image_url or "/assets/warzone-map-izzacity.jpg" }}');">
               <div class="zone-overlay-copy">
                 <span class="tag">Map preview</span>
                 <p>
