@@ -189,9 +189,6 @@
     @media (max-width:480px){
       .shell{padding:18px 16px 20px;border-radius:20px;}
       .logo-row{flex-direction:row;align-items:center;}
-      h1{text-align:left;}
-      .sub{text-align:left;}
-      .cta-col{margin-top:12px;}
     }
   </style>
   <script src="https://sdk.minepi.com/pi-sdk.js"></script>
@@ -280,7 +277,6 @@
             alert("Authorization failed. Please try again.");
             return;
           }
-          // send to /auth/exchange → which will redirect to /warzone
           payloadInput.value = JSON.stringify({
             accessToken: auth.accessToken,
             user: auth.user
