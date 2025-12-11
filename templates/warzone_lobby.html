@@ -1115,7 +1115,7 @@
         const url = base + sku + ".glb";
 
         const lastSlash = url.lastIndexOf("/");
-        const rootUrl = url.substring(0,lastSlash+1);
+        the rootUrl = url.substring(0,lastSlash+1);
         const fileName = url.substring(lastSlash+1);
 
         BABYLON.SceneLoader.ImportMesh(
@@ -1306,7 +1306,10 @@
     // ---------- Babylon.js mini-scene for lobby soldier ----------
     (function(){
       const canvas = document.getElementById("soldierCanvas");
-      if (!canvas || !window.BABYLON) return;
+      if (!canvas || !window.BABYLON) {
+        console.warn("[WARZONE] soldier canvas or BABYLON missing");
+        return;
+      }
 
       const engine = new BABYLON.Engine(canvas, true, {
         preserveDrawingBuffer:true,
@@ -1326,14 +1329,12 @@
           "cam",
           Math.PI * 1.3,
           Math.PI / 2.4,
-          1.6,                             // closer so soldier is big
-          new BABYLON.Vector3(0,1.3,0),
+          2.0,                          // initial radius, will be adjusted
+          new BABYLON.Vector3(0,1,0),
           scene
         );
         camera.attachControl(canvas, false);
         camera.inputs.clear();           // lock user controls
-        camera.lowerRadiusLimit = camera.radius;
-        camera.upperRadiusLimit = camera.radius;
         camera.panningSensibility = 0;
 
         const light = new BABYLON.HemisphericLight(
@@ -1354,6 +1355,24 @@
         });
       }
 
+      function frameCameraToRoot(root){
+        try{
+          const bounds = root.getHierarchyBoundingVectors(true);
+          const min = bounds.min;
+          const max = bounds.max;
+          const size = max.subtract(min);
+          const center = min.add(size.scale(0.5));
+          const radius = size.length() * 0.8 || 2.0;
+
+          camera.target = center;
+          camera.radius = radius;
+          camera.lowerRadiusLimit = radius * 0.9;
+          camera.upperRadiusLimit = radius * 1.1;
+        }catch(e){
+          console.warn("[WARZONE] failed to auto-frame soldier", e);
+        }
+      }
+
       function loadSoldier(){
         const url = SOLDIER_ASSET;
         if (!scene || !BABYLON.SceneLoader) return;
@@ -1367,25 +1386,45 @@
         const rootUrl = url.substring(0,lastSlash+1);
         const fileName = url.substring(lastSlash+1);
 
+        console.log("[WARZONE] Importing soldier GLB:", rootUrl, fileName);
+
         BABYLON.SceneLoader.ImportMesh(
           "",
           rootUrl,
           fileName,
           scene,
           function(meshes, ps, skeletons, animGroups){
+            console.log("[WARZONE] soldier GLB imported. meshes:", meshes.length);
+
             currentRoot = new BABYLON.TransformNode("soldierRoot", scene);
             meshes.forEach(m => {
               m.parent = currentRoot;
             });
 
-            currentRoot.position = new BABYLON.Vector3(0,-1.1,0);
+            // Let auto-framing decide exact offsets
+            currentRoot.position = new BABYLON.Vector3(0,0,0);
             currentRoot.rotation = new BABYLON.Vector3(0,Math.PI,0);
-            currentRoot.scaling = new BABYLON.Vector3(1.8,1.8,1.8); // make it massive
 
+            // Auto-frame so the model is guaranteed in view
+            frameCameraToRoot(currentRoot);
+
+            // Slow rotate for a bit of life
+            scene.onBeforeRenderObservable.clear();
+            scene.onBeforeRenderObservable.add(() => {
+              if (currentRoot) {
+                currentRoot.rotation.y += scene.getEngine().getDeltaTime() * 0.0003;
+              }
+            });
+
+            // Play first animation if available
             if (animGroups && animGroups.length){
               animGroups.forEach(g => g.stop());
-              animGroups[0].start(true); // loop first animation (idle / walk in place)
+              animGroups[0].start(true);
             }
+          },
+          null,
+          function(scene, message, exception){
+            console.error("[WARZONE] soldier ImportMesh error:", message, exception);
           }
         );
       }
