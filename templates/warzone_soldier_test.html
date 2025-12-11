@@ -43,7 +43,7 @@
     const canvas = document.getElementById("renderCanvas");
     const msgEl  = document.getElementById("msg");
 
-    if (!canvas || !window.BABYLON){
+    if(!canvas || !window.BABYLON){
       msgEl.textContent = "Babylon not available";
     } else {
       const engine = new BABYLON.Engine(canvas, true, {
@@ -52,21 +52,21 @@
       });
 
       const scene  = new BABYLON.Scene(engine);
-      scene.clearColor = new BABYLON.Color4(0,0,0,1);
+      // Make the 3D background BRIGHT BLUE so we know rendering works
+      scene.clearColor = new BABYLON.Color4(0,0,1,1);
 
-      // Fixed camera – DO NOT change this after load.
       const camera = new BABYLON.ArcRotateCamera(
         "cam",
         Math.PI * 1.3,
         Math.PI / 2.4,
-        4.0,
-        new BABYLON.Vector3(0,1,0),
+        20.0,
+        new BABYLON.Vector3(0,0,0),
         scene
       );
       camera.attachControl(canvas, false);
       camera.inputs.clear();
-      camera.lowerRadiusLimit = 3.0;
-      camera.upperRadiusLimit = 5.0;
+      camera.lowerRadiusLimit = 10.0;
+      camera.upperRadiusLimit = 30.0;
       camera.panningSensibility = 0;
 
       const light = new BABYLON.HemisphericLight(
@@ -76,11 +76,12 @@
       );
       light.intensity = 1.2;
 
-      // Debug cube so we know rendering works even if the soldier failed
+      // HUGE debug cube that should fill the screen if WebGL is working
       const debugBox = BABYLON.MeshBuilder.CreateBox("debugBox", { size:1 }, scene);
-      debugBox.position.y = 1;
+      debugBox.position = new BABYLON.Vector3(0,0,0);
+      debugBox.scaling  = new BABYLON.Vector3(10,10,10); // <-- gigantic
       const debugMat = new BABYLON.StandardMaterial("dbgMat", scene);
-      debugMat.emissiveColor = new BABYLON.Color3(0,1,1);
+      debugMat.emissiveColor = new BABYLON.Color3(0,1,1); // bright cyan
       debugBox.material = debugMat;
 
       engine.runRenderLoop(function(){
@@ -91,6 +92,7 @@
         engine.resize();
       });
 
+      // Still try to import the soldier, but for this test the cube is what matters
       const SOLDIER_URL = "/assets/warzone3d/pistol_soldier_m_idle.glb";
       const lastSlash = SOLDIER_URL.lastIndexOf("/");
       const rootUrl   = SOLDIER_URL.substring(0,lastSlash+1);
@@ -106,29 +108,23 @@
         function(meshes, ps, skeletons, animGroups){
           msgEl.textContent = "Soldier imported OK | meshes: " + meshes.length;
 
-          // slide cube aside so we can still see it
-          debugBox.position.x = -3;
-          debugBox.position.y = 0.5;
-
           const root = new BABYLON.TransformNode("soldierRoot", scene);
           meshes.forEach(m => {
             m.parent = root;
           });
 
-          // Manual transform – tuned to look good in Safari already
           root.position = new BABYLON.Vector3(0,0,0);
           root.rotation = new BABYLON.Vector3(0,Math.PI,0);
           root.scaling  = new BABYLON.Vector3(1,1,1);
 
-          // Simple idle spin
-          scene.onBeforeRenderObservable.clear();
+          // Slow spin so we can see movement
           scene.onBeforeRenderObservable.add(() => {
             const dt = scene.getEngine().getDeltaTime();
             root.rotation.y += dt * 0.0005;
-            debugBox.rotation.y += dt * 0.001;
+            debugBox.rotation.y += dt * 0.0008;
           });
 
-          if (animGroups && animGroups.length){
+          if(animGroups && animGroups.length){
             animGroups.forEach(g => g.stop());
             animGroups[0].start(true);
           }
