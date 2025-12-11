@@ -26,57 +26,23 @@
       overflow:hidden;
     }
 
-    /* Overlay for portrait, asks user to rotate */
-    .rotate-overlay{
+    /* ====== MANUAL LANDSCAPE WRAPPER ======
+       On phones (Pi Browser) we keep the OS in portrait but rotate the
+       whole game 90° so it *behaves* like landscape. On desktop we
+       disable the transform so it looks normal. */
+    .rot-wrapper{
       position:fixed;
-      inset:0;
-      display:flex;
-      align-items:center;
-      justify-content:center;
-      flex-direction:column;
-      padding:24px;
-      background:radial-gradient(circle at top,#15192e 0,#02030a 55%,#000 100%);
-      text-align:center;
-      z-index:50;
-    }
-    .rotate-overlay h1{
-      font-size:18px;
-      letter-spacing:.2em;
-      text-transform:uppercase;
-      margin-bottom:10px;
-    }
-    .rotate-overlay p{
-      font-size:13px;
-      color:var(--muted);
-      max-width:340px;
-      margin-bottom:16px;
-    }
-    .phone{
-      width:64px;height:120px;
-      border-radius:20px;
-      border:2px solid rgba(159,176,214,.6);
-      position:relative;
-      margin-bottom:10px;
-    }
-    .phone::before{
-      content:"";
-      position:absolute;
-      inset:10px;
-      border-radius:14px;
-      border:1px dashed rgba(127,209,255,.5);
-    }
-    .phone-icon{
-      width:28px;height:28px;
-      border-radius:50%;
-      border:2px solid var(--accent1);
-      position:absolute;
-      top:50%;left:50%;
-      transform:translate(-50%,-50%);
+      top:0;
+      left:0;
+      width:100vh;   /* swapped */
+      height:100vw;
+      transform-origin:top left;
+      transform:rotate(90deg) translateY(-100%);
+      /* smooth-ish when Pi Browser shows / hides chrome */
+      transition:transform .15s ease,width .15s ease,height .15s ease;
     }
 
-    /* Landscape lobby layout */
     .lobby-root{
-      display:none;
       width:100%;
       height:100%;
       padding:12px;
@@ -149,7 +115,7 @@
       min-height:0;
     }
 
-    /* Left side, map and drop zone preview */
+    /* Left side, map / drop zone preview */
     .zone-panel{
       border-radius:14px;
       background:linear-gradient(145deg,#050815,#02030c);
@@ -178,9 +144,12 @@
       flex:1;
       border-radius:10px;
       border:1px solid rgba(39,62,130,.9);
-      background:#02030a;
       position:relative;
       overflow:hidden;
+      /* Warzone-style background: put your Kenny map image here */
+      background:
+        linear-gradient(to top,rgba(0,0,0,.65),rgba(0,0,0,.15)),
+        url("/assets/warzone-map-kenny.png") center/cover no-repeat;
     }
     .zone-placeholder{
       position:absolute;
@@ -190,12 +159,12 @@
       justify-content:center;
       flex-direction:column;
       pointer-events:none;
+      text-align:center;
     }
     .zone-placeholder p{
       font-size:12px;
-      color:#9fb0d6;
+      color:#c3cff5;
       max-width:260px;
-      text-align:center;
     }
     .zone-placeholder span.tag{
       font-size:10px;
@@ -342,22 +311,11 @@
         0 0 24px rgba(0,255,255,.6),
         0 0 34px rgba(255,59,107,.55);
     }
-
     .deploy-btn span.tag{
       font-size:10px;
       text-transform:uppercase;
       letter-spacing:.16em;
       opacity:.9;
-    }
-
-    /* Show rotate overlay only in portrait, lobby in landscape */
-    @media (orientation:landscape){
-      .rotate-overlay{display:none;}
-      .lobby-root{display:block;}
-    }
-    @media (orientation:portrait){
-      .rotate-overlay{display:flex;}
-      .lobby-root{display:none;}
     }
 
     @media (max-width:900px){
@@ -368,158 +326,183 @@
   </style>
 </head>
 <body>
-  <!-- Portrait overlay, asks them to rotate since Pi Browser does not auto rotate -->
-  <div class="rotate-overlay">
-    <div class="phone">
-      <div class="phone-icon"></div>
-    </div>
-    <h1>Rotate to play</h1>
-    <p>
-      IZZA WAR ZONE runs in landscape for full screen controls.
-      Rotate your phone so the long edge is horizontal to enter the lobby.
-    </p>
-  </div>
-
-  <!-- Landscape lobby shell -->
-  <div class="lobby-root">
-    <div class="shell">
-      <div class="top-row">
-        <div class="logo-block">
-          <div class="izzacoin"></div>
-          <span>IZZA • WAR ZONE</span>
+  <!-- Rotated viewport so the game feels landscape inside portrait Pi Browser -->
+  <div class="rot-wrapper" id="rotWrapper">
+    <div class="lobby-root">
+      <div class="shell">
+        <div class="top-row">
+          <div class="logo-block">
+            <div class="izzacoin"></div>
+            <span>IZZA • WAR ZONE</span>
+          </div>
+          <div class="player-pill">
+            <span class="label">Operator</span>
+            <span class="name">
+              {{ session.get('pi_username') or session.get('pi_handle') or 'Unknown Pi user' }}
+            </span>
+          </div>
         </div>
-        <div class="player-pill">
-          <span class="label">Operator</span>
-          <span class="name">
-            {{ player.username or 'Unknown Pi user' }}
-          </span>
-        </div>
-      </div>
 
-      <div class="main-row">
-        <!-- Left, map and drop zone preview, Kenny maps plug in here later -->
-        <section class="zone-panel">
-          <div class="zone-header">
-            <div>
-              <span>Drop zone</span>
-              <strong>Pre deployment</strong>
-            </div>
-            <div style="font-size:10px;color:#7fd1ff;">
-              Kenny maps · rotated view
-            </div>
-          </div>
-          <div class="zone-canvas-shell" id="zoneCanvasShell">
-            <div class="zone-placeholder">
-              <span class="tag">Map preview</span>
-              <p>
-                This is where the rotated Kenny tiles, minimap,
-                and drop in flight path will render once we connect
-                the IZZA WAR ZONE client.
-              </p>
-            </div>
-          </div>
-        </section>
-
-        <!-- Right, IZZA WAR ZONE specific friends and starter character -->
-        <aside class="side-panel">
-          <div class="friends-card">
-            <div class="card-title">Party and friends</div>
-            <div class="friends-actions">
-              <button class="btn-ghost" id="inviteBtn">Invite friends</button>
-              <button class="btn-ghost secondary" id="searchBtn">Search players</button>
-            </div>
-            <div class="friends-foot">
-              Lobby friends and party slots will live here, separate from
-              your existing IZZA friends system so War Zone can run its own
-              parties, invites, and matchmaking.
-            </div>
-          </div>
-
-          <div class="character-card">
-            <div class="card-title">Starter operator</div>
-            <div class="character-body">
-              <div class="character-preview">
-                <!-- later swap to real Kenny soldier sprite, rotated -->
-                <div class="character-silhouette"></div>
+        <div class="main-row">
+          <!-- LEFT: Warzone-style drop zone / map background -->
+          <section class="zone-panel">
+            <div class="zone-header">
+              <div>
+                <span>Drop zone</span>
+                <strong>Pre-deployment</strong>
               </div>
-              <div class="character-info">
-                <div class="char-name" id="charName">
-                  IZZA Soldier, Basic Man
+              <div style="font-size:10px;color:#7fd1ff;">
+                Kenny maps · rotated view
+              </div>
+            </div>
+            <div class="zone-canvas-shell" id="zoneCanvasShell">
+              <div class="zone-placeholder">
+                <span class="tag">Map preview</span>
+                <p>
+                  This panel uses a Warzone-style background. Replace
+                  <code>warzone-map-kenny.png</code> with your Kenny
+                  top-down map, then we’ll draw the flight path and
+                  drop-in line on top with the JS client.
+                </p>
+              </div>
+            </div>
+          </section>
+
+          <!-- RIGHT: IZZA WAR ZONE friends + starter operator -->
+          <aside class="side-panel">
+            <div class="friends-card">
+              <div class="card-title">Party and friends</div>
+              <div class="friends-actions">
+                <button class="btn-ghost" id="inviteBtn">Invite friends</button>
+                <button class="btn-ghost secondary" id="searchBtn">Search players</button>
+              </div>
+              <div class="friends-foot">
+                War Zone uses its own party system: search Pi-authed players,
+                send invites into this lobby, and see their operators stand
+                beside you in real time once the multiplayer server is wired.
+              </div>
+            </div>
+
+            <div class="character-card">
+              <div class="card-title">Starter operator</div>
+              <div class="character-body">
+                <div class="character-preview">
+                  <!-- later swap to the proper Kenny soldier sprite (rotated) -->
+                  <div class="character-silhouette"></div>
                 </div>
-                <div class="char-sub">
-                  Choose your starter operator for IZZA WAR ZONE.
-                  Cosmetics and higher tier skins will come from IZZA token
-                  upgrades and battle rewards later.
-                </div>
-                <div class="char-toggle">
-                  <button class="char-chip active" data-class="soldier_m">
-                    Basic man
-                  </button>
-                  <button class="char-chip" data-class="soldier_f">
-                    Basic woman
-                  </button>
+                <div class="character-info">
+                  <div class="char-name" id="charName">
+                    IZZA Soldier, Basic Man
+                  </div>
+                  <div class="char-sub">
+                    Pick your starter IZZA Soldier. Cosmetic skins and
+                    weapon blueprints will unlock via IZZA token upgrades
+                    and War Zone battle rewards.
+                  </div>
+                  <div class="char-toggle">
+                    <button class="char-chip active" data-class="soldier_m">
+                      Basic man
+                    </button>
+                    <button class="char-chip" data-class="soldier_f">
+                      Basic woman
+                    </button>
+                  </div>
                 </div>
               </div>
             </div>
-          </div>
-        </aside>
-      </div>
+          </aside>
+        </div>
 
-      <div class="bottom-row">
-        <button class="deploy-btn" id="deployBtn">
-          <span>Deploy</span>
-          <span class="tag">drop in</span>
-        </button>
+        <div class="bottom-row">
+          <button class="deploy-btn" id="deployBtn">
+            <span>Deploy</span>
+            <span class="tag">drop in</span>
+          </button>
+        </div>
       </div>
     </div>
   </div>
 
   <script>
-    // Character toggle logic for starter IZZA Soldier
+    // Manual landscape: if we’re on desktop (true landscape), un-rotate.
+    (function(){
+      const wrapper = document.getElementById("rotWrapper");
+
+      function updateLayout(){
+        if (!wrapper) return;
+        const landscape = window.innerWidth >= window.innerHeight;
+        if (landscape){
+          // Desktop / real landscape: no rotation.
+          wrapper.style.transform = "none";
+          wrapper.style.width = "100%";
+          wrapper.style.height = "100%";
+        } else {
+          // Phone in portrait (Pi Browser): rotate to fake landscape.
+          wrapper.style.width = window.innerHeight + "px";
+          wrapper.style.height = window.innerWidth + "px";
+          wrapper.style.transform = "rotate(90deg) translateY(-100%)";
+        }
+      }
+
+      window.addEventListener("resize", updateLayout);
+      window.addEventListener("orientationchange", updateLayout);
+      updateLayout();
+    })();
+
+    // Basic character toggle + stub hooks for invites / deploy.
     (function(){
       const chips = document.querySelectorAll(".char-chip");
       const nameEl = document.getElementById("charName");
 
       function setStarter(code){
         chips.forEach(c => {
-          if (c.dataset.class === code) {
-            c.classList.add("active");
-          } else {
-            c.classList.remove("active");
-          }
+          c.classList.toggle("active", c.dataset.class === code);
         });
-        if (code === "soldier_f") {
-          nameEl.textContent = "IZZA Soldier, Basic Woman";
-        } else {
-          nameEl.textContent = "IZZA Soldier, Basic Man";
-        }
-        // later we can POST to a War Zone endpoint to persist starter choice
-        // fetch("/warzone/api/starter", { method:"POST", body:JSON.stringify({ starter: code }), headers:{ "Content-Type":"application/json" } });
+        nameEl.textContent =
+          code === "soldier_f"
+            ? "IZZA Soldier, Basic Woman"
+            : "IZZA Soldier, Basic Man";
+
+        // Later: POST this choice to your War Zone profile endpoint.
+        // fetch("/warzone/api/starter", {
+        //   method:"POST",
+        //   headers:{ "Content-Type":"application/json" },
+        //   body:JSON.stringify({ starter: code })
+        // });
       }
 
       chips.forEach(c => {
-        c.addEventListener("click", function(){
-          setStarter(this.dataset.class);
-        });
+        c.addEventListener("click", () => setStarter(c.dataset.class));
       });
 
-      // Deploy stub, later this can go to /warzone/deploy or boot the FPS client
-      const deployBtn = document.getElementById("deployBtn");
-      if (deployBtn) {
-        deployBtn.addEventListener("click", function(){
-          alert("Deploy sequence will start the cinematic drop in and load the Kenny map. Not wired yet.");
-          // example future navigation:
-          // window.location.href = "/warzone/deploy";
-        });
-      }
-
-      document.getElementById("inviteBtn")?.addEventListener("click", function(){
-        alert("War Zone invites will open here. We will wire this to the IZZA WAR ZONE friend system.");
+      document.getElementById("deployBtn")?.addEventListener("click", () => {
+        alert("Deploy will connect to the Node multiplayer server, fill to 20 players with bots, then load the Kenny map. Stub for now.");
+        // Example future:
+        // window.location.href = "/warzone/match/search";
       });
-      document.getElementById("searchBtn")?.addEventListener("click", function(){
-        alert("Player search UI will live here, using Pi authed War Zone accounts.");
+
+      document.getElementById("inviteBtn")?.addEventListener("click", () => {
+        alert("War Zone party invites UI goes here (WebSocket → Node server).");
+      });
+
+      document.getElementById("searchBtn")?.addEventListener("click", () => {
+        alert("Player search overlay will live here, querying War Zone profiles for Pi-authed users.");
       });
     })();
+
+    // ======= multiplayer wiring sketch (for later, Node side) =======
+    // In the future this page will open a WebSocket to your Node server:
+    //
+    // const ws = new WebSocket("wss://YOUR-WARZONE-NODE/ws/lobby");
+    // ws.onopen = () => ws.send(JSON.stringify({ type:"joinLobby", token:"<JWT from Flask>" }));
+    // ws.onmessage = (ev) => {
+    //   const msg = JSON.parse(ev.data);
+    //   if (msg.type === "lobbyState") { /* update party list + operators */ }
+    //   if (msg.type === "matchFound") { window.location.href = "/warzone/match/" + msg.matchId; }
+    // };
+    //
+    // Flask will just hand out the JWT + user id; Node will own the
+    // lobby, party, and 20-player matchmaking (plus bots).
   </script>
 </body>
 </html>
