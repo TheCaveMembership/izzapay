@@ -196,20 +196,20 @@
       z-index:1;
     }
 
-    /* 3D soldier canvas over the map */
+    /* 3D soldier canvas over the map — make it big so it's definitely visible */
     .zone-soldier-canvas{
       position:absolute;
       left:50%;
-      bottom:0;
+      bottom:-8%;
       transform:translateX(-50%);
-      width:40%;
-      height:100%;
+      width:70%;
+      height:140%;
       pointer-events:none;
       z-index:2;
       display:block;
     }
 
-    /* Loadout bar under the map – text + buttons */
+    /* Loadout bar styles (kept for reuse of .btn-loadout) */
     .loadout-bar{
       margin-top:4px;
       padding:6px 10px;
@@ -253,7 +253,7 @@
       color:#ffefc6;
     }
 
-    /* Right side: friends + starter operator */
+    /* Right side: friends + armory */
     .side-panel{
       display:flex;
       flex-direction:column;
@@ -309,7 +309,6 @@
       display:flex;
       gap:8px;
     }
-    /* we removed the tiny preview box – just keep info text + chips */
     .character-info{
       flex:1;
       display:flex;
@@ -329,26 +328,8 @@
     .char-toggle{
       display:flex;
       gap:6px;
-      margin-top:4px;
-    }
-    .char-chip{
-      flex:1;
-      padding:5px 7px;
-      border-radius:999px;
-      border:1px solid rgba(127,209,255,.4);
-      background:var(--panelSoft);
-      font-size:11px;
-      text-align:center;
-      cursor:pointer;
-      text-transform:uppercase;
-      letter-spacing:.12em;
-      color:#9fb0d6;
-    }
-    .char-chip.active{
-      border-color:var(--accent2);
-      background:linear-gradient(90deg,#ff3b6b,#ffcf4d);
-      color:#1b0410;
-      font-weight:600;
+      margin-top:6px;
+      flex-wrap:wrap;
     }
 
     /* Overlays (friends / search / matchmaking / shop) */
@@ -531,6 +512,20 @@
       border-bottom:1px solid rgba(44,64,122,.65);
     }
     .shop-item:last-child{border-bottom:none;}
+    .shop-preview{
+      width:80px;
+      height:64px;
+      border-radius:8px;
+      border:1px solid rgba(66,91,168,.8);
+      background:radial-gradient(circle at top,#060c20,#02030a);
+      overflow:hidden;
+      flex-shrink:0;
+    }
+    .shop-preview-canvas{
+      width:100%;
+      height:100%;
+      display:block;
+    }
     .shop-main{
       flex:1;
       min-width:0;
@@ -603,7 +598,7 @@
     }
   </style>
   <script src="https://sdk.minepi.com/pi-sdk.js"></script>
-  <!-- Babylon.js for 3D lobby soldier -->
+  <!-- Babylon.js for 3D lobby soldier + shop previews -->
   <script src="https://cdn.babylonjs.com/babylon.js"></script>
   <script src="https://cdn.babylonjs.com/loaders/babylonjs.loaders.min.js"></script>
 </head>
@@ -645,15 +640,7 @@
               <!-- 3D soldier rendered on top of the map -->
               <canvas id="soldierCanvas" class="zone-soldier-canvas"></canvas>
             </div>
-
-            <!-- Loadout bar: PRE-DEPLOY LOADOUT text + buttons -->
-            <div class="loadout-bar">
-              <div class="loadout-label">Pre-deploy loadout</div>
-              <div class="loadout-actions">
-                <button class="btn-loadout secondary" id="weaponsBtn">Weapons</button>
-                <button class="btn-loadout" id="skinsBtn">Skins</button>
-              </div>
-            </div>
+            <!-- PRE-DEPLOY LOADOUT bar removed on purpose -->
           </section>
 
           <aside class="side-panel">
@@ -670,32 +657,20 @@
             </div>
 
             <div class="character-card">
-              <div class="card-title">Starter operator</div>
+              <div class="card-title">IZZA soldier and armory</div>
               <div class="character-body">
                 <div class="character-info">
                   <div class="char-name" id="charName">
-                    {% if player.starter == 'soldier_f' %}
-                      IZZA Soldier, Basic Woman
-                    {% else %}
-                      IZZA Soldier, Basic Man
-                    {% endif %}
+                    IZZA Soldier
                   </div>
                   <div class="char-sub">
-                    Pick your starter IZZA Soldier. Cosmetics, camos, and
-                    weapon blueprints will unlock with IZZA token upgrades and
-                    War Zone battle rewards.
+                    All players start as the basic IZZA Soldier. Unlock extra weapons
+                    and operator skins in the Armory, then equip your favorites
+                    before dropping into IZZA WAR ZONE.
                   </div>
                   <div class="char-toggle">
-                    <button
-                      class="char-chip {% if player.starter != 'soldier_f' %}active{% endif %}"
-                      data-class="soldier_m">
-                      Basic man
-                    </button>
-                    <button
-                      class="char-chip {% if player.starter == 'soldier_f' %}active{% endif %}"
-                      data-class="soldier_f">
-                      Basic woman
-                    </button>
+                    <button class="btn-loadout secondary" id="weaponsBtn">Weapons</button>
+                    <button class="btn-loadout" id="skinsBtn">Skins</button>
                   </div>
                 </div>
               </div>
@@ -849,35 +824,6 @@
       window.addEventListener("resize", updateLayout);
       window.addEventListener("orientationchange", updateLayout);
       updateLayout();
-    })();
-
-    // Starter operator toggle – also notifies the 3D soldier renderer
-    (function(){
-      const chips = document.querySelectorAll(".char-chip");
-      const nameEl = document.getElementById("charName");
-
-      function setStarter(code){
-        chips.forEach(c => {
-          c.classList.toggle("active", c.dataset.class === code);
-        });
-        if (code === "soldier_f"){
-          nameEl.textContent = "IZZA Soldier, Basic Woman";
-        } else {
-          nameEl.textContent = "IZZA Soldier, Basic Man";
-        }
-        if (window.__setLobbySoldierGender){
-          window.__setLobbySoldierGender(code);
-        }
-        // later: POST to /warzone/api/starter to persist
-      }
-
-      chips.forEach(c => {
-        c.addEventListener("click", () => setStarter(c.dataset.class));
-      });
-
-      // initial state from server
-      const initial = "{{ 'soldier_f' if player.starter == 'soldier_f' else 'soldier_m' }}";
-      window.addEventListener("load", () => setStarter(initial));
     })();
 
     // ---------- Minimal IZZA wallet helpers (ported from creatures flow) ----------
@@ -1124,10 +1070,84 @@
       searchGo?.addEventListener("click", doSearch);
     })();
 
-    // ---------- Armory load + IZZA purchases ----------
+    // ---------- Armory load + IZZA purchases + 3D previews ----------
     (function(){
       const weaponsList = document.getElementById("weaponsList");
       const skinsList   = document.getElementById("skinsList");
+
+      function createShopPreview(canvas, slot, sku){
+        if (!canvas || !window.BABYLON) return;
+
+        const engine = new BABYLON.Engine(canvas, true, {
+          preserveDrawingBuffer:true,
+          stencil:false
+        });
+        const scene = new BABYLON.Scene(engine);
+        scene.clearColor = new BABYLON.Color4(0,0,0,0);
+
+        const camera = new BABYLON.ArcRotateCamera(
+          "c",
+          Math.PI * 1.4,
+          Math.PI / 2.4,
+          2.0,
+          new BABYLON.Vector3(0,0.8,0),
+          scene
+        );
+        camera.attachControl(canvas, false);
+        camera.inputs.clear();
+        camera.lowerRadiusLimit = camera.radius;
+        camera.upperRadiusLimit = camera.radius;
+        camera.panningSensibility = 0;
+
+        const light = new BABYLON.HemisphericLight(
+          "h",
+          new BABYLON.Vector3(0,1,0),
+          scene
+        );
+        light.intensity = 1.1;
+
+        let base = "/assets/warzone3d/";
+        if (slot === "weapons"){
+          base += "weapons/";
+        } else {
+          base += "skins/";
+        }
+        const url = base + sku + ".glb";
+
+        const lastSlash = url.lastIndexOf("/");
+        const rootUrl = url.substring(0,lastSlash+1);
+        const fileName = url.substring(lastSlash+1);
+
+        BABYLON.SceneLoader.ImportMesh(
+          "",
+          rootUrl,
+          fileName,
+          scene,
+          function(meshes, ps, skeletons, animGroups){
+            const root = new BABYLON.TransformNode("shopRoot", scene);
+            meshes.forEach(m => {
+              m.parent = root;
+            });
+
+            root.position = new BABYLON.Vector3(0,-0.5,0);
+            root.rotation = new BABYLON.Vector3(0,Math.PI,0);
+            root.scaling = new BABYLON.Vector3(1.2,1.2,1.2);
+
+            if (animGroups && animGroups.length){
+              animGroups.forEach(g => g.stop());
+              animGroups[0].start(true);
+            }
+          },
+          null,
+          function(err){
+            console.warn("Preview load failed for", slot, sku, err);
+          }
+        );
+
+        engine.runRenderLoop(function(){
+          scene.render();
+        });
+      }
 
       async function loadShop(slot){
         const listEl = slot === "weapons" ? weaponsList : skinsList;
@@ -1149,6 +1169,12 @@
           items.forEach(it => {
             const row = document.createElement("div");
             row.className = "shop-item";
+
+            const preview = document.createElement("div");
+            preview.className = "shop-preview";
+            const previewCanvas = document.createElement("canvas");
+            previewCanvas.className = "shop-preview-canvas";
+            preview.appendChild(previewCanvas);
 
             const main = document.createElement("div");
             main.className = "shop-main";
@@ -1200,9 +1226,14 @@
             });
 
             side.appendChild(btn);
+
+            row.appendChild(preview);
             row.appendChild(main);
             row.appendChild(side);
             listEl.appendChild(row);
+
+            // kick off Babylon preview for this item
+            createShopPreview(previewCanvas, slot, it.sku);
           });
         }catch(e){
           console.error(e);
@@ -1283,16 +1314,9 @@
       });
 
       let scene, camera;
-      let currentGender = "soldier_m";
       let currentRoot = null;
 
-      function getAssetForGender(code){
-        // adjust these paths to match your GLB filenames
-        if (code === "soldier_f"){
-          return "/assets/warzone3d/pistol_soldier_f_idle.glb";
-        }
-        return "/assets/warzone3d/pistol_soldier_m_idle.glb";
-      }
+      const SOLDIER_ASSET = "/assets/warzone3d/pistol_soldier_m_idle.glb";
 
       function createScene(){
         scene = new BABYLON.Scene(engine);
@@ -1302,8 +1326,8 @@
           "cam",
           Math.PI * 1.3,
           Math.PI / 2.4,
-          3,
-          new BABYLON.Vector3(0,1,0),
+          1.6,                             // closer so soldier is big
+          new BABYLON.Vector3(0,1.3,0),
           scene
         );
         camera.attachControl(canvas, false);
@@ -1319,7 +1343,7 @@
         );
         light.intensity = 1.2;
 
-        loadSoldier(currentGender);
+        loadSoldier();
 
         engine.runRenderLoop(function(){
           if (scene){ scene.render(); }
@@ -1330,10 +1354,8 @@
         });
       }
 
-      function loadSoldier(code){
-        const url = getAssetForGender(code);
-        currentGender = code;
-
+      function loadSoldier(){
+        const url = SOLDIER_ASSET;
         if (!scene || !BABYLON.SceneLoader) return;
 
         if (currentRoot){
@@ -1356,8 +1378,9 @@
               m.parent = currentRoot;
             });
 
-            currentRoot.position = new BABYLON.Vector3(0,-1,0);
+            currentRoot.position = new BABYLON.Vector3(0,-1.1,0);
             currentRoot.rotation = new BABYLON.Vector3(0,Math.PI,0);
+            currentRoot.scaling = new BABYLON.Vector3(1.8,1.8,1.8); // make it massive
 
             if (animGroups && animGroups.length){
               animGroups.forEach(g => g.stop());
@@ -1368,13 +1391,6 @@
       }
 
       createScene();
-
-      // called from the starter-operator toggle
-      window.__setLobbySoldierGender = function(code){
-        if (code !== currentGender){
-          loadSoldier(code);
-        }
-      };
     })();
   </script>
 </body>
