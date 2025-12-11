@@ -191,6 +191,32 @@ def init_db():
           ON izza_airdrop_wallets(username);
 
         ----------------------------------------------------------------------
+        -- IZZA WAR ZONE friends + lobby invites
+        ----------------------------------------------------------------------
+        CREATE TABLE IF NOT EXISTS warzone_invites(
+          id INTEGER PRIMARY KEY,
+          from_user_id INTEGER NOT NULL,
+          to_user_id   INTEGER NOT NULL,
+          status       TEXT NOT NULL DEFAULT 'pending', -- pending | accepted | declined
+          created_at   INTEGER NOT NULL,
+          responded_at INTEGER,
+          FOREIGN KEY(from_user_id) REFERENCES users(id),
+          FOREIGN KEY(to_user_id)   REFERENCES users(id)
+        );
+        CREATE INDEX IF NOT EXISTS idx_warzone_invites_to_status
+          ON warzone_invites(to_user_id, status);
+
+        CREATE TABLE IF NOT EXISTS warzone_friends(
+          id INTEGER PRIMARY KEY,
+          user_id        INTEGER NOT NULL,
+          friend_user_id INTEGER NOT NULL,
+          created_at     INTEGER NOT NULL,
+          UNIQUE(user_id, friend_user_id),
+          FOREIGN KEY(user_id)        REFERENCES users(id),
+          FOREIGN KEY(friend_user_id) REFERENCES users(id)
+        );
+
+        ----------------------------------------------------------------------
         -- NFT / Collections
         ----------------------------------------------------------------------
 
@@ -610,6 +636,32 @@ def ensure_schema():
         );
         CREATE INDEX IF NOT EXISTS idx_nft_pending_pub ON nft_pending_claims(buyer_pub, status);
         CREATE INDEX IF NOT EXISTS idx_nft_pending_user ON nft_pending_claims(buyer_username, status);
+
+        ----------------------------------------------------------------------
+        -- IZZA WAR ZONE friends + lobby invites
+        ----------------------------------------------------------------------
+        CREATE TABLE IF NOT EXISTS warzone_invites(
+          id INTEGER PRIMARY KEY,
+          from_user_id INTEGER NOT NULL,
+          to_user_id   INTEGER NOT NULL,
+          status       TEXT NOT NULL DEFAULT 'pending', -- pending | accepted | declined
+          created_at   INTEGER NOT NULL,
+          responded_at INTEGER,
+          FOREIGN KEY(from_user_id) REFERENCES users(id),
+          FOREIGN KEY(to_user_id)   REFERENCES users(id)
+        );
+        CREATE INDEX IF NOT EXISTS idx_warzone_invites_to_status
+          ON warzone_invites(to_user_id, status);
+
+        CREATE TABLE IF NOT EXISTS warzone_friends(
+          id INTEGER PRIMARY KEY,
+          user_id        INTEGER NOT NULL,
+          friend_user_id INTEGER NOT NULL,
+          created_at     INTEGER NOT NULL,
+          UNIQUE(user_id, friend_user_id),
+          FOREIGN KEY(user_id)        REFERENCES users(id),
+          FOREIGN KEY(friend_user_id) REFERENCES users(id)
+        );
         """)
 
         # Partial UNIQUE indexes (recreate if needed)
