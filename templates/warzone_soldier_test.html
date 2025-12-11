@@ -2,9 +2,8 @@
 <html lang="en">
 <head>
   <meta charset="utf-8">
-  <title>War Zone soldier test (Three.js)</title>
+  <title>War Zone soldier test</title>
   <meta name="viewport" content="width=device-width,initial-scale=1">
-
   <style>
     html,body{
       margin:0;
@@ -22,145 +21,145 @@
       left:10px;
       font-size:14px;
       z-index:5;
-      pointer-events:none;
     }
-    #gl{
+    #renderCanvas{
       position:fixed;
-      inset:0;
+      left:0;
+      top:0;
       width:100%;
       height:100%;
       display:block;
       touch-action:none;
     }
   </style>
-
-  <!-- Three.js core (same version you use for IZZA DASH) -->
-  <script src="https://unpkg.com/three@0.157.0/build/three.min.js"></script>
-  <!-- GLTF / GLB loader -->
-  <script src="https://unpkg.com/three@0.157.0/examples/js/loaders/GLTFLoader.js"></script>
+  <script src="https://cdn.babylonjs.com/babylon.js"></script>
+  <script src="https://cdn.babylonjs.com/loaders/babylonjs.loaders.min.js"></script>
 </head>
 <body>
-  <div id="msg">Booting Three.js…</div>
-  <canvas id="gl"></canvas>
+  <div id="msg">Booting Babylon…</div>
+  <canvas id="renderCanvas"></canvas>
 
   <script>
-    const msgEl = document.getElementById('msg');
-    const canvas = document.getElementById('gl');
+    const canvas = document.getElementById("renderCanvas");
+    const msgEl  = document.getElementById("msg");
 
-    if (!window.THREE) {
-      msgEl.textContent = 'Three.js not available';
+    if (!canvas || !window.BABYLON){
+      msgEl.textContent = "Babylon not available";
     } else {
-      const scene = new THREE.Scene();
-      scene.background = new THREE.Color(0x000000);
-
-      const camera = new THREE.PerspectiveCamera(
-        50,
-        window.innerWidth / window.innerHeight,
-        0.1,
-        100
-      );
-      camera.position.set(0, 1.6, 6);
-
-      const renderer = new THREE.WebGLRenderer({
-        canvas,
-        antialias: true
+      const engine = new BABYLON.Engine(canvas, true, {
+        preserveDrawingBuffer:true,
+        stencil:true
       });
-      renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
-      renderer.setSize(window.innerWidth, window.innerHeight, false);
 
-      const hemi = new THREE.HemisphereLight(0xffffff, 0x222233, 1.1);
-      scene.add(hemi);
+      const scene  = new BABYLON.Scene(engine);
+      scene.clearColor = new BABYLON.Color4(0,0,0,1);
 
-      const dir = new THREE.DirectionalLight(0xffffff, 1.0);
-      dir.position.set(3, 6, 5);
-      scene.add(dir);
+      // Camera looking at the origin by default
+      const camera = new BABYLON.ArcRotateCamera(
+        "cam",
+        Math.PI * 1.3,
+        Math.PI / 2.4,
+        4.0,
+        new BABYLON.Vector3(0,1,0),
+        scene
+      );
+      camera.attachControl(canvas, false);
+      camera.inputs.clear();
+      camera.panningSensibility = 0;
 
-      // Debug cube so we always know render is working
-      const debugGeom = new THREE.BoxGeometry(0.6,0.6,0.6);
-      const debugMat  = new THREE.MeshStandardMaterial({ color: 0x00ffff, emissive: 0x008080 });
-      const debugBox  = new THREE.Mesh(debugGeom, debugMat);
-      debugBox.position.set(-2, 0.5, 0);
-      scene.add(debugBox);
+      const light = new BABYLON.HemisphericLight(
+        "h",
+        new BABYLON.Vector3(0,1,0),
+        scene
+      );
+      light.intensity = 1.2;
 
-      let soldierRoot = null;
+      // Debug cube so we always see *something*
+      const debugBox = BABYLON.MeshBuilder.CreateBox("debugBox", { size:1 }, scene);
+      debugBox.position.y = 1;
+      const debugMat = new BABYLON.StandardMaterial("dbgMat", scene);
+      debugMat.emissiveColor = new BABYLON.Color3(0,1,1);
+      debugBox.material = debugMat;
 
-      function onResize() {
-        const w = window.innerWidth;
-        const h = window.innerHeight;
-        camera.aspect = w / h;
-        camera.updateProjectionMatrix();
-        renderer.setSize(w, h, false);
-      }
-      window.addEventListener('resize', onResize, { passive: true });
+      engine.runRenderLoop(function(){
+        scene.render();
+      });
 
-      function animate() {
-        requestAnimationFrame(animate);
-        const t = performance.now() * 0.001;
+      window.addEventListener("resize", function(){
+        engine.resize();
+      });
 
-        if (soldierRoot) soldierRoot.rotation.y = t * 0.3;
-        debugBox.rotation.y = t * 0.8;
+      function frameCameraToRoot(root){
+        try{
+          const bounds = root.getHierarchyBoundingVectors(true);
+          const min = bounds.min;
+          const max = bounds.max;
+          const size = max.subtract(min);
+          const center = min.add(size.scale(0.5));
 
-        renderer.render(scene, camera);
-      }
-      animate();
+          const maxDim = Math.max(size.x, size.y, size.z);
+          const radius = (maxDim || 1) * 1.8;
 
-      // ---- Soldier load (same file path as before) ----
-      const SOLDIER_URL = '/assets/warzone3d/pistol_soldier_m_idle.glb';
-
-      msgEl.textContent = 'Loading soldier…';
-
-      const loader = new THREE.GLTFLoader();
-      loader.load(
-        SOLDIER_URL,
-        (gltf) => {
-          soldierRoot = gltf.scene || gltf.scenes[0];
-          if (!soldierRoot) {
-            msgEl.textContent = 'Loaded, but no scene in GLB';
-            return;
-          }
-
-          scene.add(soldierRoot);
-
-          // Frame camera around the soldier
-          const box = new THREE.Box3().setFromObject(soldierRoot);
-          const size = new THREE.Vector3();
-          const center = new THREE.Vector3();
-          box.getSize(size);
-          box.getCenter(center);
-
-          const maxDim = Math.max(size.x, size.y, size.z) || 1;
-          const radius = maxDim * 1.8;
-
+          // Show numbers so we know what the model looks like
           msgEl.textContent =
-            'Soldier imported OK | size: ' +
+            "Soldier imported OK | size: " +
             maxDim.toFixed(3) +
-            ' | radius: ' +
+            " | radius: " +
             radius.toFixed(3);
 
-          camera.position.set(center.x, center.y + maxDim * 0.2, center.z + radius);
-          camera.lookAt(center);
+          // IMPORTANT: we DO NOT rescale or move the model.
+          // We only move the camera so the whole thing fits.
+          camera.target = center;
+          camera.radius = radius;
+          camera.lowerRadiusLimit = radius * 0.8;
+          camera.upperRadiusLimit = radius * 2.2;
+        }catch(e){
+          console.warn("frameCameraToRoot failed", e);
+          msgEl.textContent = "Soldier imported, camera frame failed";
+        }
+      }
 
-          // Optional: play first animation if it exists
-          if (gltf.animations && gltf.animations.length) {
-            const mixer = new THREE.AnimationMixer(soldierRoot);
-            mixer.clipAction(gltf.animations[0]).play();
+      const SOLDIER_URL = "/assets/warzone3d/pistol_soldier_m_idle.glb";
 
-            // simple mixer update
-            let lastTime = performance.now();
-            function updateMixer() {
-              const now = performance.now();
-              const dt = (now - lastTime) / 1000;
-              lastTime = now;
-              mixer.update(dt);
-              requestAnimationFrame(updateMixer);
-            }
-            updateMixer();
+      const lastSlash = SOLDIER_URL.lastIndexOf("/");
+      const rootUrl   = SOLDIER_URL.substring(0,lastSlash+1);
+      const fileName  = SOLDIER_URL.substring(lastSlash+1);
+
+      msgEl.textContent = "Loading soldier…";
+
+      BABYLON.SceneLoader.ImportMesh(
+        "",
+        rootUrl,
+        fileName,
+        scene,
+        function(meshes, ps, skeletons, animGroups){
+          // Keep the cube so we can see the camera hasn't broken
+          debugBox.position.x = -3;
+          debugBox.position.y = 0.5;
+
+          const root = new BABYLON.TransformNode("soldierRoot", scene);
+          meshes.forEach(m => {
+            m.parent = root;
+          });
+
+          frameCameraToRoot(root);
+
+          // Slow spin so it's obvious when it appears
+          scene.onBeforeRenderObservable.clear();
+          scene.onBeforeRenderObservable.add(() => {
+            root.rotation.y += scene.getEngine().getDeltaTime() * 0.0005;
+            debugBox.rotation.y += scene.getEngine().getDeltaTime() * 0.001;
+          });
+
+          if (animGroups && animGroups.length){
+            animGroups.forEach(g => g.stop());
+            animGroups[0].start(true);
           }
         },
-        undefined,
-        (err) => {
-          console.error('GLB load error', err);
-          msgEl.textContent = 'Import error: ' + (err && err.message ? err.message : 'unknown');
+        null,
+        function(scene, message, exception){
+          console.error("ImportMesh error:", message, exception);
+          msgEl.textContent = "Import error: " + message;
         }
       );
     }
