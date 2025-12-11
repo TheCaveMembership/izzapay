@@ -686,3 +686,17 @@ def warzone_equip():
         )
 
     return jsonify({"ok": True})
+
+
+# ----------------------------------------------------------------------
+# Soldier GLB test page (barebones)
+# ----------------------------------------------------------------------
+
+
+@warzone_bp.get("/test-soldier")
+def warzone_test_soldier():
+    """
+    Barebones page that only renders the pistol_soldier_m_idle.glb
+    so we can verify the asset + path independently of the lobby UI.
+    """
+    return render_template("warzone_soldier_test.html")
