@@ -26,26 +26,22 @@
       overflow:hidden;
     }
 
-    /* ====== MANUAL LANDSCAPE WRAPPER ======
-       On phones (Pi Browser) we keep the OS in portrait but rotate the
-       whole game 90° so it *behaves* like landscape. On desktop we
-       disable the transform so it looks normal. */
+    /* ====== MANUAL LANDSCAPE WRAPPER (Pi Browser) ====== */
     .rot-wrapper{
       position:fixed;
       top:0;
       left:0;
-      width:100vh;   /* swapped */
+      width:100vh;
       height:100vw;
       transform-origin:top left;
       transform:rotate(90deg) translateY(-100%);
-      /* smooth-ish when Pi Browser shows / hides chrome */
       transition:transform .15s ease,width .15s ease,height .15s ease;
     }
 
     .lobby-root{
       width:100%;
       height:100%;
-      padding:12px;
+      padding:10px;
     }
 
     .shell{
@@ -81,7 +77,8 @@
     }
     .izzacoin{
       width:30px;height:30px;border-radius:50%;
-      background:url("/assets/izza-war-coin.png") center/cover no-repeat,
+      background:
+        url("/assets/izza.png") center/cover no-repeat,
         radial-gradient(circle at 30% 10%,#ffe9b5 0,#ffcf4d 30%,#b87910 65%,#442400 100%);
       box-shadow:0 0 18px rgba(255,207,77,.6);
       flex-shrink:0;
@@ -110,7 +107,7 @@
     .main-row{
       flex:1;
       display:grid;
-      grid-template-columns:2.2fr 1.2fr;
+      grid-template-columns:2.1fr 1.2fr;
       gap:10px;
       min-height:0;
     }
@@ -146,32 +143,25 @@
       border:1px solid rgba(39,62,130,.9);
       position:relative;
       overflow:hidden;
-      /* Warzone-style background: put your Kenny map image here */
       background:
-        linear-gradient(to top,rgba(0,0,0,.65),rgba(0,0,0,.15)),
+        linear-gradient(to top,rgba(0,0,0,.7),rgba(0,0,0,.2)),
         url("/assets/warzone-map-kenny.png") center/cover no-repeat;
     }
-    .zone-placeholder{
+    .zone-overlay-copy{
       position:absolute;
-      inset:0;
-      display:flex;
-      align-items:center;
-      justify-content:center;
-      flex-direction:column;
-      pointer-events:none;
-      text-align:center;
-    }
-    .zone-placeholder p{
-      font-size:12px;
-      color:#c3cff5;
+      left:14px;
+      bottom:14px;
       max-width:260px;
+      font-size:11px;
+      color:#c3cff5;
     }
-    .zone-placeholder span.tag{
+    .zone-overlay-copy .tag{
       font-size:10px;
       text-transform:uppercase;
       letter-spacing:.16em;
       color:#7fd1ff;
-      margin-bottom:6px;
+      margin-bottom:4px;
+      display:block;
     }
 
     /* Right side, friends and party */
@@ -181,7 +171,6 @@
       gap:8px;
       min-width:0;
     }
-
     .friends-card,
     .character-card{
       border-radius:14px;
@@ -234,16 +223,21 @@
       height:96px;
       border-radius:12px;
       border:1px solid rgba(66,91,168,.8);
-      background:radial-gradient(circle at 30% 0,#3d6bff 0,transparent 55%),#050815;
+      background:
+        radial-gradient(circle at 30% 0,#3d6bff 0,transparent 55%),
+        #050815;
       position:relative;
       flex-shrink:0;
+      overflow:hidden;
     }
     .character-silhouette{
       position:absolute;
-      inset:10px 14px 6px 14px;
-      border-radius:8px;
-      border:1px dashed rgba(159,176,214,.7);
-      opacity:.7;
+      inset:0;
+      background:url("/assets/warzone-operator-m.png") center bottom/contain no-repeat;
+      opacity:.95;
+    }
+    .character-silhouette.female{
+      background-image:url("/assets/warzone-operator-f.png");
     }
     .character-info{
       flex:1;
@@ -289,11 +283,11 @@
     .bottom-row{
       display:flex;
       justify-content:flex-end;
-      margin-top:4px;
+      padding-top:4px;
     }
     .deploy-btn{
-      min-width:180px;
-      padding:9px 16px;
+      min-width:170px;
+      padding:9px 14px;
       border-radius:999px;
       border:none;
       cursor:pointer;
@@ -318,9 +312,114 @@
       opacity:.9;
     }
 
+    /* Simple overlay panels for invites / search / deploy */
+    .overlay{
+      position:absolute;
+      inset:0;
+      display:none;
+      align-items:center;
+      justify-content:center;
+      background:radial-gradient(circle at top,rgba(7,11,30,.96),rgba(1,2,10,.98));
+      z-index:20;
+    }
+    .overlay.visible{display:flex;}
+    .overlay-card{
+      width:90%;
+      max-width:420px;
+      border-radius:18px;
+      border:1px solid rgba(132,153,255,.7);
+      background:linear-gradient(145deg,#050818,#02030c);
+      padding:16px 18px 14px;
+      box-shadow:0 0 40px rgba(0,0,0,.9);
+    }
+    .overlay-header{
+      display:flex;
+      justify-content:space-between;
+      align-items:center;
+      margin-bottom:8px;
+      gap:8px;
+    }
+    .overlay-title{
+      font-size:12px;
+      text-transform:uppercase;
+      letter-spacing:.22em;
+      color:#9fb0d6;
+    }
+    .overlay-close{
+      border:none;
+      background:transparent;
+      color:#9fb0d6;
+      font-size:12px;
+      cursor:pointer;
+      text-transform:uppercase;
+      letter-spacing:.12em;
+    }
+    .overlay-body{
+      font-size:12px;
+      color:#c3cff5;
+      line-height:1.6;
+    }
+    .overlay-body p{margin-bottom:8px;}
+    .overlay-input-row{
+      display:flex;
+      gap:6px;
+      margin-top:6px;
+    }
+    .overlay-input-row input{
+      flex:1;
+      border-radius:999px;
+      border:1px solid rgba(127,209,255,.6);
+      padding:6px 10px;
+      background:#02061b;
+      color:#edf3ff;
+      font-size:12px;
+      outline:none;
+    }
+    .overlay-input-row button{
+      padding:6px 10px;
+      border-radius:999px;
+      border:none;
+      font-size:11px;
+      text-transform:uppercase;
+      letter-spacing:.14em;
+      background:linear-gradient(90deg,#0ff,#7fd1ff);
+      color:#001520;
+      cursor:pointer;
+    }
+    .party-list{
+      margin-top:8px;
+      padding:8px;
+      border-radius:10px;
+      border:1px dashed rgba(127,209,255,.5);
+      font-size:11px;
+      color:#9fb0d6;
+    }
+    .party-row{
+      display:flex;
+      align-items:center;
+      gap:8px;
+      margin-bottom:4px;
+    }
+    .party-row:last-child{margin-bottom:0;}
+    .party-avatar{
+      width:20px;height:20px;border-radius:50%;
+      background:url("/assets/izza.png") center/cover no-repeat,
+        radial-gradient(circle at 30% 10%,#ffe9b5 0,#ffcf4d 40%,#b87910 70%,#281305 100%);
+    }
+    .party-name{
+      flex:1;
+      color:#e7f0ff;
+    }
+    .party-status{
+      font-size:10px;
+      text-transform:uppercase;
+      letter-spacing:.14em;
+      color:#7fd1ff;
+    }
+
     @media (max-width:900px){
       .main-row{
-        grid-template-columns:1.8fr 1.2fr;
+        grid-template-columns:1.7fr 1.3fr;
       }
     }
   </style>
@@ -338,7 +437,10 @@
           <div class="player-pill">
             <span class="label">Operator</span>
             <span class="name">
-              {{ session.get('pi_username') or session.get('pi_handle') or 'Unknown Pi user' }}
+              {{ session.get('username')
+                 or session.get('pi_username')
+                 or session.get('pi_handle')
+                 or 'Unknown Pi user' }}
             </span>
           </div>
         </div>
@@ -356,13 +458,12 @@
               </div>
             </div>
             <div class="zone-canvas-shell" id="zoneCanvasShell">
-              <div class="zone-placeholder">
+              <div class="zone-overlay-copy">
                 <span class="tag">Map preview</span>
                 <p>
-                  This panel uses a Warzone-style background. Replace
-                  <code>warzone-map-kenny.png</code> with your Kenny
-                  top-down map, then we’ll draw the flight path and
-                  drop-in line on top with the JS client.
+                  Top-down Kenny map for IZZA WAR ZONE. When you deploy,
+                  we’ll animate the drop-ship path and your squad’s drop-in
+                  line over this view before the FPS client takes over.
                 </p>
               </div>
             </div>
@@ -377,9 +478,9 @@
                 <button class="btn-ghost secondary" id="searchBtn">Search players</button>
               </div>
               <div class="friends-foot">
-                War Zone uses its own party system: search Pi-authed players,
-                send invites into this lobby, and see their operators stand
-                beside you in real time once the multiplayer server is wired.
+                War Zone runs its own party system. Once wired to the Node
+                server, you’ll see Pi-authed friends standing beside your
+                operator here before each match.
               </div>
             </div>
 
@@ -387,16 +488,15 @@
               <div class="card-title">Starter operator</div>
               <div class="character-body">
                 <div class="character-preview">
-                  <!-- later swap to the proper Kenny soldier sprite (rotated) -->
-                  <div class="character-silhouette"></div>
+                  <div class="character-silhouette" id="charSprite"></div>
                 </div>
                 <div class="character-info">
                   <div class="char-name" id="charName">
                     IZZA Soldier, Basic Man
                   </div>
                   <div class="char-sub">
-                    Pick your starter IZZA Soldier. Cosmetic skins and
-                    weapon blueprints will unlock via IZZA token upgrades
+                    Pick your starter IZZA Soldier. Cosmetics, camos, and
+                    weapon blueprints will unlock with IZZA token upgrades
                     and War Zone battle rewards.
                   </div>
                   <div class="char-toggle">
@@ -419,12 +519,103 @@
             <span class="tag">drop in</span>
           </button>
         </div>
+
+        <!-- INVITE OVERLAY -->
+        <div class="overlay" id="inviteOverlay">
+          <div class="overlay-card">
+            <div class="overlay-header">
+              <div class="overlay-title">War zone party</div>
+              <button class="overlay-close" data-close="inviteOverlay">Close</button>
+            </div>
+            <div class="overlay-body">
+              <p>
+                This is the IZZA WAR ZONE party lobby. Once the Node server
+                is live, it will show live Pi-authed friends you can invite
+                into your squad.
+              </p>
+              <div class="party-list">
+                <div class="party-row">
+                  <div class="party-avatar"></div>
+                  <div class="party-name">
+                    {{ session.get('username')
+                       or session.get('pi_username')
+                       or session.get('pi_handle')
+                       or 'You' }}
+                  </div>
+                  <div class="party-status">leader</div>
+                </div>
+                <div class="party-row">
+                  <div class="party-avatar"></div>
+                  <div class="party-name">Open slot</div>
+                  <div class="party-status">invite</div>
+                </div>
+                <div class="party-row">
+                  <div class="party-avatar"></div>
+                  <div class="party-name">Open slot</div>
+                  <div class="party-status">invite</div>
+                </div>
+                <div class="party-row">
+                  <div class="party-avatar"></div>
+                  <div class="party-name">Open slot</div>
+                  <div class="party-status">invite</div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- SEARCH OVERLAY -->
+        <div class="overlay" id="searchOverlay">
+          <div class="overlay-card">
+            <div class="overlay-header">
+              <div class="overlay-title">Search players</div>
+              <button class="overlay-close" data-close="searchOverlay">Close</button>
+            </div>
+            <div class="overlay-body">
+              <p>
+                Search Pi-authed IZZA WAR ZONE profiles. This will talk to a
+                dedicated search endpoint on the Node server.
+              </p>
+              <div class="overlay-input-row">
+                <input type="text" id="searchInput" placeholder="Search by Pi username…">
+                <button type="button" id="searchGo">Go</button>
+              </div>
+              <div class="party-list" id="searchResults">
+                Type a name and tap <b>Go</b> to see mock results. Later this
+                will show real players you can invite.
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- DEPLOY OVERLAY -->
+        <div class="overlay" id="deployOverlay">
+          <div class="overlay-card">
+            <div class="overlay-header">
+              <div class="overlay-title">Matchmaking</div>
+              <button class="overlay-close" data-close="deployOverlay">Cancel</button>
+            </div>
+            <div class="overlay-body">
+              <p>
+                Connecting to IZZA WAR ZONE Node server, filling the lobby to
+                <b>20</b> players and topping up with bots if needed. Once a
+                match is ready, the Kenny map client will load.
+              </p>
+              <p style="font-size:11px;color:#9fb0d6;">
+                This is a front-end stub. When you’re ready we’ll swap this to
+                a WebSocket call like:
+                <code>joinLobby → lobbyState → matchFound</code>.
+              </p>
+            </div>
+          </div>
+        </div>
+
       </div>
     </div>
   </div>
 
   <script>
-    // Manual landscape: if we’re on desktop (true landscape), un-rotate.
+    // Manual landscape: disable rotation on real landscape (desktop)
     (function(){
       const wrapper = document.getElementById("rotWrapper");
 
@@ -432,12 +623,10 @@
         if (!wrapper) return;
         const landscape = window.innerWidth >= window.innerHeight;
         if (landscape){
-          // Desktop / real landscape: no rotation.
           wrapper.style.transform = "none";
           wrapper.style.width = "100%";
           wrapper.style.height = "100%";
         } else {
-          // Phone in portrait (Pi Browser): rotate to fake landscape.
           wrapper.style.width = window.innerHeight + "px";
           wrapper.style.height = window.innerWidth + "px";
           wrapper.style.transform = "rotate(90deg) translateY(-100%)";
@@ -449,60 +638,84 @@
       updateLayout();
     })();
 
-    // Basic character toggle + stub hooks for invites / deploy.
+    // Character toggle (swap sprite + label)
     (function(){
       const chips = document.querySelectorAll(".char-chip");
       const nameEl = document.getElementById("charName");
+      const sprite = document.getElementById("charSprite");
 
       function setStarter(code){
         chips.forEach(c => {
           c.classList.toggle("active", c.dataset.class === code);
         });
-        nameEl.textContent =
-          code === "soldier_f"
-            ? "IZZA Soldier, Basic Woman"
-            : "IZZA Soldier, Basic Man";
-
-        // Later: POST this choice to your War Zone profile endpoint.
-        // fetch("/warzone/api/starter", {
-        //   method:"POST",
-        //   headers:{ "Content-Type":"application/json" },
-        //   body:JSON.stringify({ starter: code })
-        // });
+        if (code === "soldier_f"){
+          nameEl.textContent = "IZZA Soldier, Basic Woman";
+          sprite.classList.add("female");
+        } else {
+          nameEl.textContent = "IZZA Soldier, Basic Man";
+          sprite.classList.remove("female");
+        }
+        // Later: POST to War Zone profile endpoint.
+        // fetch("/warzone/api/starter", { ... });
       }
 
       chips.forEach(c => {
         c.addEventListener("click", () => setStarter(c.dataset.class));
       });
-
-      document.getElementById("deployBtn")?.addEventListener("click", () => {
-        alert("Deploy will connect to the Node multiplayer server, fill to 20 players with bots, then load the Kenny map. Stub for now.");
-        // Example future:
-        // window.location.href = "/warzone/match/search";
-      });
-
-      document.getElementById("inviteBtn")?.addEventListener("click", () => {
-        alert("War Zone party invites UI goes here (WebSocket → Node server).");
-      });
-
-      document.getElementById("searchBtn")?.addEventListener("click", () => {
-        alert("Player search overlay will live here, querying War Zone profiles for Pi-authed users.");
-      });
     })();
 
-    // ======= multiplayer wiring sketch (for later, Node side) =======
-    // In the future this page will open a WebSocket to your Node server:
-    //
-    // const ws = new WebSocket("wss://YOUR-WARZONE-NODE/ws/lobby");
+    // Overlays: invites, search, deploy
+    (function(){
+      const inviteOverlay = document.getElementById("inviteOverlay");
+      const searchOverlay = document.getElementById("searchOverlay");
+      const deployOverlay = document.getElementById("deployOverlay");
+
+      function show(id){
+        const el = document.getElementById(id);
+        if (el) el.classList.add("visible");
+      }
+      function hide(id){
+        const el = document.getElementById(id);
+        if (el) el.classList.remove("visible");
+      }
+
+      document.getElementById("inviteBtn")?.addEventListener("click", () => show("inviteOverlay"));
+      document.getElementById("searchBtn")?.addEventListener("click", () => show("searchOverlay"));
+      document.getElementById("deployBtn")?.addEventListener("click", () => show("deployOverlay"));
+
+      document.querySelectorAll(".overlay-close").forEach(btn => {
+        btn.addEventListener("click", function(){
+          const id = this.getAttribute("data-close");
+          if (id) hide(id);
+        });
+      });
+
+      // Tiny mock search so the panel feels alive
+      const searchGo = document.getElementById("searchGo");
+      const searchInput = document.getElementById("searchInput");
+      const searchResults = document.getElementById("searchResults");
+      if (searchGo && searchInput && searchResults){
+        searchGo.addEventListener("click", () => {
+          const q = (searchInput.value || "").trim();
+          if (!q){
+            searchResults.textContent = "Type a Pi username and tap Go.";
+            return;
+          }
+          searchResults.innerHTML = `
+            <div class="party-row">
+              <div class="party-avatar"></div>
+              <div class="party-name">${q}</div>
+              <div class="party-status">invite</div>
+            </div>
+          `;
+        });
+      }
+    })();
+
+    // Sketch for future WebSocket wiring:
+    // const ws = new WebSocket("wss://YOUR-NODE-SERVER/ws/lobby");
     // ws.onopen = () => ws.send(JSON.stringify({ type:"joinLobby", token:"<JWT from Flask>" }));
-    // ws.onmessage = (ev) => {
-    //   const msg = JSON.parse(ev.data);
-    //   if (msg.type === "lobbyState") { /* update party list + operators */ }
-    //   if (msg.type === "matchFound") { window.location.href = "/warzone/match/" + msg.matchId; }
-    // };
-    //
-    // Flask will just hand out the JWT + user id; Node will own the
-    // lobby, party, and 20-player matchmaking (plus bots).
+    // ws.onmessage = (ev) => { ... };
   </script>
 </body>
 </html>
