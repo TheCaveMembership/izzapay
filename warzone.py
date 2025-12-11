@@ -1,5 +1,15 @@
 # warzone.py
-from flask import Blueprint, render_template, session, redirect, request, current_app
+from flask import (
+    Blueprint,
+    render_template,
+    session,
+    redirect,
+    request,
+    current_app,
+    jsonify,
+)
+from time import time
+from db import conn
 
 warzone_bp = Blueprint("warzone_bp", __name__, url_prefix="/warzone")
 
@@ -33,12 +43,17 @@ def warzone_lobby():
         base = "/warzone/auth"
         return redirect(f"{base}?{qs}" if qs else base)
 
-    # Simple player object from session for now
+    # Derive a sane display name from IZZA / Pi session keys
+    display_name = (
+        session.get("username")
+        or session.get("pi_username")
+        or session.get("pi_handle")
+        or f"Operator #{session.get('user_id')}"
+    )
+
     player = {
         "id": session.get("user_id"),
-        # adjust if your session key is different
-        "username": session.get("username") or session.get("pi_username"),
-        # starter class, we can persist this later
+        "username": display_name,
         "starter": session.get("warzone_starter") or "soldier_m",
     }
 
@@ -47,3 +62,88 @@ def warzone_lobby():
     # - party members
     # - Kenny map metadata for the drop in scene
     return render_template("warzone_lobby.html", player=player)
+
+
+# ----------------------------------------------------------------------
+# War Zone API: friend search + lobby invites
+# ----------------------------------------------------------------------
+
+
+def _require_user_id():
+    uid = session.get("user_id")
+    if not uid:
+        return None
+    try:
+        return int(uid)
+    except (TypeError, ValueError):
+        return None
+
+
+@warzone_bp.get("/api/search")
+def warzone_search_players():
+    """
+    Search IZZA users by username / pi_username for War Zone friend invites.
+
+    This uses the existing users table (not bot or merchant tables),
+    and only returns a small JSON list of candidates.
+    """
+    uid = _require_user_id()
+    if not uid:
+        return jsonify({"error": "auth_required"}), 401
+
+    q = (request.args.get("q") or "").strip()
+    if not q:
+        return jsonify({"results": []})
+
+    like = f"%{q}%"
+    with conn() as cx:
+        rows = cx.execute(
+            """
+            SELECT id,
+                   COALESCE(username, pi_username) AS username
+            FROM users
+            WHERE (username    LIKE ? OR pi_username LIKE ?)
+              AND id != ?
+            ORDER BY username COLLATE NOCASE
+            LIMIT 20
+            """,
+            (like, like, uid),
+        ).fetchall()
+
+    results = [
+        {"id": r["id"], "username": r["username"] or f"User #{r['id']}"}
+        for r in rows
+    ]
+    return jsonify({"results": results})
+
+
+@warzone_bp.post("/api/invite")
+def warzone_invite_player():
+    """
+    Create a War Zone lobby invite.
+
+    This writes into warzone_invites; acceptance / party sync can be
+    handled later by the Node lobby server reading these rows.
+    """
+    uid = _require_user_id()
+    if not uid:
+        return jsonify({"error": "auth_required"}), 401
+
+    data = request.get_json(silent=True) or {}
+    target_id = int(data.get("target_id") or 0)
+
+    if not target_id or target_id == uid:
+        return jsonify({"error": "invalid_target"}), 400
+
+    now = int(time())
+    with conn() as cx:
+        cx.execute(
+            """
+            INSERT OR IGNORE INTO warzone_invites
+              (from_user_id, to_user_id, status, created_at)
+            VALUES (?, ?, 'pending', ?)
+            """,
+            (uid, target_id, now),
+        )
+
+    return jsonify({"ok": True})
