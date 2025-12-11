@@ -1,0 +1,137 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>IZZA WAR ZONE — Soldier Test</title>
+  <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+  <style>
+    html,body{
+      margin:0;
+      padding:0;
+      width:100%;
+      height:100%;
+      background:#000;
+      overflow:hidden;
+      touch-action:none;
+    }
+    #soldierCanvas{
+      width:100%;
+      height:100%;
+      display:block;
+    }
+  </style>
+  <!-- Babylon core + loaders -->
+  <script src="https://cdn.babylonjs.com/babylon.js"></script>
+  <script src="https://cdn.babylonjs.com/loaders/babylonjs.loaders.min.js"></script>
+</head>
+<body>
+  <canvas id="soldierCanvas"></canvas>
+
+  <script>
+    (function(){
+      const canvas = document.getElementById("soldierCanvas");
+      if(!canvas || !window.BABYLON){
+        console.error("[SOLDIER TEST] canvas or BABYLON missing");
+        return;
+      }
+
+      const engine = new BABYLON.Engine(canvas, true, {
+        preserveDrawingBuffer:true,
+        stencil:true
+      });
+
+      const scene  = new BABYLON.Scene(engine);
+      scene.clearColor = new BABYLON.Color4(0,0,0,1);
+
+      const camera = new BABYLON.ArcRotateCamera(
+        "cam",
+        Math.PI * 1.3,
+        Math.PI / 2.4,
+        3.0,
+        new BABYLON.Vector3(0,1,0),
+        scene
+      );
+      camera.attachControl(canvas, false);
+      camera.inputs.clear();
+      camera.panningSensibility = 0;
+
+      const light = new BABYLON.HemisphericLight(
+        "h",
+        new BABYLON.Vector3(0,1,0),
+        scene
+      );
+      light.intensity = 1.2;
+
+      const ASSET_URL = "/assets/warzone3d/pistol_soldier_m_idle.glb";
+
+      const lastSlash = ASSET_URL.lastIndexOf("/");
+      const rootUrl   = ASSET_URL.substring(0, lastSlash + 1);
+      const fileName  = ASSET_URL.substring(lastSlash + 1);
+
+      let rootNode = null;
+
+      function frameCameraToRoot(root){
+        try{
+          const bounds = root.getHierarchyBoundingVectors(true);
+          const min = bounds.min;
+          const max = bounds.max;
+          const size = max.subtract(min);
+          const center = min.add(size.scale(0.5));
+          const radius = size.length() * 0.6 || 2.0;
+
+          camera.target = center;
+          camera.radius = radius;
+          camera.lowerRadiusLimit = radius * 0.9;
+          camera.upperRadiusLimit = radius * 1.1;
+        }catch(e){
+          console.warn("[SOLDIER TEST] frameCameraToRoot failed", e);
+        }
+      }
+
+      BABYLON.SceneLoader.ImportMesh(
+        "",
+        rootUrl,
+        fileName,
+        scene,
+        function(meshes, ps, skeletons, animGroups){
+          console.log("[SOLDIER TEST] GLB imported, meshes:", meshes.length);
+
+          rootNode = new BABYLON.TransformNode("soldierRoot", scene);
+          meshes.forEach(m => {
+            m.parent = rootNode;
+          });
+
+          rootNode.position = new BABYLON.Vector3(0,0,0);
+          rootNode.rotation = new BABYLON.Vector3(0,Math.PI,0);
+
+          frameCameraToRoot(rootNode);
+
+          // slow idle spin so you can see movement
+          scene.onBeforeRenderObservable.add(() => {
+            if(rootNode){
+              rootNode.rotation.y += scene.getEngine().getDeltaTime() * 0.0005;
+            }
+          });
+
+          if(animGroups && animGroups.length){
+            animGroups.forEach(g => g.stop());
+            animGroups[0].start(true);
+          }
+        },
+        null,
+        function(scene, message, exception){
+          console.error("[SOLDIER TEST] ImportMesh error:", message, exception);
+        }
+      );
+
+      engine.runRenderLoop(() => {
+        scene.render();
+      });
+
+      window.addEventListener("resize", () => {
+        engine.resize();
+      });
+    })();
+  </script>
+</body>
+</html>
