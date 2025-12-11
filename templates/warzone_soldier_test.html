@@ -54,13 +54,13 @@
       const scene  = new BABYLON.Scene(engine);
       scene.clearColor = new BABYLON.Color4(0,0,0,1);
 
-      // Camera looking at the origin by default
+      // Fixed camera – no fancy auto-framing (Pi Browser safe)
       const camera = new BABYLON.ArcRotateCamera(
         "cam",
-        Math.PI * 1.3,
-        Math.PI / 2.4,
-        4.0,
-        new BABYLON.Vector3(0,1,0),
+        Math.PI * 1.2,        // alpha
+        Math.PI / 2.4,        // beta
+        6.0,                  // radius
+        new BABYLON.Vector3(0,1.2,0), // target
         scene
       );
       camera.attachControl(canvas, false);
@@ -74,53 +74,17 @@
       );
       light.intensity = 1.2;
 
-      // Debug cube so we always see *something*
-      const debugBox = BABYLON.MeshBuilder.CreateBox("debugBox", { size:1 }, scene);
-      debugBox.position.y = 1;
+      // Tiny debug cube so we know camera is sane
+      const debugBox = BABYLON.MeshBuilder.CreateBox("debugBox", { size:0.5 }, scene);
+      debugBox.position = new BABYLON.Vector3(-2, 0.5, 0);
       const debugMat = new BABYLON.StandardMaterial("dbgMat", scene);
       debugMat.emissiveColor = new BABYLON.Color3(0,1,1);
       debugBox.material = debugMat;
 
-      engine.runRenderLoop(function(){
-        scene.render();
-      });
-
-      window.addEventListener("resize", function(){
-        engine.resize();
-      });
-
-      function frameCameraToRoot(root){
-        try{
-          const bounds = root.getHierarchyBoundingVectors(true);
-          const min = bounds.min;
-          const max = bounds.max;
-          const size = max.subtract(min);
-          const center = min.add(size.scale(0.5));
-
-          const maxDim = Math.max(size.x, size.y, size.z);
-          const radius = (maxDim || 1) * 1.8;
-
-          // Show numbers so we know what the model looks like
-          msgEl.textContent =
-            "Soldier imported OK | size: " +
-            maxDim.toFixed(3) +
-            " | radius: " +
-            radius.toFixed(3);
-
-          // IMPORTANT: we DO NOT rescale or move the model.
-          // We only move the camera so the whole thing fits.
-          camera.target = center;
-          camera.radius = radius;
-          camera.lowerRadiusLimit = radius * 0.8;
-          camera.upperRadiusLimit = radius * 2.2;
-        }catch(e){
-          console.warn("frameCameraToRoot failed", e);
-          msgEl.textContent = "Soldier imported, camera frame failed";
-        }
-      }
+      engine.runRenderLoop(() => scene.render());
+      window.addEventListener("resize", () => engine.resize());
 
       const SOLDIER_URL = "/assets/warzone3d/pistol_soldier_m_idle.glb";
-
       const lastSlash = SOLDIER_URL.lastIndexOf("/");
       const rootUrl   = SOLDIER_URL.substring(0,lastSlash+1);
       const fileName  = SOLDIER_URL.substring(lastSlash+1);
@@ -133,28 +97,29 @@
         fileName,
         scene,
         function(meshes, ps, skeletons, animGroups){
-          // Keep the cube so we can see the camera hasn't broken
-          debugBox.position.x = -3;
-          debugBox.position.y = 0.5;
-
+          // Root node for soldier
           const root = new BABYLON.TransformNode("soldierRoot", scene);
+
           meshes.forEach(m => {
             m.parent = root;
           });
 
-          frameCameraToRoot(root);
+          // Put root roughly in front of camera and spin it
+          root.position = new BABYLON.Vector3(0, 0, 0);
 
-          // Slow spin so it's obvious when it appears
           scene.onBeforeRenderObservable.clear();
           scene.onBeforeRenderObservable.add(() => {
-            root.rotation.y += scene.getEngine().getDeltaTime() * 0.0005;
-            debugBox.rotation.y += scene.getEngine().getDeltaTime() * 0.001;
+            const dt = scene.getEngine().getDeltaTime() * 0.001;
+            root.rotation.y += dt * 0.5;
+            debugBox.rotation.y += dt;
           });
 
           if (animGroups && animGroups.length){
             animGroups.forEach(g => g.stop());
             animGroups[0].start(true);
           }
+
+          msgEl.textContent = "Soldier imported OK | meshes: " + meshes.length;
         },
         null,
         function(scene, message, exception){
