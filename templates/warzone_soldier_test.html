@@ -32,32 +32,8 @@
       touch-action:none;
     }
   </style>
-
-  <!-- Babylon core + loaders -->
   <script src="https://cdn.babylonjs.com/babylon.js"></script>
   <script src="https://cdn.babylonjs.com/loaders/babylonjs.loaders.min.js"></script>
-
-  <!-- NEW: Draco config so compressed meshes decode in Pi Browser -->
-  <script>
-    (function(){
-      // Make sure Babylon uses the pure JS Draco decoder (no WASM),
-      // which is safer in restricted webviews like Pi Browser.
-      if (window.BABYLON && BABYLON.DracoCompression) {
-        BABYLON.DracoCompression.Configuration = {
-          decoder: {
-            wasmUrl: "",
-            wasmBinaryUrl: "",
-            jsUrl: "https://cdn.babylonjs.com/draco_decoder_gltf.js"
-          },
-          useWebAssembly: false
-        };
-      }
-      // Disable incremental loading to avoid odd edge-cases on older WebViews.
-      if (window.BABYLON && BABYLON.GLTFFileLoader) {
-        BABYLON.GLTFFileLoader.IncrementalLoading = false;
-      }
-    })();
-  </script>
 </head>
 <body>
   <div id="msg">Booting Babylon…</div>
@@ -70,6 +46,22 @@
     if (!canvas || !window.BABYLON){
       msgEl.textContent = "Babylon not available";
     } else {
+      // -----------------------------
+      // Draco configuration (for KHR_draco_mesh_compression)
+      // -----------------------------
+      if (BABYLON.DracoCompression) {
+        BABYLON.DracoCompression.Configuration = {
+          decoder: {
+            // you can later host these files yourself instead of preview.babylonjs.com
+            wasmUrl:      "https://preview.babylonjs.com/draco_wasm_wrapper_gltf.js",
+            wasmBinaryUrl:"https://preview.babylonjs.com/draco_decoder_gltf.wasm",
+            fallbackUrl:  "https://preview.babylonjs.com/draco_decoder_gltf.js"
+          }
+        };
+      } else {
+        msgEl.textContent = "DracoCompression class not found – this build of Babylon cannot decode Draco meshes.";
+      }
+
       const engine = new BABYLON.Engine(canvas, true, {
         preserveDrawingBuffer:true,
         stencil:true
@@ -82,12 +74,12 @@
         "cam",
         Math.PI * 1.2,
         Math.PI / 2.4,
-        10.0,
+        6.0,                         // closer radius, we’ll adjust once model is in
         new BABYLON.Vector3(0,1,0),
         scene
       );
       camera.attachControl(canvas, false);
-      camera.inputs.clear();
+      camera.inputs.clear();        // disable user orbit so Pi Browser can’t mess it up
       camera.panningSensibility = 0;
 
       const light = new BABYLON.HemisphericLight(
@@ -112,11 +104,7 @@
         engine.resize();
       });
 
-      // NOTE: if you export a non-Draco "plain" GLB from Sketchfab,
-      // you can point this to that file instead:
-      // const SOLDIER_URL = "/assets/warzone3d/soldier_plain.glb";
       const SOLDIER_URL = "/assets/warzone3d/pistol_soldier_m_idle.glb";
-
       const lastSlash = SOLDIER_URL.lastIndexOf("/");
       const rootUrl   = SOLDIER_URL.substring(0,lastSlash+1);
       const fileName  = SOLDIER_URL.substring(lastSlash+1);
@@ -128,39 +116,38 @@
         rootUrl,
         fileName,
         scene,
-        function(meshes, ps, skeletons, animGroups){
+        function(meshes, particleSystems, skeletons, animGroups){
           // Count meshes that actually have geometry
           const geoMeshes = meshes.filter(m =>
             m && m.getTotalVertices && m.getTotalVertices() > 0
           );
-
           const first = geoMeshes[0] || meshes[0] || null;
           const totalVerts = geoMeshes.reduce((sum,m)=>sum+m.getTotalVertices(),0);
 
           msgEl.textContent =
             "Soldier imported | meshes: " + meshes.length +
             " | geoMeshes: " + geoMeshes.length +
-            " | totalVerts: " + totalVerts +
-            (geoMeshes.length === 0 ? " | WARNING: no geometry" : "");
+            " | totalVerts: " + totalVerts;
 
-          // If there is at least one real mesh, force it into view
           if (first && first.getTotalVertices && first.getTotalVertices() > 0) {
             const root = new BABYLON.TransformNode("soldierRoot", scene);
             geoMeshes.forEach(m => {
               m.parent = root;
               m.alwaysSelectAsActiveMesh = true;
-              m.showBoundingBox = true; // just for debugging
+              // m.showBoundingBox = true; // keep OFF now that we know it works
             });
 
-            root.position = new BABYLON.Vector3(0, 1, 0);
+            // Nice centered placement
+            root.position = new BABYLON.Vector3(0, 0, 0);
             root.scaling  = new BABYLON.Vector3(1, 1, 1);
 
-            // Big, safe camera so even if it’s off-center we should see something
-            camera.target = root.position;
-            camera.radius = 12;
-            camera.lowerRadiusLimit = 6;
-            camera.upperRadiusLimit = 20;
+            // Camera tuned so we see the full body
+            camera.target = new BABYLON.Vector3(0, 1.2, 0);
+            camera.radius = 4.5;
+            camera.lowerRadiusLimit = 3.5;
+            camera.upperRadiusLimit = 6.5;
 
+            // Slow idle spin
             scene.onBeforeRenderObservable.clear();
             scene.onBeforeRenderObservable.add(() => {
               root.rotation.y += scene.getEngine().getDeltaTime() * 0.0005;
@@ -170,6 +157,8 @@
               animGroups.forEach(g => g.stop());
               animGroups[0].start(true);
             }
+          } else {
+            msgEl.textContent += " | WARNING: no geometry (model is Draco-compressed and could not be decoded)";
           }
         },
         null,
