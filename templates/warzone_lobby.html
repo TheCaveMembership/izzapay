@@ -26,7 +26,7 @@
       overflow:hidden;
     }
 
-    /* ====== MANUAL LANDSCAPE WRAPPER (Pi Browser) ====== */
+    /* Manual landscape for Pi Browser */
     .rot-wrapper{
       position:fixed;
       top:0;
@@ -55,9 +55,9 @@
         0 0 80px rgba(0,255,255,.08),
         0 0 80px rgba(255,59,107,.12);
       padding:10px 14px;
-      display:flex;
-      flex-direction:column;
-      gap:8px;
+      display:grid;
+      grid-template-rows:auto 1fr auto;
+      row-gap:8px;
     }
 
     .top-row{
@@ -105,14 +105,13 @@
     }
 
     .main-row{
-      flex:1;
+      min-height:0;
       display:grid;
       grid-template-columns:2.1fr 1.2fr;
       gap:10px;
-      min-height:0;
     }
 
-    /* Left side, map / drop zone preview */
+    /* Left side: map / drop zone preview */
     .zone-panel{
       border-radius:14px;
       background:linear-gradient(145deg,#050815,#02030c);
@@ -164,7 +163,7 @@
       display:block;
     }
 
-    /* Right side, friends and party */
+    /* Right side: friends + starter operator */
     .side-panel{
       display:flex;
       flex-direction:column;
@@ -234,7 +233,7 @@
       position:absolute;
       inset:0;
       background:url("/assets/warzone-operator-m.png") center bottom/contain no-repeat;
-      opacity:.95;
+      opacity:.98;
     }
     .character-silhouette.female{
       background-image:url("/assets/warzone-operator-f.png");
@@ -312,7 +311,7 @@
       opacity:.9;
     }
 
-    /* Simple overlay panels for invites / search / deploy */
+    /* Overlays for invites / search / matchmaking */
     .overlay{
       position:absolute;
       inset:0;
@@ -359,7 +358,6 @@
       color:#c3cff5;
       line-height:1.6;
     }
-    .overlay-body p{margin-bottom:8px;}
     .overlay-input-row{
       display:flex;
       gap:6px;
@@ -416,16 +414,27 @@
       letter-spacing:.14em;
       color:#7fd1ff;
     }
+    .invite-btn{
+      border:none;
+      border-radius:999px;
+      padding:3px 8px;
+      font-size:10px;
+      text-transform:uppercase;
+      letter-spacing:.12em;
+      background:linear-gradient(90deg,#0ff,#ff3b6b);
+      color:#001520;
+      cursor:pointer;
+    }
 
-    @media (max-width:900px){
+    /* Stack panels on very short screens so Deploy never overlaps */
+    @media (max-height:620px){
       .main-row{
-        grid-template-columns:1.7fr 1.3fr;
+        grid-template-columns:1fr;
       }
     }
   </style>
 </head>
 <body>
-  <!-- Rotated viewport so the game feels landscape inside portrait Pi Browser -->
   <div class="rot-wrapper" id="rotWrapper">
     <div class="lobby-root">
       <div class="shell">
@@ -436,17 +445,11 @@
           </div>
           <div class="player-pill">
             <span class="label">Operator</span>
-            <span class="name">
-              {{ session.get('username')
-                 or session.get('pi_username')
-                 or session.get('pi_handle')
-                 or 'Unknown Pi user' }}
-            </span>
+            <span class="name">{{ player.username }}</span>
           </div>
         </div>
 
         <div class="main-row">
-          <!-- LEFT: Warzone-style drop zone / map background -->
           <section class="zone-panel">
             <div class="zone-header">
               <div>
@@ -461,15 +464,14 @@
               <div class="zone-overlay-copy">
                 <span class="tag">Map preview</span>
                 <p>
-                  Top-down Kenny map for IZZA WAR ZONE. When you deploy,
-                  we’ll animate the drop-ship path and your squad’s drop-in
-                  line over this view before the FPS client takes over.
+                  Top-down Kenny map for IZZA WAR ZONE. When you deploy, we’ll
+                  animate the drop-ship path and your squad’s drop-in line over
+                  this view before the FPS client takes over.
                 </p>
               </div>
             </div>
           </section>
 
-          <!-- RIGHT: IZZA WAR ZONE friends + starter operator -->
           <aside class="side-panel">
             <div class="friends-card">
               <div class="card-title">Party and friends</div>
@@ -478,9 +480,8 @@
                 <button class="btn-ghost secondary" id="searchBtn">Search players</button>
               </div>
               <div class="friends-foot">
-                War Zone runs its own party system. Once wired to the Node
-                server, you’ll see Pi-authed friends standing beside your
-                operator here before each match.
+                War Zone runs its own party system. Invited Pi-authed friends
+                will appear standing beside your operator when they accept.
               </div>
             </div>
 
@@ -488,22 +489,32 @@
               <div class="card-title">Starter operator</div>
               <div class="character-body">
                 <div class="character-preview">
-                  <div class="character-silhouette" id="charSprite"></div>
+                  <div
+                    class="character-silhouette{% if player.starter == 'soldier_f' %} female{% endif %}"
+                    id="charSprite"></div>
                 </div>
                 <div class="character-info">
                   <div class="char-name" id="charName">
-                    IZZA Soldier, Basic Man
+                    {% if player.starter == 'soldier_f' %}
+                      IZZA Soldier, Basic Woman
+                    {% else %}
+                      IZZA Soldier, Basic Man
+                    {% endif %}
                   </div>
                   <div class="char-sub">
                     Pick your starter IZZA Soldier. Cosmetics, camos, and
-                    weapon blueprints will unlock with IZZA token upgrades
-                    and War Zone battle rewards.
+                    weapon blueprints will unlock with IZZA token upgrades and
+                    War Zone battle rewards.
                   </div>
                   <div class="char-toggle">
-                    <button class="char-chip active" data-class="soldier_m">
+                    <button
+                      class="char-chip {% if player.starter != 'soldier_f' %}active{% endif %}"
+                      data-class="soldier_m">
                       Basic man
                     </button>
-                    <button class="char-chip" data-class="soldier_f">
+                    <button
+                      class="char-chip {% if player.starter == 'soldier_f' %}active{% endif %}"
+                      data-class="soldier_f">
                       Basic woman
                     </button>
                   </div>
@@ -529,36 +540,15 @@
             </div>
             <div class="overlay-body">
               <p>
-                This is the IZZA WAR ZONE party lobby. Once the Node server
-                is live, it will show live Pi-authed friends you can invite
-                into your squad.
+                Current squad. When friends accept your invites they’ll appear here.
               </p>
-              <div class="party-list">
+              <div class="party-list" id="partyList">
                 <div class="party-row">
                   <div class="party-avatar"></div>
-                  <div class="party-name">
-                    {{ session.get('username')
-                       or session.get('pi_username')
-                       or session.get('pi_handle')
-                       or 'You' }}
-                  </div>
+                  <div class="party-name">{{ player.username }}</div>
                   <div class="party-status">leader</div>
                 </div>
-                <div class="party-row">
-                  <div class="party-avatar"></div>
-                  <div class="party-name">Open slot</div>
-                  <div class="party-status">invite</div>
-                </div>
-                <div class="party-row">
-                  <div class="party-avatar"></div>
-                  <div class="party-name">Open slot</div>
-                  <div class="party-status">invite</div>
-                </div>
-                <div class="party-row">
-                  <div class="party-avatar"></div>
-                  <div class="party-name">Open slot</div>
-                  <div class="party-status">invite</div>
-                </div>
+                <!-- Other members can be rendered here later from Node/server -->
               </div>
             </div>
           </div>
@@ -573,16 +563,14 @@
             </div>
             <div class="overlay-body">
               <p>
-                Search Pi-authed IZZA WAR ZONE profiles. This will talk to a
-                dedicated search endpoint on the Node server.
+                Search Pi-authed IZZA WAR ZONE players and send lobby invites.
               </p>
               <div class="overlay-input-row">
                 <input type="text" id="searchInput" placeholder="Search by Pi username…">
                 <button type="button" id="searchGo">Go</button>
               </div>
               <div class="party-list" id="searchResults">
-                Type a name and tap <b>Go</b> to see mock results. Later this
-                will show real players you can invite.
+                Type a name and tap <b>Go</b> to search.
               </div>
             </div>
           </div>
@@ -597,14 +585,9 @@
             </div>
             <div class="overlay-body">
               <p>
-                Connecting to IZZA WAR ZONE Node server, filling the lobby to
-                <b>20</b> players and topping up with bots if needed. Once a
-                match is ready, the Kenny map client will load.
-              </p>
-              <p style="font-size:11px;color:#9fb0d6;">
-                This is a front-end stub. When you’re ready we’ll swap this to
-                a WebSocket call like:
-                <code>joinLobby → lobbyState → matchFound</code>.
+                Connecting to the IZZA WAR ZONE lobby, filling up to 20 players
+                per match and topping up with bots if needed. When the match is
+                ready the Kenny map client will load.
               </p>
             </div>
           </div>
@@ -615,10 +598,9 @@
   </div>
 
   <script>
-    // Manual landscape: disable rotation on real landscape (desktop)
+    // Manual landscape: disable rotation when the browser is truly landscape (desktop)
     (function(){
       const wrapper = document.getElementById("rotWrapper");
-
       function updateLayout(){
         if (!wrapper) return;
         const landscape = window.innerWidth >= window.innerHeight;
@@ -632,13 +614,12 @@
           wrapper.style.transform = "rotate(90deg) translateY(-100%)";
         }
       }
-
       window.addEventListener("resize", updateLayout);
       window.addEventListener("orientationchange", updateLayout);
       updateLayout();
     })();
 
-    // Character toggle (swap sprite + label)
+    // Starter operator toggle
     (function(){
       const chips = document.querySelectorAll(".char-chip");
       const nameEl = document.getElementById("charName");
@@ -655,8 +636,8 @@
           nameEl.textContent = "IZZA Soldier, Basic Man";
           sprite.classList.remove("female");
         }
-        // Later: POST to War Zone profile endpoint.
-        // fetch("/warzone/api/starter", { ... });
+        // TODO: POST choice to a War Zone profile endpoint if you want to persist immediately
+        // fetch("/warzone/api/starter", {...})
       }
 
       chips.forEach(c => {
@@ -664,7 +645,7 @@
       });
     })();
 
-    // Overlays: invites, search, deploy
+    // Overlays + real search/invite wiring
     (function(){
       const inviteOverlay = document.getElementById("inviteOverlay");
       const searchOverlay = document.getElementById("searchOverlay");
@@ -690,32 +671,78 @@
         });
       });
 
-      // Tiny mock search so the panel feels alive
+      // Search + invite
       const searchGo = document.getElementById("searchGo");
       const searchInput = document.getElementById("searchInput");
       const searchResults = document.getElementById("searchResults");
-      if (searchGo && searchInput && searchResults){
-        searchGo.addEventListener("click", () => {
-          const q = (searchInput.value || "").trim();
-          if (!q){
-            searchResults.textContent = "Type a Pi username and tap Go.";
+
+      async function doSearch(){
+        const q = (searchInput.value || "").trim();
+        if (!q){
+          searchResults.textContent = "Type a Pi username and tap Go.";
+          return;
+        }
+        try{
+          const res = await fetch(`/warzone/api/search?q=${encodeURIComponent(q)}`);
+          if (!res.ok){
+            searchResults.textContent = "Search failed. Try again.";
             return;
           }
-          searchResults.innerHTML = `
-            <div class="party-row">
+          const data = await res.json();
+          if (!data.results || !data.results.length){
+            searchResults.textContent = "No players found.";
+            return;
+          }
+          searchResults.innerHTML = "";
+          data.results.forEach(player => {
+            const row = document.createElement("div");
+            row.className = "party-row";
+            row.innerHTML = `
               <div class="party-avatar"></div>
-              <div class="party-name">${q}</div>
-              <div class="party-status">invite</div>
-            </div>
-          `;
-        });
-      }
-    })();
+              <div class="party-name">${player.username}</div>
+              <div class="party-status">
+                <button class="invite-btn" data-id="${player.id}">Invite</button>
+              </div>
+            `;
+            searchResults.appendChild(row);
+          });
 
-    // Sketch for future WebSocket wiring:
-    // const ws = new WebSocket("wss://YOUR-NODE-SERVER/ws/lobby");
-    // ws.onopen = () => ws.send(JSON.stringify({ type:"joinLobby", token:"<JWT from Flask>" }));
-    // ws.onmessage = (ev) => { ... };
+          searchResults.querySelectorAll(".invite-btn").forEach(btn => {
+            btn.addEventListener("click", async function(){
+              const id = this.getAttribute("data-id");
+              try{
+                const res = await fetch("/warzone/api/invite", {
+                  method: "POST",
+                  headers: { "Content-Type": "application/json" },
+                  body: JSON.stringify({ target_id: id })
+                });
+                if (res.ok){
+                  this.textContent = "Invited";
+                  this.disabled = true;
+                } else {
+                  this.textContent = "Error";
+                }
+              } catch(e){
+                console.error(e);
+                this.textContent = "Error";
+              }
+            });
+          });
+
+        } catch(err){
+          console.error(err);
+          searchResults.textContent = "Search error. Try again.";
+        }
+      }
+
+      searchGo?.addEventListener("click", doSearch);
+      searchInput?.addEventListener("keydown", function(ev){
+        if (ev.key === "Enter"){
+          ev.preventDefault();
+          doSearch();
+        }
+      });
+    })();
   </script>
 </body>
 </html>
