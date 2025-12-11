@@ -28,6 +28,7 @@ from creatures_api import bp_creatures
 from friends_api import bp as friends_bp
 # 🟢 Wallet API blueprint import (needs to be at top-level)
 from wallet_api import bp as wallet_api_bp
+from warzone import warzone_bp
 
 # ---- DB bootstrap ------------------------------------------------------------
 try:
