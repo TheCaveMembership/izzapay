@@ -20,7 +20,6 @@
       display:block;
     }
   </style>
-  <!-- Babylon core + loaders -->
   <script src="https://cdn.babylonjs.com/babylon.js"></script>
   <script src="https://cdn.babylonjs.com/loaders/babylonjs.loaders.min.js"></script>
 </head>
@@ -31,7 +30,6 @@
     (function(){
       const canvas = document.getElementById("soldierCanvas");
       if(!canvas || !window.BABYLON){
-        console.error("[SOLDIER TEST] canvas or BABYLON missing");
         return;
       }
 
@@ -72,20 +70,18 @@
 
       function frameCameraToRoot(root){
         try{
-          const bounds = root.getHierarchyBoundingVectors(true);
-          const min = bounds.min;
-          const max = bounds.max;
-          const size = max.subtract(min);
-          const center = min.add(size.scale(0.5));
-          const radius = size.length() * 0.6 || 2.0;
+          const bounds  = root.getHierarchyBoundingVectors(true);
+          const min     = bounds.min;
+          const max     = bounds.max;
+          const size    = max.subtract(min);
+          const center  = min.add(size.scale(0.5));
+          const radius  = size.length() * 0.6 || 2.0;
 
           camera.target = center;
           camera.radius = radius;
           camera.lowerRadiusLimit = radius * 0.9;
           camera.upperRadiusLimit = radius * 1.1;
-        }catch(e){
-          console.warn("[SOLDIER TEST] frameCameraToRoot failed", e);
-        }
+        }catch(e){}
       }
 
       BABYLON.SceneLoader.ImportMesh(
@@ -94,19 +90,14 @@
         fileName,
         scene,
         function(meshes, ps, skeletons, animGroups){
-          console.log("[SOLDIER TEST] GLB imported, meshes:", meshes.length);
-
           rootNode = new BABYLON.TransformNode("soldierRoot", scene);
-          meshes.forEach(m => {
-            m.parent = rootNode;
-          });
+          meshes.forEach(m => { m.parent = rootNode; });
 
           rootNode.position = new BABYLON.Vector3(0,0,0);
           rootNode.rotation = new BABYLON.Vector3(0,Math.PI,0);
 
           frameCameraToRoot(rootNode);
 
-          // slow idle spin so you can see movement
           scene.onBeforeRenderObservable.add(() => {
             if(rootNode){
               rootNode.rotation.y += scene.getEngine().getDeltaTime() * 0.0005;
@@ -120,7 +111,7 @@
         },
         null,
         function(scene, message, exception){
-          console.error("[SOLDIER TEST] ImportMesh error:", message, exception);
+          console.error("[SOLDIER TEST] ImportMesh error:", message || exception);
         }
       );
 
