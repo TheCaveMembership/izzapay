@@ -32,8 +32,32 @@
       touch-action:none;
     }
   </style>
+
+  <!-- Babylon core + loaders -->
   <script src="https://cdn.babylonjs.com/babylon.js"></script>
   <script src="https://cdn.babylonjs.com/loaders/babylonjs.loaders.min.js"></script>
+
+  <!-- NEW: Draco config so compressed meshes decode in Pi Browser -->
+  <script>
+    (function(){
+      // Make sure Babylon uses the pure JS Draco decoder (no WASM),
+      // which is safer in restricted webviews like Pi Browser.
+      if (window.BABYLON && BABYLON.DracoCompression) {
+        BABYLON.DracoCompression.Configuration = {
+          decoder: {
+            wasmUrl: "",
+            wasmBinaryUrl: "",
+            jsUrl: "https://cdn.babylonjs.com/draco_decoder_gltf.js"
+          },
+          useWebAssembly: false
+        };
+      }
+      // Disable incremental loading to avoid odd edge-cases on older WebViews.
+      if (window.BABYLON && BABYLON.GLTFFileLoader) {
+        BABYLON.GLTFFileLoader.IncrementalLoading = false;
+      }
+    })();
+  </script>
 </head>
 <body>
   <div id="msg">Booting Babylon…</div>
@@ -76,7 +100,7 @@
       // Bright floor so we know camera is sane
       const floor = BABYLON.MeshBuilder.CreateGround("g", {width:30, height:30}, scene);
       const fMat = new BABYLON.StandardMaterial("fMat", scene);
-      fMat.emissiveColor = new BABYLON.Color3(0,1,1);
+      fMat.emissiveColor = new BABYLON.Color3(1,1,1);
       floor.material = fMat;
       floor.position.y = 0;
 
@@ -88,7 +112,11 @@
         engine.resize();
       });
 
+      // NOTE: if you export a non-Draco "plain" GLB from Sketchfab,
+      // you can point this to that file instead:
+      // const SOLDIER_URL = "/assets/warzone3d/soldier_plain.glb";
       const SOLDIER_URL = "/assets/warzone3d/pistol_soldier_m_idle.glb";
+
       const lastSlash = SOLDIER_URL.lastIndexOf("/");
       const rootUrl   = SOLDIER_URL.substring(0,lastSlash+1);
       const fileName  = SOLDIER_URL.substring(lastSlash+1);
@@ -112,7 +140,8 @@
           msgEl.textContent =
             "Soldier imported | meshes: " + meshes.length +
             " | geoMeshes: " + geoMeshes.length +
-            " | totalVerts: " + totalVerts;
+            " | totalVerts: " + totalVerts +
+            (geoMeshes.length === 0 ? " | WARNING: no geometry" : "");
 
           // If there is at least one real mesh, force it into view
           if (first && first.getTotalVertices && first.getTotalVertices() > 0) {
@@ -120,7 +149,7 @@
             geoMeshes.forEach(m => {
               m.parent = root;
               m.alwaysSelectAsActiveMesh = true;
-              m.showBoundingBox = true;
+              m.showBoundingBox = true; // just for debugging
             });
 
             root.position = new BABYLON.Vector3(0, 1, 0);
@@ -141,10 +170,6 @@
               animGroups.forEach(g => g.stop());
               animGroups[0].start(true);
             }
-          } else {
-            // No mesh with vertices – that means Pi Browser's loader
-            // gave us only empty nodes.
-            msgEl.textContent += " | WARNING: no geometry";
           }
         },
         null,
