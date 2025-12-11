@@ -30,12 +30,6 @@ def warzone_lobby():
     """
     Main IZZA WAR ZONE lobby page.
 
-    The lobby is where:
-      - Players land after Pi auth
-      - Invite friends and search players will live
-      - Starter character is selected (basic man or basic woman IZZA Soldier)
-      - Deploy button sends them into the rotated FPS scene later
-
     If user is not logged in, redirect them to the War Zone auth page.
     """
     if "user_id" not in session:
@@ -43,24 +37,42 @@ def warzone_lobby():
         base = "/warzone/auth"
         return redirect(f"{base}?{qs}" if qs else base)
 
-    # Derive a sane display name from IZZA / Pi session keys
+    # Make sure we can treat user_id as int
+    try:
+        uid = int(session.get("user_id"))
+    except (TypeError, ValueError):
+        uid = None
+
+    db_name = None
+    if uid is not None:
+        # Pull the best display name we have from the users table
+        with conn() as cx:
+            row = cx.execute(
+                """
+                SELECT COALESCE(username, pi_username, pi_uid) AS name
+                FROM users
+                WHERE id = ?
+                """,
+                (uid,),
+            ).fetchone()
+            if row and row["name"]:
+                db_name = row["name"]
+
+    # Fallback to session keys only if DB had nothing
     display_name = (
-        session.get("username")
+        db_name
+        or session.get("username")
         or session.get("pi_username")
         or session.get("pi_handle")
-        or f"Operator #{session.get('user_id')}"
+        or f"User #{uid}"  # last resort
     )
 
     player = {
-        "id": session.get("user_id"),
+        "id": uid,
         "username": display_name,
         "starter": session.get("warzone_starter") or "soldier_m",
     }
 
-    # Later we can also pass:
-    # - friend list
-    # - party members
-    # - Kenny map metadata for the drop in scene
     return render_template("warzone_lobby.html", player=player)
 
 
@@ -83,9 +95,6 @@ def _require_user_id():
 def warzone_search_players():
     """
     Search IZZA users by username / pi_username for War Zone friend invites.
-
-    This uses the existing users table (not bot or merchant tables),
-    and only returns a small JSON list of candidates.
     """
     uid = _require_user_id()
     if not uid:
@@ -120,10 +129,7 @@ def warzone_search_players():
 @warzone_bp.post("/api/invite")
 def warzone_invite_player():
     """
-    Create a War Zone lobby invite.
-
-    This writes into warzone_invites; acceptance / party sync can be
-    handled later by the Node lobby server reading these rows.
+    Create a War Zone lobby invite into warzone_invites.
     """
     uid = _require_user_id()
     if not uid:
