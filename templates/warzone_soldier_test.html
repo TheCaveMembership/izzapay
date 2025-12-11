@@ -19,33 +19,57 @@
       height:100%;
       display:block;
     }
+    #statusBanner{
+      position:fixed;
+      top:8px;
+      left:8px;
+      padding:4px 8px;
+      border-radius:6px;
+      background:rgba(0,0,0,0.6);
+      color:#ffffff;
+      font-family:system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;
+      font-size:13px;
+      z-index:10;
+      pointer-events:none;
+    }
   </style>
   <script src="https://cdn.babylonjs.com/babylon.js"></script>
   <script src="https://cdn.babylonjs.com/loaders/babylonjs.loaders.min.js"></script>
 </head>
 <body>
+  <div id="statusBanner">Loading soldier…</div>
   <canvas id="soldierCanvas"></canvas>
 
   <script>
     (function(){
       const canvas = document.getElementById("soldierCanvas");
+      const statusEl = document.getElementById("statusBanner");
+
+      function setStatus(text, color){
+        if(!statusEl) return;
+        statusEl.textContent = text;
+        if(color) statusEl.style.color = color;
+      }
+
       if(!canvas || !window.BABYLON){
+        setStatus("Babylon.js not available", "#ff7777");
         return;
       }
 
+      // Engine + scene
       const engine = new BABYLON.Engine(canvas, true, {
         preserveDrawingBuffer:true,
         stencil:true
       });
-
       const scene  = new BABYLON.Scene(engine);
       scene.clearColor = new BABYLON.Color4(0,0,0,1);
 
+      // Camera
       const camera = new BABYLON.ArcRotateCamera(
         "cam",
-        Math.PI * 1.3,
-        Math.PI / 2.4,
-        3.0,
+        Math.PI * 1.1,
+        Math.PI / 2.6,
+        4.0,
         new BABYLON.Vector3(0,1,0),
         scene
       );
@@ -53,35 +77,47 @@
       camera.inputs.clear();
       camera.panningSensibility = 0;
 
+      // Light
       const light = new BABYLON.HemisphericLight(
         "h",
         new BABYLON.Vector3(0,1,0),
         scene
       );
-      light.intensity = 1.2;
+      light.intensity = 1.3;
 
+      // Always-visible fallback: spinning cube
+      const box = BABYLON.MeshBuilder.CreateBox("debugBox", { size: 1 }, scene);
+      box.position.y = 1;
+
+      scene.onBeforeRenderObservable.add(() => {
+        const dt = scene.getEngine().getDeltaTime();
+        box.rotation.y += dt * 0.0012;
+      });
+
+      // Soldier GLB
       const ASSET_URL = "/assets/warzone3d/pistol_soldier_m_idle.glb";
-
       const lastSlash = ASSET_URL.lastIndexOf("/");
       const rootUrl   = ASSET_URL.substring(0, lastSlash + 1);
       const fileName  = ASSET_URL.substring(lastSlash + 1);
 
-      let rootNode = null;
+      let soldierRoot = null;
 
       function frameCameraToRoot(root){
         try{
-          const bounds  = root.getHierarchyBoundingVectors(true);
-          const min     = bounds.min;
-          const max     = bounds.max;
-          const size    = max.subtract(min);
-          const center  = min.add(size.scale(0.5));
-          const radius  = size.length() * 0.6 || 2.0;
+          const bounds = root.getHierarchyBoundingVectors(true);
+          const min    = bounds.min;
+          const max    = bounds.max;
+          const size   = max.subtract(min);
+          const center = min.add(size.scale(0.5));
+          const radius = size.length() * 0.7 || 2.0;
 
           camera.target = center;
           camera.radius = radius;
           camera.lowerRadiusLimit = radius * 0.9;
           camera.upperRadiusLimit = radius * 1.1;
-        }catch(e){}
+        }catch(e){
+          // ignore
+        }
       }
 
       BABYLON.SceneLoader.ImportMesh(
@@ -90,17 +126,23 @@
         fileName,
         scene,
         function(meshes, ps, skeletons, animGroups){
-          rootNode = new BABYLON.TransformNode("soldierRoot", scene);
-          meshes.forEach(m => { m.parent = rootNode; });
+          // success
+          soldierRoot = new BABYLON.TransformNode("soldierRoot", scene);
+          meshes.forEach(m => { m.parent = soldierRoot; });
 
-          rootNode.position = new BABYLON.Vector3(0,0,0);
-          rootNode.rotation = new BABYLON.Vector3(0,Math.PI,0);
+          soldierRoot.rotation = new BABYLON.Vector3(0, Math.PI, 0);
 
-          frameCameraToRoot(rootNode);
+          frameCameraToRoot(soldierRoot);
+
+          // Keep a very faint cube so we know WebGL is alive
+          box.scaling.setAll(0.3);
+          box.position.y = 0.2;
+          box.visibility = 0.25;
 
           scene.onBeforeRenderObservable.add(() => {
-            if(rootNode){
-              rootNode.rotation.y += scene.getEngine().getDeltaTime() * 0.0005;
+            if(soldierRoot){
+              const dt = scene.getEngine().getDeltaTime();
+              soldierRoot.rotation.y += dt * 0.0006;
             }
           });
 
@@ -108,10 +150,13 @@
             animGroups.forEach(g => g.stop());
             animGroups[0].start(true);
           }
+
+          setStatus("Soldier imported OK", "#7dff7d");
         },
         null,
-        function(scene, message, exception){
+        function(sceneArg, message, exception){
           console.error("[SOLDIER TEST] ImportMesh error:", message || exception);
+          setStatus("ERROR loading soldier file", "#ff7777");
         }
       );
 
@@ -122,6 +167,9 @@
       window.addEventListener("resize", () => {
         engine.resize();
       });
+
+      // If absolutely nothing is rendering, at least the box should show.
+      setStatus("Loading soldier… (cube means WebGL is OK)", "#ffffff");
     })();
   </script>
 </body>
