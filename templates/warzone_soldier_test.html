@@ -89,33 +89,77 @@
         engine.resize();
       });
 
-      function frameCameraToRoot(root){
+      // NEW: robust framing that avoids Infinity / NaN on Pi Browser
+      function frameCameraFromMeshes(meshes){
         try{
-          const bounds = root.getHierarchyBoundingVectors(true);
-          const min = bounds.min;
-          const max = bounds.max;
+          if (!meshes || !meshes.length){
+            msgEl.textContent = "Soldier imported but no meshes?";
+            return;
+          }
+
+          let min = new BABYLON.Vector3(
+            Number.POSITIVE_INFINITY,
+            Number.POSITIVE_INFINITY,
+            Number.POSITIVE_INFINITY
+          );
+          let max = new BABYLON.Vector3(
+            Number.NEGATIVE_INFINITY,
+            Number.NEGATIVE_INFINITY,
+            Number.NEGATIVE_INFINITY
+          );
+
+          let any = false;
+
+          for (const m of meshes){
+            if (!m || !m.getBoundingInfo || m.getTotalVertices() === 0) continue;
+
+            // ensure world matrix and bounds are up to date
+            m.computeWorldMatrix(true);
+            const bi   = m.getBoundingInfo();
+            const bmin = bi.boundingBox.minimumWorld;
+            const bmax = bi.boundingBox.maximumWorld;
+
+            if (!isFinite(bmin.x) || !isFinite(bmin.y) || !isFinite(bmin.z)) continue;
+            if (!isFinite(bmax.x) || !isFinite(bmax.y) || !isFinite(bmax.z)) continue;
+
+            min = BABYLON.Vector3.Minimize(min, bmin);
+            max = BABYLON.Vector3.Maximize(max, bmax);
+            any = true;
+          }
+
+          if (!any){
+            msgEl.textContent = "Soldier imported but bounds invalid";
+            return;
+          }
+
           const size = max.subtract(min);
+          if (!isFinite(size.x) || !isFinite(size.y) || !isFinite(size.z)){
+            msgEl.textContent = "Soldier bounds non-finite";
+            return;
+          }
+
+          const maxDim = Math.max(size.x, size.y, size.z) || 1;
           const center = min.add(size.scale(0.5));
+          const radius = maxDim * 1.8;
 
-          const maxDim = Math.max(size.x, size.y, size.z);
-          const radius = (maxDim || 1) * 1.8;
-
-          // Show numbers so we know what the model looks like
           msgEl.textContent =
             "Soldier imported OK | size: " +
             maxDim.toFixed(3) +
             " | radius: " +
             radius.toFixed(3);
 
-          // IMPORTANT: we DO NOT rescale or move the model.
-          // We only move the camera so the whole thing fits.
           camera.target = center;
           camera.radius = radius;
           camera.lowerRadiusLimit = radius * 0.8;
           camera.upperRadiusLimit = radius * 2.2;
         }catch(e){
-          console.warn("frameCameraToRoot failed", e);
+          console.warn("frameCameraFromMeshes failed", e);
           msgEl.textContent = "Soldier imported, camera frame failed";
+          // very safe fallback so we still see *something*
+          camera.target = new BABYLON.Vector3(0,1,0);
+          camera.radius = 4.0;
+          camera.lowerRadiusLimit = 3.0;
+          camera.upperRadiusLimit = 6.0;
         }
       }
 
@@ -142,7 +186,8 @@
             m.parent = root;
           });
 
-          frameCameraToRoot(root);
+          // Use robust framing so Pi Browser can't break it
+          frameCameraFromMeshes(meshes);
 
           // Slow spin so it's obvious when it appears
           scene.onBeforeRenderObservable.clear();
