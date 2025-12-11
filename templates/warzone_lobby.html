@@ -196,12 +196,14 @@
       z-index:1;
     }
 
-    /* 3D soldier canvas over the map — fill the card so he’s always visible */
+    /* 3D soldier canvas over the map */
     .zone-soldier-canvas{
       position:absolute;
-      inset:0;
-      width:100%;
-      height:100%;
+      left:50%;
+      bottom:-8%;
+      transform:translateX(-50%);
+      width:70%;
+      height:140%;
       pointer-events:none;
       z-index:2;
       display:block;
@@ -638,6 +640,7 @@
               <!-- 3D soldier rendered on top of the map -->
               <canvas id="soldierCanvas" class="zone-soldier-canvas"></canvas>
             </div>
+            <!-- PRE-DEPLOY LOADOUT bar removed on purpose -->
           </section>
 
           <aside class="side-panel">
@@ -1301,7 +1304,7 @@
     })();
 
     // ---------- Babylon.js mini-scene for lobby soldier ----------
-    (function () {
+    (function(){
       const canvas = document.getElementById("soldierCanvas");
       if (!canvas || !window.BABYLON) {
         console.warn("[WARZONE] soldier canvas or BABYLON missing");
@@ -1309,97 +1312,166 @@
       }
 
       const engine = new BABYLON.Engine(canvas, true, {
-        preserveDrawingBuffer: true,
-        stencil: true
+        preserveDrawingBuffer:true,
+        stencil:true
       });
 
-      const scene = new BABYLON.Scene(engine);
-      scene.clearColor = new BABYLON.Color4(0, 0, 0, 0); // transparent over the map
+      let scene, camera;
+      let currentRoot = null;
 
-      const camera = new BABYLON.ArcRotateCamera(
-        "cam",
-        Math.PI * 1.3,
-        Math.PI / 2.4,
-        4.0,
-        new BABYLON.Vector3(0, 1, 0),
-        scene
-      );
-      camera.attachControl(canvas, false);
-      camera.inputs.clear();
-      camera.panningSensibility = 0;
+      const SOLDIER_ASSET = "/assets/warzone3d/pistol_soldier_m_idle.glb";
 
-      const light = new BABYLON.HemisphericLight(
-        "h",
-        new BABYLON.Vector3(0, 1, 0),
-        scene
-      );
-      light.intensity = 1.2;
+      function createScene(){
+        scene = new BABYLON.Scene(engine);
+        scene.clearColor = new BABYLON.Color4(0,0,0,0); // transparent
 
-      const SOLDIER_URL = "/assets/warzone3d/pistol_soldier_m_idle.glb";
+        camera = new BABYLON.ArcRotateCamera(
+          "cam",
+          Math.PI * 1.3,
+          Math.PI / 2.4,
+          3.0,                          // default radius
+          new BABYLON.Vector3(0,1,0),
+          scene
+        );
+        camera.attachControl(canvas, false);
+        camera.inputs.clear();           // lock user controls
+        camera.panningSensibility = 0;
 
-      function frameCameraToRoot(root) {
-        try {
-          const bounds = root.getHierarchyBoundingVectors(true);
-          const min = bounds.min;
-          const max = bounds.max;
+        const light = new BABYLON.HemisphericLight(
+          "h",
+          new BABYLON.Vector3(0,1,0),
+          scene
+        );
+        light.intensity = 1.2;
+
+        loadSoldier();
+
+        engine.runRenderLoop(function(){
+          if (scene){ scene.render(); }
+        });
+
+        window.addEventListener("resize", function(){
+          engine.resize();
+        });
+      }
+
+      // robust bounding helper that avoids Infinity / NaN issues in Pi Browser
+      function frameCameraFromMeshes(meshes){
+        try{
+          if (!meshes || !meshes.length || !camera) return;
+
+          let min = new BABYLON.Vector3(
+            Number.POSITIVE_INFINITY,
+            Number.POSITIVE_INFINITY,
+            Number.POSITIVE_INFINITY
+          );
+          let max = new BABYLON.Vector3(
+            Number.NEGATIVE_INFINITY,
+            Number.NEGATIVE_INFINITY,
+            Number.NEGATIVE_INFINITY
+          );
+
+          let any = false;
+
+          for (const m of meshes){
+            if (!m || !m.getBoundingInfo || m.getTotalVertices() === 0) continue;
+            // make sure world matrix / bounds are up to date
+            m.computeWorldMatrix(true);
+            const bi = m.getBoundingInfo();
+            const bmin = bi.boundingBox.minimumWorld;
+            const bmax = bi.boundingBox.maximumWorld;
+
+            if (!isFinite(bmin.x) || !isFinite(bmin.y) || !isFinite(bmin.z)) continue;
+            if (!isFinite(bmax.x) || !isFinite(bmax.y) || !isFinite(bmax.z)) continue;
+
+            min = BABYLON.Vector3.Minimize(min, bmin);
+            max = BABYLON.Vector3.Maximize(max, bmax);
+            any = true;
+          }
+
+          if (!any){
+            throw new Error("no finite bounds");
+          }
+
           const size = max.subtract(min);
-          const center = min.add(size.scale(0.5));
+          if (!isFinite(size.x) || !isFinite(size.y) || !isFinite(size.z)){
+            throw new Error("non-finite size");
+          }
 
-          const maxDim = Math.max(size.x, size.y, size.z);
-          const radius = (maxDim || 1) * 1.8;
+          const maxDim = Math.max(size.x, size.y, size.z) || 1.0;
+          const center = min.add(size.scale(0.5));
+          const radius = maxDim * 0.9;
 
           camera.target = center;
           camera.radius = radius;
-          camera.lowerRadiusLimit = radius * 0.8;
-          camera.upperRadiusLimit = radius * 2.2;
-        } catch (e) {
-          console.warn("[WARZONE] frameCameraToRoot failed", e);
+          camera.lowerRadiusLimit = radius * 0.9;
+          camera.upperRadiusLimit = radius * 1.2;
+        }catch(e){
+          console.warn("[WARZONE] fallback soldier framing", e);
+          // safe fallback that still shows the soldier
+          camera.target = new BABYLON.Vector3(0,1,0);
+          camera.radius = 3.0;
+          camera.lowerRadiusLimit = 2.5;
+          camera.upperRadiusLimit = 3.5;
         }
       }
 
-      const lastSlash = SOLDIER_URL.lastIndexOf("/");
-      const rootUrl = SOLDIER_URL.substring(0, lastSlash + 1);
-      const fileName = SOLDIER_URL.substring(lastSlash + 1);
+      function loadSoldier(){
+        const url = SOLDIER_ASSET;
+        if (!scene || !BABYLON.SceneLoader) return;
 
-      BABYLON.SceneLoader.ImportMesh(
-        "",
-        rootUrl,
-        fileName,
-        scene,
-        function (meshes, ps, skeletons, animGroups) {
-          const root = new BABYLON.TransformNode("soldierRoot", scene);
-          meshes.forEach(m => { m.parent = root; });
-
-          // keep him centered and facing camera
-          root.position = new BABYLON.Vector3(0, 0, 0);
-          root.rotation = new BABYLON.Vector3(0, Math.PI, 0);
-
-          frameCameraToRoot(root);
-
-          // slow spin for life
-          scene.onBeforeRenderObservable.clear();
-          scene.onBeforeRenderObservable.add(() => {
-            root.rotation.y += scene.getEngine().getDeltaTime() * 0.0005;
-          });
-
-          if (animGroups && animGroups.length) {
-            animGroups.forEach(g => g.stop());
-            animGroups[0].start(true);
-          }
-        },
-        null,
-        function (scene, message, exception) {
-          console.error("[WARZONE] soldier ImportMesh error:", message, exception);
+        if (currentRoot){
+          currentRoot.dispose(true, false);
+          currentRoot = null;
         }
-      );
 
-      engine.runRenderLoop(function () {
-        scene.render();
-      });
+        const lastSlash = url.lastIndexOf("/");
+        const rootUrl = url.substring(0,lastSlash+1);
+        const fileName = url.substring(lastSlash+1);
 
-      window.addEventListener("resize", function () {
-        engine.resize();
-      });
+        console.log("[WARZONE] Importing soldier GLB:", rootUrl, fileName);
+
+        BABYLON.SceneLoader.ImportMesh(
+          "",
+          rootUrl,
+          fileName,
+          scene,
+          function(meshes, ps, skeletons, animGroups){
+            console.log("[WARZONE] soldier GLB imported. meshes:", meshes.length);
+
+            currentRoot = new BABYLON.TransformNode("soldierRoot", scene);
+            meshes.forEach(m => {
+              m.parent = currentRoot;
+            });
+
+            currentRoot.position = new BABYLON.Vector3(0,0,0);
+            currentRoot.rotation = new BABYLON.Vector3(0,Math.PI,0);
+
+            // robust framing that works even in Pi Browser
+            frameCameraFromMeshes(meshes);
+
+            // Slow rotate for a bit of life
+            scene.onBeforeRenderObservable.clear();
+            scene.onBeforeRenderObservable.add(() => {
+              if (currentRoot) {
+                currentRoot.rotation.y += scene.getEngine().getDeltaTime() * 0.0003;
+              }
+            });
+
+            // Play first animation if available
+            if (animGroups && animGroups.length){
+              animGroups.forEach(g => g.stop());
+              animGroups[0].start(true);
+            }
+          },
+          null,
+          function(scene, message, exception){
+            console.error("[WARZONE] soldier ImportMesh error:", message, exception);
+          }
+        );
+      }
+
+      createScene();
     })();
   </script>
 </body>
