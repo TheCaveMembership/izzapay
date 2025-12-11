@@ -42,11 +42,17 @@
       width:100%;
       height:100%;
       padding:10px;
+      overflow:auto;                 /* allow scroll inside rotated frame */
+      -webkit-overflow-scrolling:touch;
+    }
+    .lobby-root::-webkit-scrollbar{
+      width:0;
+      height:0;                      /* hide scrollbars */
     }
 
     .shell{
       width:100%;
-      height:100%;
+      min-height:100%;               /* can grow taller than viewport */
       border-radius:18px;
       border:1px solid rgba(132,153,255,.4);
       background:radial-gradient(circle at top,#182136 0,#06091a 52%,#01020a 100%);
@@ -56,7 +62,7 @@
         0 0 80px rgba(255,59,107,.12);
       padding:10px 14px;
       display:grid;
-      grid-template-rows:auto 1fr; /* top + main only, no bottom row now */
+      grid-template-rows:auto 1fr; /* top + main only */
       row-gap:8px;
       position:relative;
     }
