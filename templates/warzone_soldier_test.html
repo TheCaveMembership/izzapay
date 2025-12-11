@@ -2,8 +2,8 @@
 <html lang="en">
 <head>
   <meta charset="utf-8">
-  <title>IZZA WAR ZONE — Soldier Test</title>
-  <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+  <title>War Zone soldier test</title>
+  <meta name="viewport" content="width=device-width,initial-scale=1">
   <style>
     html,body{
       margin:0;
@@ -11,64 +11,53 @@
       width:100%;
       height:100%;
       background:#000;
+      color:#0f0;
+      font-family:system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;
       overflow:hidden;
-      touch-action:none;
     }
-    #soldierCanvas{
+    #msg{
+      position:fixed;
+      top:8px;
+      left:10px;
+      font-size:14px;
+      z-index:5;
+    }
+    #renderCanvas{
+      position:fixed;
+      left:0;
+      top:0;
       width:100%;
       height:100%;
       display:block;
-    }
-    #statusBanner{
-      position:fixed;
-      top:8px;
-      left:8px;
-      padding:4px 8px;
-      border-radius:6px;
-      background:rgba(0,0,0,0.6);
-      color:#ffffff;
-      font-family:system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;
-      font-size:13px;
-      z-index:10;
-      pointer-events:none;
+      touch-action:none;
     }
   </style>
   <script src="https://cdn.babylonjs.com/babylon.js"></script>
   <script src="https://cdn.babylonjs.com/loaders/babylonjs.loaders.min.js"></script>
 </head>
 <body>
-  <div id="statusBanner">Loading soldier…</div>
-  <canvas id="soldierCanvas"></canvas>
+  <div id="msg">Loading soldier…</div>
+  <canvas id="renderCanvas"></canvas>
 
   <script>
-    (function(){
-      const canvas = document.getElementById("soldierCanvas");
-      const statusEl = document.getElementById("statusBanner");
+    const canvas = document.getElementById("renderCanvas");
+    const msgEl  = document.getElementById("msg");
 
-      function setStatus(text, color){
-        if(!statusEl) return;
-        statusEl.textContent = text;
-        if(color) statusEl.style.color = color;
-      }
-
-      if(!canvas || !window.BABYLON){
-        setStatus("Babylon.js not available", "#ff7777");
-        return;
-      }
-
-      // Engine + scene
+    if (!canvas || !window.BABYLON){
+      msgEl.textContent = "Babylon not available";
+    } else {
       const engine = new BABYLON.Engine(canvas, true, {
         preserveDrawingBuffer:true,
         stencil:true
       });
+
       const scene  = new BABYLON.Scene(engine);
       scene.clearColor = new BABYLON.Color4(0,0,0,1);
 
-      // Camera
       const camera = new BABYLON.ArcRotateCamera(
         "cam",
-        Math.PI * 1.1,
-        Math.PI / 2.6,
+        Math.PI * 1.3,
+        Math.PI / 2.4,
         4.0,
         new BABYLON.Vector3(0,1,0),
         scene
@@ -77,48 +66,57 @@
       camera.inputs.clear();
       camera.panningSensibility = 0;
 
-      // Light
       const light = new BABYLON.HemisphericLight(
         "h",
         new BABYLON.Vector3(0,1,0),
         scene
       );
-      light.intensity = 1.3;
+      light.intensity = 1.2;
 
-      // Always-visible fallback: spinning cube
-      const box = BABYLON.MeshBuilder.CreateBox("debugBox", { size: 1 }, scene);
-      box.position.y = 1;
+      // Debug cube so we always see *something*
+      const debugBox = BABYLON.MeshBuilder.CreateBox("debugBox", { size:1 }, scene);
+      debugBox.position.y = 1;
+      const debugMat = new BABYLON.StandardMaterial("dbgMat", scene);
+      debugMat.emissiveColor = new BABYLON.Color3(0,1,1);
+      debugBox.material = debugMat;
 
-      scene.onBeforeRenderObservable.add(() => {
-        const dt = scene.getEngine().getDeltaTime();
-        box.rotation.y += dt * 0.0012;
+      engine.runRenderLoop(function(){
+        scene.render();
       });
 
-      // Soldier GLB
-      const ASSET_URL = "/assets/warzone3d/pistol_soldier_m_idle.glb";
-      const lastSlash = ASSET_URL.lastIndexOf("/");
-      const rootUrl   = ASSET_URL.substring(0, lastSlash + 1);
-      const fileName  = ASSET_URL.substring(lastSlash + 1);
+      window.addEventListener("resize", function(){
+        engine.resize();
+      });
 
-      let soldierRoot = null;
-
-      function frameCameraToRoot(root){
+      function fitAndScaleToView(root){
         try{
           const bounds = root.getHierarchyBoundingVectors(true);
-          const min    = bounds.min;
-          const max    = bounds.max;
-          const size   = max.subtract(min);
+          const min = bounds.min;
+          const max = bounds.max;
+          const size = max.subtract(min);
           const center = min.add(size.scale(0.5));
-          const radius = size.length() * 0.7 || 2.0;
 
-          camera.target = center;
-          camera.radius = radius;
-          camera.lowerRadiusLimit = radius * 0.9;
-          camera.upperRadiusLimit = radius * 1.1;
+          const maxDim = Math.max(size.x, size.y, size.z);
+          const targetSize = 2.0; // how tall / wide we want it in world units
+          const scale = maxDim > 0 ? (targetSize / maxDim) : 1.0;
+
+          root.scaling = new BABYLON.Vector3(scale, scale, scale);
+          root.position = center.scale(-scale); // move center to origin
+
+          camera.target = new BABYLON.Vector3(0, 0.9, 0);
+          camera.radius = 3.0;
+          camera.lowerRadiusLimit = 2.5;
+          camera.upperRadiusLimit = 3.5;
         }catch(e){
-          // ignore
+          console.warn("fitAndScaleToView failed", e);
         }
       }
+
+      const SOLDIER_URL = "/assets/warzone3d/pistol_soldier_m_idle.glb";
+
+      const lastSlash = SOLDIER_URL.lastIndexOf("/");
+      const rootUrl   = SOLDIER_URL.substring(0,lastSlash+1);
+      const fileName  = SOLDIER_URL.substring(lastSlash+1);
 
       BABYLON.SceneLoader.ImportMesh(
         "",
@@ -126,51 +124,36 @@
         fileName,
         scene,
         function(meshes, ps, skeletons, animGroups){
-          // success
-          soldierRoot = new BABYLON.TransformNode("soldierRoot", scene);
-          meshes.forEach(m => { m.parent = soldierRoot; });
+          msgEl.textContent = "Soldier imported OK";
 
-          soldierRoot.rotation = new BABYLON.Vector3(0, Math.PI, 0);
+          // remove the debug cube now that we have the real model
+          debugBox.dispose();
 
-          frameCameraToRoot(soldierRoot);
-
-          // Keep a very faint cube so we know WebGL is alive
-          box.scaling.setAll(0.3);
-          box.position.y = 0.2;
-          box.visibility = 0.25;
-
-          scene.onBeforeRenderObservable.add(() => {
-            if(soldierRoot){
-              const dt = scene.getEngine().getDeltaTime();
-              soldierRoot.rotation.y += dt * 0.0006;
-            }
+          const root = new BABYLON.TransformNode("soldierRoot", scene);
+          meshes.forEach(m => {
+            m.parent = root;
           });
 
-          if(animGroups && animGroups.length){
+          fitAndScaleToView(root);
+
+          // simple slow spin so it’s obvious
+          scene.onBeforeRenderObservable.clear();
+          scene.onBeforeRenderObservable.add(() => {
+            root.rotation.y += scene.getEngine().getDeltaTime() * 0.0005;
+          });
+
+          if (animGroups && animGroups.length){
             animGroups.forEach(g => g.stop());
             animGroups[0].start(true);
           }
-
-          setStatus("Soldier imported OK", "#7dff7d");
         },
         null,
-        function(sceneArg, message, exception){
-          console.error("[SOLDIER TEST] ImportMesh error:", message || exception);
-          setStatus("ERROR loading soldier file", "#ff7777");
+        function(scene, message, exception){
+          console.error("ImportMesh error:", message, exception);
+          msgEl.textContent = "Import error: " + message;
         }
       );
-
-      engine.runRenderLoop(() => {
-        scene.render();
-      });
-
-      window.addEventListener("resize", () => {
-        engine.resize();
-      });
-
-      // If absolutely nothing is rendering, at least the box should show.
-      setStatus("Loading soldier… (cube means WebGL is OK)", "#ffffff");
-    })();
+    }
   </script>
 </body>
 </html>
