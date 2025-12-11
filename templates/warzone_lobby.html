@@ -41,18 +41,12 @@
     .lobby-root{
       width:100%;
       height:100%;
-      padding:10px;
-      overflow:auto;                 /* allow scroll inside rotated frame */
-      -webkit-overflow-scrolling:touch;
-    }
-    .lobby-root::-webkit-scrollbar{
-      width:0;
-      height:0;                      /* hide scrollbars */
+      padding:6px; /* slightly tighter so content fits better */
     }
 
     .shell{
       width:100%;
-      min-height:100%;               /* can grow taller than viewport */
+      height:100%;
       border-radius:18px;
       border:1px solid rgba(132,153,255,.4);
       background:radial-gradient(circle at top,#182136 0,#06091a 52%,#01020a 100%);
@@ -60,11 +54,17 @@
         0 0 40px rgba(0,0,0,.8),
         0 0 80px rgba(0,255,255,.08),
         0 0 80px rgba(255,59,107,.12);
-      padding:10px 14px;
+      padding:8px 10px;          /* was 10px 14px */
       display:grid;
-      grid-template-rows:auto 1fr; /* top + main only */
-      row-gap:8px;
+      grid-template-rows:auto 1fr; /* top + main */
+      row-gap:6px;
       position:relative;
+      overflow:auto;              /* key: allow internal scroll instead of clipping */
+      -webkit-overflow-scrolling:touch;
+    }
+    .shell::-webkit-scrollbar{
+      width:0;
+      height:0;                  /* hide scrollbar so it still looks like a fixed frame */
     }
 
     .top-row{
