@@ -194,6 +194,8 @@
       mix-blend-mode:soft-light;
       pointer-events:none;
     }
+
+    /* bottom-left overlay on map */
     .zone-overlay-copy{
       position:absolute;
       left:14px;
@@ -212,29 +214,18 @@
       display:block;
     }
 
-    /* Loadout row under the map */
+    /* Loadout bar under the map – buttons only */
     .loadout-bar{
       margin-top:4px;
-      padding:8px 10px;
+      padding:6px 10px;
       border-radius:10px;
       border:1px solid rgba(66,91,168,.8);
       background:linear-gradient(145deg,#050815,#030616);
       display:flex;
-      align-items:flex-start;
-      justify-content:space-between;
+      align-items:center;
+      justify-content:flex-end;
       gap:10px;
       font-size:11px;
-    }
-    .loadout-title{
-      text-transform:uppercase;
-      letter-spacing:.16em;
-      font-size:10px;
-      color:#9fb0d6;
-      margin-bottom:2px;
-    }
-    .loadout-sub{
-      color:#b7c6f2;
-      max-width:260px;
     }
     .loadout-actions{
       display:flex;
@@ -667,23 +658,16 @@
               id="zoneCanvasShell"
               style="background-image:url('{{ map_image_url or "/assets/warzone-map-izzacity.jpg" }}');">
               <div class="zone-overlay-copy">
-                <span class="tag">Map preview</span>
+                <span class="tag">Pre-deploy loadout</span>
                 <p>
-                  This panel will show the live War Zone map and your squad’s
-                  drop-ship path before the FPS client takes over.
+                  You always spawn with a basic pistol for free. Extra weapons
+                  and IZZA Soldier skins unlock with IZZA token purchases.
                 </p>
               </div>
             </div>
 
-            <!-- NEW: loadout bar with WEAPONS + SKINS buttons -->
+            <!-- Loadout bar: buttons only -->
             <div class="loadout-bar">
-              <div>
-                <div class="loadout-title">Pre-deploy loadout</div>
-                <div class="loadout-sub">
-                  You always spawn with a basic pistol for free. Extra weapons
-                  and IZZA Soldier skins unlock with IZZA token purchases.
-                </div>
-              </div>
               <div class="loadout-actions">
                 <button class="btn-loadout secondary" id="weaponsBtn">Weapons</button>
                 <button class="btn-loadout" id="skinsBtn">Skins</button>
