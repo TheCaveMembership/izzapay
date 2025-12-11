@@ -193,28 +193,23 @@
         radial-gradient(circle at 80% 100%,rgba(11,22,54,.9) 0,transparent 65%);
       mix-blend-mode:soft-light;
       pointer-events:none;
-    }
-
-    /* bottom-left overlay on map */
-    .zone-overlay-copy{
-      position:absolute;
-      left:14px;
-      bottom:14px;
-      max-width:260px;
-      font-size:11px;
-      color:#c3cff5;
       z-index:1;
     }
-    .zone-overlay-copy .tag{
-      font-size:10px;
-      text-transform:uppercase;
-      letter-spacing:.16em;
-      color:#7fd1ff;
-      margin-bottom:4px;
+
+    /* 3D soldier canvas over the map */
+    .zone-soldier-canvas{
+      position:absolute;
+      left:50%;
+      bottom:0;
+      transform:translateX(-50%);
+      width:40%;
+      height:100%;
+      pointer-events:none;
+      z-index:2;
       display:block;
     }
 
-    /* Loadout bar under the map – buttons only */
+    /* Loadout bar under the map – text + buttons */
     .loadout-bar{
       margin-top:4px;
       padding:6px 10px;
@@ -223,9 +218,16 @@
       background:linear-gradient(145deg,#050815,#030616);
       display:flex;
       align-items:center;
-      justify-content:flex-end;
+      justify-content:space-between;
       gap:10px;
       font-size:11px;
+    }
+    .loadout-label{
+      font-size:10px;
+      text-transform:uppercase;
+      letter-spacing:.18em;
+      color:#7fd1ff;
+      white-space:nowrap;
     }
     .loadout-actions{
       display:flex;
@@ -307,27 +309,7 @@
       display:flex;
       gap:8px;
     }
-    .character-preview{
-      width:64px;
-      height:96px;
-      border-radius:12px;
-      border:1px solid rgba(66,91,168,.8);
-      background:
-        radial-gradient(circle at 30% 0,#3d6bff 0,transparent 55%),
-        #050815;
-      position:relative;
-      flex-shrink:0;
-      overflow:hidden;
-    }
-    .character-silhouette{
-      position:absolute;
-      inset:0;
-      background:url("/assets/warzone-operator-m.png") center bottom/contain no-repeat;
-      opacity:.98;
-    }
-    .character-silhouette.female{
-      background-image:url("/assets/warzone-operator-f.png");
-    }
+    /* we removed the tiny preview box – just keep info text + chips */
     .character-info{
       flex:1;
       display:flex;
@@ -621,6 +603,9 @@
     }
   </style>
   <script src="https://sdk.minepi.com/pi-sdk.js"></script>
+  <!-- Babylon.js for 3D lobby soldier -->
+  <script src="https://cdn.babylonjs.com/babylon.js"></script>
+  <script src="https://cdn.babylonjs.com/loaders/babylonjs.loaders.min.js"></script>
 </head>
 <body>
   <div class="rot-wrapper" id="rotWrapper">
@@ -657,17 +642,13 @@
               class="zone-canvas-shell"
               id="zoneCanvasShell"
               style="background-image:url('{{ map_image_url or "/assets/warzone-map-izzacity.jpg" }}');">
-              <div class="zone-overlay-copy">
-                <span class="tag">Pre-deploy loadout</span>
-                <p>
-                  You always spawn with a basic pistol for free. Extra weapons
-                  and IZZA Soldier skins unlock with IZZA token purchases.
-                </p>
-              </div>
+              <!-- 3D soldier rendered on top of the map -->
+              <canvas id="soldierCanvas" class="zone-soldier-canvas"></canvas>
             </div>
 
-            <!-- Loadout bar: buttons only -->
+            <!-- Loadout bar: PRE-DEPLOY LOADOUT text + buttons -->
             <div class="loadout-bar">
+              <div class="loadout-label">Pre-deploy loadout</div>
               <div class="loadout-actions">
                 <button class="btn-loadout secondary" id="weaponsBtn">Weapons</button>
                 <button class="btn-loadout" id="skinsBtn">Skins</button>
@@ -691,11 +672,6 @@
             <div class="character-card">
               <div class="card-title">Starter operator</div>
               <div class="character-body">
-                <div class="character-preview">
-                  <div
-                    class="character-silhouette{% if player.starter == 'soldier_f' %} female{% endif %}"
-                    id="charSprite"></div>
-                </div>
                 <div class="character-info">
                   <div class="char-name" id="charName">
                     {% if player.starter == 'soldier_f' %}
@@ -875,11 +851,10 @@
       updateLayout();
     })();
 
-    // Starter operator toggle (unchanged)
+    // Starter operator toggle – also notifies the 3D soldier renderer
     (function(){
       const chips = document.querySelectorAll(".char-chip");
       const nameEl = document.getElementById("charName");
-      const sprite = document.getElementById("charSprite");
 
       function setStarter(code){
         chips.forEach(c => {
@@ -887,10 +862,11 @@
         });
         if (code === "soldier_f"){
           nameEl.textContent = "IZZA Soldier, Basic Woman";
-          sprite.classList.add("female");
         } else {
           nameEl.textContent = "IZZA Soldier, Basic Man";
-          sprite.classList.remove("female");
+        }
+        if (window.__setLobbySoldierGender){
+          window.__setLobbySoldierGender(code);
         }
         // later: POST to /warzone/api/starter to persist
       }
@@ -898,6 +874,10 @@
       chips.forEach(c => {
         c.addEventListener("click", () => setStarter(c.dataset.class));
       });
+
+      // initial state from server
+      const initial = "{{ 'soldier_f' if player.starter == 'soldier_f' else 'soldier_m' }}";
+      window.addEventListener("load", () => setStarter(initial));
     })();
 
     // ---------- Minimal IZZA wallet helpers (ported from creatures flow) ----------
@@ -1290,6 +1270,111 @@
 
       // make loader globally callable from overlay open
       window.__izzaLoadShop = loadShop;
+    })();
+
+    // ---------- Babylon.js mini-scene for lobby soldier ----------
+    (function(){
+      const canvas = document.getElementById("soldierCanvas");
+      if (!canvas || !window.BABYLON) return;
+
+      const engine = new BABYLON.Engine(canvas, true, {
+        preserveDrawingBuffer:true,
+        stencil:true
+      });
+
+      let scene, camera;
+      let currentGender = "soldier_m";
+      let currentRoot = null;
+
+      function getAssetForGender(code){
+        // adjust these paths to match your GLB filenames
+        if (code === "soldier_f"){
+          return "/assets/warzone3d/pistol_soldier_f_idle.glb";
+        }
+        return "/assets/warzone3d/pistol_soldier_m_idle.glb";
+      }
+
+      function createScene(){
+        scene = new BABYLON.Scene(engine);
+        scene.clearColor = new BABYLON.Color4(0,0,0,0); // transparent
+
+        camera = new BABYLON.ArcRotateCamera(
+          "cam",
+          Math.PI * 1.3,
+          Math.PI / 2.4,
+          3,
+          new BABYLON.Vector3(0,1,0),
+          scene
+        );
+        camera.attachControl(canvas, false);
+        camera.inputs.clear();           // lock user controls
+        camera.lowerRadiusLimit = camera.radius;
+        camera.upperRadiusLimit = camera.radius;
+        camera.panningSensibility = 0;
+
+        const light = new BABYLON.HemisphericLight(
+          "h",
+          new BABYLON.Vector3(0,1,0),
+          scene
+        );
+        light.intensity = 1.2;
+
+        loadSoldier(currentGender);
+
+        engine.runRenderLoop(function(){
+          if (scene){ scene.render(); }
+        });
+
+        window.addEventListener("resize", function(){
+          engine.resize();
+        });
+      }
+
+      function loadSoldier(code){
+        const url = getAssetForGender(code);
+        currentGender = code;
+
+        if (!scene || !BABYLON.SceneLoader) return;
+
+        if (currentRoot){
+          currentRoot.dispose(true, false);
+          currentRoot = null;
+        }
+
+        const lastSlash = url.lastIndexOf("/");
+        const rootUrl = url.substring(0,lastSlash+1);
+        const fileName = url.substring(lastSlash+1);
+
+        BABYLON.SceneLoader.ImportMesh(
+          "",
+          rootUrl,
+          fileName,
+          scene,
+          function(meshes, ps, skeletons, animGroups){
+            currentRoot = new BABYLON.TransformNode("soldierRoot", scene);
+            meshes.forEach(m => {
+              m.parent = currentRoot;
+            });
+
+            currentRoot.position = new BABYLON.Vector3(0,-1,0);
+            currentRoot.rotation = new BABYLON.Vector3(0,Math.PI,0);
+
+            if (animGroups && animGroups.length){
+              animGroups.forEach(g => g.stop());
+              animGroups[0].start(true); // loop first animation (idle / walk in place)
+            }
+          }
+        );
+      }
+
+      createScene();
+
+      // called from the starter-operator toggle
+      window.__setLobbySoldierGender = function(code){
+        if (code !== currentGender){
+          loadSoldier(code);
+        }
+      };
     })();
   </script>
 </body>
