@@ -56,8 +56,9 @@
         0 0 80px rgba(255,59,107,.12);
       padding:10px 14px;
       display:grid;
-      grid-template-rows:auto 1fr auto;
+      grid-template-rows:auto 1fr; /* top + main only, no bottom row now */
       row-gap:8px;
+      position:relative;
     }
 
     .top-row{
@@ -65,6 +66,7 @@
       align-items:center;
       justify-content:space-between;
       gap:10px;
+      flex-wrap:wrap;
     }
     .logo-block{
       display:flex;
@@ -83,6 +85,35 @@
       box-shadow:0 0 18px rgba(255,207,77,.6);
       flex-shrink:0;
     }
+
+    .deploy-btn{
+      min-width:170px;
+      padding:9px 14px;
+      border-radius:999px;
+      border:none;
+      cursor:pointer;
+      font-weight:700;
+      font-size:12px;
+      letter-spacing:.18em;
+      text-transform:uppercase;
+      display:inline-flex;
+      align-items:center;
+      justify-content:center;
+      gap:8px;
+      background:linear-gradient(90deg,#0ff,#ff3b6b);
+      color:#001520;
+      box-shadow:
+        0 0 24px rgba(0,255,255,.6),
+        0 0 34px rgba(255,59,107,.55);
+      white-space:nowrap;
+    }
+    .deploy-btn span.tag{
+      font-size:10px;
+      text-transform:uppercase;
+      letter-spacing:.16em;
+      opacity:.9;
+    }
+
     .player-pill{
       padding:6px 10px;
       border-radius:999px;
@@ -142,9 +173,10 @@
       border:1px solid rgba(39,62,130,.9);
       position:relative;
       overflow:hidden;
-      background:
-        linear-gradient(to top,rgba(0,0,0,.7),rgba(0,0,0,.2)),
-        url("/assets/warzone-map-kenny.png") center/cover no-repeat;
+      /* Neutral placeholder until real map assets are wired in */
+      background:radial-gradient(circle at 20% 0,#1a2345 0,transparent 55%),
+                 radial-gradient(circle at 80% 100%,#0b1636 0,transparent 65%),
+                 #02030c;
     }
     .zone-overlay-copy{
       position:absolute;
@@ -184,13 +216,15 @@
       color:#9fb0d6;
       margin-bottom:6px;
     }
+
     .friends-actions{
       display:flex;
+      flex-direction:column; /* stack so nothing spills out */
       gap:6px;
       margin-bottom:6px;
     }
     .btn-ghost{
-      flex:1;
+      width:100%;
       padding:7px 8px;
       border-radius:999px;
       border:1px solid rgba(127,209,255,.6);
@@ -279,38 +313,6 @@
       font-weight:600;
     }
 
-    .bottom-row{
-      display:flex;
-      justify-content:flex-end;
-      padding-top:4px;
-    }
-    .deploy-btn{
-      min-width:170px;
-      padding:9px 14px;
-      border-radius:999px;
-      border:none;
-      cursor:pointer;
-      font-weight:700;
-      font-size:12px;
-      letter-spacing:.18em;
-      text-transform:uppercase;
-      display:inline-flex;
-      align-items:center;
-      justify-content:center;
-      gap:8px;
-      background:linear-gradient(90deg,#0ff,#ff3b6b);
-      color:#001520;
-      box-shadow:
-        0 0 24px rgba(0,255,255,.6),
-        0 0 34px rgba(255,59,107,.55);
-    }
-    .deploy-btn span.tag{
-      font-size:10px;
-      text-transform:uppercase;
-      letter-spacing:.16em;
-      opacity:.9;
-    }
-
     /* Overlays for invites / search / matchmaking */
     .overlay{
       position:absolute;
@@ -358,21 +360,34 @@
       color:#c3cff5;
       line-height:1.6;
     }
+
     .overlay-input-row{
       display:flex;
       gap:6px;
       margin-top:6px;
+      align-items:center;
     }
-    .overlay-input-row input{
+
+    /* Custom IZZA keyboard display */
+    .izzakey-display{
       flex:1;
+      min-height:30px;
       border-radius:999px;
       border:1px solid rgba(127,209,255,.6);
       padding:6px 10px;
       background:#02061b;
       color:#edf3ff;
       font-size:12px;
-      outline:none;
+      display:flex;
+      align-items:center;
+      overflow:hidden;
+      white-space:nowrap;
+      text-overflow:ellipsis;
     }
+    .izzakey-display.empty{
+      color:#5d6aa0;
+    }
+
     .overlay-input-row button{
       padding:6px 10px;
       border-radius:999px;
@@ -383,7 +398,38 @@
       background:linear-gradient(90deg,#0ff,#7fd1ff);
       color:#001520;
       cursor:pointer;
+      white-space:nowrap;
     }
+
+    .izzakey-grid{
+      margin-top:6px;
+      display:grid;
+      grid-template-columns:repeat(10,1fr);
+      gap:4px;
+      font-size:11px;
+    }
+    .izzakey{
+      padding:6px 0;
+      border-radius:6px;
+      border:1px solid rgba(127,209,255,.35);
+      background:#050b1f;
+      color:#d0defe;
+      text-align:center;
+      cursor:pointer;
+      user-select:none;
+    }
+    .izzakey.wide{
+      grid-column:span 2;
+    }
+    .izzakey.back{
+      background:#25112a;
+      border-color:rgba(255,59,107,.7);
+    }
+    .izzakey.clear{
+      background:#231f0b;
+      border-color:rgba(255,207,77,.7);
+    }
+
     .party-list{
       margin-top:8px;
       padding:8px;
@@ -391,6 +437,8 @@
       border:1px dashed rgba(127,209,255,.5);
       font-size:11px;
       color:#9fb0d6;
+      max-height:180px;
+      overflow:auto;
     }
     .party-row{
       display:flex;
@@ -426,7 +474,7 @@
       cursor:pointer;
     }
 
-    /* Stack panels on very short screens so Deploy never overlaps */
+    /* Stack panels on very short screens so nothing overlaps */
     @media (max-height:620px){
       .main-row{
         grid-template-columns:1fr;
@@ -443,6 +491,10 @@
             <div class="izzacoin"></div>
             <span>IZZA • WAR ZONE</span>
           </div>
+          <button class="deploy-btn" id="deployBtn">
+            <span>Deploy</span>
+            <span class="tag">drop in</span>
+          </button>
           <div class="player-pill">
             <span class="label">Operator</span>
             <span class="name">{{ player.username }}</span>
@@ -454,19 +506,18 @@
             <div class="zone-header">
               <div>
                 <span>Drop zone</span>
-                <strong>Pre-deployment</strong>
+                <strong>Pre-deployment view</strong>
               </div>
               <div style="font-size:10px;color:#7fd1ff;">
-                Kenny maps · rotated view
+                IZZA maps · rotated view
               </div>
             </div>
             <div class="zone-canvas-shell" id="zoneCanvasShell">
               <div class="zone-overlay-copy">
                 <span class="tag">Map preview</span>
                 <p>
-                  Top-down Kenny map for IZZA WAR ZONE. When you deploy, we’ll
-                  animate the drop-ship path and your squad’s drop-in line over
-                  this view before the FPS client takes over.
+                  This panel will show the live War Zone map and your squad’s
+                  drop-ship path before the FPS client takes over.
                 </p>
               </div>
             </div>
@@ -524,13 +575,6 @@
           </aside>
         </div>
 
-        <div class="bottom-row">
-          <button class="deploy-btn" id="deployBtn">
-            <span>Deploy</span>
-            <span class="tag">drop in</span>
-          </button>
-        </div>
-
         <!-- INVITE OVERLAY -->
         <div class="overlay" id="inviteOverlay">
           <div class="overlay-card">
@@ -548,13 +592,13 @@
                   <div class="party-name">{{ player.username }}</div>
                   <div class="party-status">leader</div>
                 </div>
-                <!-- Other members can be rendered here later from Node/server -->
+                <!-- Other members can be rendered here later -->
               </div>
             </div>
           </div>
         </div>
 
-        <!-- SEARCH OVERLAY -->
+        <!-- SEARCH OVERLAY (custom IZZA keyboard) -->
         <div class="overlay" id="searchOverlay">
           <div class="overlay-card">
             <div class="overlay-header">
@@ -563,14 +607,16 @@
             </div>
             <div class="overlay-body">
               <p>
-                Search Pi-authed IZZA WAR ZONE players and send lobby invites.
+                Use the IZZA keyboard to search Pi-authed IZZA WAR ZONE players
+                and send lobby invites.
               </p>
               <div class="overlay-input-row">
-                <input type="text" id="searchInput" placeholder="Search by Pi username…">
+                <div id="searchDisplay" class="izzakey-display empty">Search by Pi username…</div>
                 <button type="button" id="searchGo">Go</button>
               </div>
+              <div class="izzakey-grid" id="izzakeyGrid"></div>
               <div class="party-list" id="searchResults">
-                Type a name and tap <b>Go</b> to search.
+                Type a name using the IZZA keyboard and tap <b>Go</b>.
               </div>
             </div>
           </div>
@@ -587,7 +633,7 @@
               <p>
                 Connecting to the IZZA WAR ZONE lobby, filling up to 20 players
                 per match and topping up with bots if needed. When the match is
-                ready the Kenny map client will load.
+                ready the FPS client will load.
               </p>
             </div>
           </div>
@@ -636,8 +682,7 @@
           nameEl.textContent = "IZZA Soldier, Basic Man";
           sprite.classList.remove("female");
         }
-        // TODO: POST choice to a War Zone profile endpoint if you want to persist immediately
-        // fetch("/warzone/api/starter", {...})
+        // later: POST to /warzone/api/starter to persist
       }
 
       chips.forEach(c => {
@@ -645,7 +690,7 @@
       });
     })();
 
-    // Overlays + real search/invite wiring
+    // Overlays + search/invite wiring (with custom IZZA keyboard)
     (function(){
       const inviteOverlay = document.getElementById("inviteOverlay");
       const searchOverlay = document.getElementById("searchOverlay");
@@ -671,15 +716,93 @@
         });
       });
 
-      // Search + invite
-      const searchGo = document.getElementById("searchGo");
-      const searchInput = document.getElementById("searchInput");
+      // ----------------------------------------------------
+      // Custom IZZA keyboard (no OS keyboard popup)
+      // ----------------------------------------------------
+      const searchDisplay = document.getElementById("searchDisplay");
+      const keyGrid = document.getElementById("izzakeyGrid");
       const searchResults = document.getElementById("searchResults");
+      const searchGo = document.getElementById("searchGo");
+
+      let buffer = "";
+
+      function updateDisplay(){
+        if (!searchDisplay) return;
+        if (!buffer){
+          searchDisplay.textContent = "Search by Pi username…";
+          searchDisplay.classList.add("empty");
+        } else {
+          searchDisplay.textContent = buffer;
+          searchDisplay.classList.remove("empty");
+        }
+      }
+
+      function appendChar(ch){
+        if (buffer.length >= 20) return;
+        buffer += ch;
+        updateDisplay();
+      }
+      function backspace(){
+        buffer = buffer.slice(0,-1);
+        updateDisplay();
+      }
+      function clearAll(){
+        buffer = "";
+        updateDisplay();
+      }
+
+      function buildKeyboard(){
+        if (!keyGrid) return;
+        keyGrid.innerHTML = "";
+
+        const rows = [
+          "QWERTYUIOP",
+          "ASDFGHJKL",
+          "ZXCVBNM",
+          "1234567890"
+        ];
+
+        rows.forEach(row => {
+          row.split("").forEach(ch => {
+            const btn = document.createElement("button");
+            btn.type = "button";
+            btn.className = "izzakey";
+            btn.textContent = ch;
+            btn.addEventListener("click", () => appendChar(ch));
+            keyGrid.appendChild(btn);
+          });
+        });
+
+        // Space, backspace, clear
+        const space = document.createElement("button");
+        space.type = "button";
+        space.className = "izzakey wide";
+        space.textContent = "space";
+        space.addEventListener("click", () => appendChar(" "));
+        keyGrid.appendChild(space);
+
+        const back = document.createElement("button");
+        back.type = "button";
+        back.className = "izzakey wide back";
+        back.textContent = "⌫";
+        back.addEventListener("click", backspace);
+        keyGrid.appendChild(back);
+
+        const clear = document.createElement("button");
+        clear.type = "button";
+        clear.className = "izzakey wide clear";
+        clear.textContent = "clear";
+        clear.addEventListener("click", clearAll);
+        keyGrid.appendChild(clear);
+      }
+
+      buildKeyboard();
+      updateDisplay();
 
       async function doSearch(){
-        const q = (searchInput.value || "").trim();
+        const q = (buffer || "").trim();
         if (!q){
-          searchResults.textContent = "Type a Pi username and tap Go.";
+          searchResults.textContent = "Type a Pi username with the IZZA keyboard and tap Go.";
           return;
         }
         try{
@@ -736,12 +859,6 @@
       }
 
       searchGo?.addEventListener("click", doSearch);
-      searchInput?.addEventListener("keydown", function(ev){
-        if (ev.key === "Enter"){
-          ev.preventDefault();
-          doSearch();
-        }
-      });
     })();
   </script>
 </body>
