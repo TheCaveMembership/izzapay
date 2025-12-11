@@ -1115,8 +1115,8 @@
         const url = base + sku + ".glb";
 
         const lastSlash = url.lastIndexOf("/");
-        the rootUrl = url.substring(0,lastSlash+1);
-        const fileName = url.substring(lastSlash+1);
+        const rootUrl = url.substring(0,lastSlash+1);
+        const fileName = url.substring(lastSlash+1);   
 
         BABYLON.SceneLoader.ImportMesh(
           "",
