@@ -174,7 +174,7 @@
       font-size:12px;
     }
     .zone-canvas-shell{
-      flex:1;
+      /* COD-style wide map banner */
       border-radius:10px;
       border:1px solid rgba(39,62,130,.9);
       position:relative;
@@ -182,6 +182,8 @@
       background-size:cover;
       background-position:center;
       background-repeat:no-repeat;
+      aspect-ratio:16 / 9;
+      flex:0 0 auto;
     }
     .zone-canvas-shell::before{
       /* soft hologram tint over the real map image */
@@ -236,7 +238,7 @@
 
     .friends-actions{
       display:flex;
-      flex-direction:column; /* stack so nothing spills out */
+      flex-direction:column;
       gap:6px;
       margin-bottom:6px;
     }
