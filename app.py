@@ -149,36 +149,7 @@ try:
 except Exception:
     PI_USD_RATE = 0.0
 
-# ----------------- IZZA WARZONE BLUEPRINT -----------------
-warzone_bp = Blueprint("warzone_bp", __name__, url_prefix="/warzone")
 
-@warzone_bp.get("/auth")
-def warzone_auth():
-    """
-    Pi auth gate for IZZA WAR ZONE.
-    Uses the same /auth/exchange handler as the rest of IZZA,
-    but themed for the War Zone FPS.
-    """
-    return render_template("warzone_auth.html", sandbox=PI_SANDBOX)
-
-
-@warzone_bp.get("/")
-def warzone_lobby():
-    """
-    Main IZZA WAR ZONE lobby page.
-    For now this is a simple placeholder. We can wire the full FPS canvas,
-    matchmaking, and loadout selection here later.
-
-    If user is not logged in, send them to the War Zone auth page.
-    """
-    if "user_id" not in session:
-        # Preserve query string if present
-        qs = request.query_string.decode("utf-8")
-        base = "/warzone/auth"
-        return redirect(f"{base}?{qs}" if qs else base)
-
-    # Later: pass player stats, loadouts, etc.
-    return render_template("warzone_lobby.html")
 
 # ----------------- APP -----------------
 app = Flask(__name__)
