@@ -41,7 +41,7 @@
     .lobby-root{
       width:100%;
       height:100%;
-      padding:6px; /* slightly tighter so content fits better */
+      padding:6px;
     }
 
     .shell{
@@ -56,10 +56,10 @@
         0 0 80px rgba(255,59,107,.12);
       padding:8px 10px;
       display:grid;
-      grid-template-rows:auto 1fr; /* top + main */
+      grid-template-rows:auto 1fr;
       row-gap:6px;
       position:relative;
-      overflow:auto;              /* allow internal scroll on tiny screens */
+      overflow:auto;
       -webkit-overflow-scrolling:touch;
     }
     .shell::-webkit-scrollbar{
@@ -174,7 +174,6 @@
       font-size:12px;
     }
     .zone-canvas-shell{
-      /* COD-style wide map banner */
       border-radius:10px;
       border:1px solid rgba(39,62,130,.9);
       position:relative;
@@ -186,7 +185,6 @@
       flex:0 0 auto;
     }
     .zone-canvas-shell::before{
-      /* soft hologram tint over the real map image */
       content:"";
       position:absolute;
       inset:0;
@@ -212,6 +210,54 @@
       color:#7fd1ff;
       margin-bottom:4px;
       display:block;
+    }
+
+    /* Loadout row under the map */
+    .loadout-bar{
+      margin-top:4px;
+      padding:8px 10px;
+      border-radius:10px;
+      border:1px solid rgba(66,91,168,.8);
+      background:linear-gradient(145deg,#050815,#030616);
+      display:flex;
+      align-items:flex-start;
+      justify-content:space-between;
+      gap:10px;
+      font-size:11px;
+    }
+    .loadout-title{
+      text-transform:uppercase;
+      letter-spacing:.16em;
+      font-size:10px;
+      color:#9fb0d6;
+      margin-bottom:2px;
+    }
+    .loadout-sub{
+      color:#b7c6f2;
+      max-width:260px;
+    }
+    .loadout-actions{
+      display:flex;
+      flex-wrap:wrap;
+      gap:6px;
+      justify-content:flex-end;
+    }
+    .btn-loadout{
+      padding:6px 10px;
+      border-radius:999px;
+      border:1px solid rgba(127,209,255,.7);
+      background:linear-gradient(90deg,rgba(3,12,38,.9),rgba(4,27,61,.95));
+      color:#e7f0ff;
+      font-size:10px;
+      text-transform:uppercase;
+      letter-spacing:.16em;
+      cursor:pointer;
+      white-space:nowrap;
+    }
+    .btn-loadout.secondary{
+      border-color:rgba(255,207,77,.7);
+      background:linear-gradient(90deg,#312008,#4a3410);
+      color:#ffefc6;
     }
 
     /* Right side: friends + starter operator */
@@ -332,7 +378,7 @@
       font-weight:600;
     }
 
-    /* Overlays for invites / search / matchmaking */
+    /* Overlays (friends / search / matchmaking / shop) */
     .overlay{
       position:absolute;
       inset:0;
@@ -345,7 +391,7 @@
     .overlay.visible{display:flex;}
     .overlay-card{
       width:90%;
-      max-width:420px;
+      max-width:460px;
       border-radius:18px;
       border:1px solid rgba(132,153,255,.7);
       background:linear-gradient(145deg,#050818,#02030c);
@@ -493,13 +539,97 @@
       cursor:pointer;
     }
 
-    /* Stack panels on very short screens so nothing overlaps */
+    /* Shop / armory lists */
+    .shop-list{
+      margin-top:8px;
+      max-height:260px;
+      overflow:auto;
+      padding:4px;
+      border-radius:10px;
+      border:1px solid rgba(66,91,168,.7);
+      background:radial-gradient(circle at top,#050919,#010308);
+    }
+    .shop-item{
+      display:flex;
+      align-items:flex-start;
+      justify-content:space-between;
+      gap:8px;
+      padding:6px 6px 6px 2px;
+      border-bottom:1px solid rgba(44,64,122,.65);
+    }
+    .shop-item:last-child{border-bottom:none;}
+    .shop-main{
+      flex:1;
+      min-width:0;
+    }
+    .shop-name{
+      font-size:12px;
+      font-weight:600;
+      margin-bottom:2px;
+    }
+    .shop-sub{
+      font-size:11px;
+      color:#9fb0d6;
+    }
+    .shop-side{
+      display:flex;
+      flex-direction:column;
+      gap:4px;
+      align-items:flex-end;
+      justify-content:center;
+      min-width:92px;
+    }
+    .price-tag{
+      font-size:11px;
+      padding:2px 8px;
+      border-radius:999px;
+      border:1px solid rgba(255,207,77,.8);
+      background:linear-gradient(90deg,#3b2b0b,#5a3f10);
+      color:#ffe8a6;
+      white-space:nowrap;
+    }
+    .price-tag.start{
+      border-color:rgba(127,209,255,.8);
+      background:linear-gradient(90deg,#041626,#04384d);
+      color:#cfe9ff;
+    }
+    .shop-btn{
+      padding:5px 8px;
+      border-radius:999px;
+      border:1px solid rgba(127,209,255,.8);
+      background:linear-gradient(90deg,#021021,#03253b);
+      color:#e7f0ff;
+      font-size:10px;
+      text-transform:uppercase;
+      letter-spacing:.14em;
+      cursor:pointer;
+      white-space:nowrap;
+    }
+    .shop-btn.owned{
+      border-color:rgba(159,176,214,.8);
+      background:#111826;
+      color:#9fb0d6;
+    }
+    .shop-btn.equipped{
+      border-color:rgba(0,255,170,.9);
+      background:linear-gradient(90deg,#00e5b0,#62ffd5);
+      color:#001b11;
+      font-weight:700;
+    }
+    .shop-note{
+      margin-top:6px;
+      font-size:11px;
+      color:#9fb0d6;
+    }
+
+    /* Stack panels on very short screens */
     @media (max-height:620px){
       .main-row{
         grid-template-columns:1fr;
       }
     }
   </style>
+  <script src="https://sdk.minepi.com/pi-sdk.js"></script>
 </head>
 <body>
   <div class="rot-wrapper" id="rotWrapper">
@@ -542,6 +672,21 @@
                   This panel will show the live War Zone map and your squad’s
                   drop-ship path before the FPS client takes over.
                 </p>
+              </div>
+            </div>
+
+            <!-- NEW: loadout bar with WEAPONS + SKINS buttons -->
+            <div class="loadout-bar">
+              <div>
+                <div class="loadout-title">Pre-deploy loadout</div>
+                <div class="loadout-sub">
+                  You always spawn with a basic pistol for free. Extra weapons
+                  and IZZA Soldier skins unlock with IZZA token purchases.
+                </div>
+              </div>
+              <div class="loadout-actions">
+                <button class="btn-loadout secondary" id="weaponsBtn">Weapons</button>
+                <button class="btn-loadout" id="skinsBtn">Skins</button>
               </div>
             </div>
           </section>
@@ -615,7 +760,6 @@
                   <div class="party-name">{{ player.username }}</div>
                   <div class="party-status">leader</div>
                 </div>
-                <!-- Other members can be rendered here later -->
               </div>
             </div>
           </div>
@@ -662,11 +806,70 @@
           </div>
         </div>
 
-      </div>
+        <!-- ARMORY: WEAPONS -->
+        <div class="overlay" id="weaponsOverlay">
+          <div class="overlay-card">
+            <div class="overlay-header">
+              <div class="overlay-title">Armory — Weapons</div>
+              <button class="overlay-close" data-close="weaponsOverlay">Close</button>
+            </div>
+            <div class="overlay-body">
+              <p>
+                You always deploy with the free <b>Basic Pistol</b>. Use IZZA tokens
+                to unlock extra weapons and blueprints. Owned weapons stay in
+                your inventory across matches.
+              </p>
+              <div id="weaponsList" class="shop-list">
+                Loading weapons…
+              </div>
+              <div class="shop-note">
+                Purchases are paid with Testnet IZZA from your active IZZA wallet,
+                using the same flow as IZZA CREATURE mints.
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- ARMORY: SKINS -->
+        <div class="overlay" id="skinsOverlay">
+          <div class="overlay-card">
+            <div class="overlay-header">
+              <div class="overlay-title">Armory — Skins</div>
+              <button class="overlay-close" data-close="skinsOverlay">Close</button>
+            </div>
+            <div class="overlay-body">
+              <p>
+                Start with the free <b>Basic IZZA Soldier</b>. Unlock extra operator
+                skins and outfits with IZZA tokens, then equip one as your
+                current look before you drop in.
+              </p>
+              <div id="skinsList" class="shop-list">
+                Loading skins…
+              </div>
+              <div class="shop-note">
+                Skins are pure cosmetics and are <b>not</b> NFTs. They live in
+                your IZZA WAR ZONE inventory, purchased with IZZA like game
+                credits.
+              </div>
+            </div>
+          </div>
+        </div>
+
+      </div><!-- /.shell -->
     </div>
   </div>
 
   <script>
+    // Pi SDK init (same pattern as creatures page)
+    (function(){
+      const sandbox = {{ 'true' if PI_SANDBOX else 'false' }};
+      try{
+        if(window.Pi && Pi.init){
+          Pi.init({ version:"2.0", sandbox:sandbox });
+        }
+      }catch(e){}
+    })();
+
     // Manual landscape: disable rotation when the browser is truly landscape (desktop)
     (function(){
       const wrapper = document.getElementById("rotWrapper");
@@ -688,7 +891,7 @@
       updateLayout();
     })();
 
-    // Starter operator toggle
+    // Starter operator toggle (unchanged)
     (function(){
       const chips = document.querySelectorAll(".char-chip");
       const nameEl = document.getElementById("charName");
@@ -713,11 +916,78 @@
       });
     })();
 
-    // Overlays + search/invite wiring (with custom IZZA keyboard)
+    // ---------- Minimal IZZA wallet helpers (ported from creatures flow) ----------
+    (function(){
+      const SRV_USER = {{ (player.username or '') | tojson }};
+      function stripAt(s){ return (s||"").toString().trim().replace(/^@+/, ""); }
+      const USER_CANON = stripAt(SRV_USER || localStorage.getItem("izzaUserCanon") || "");
+
+      if(USER_CANON){
+        try{
+          localStorage.setItem("izzaUserCanon", USER_CANON);
+          localStorage.setItem("izzaUserU", USER_CANON.toLowerCase());
+        }catch(e){}
+      }
+
+      function __readVault(){
+        try{
+          const s = localStorage.getItem("izza_test_wallet");
+          return s ? JSON.parse(s) : null;
+        }catch(e){ return null; }
+      }
+      function __writeVault(j){
+        try{ localStorage.setItem("izza_test_wallet", JSON.stringify(j || {})); }catch(e){}
+      }
+      function isLocalWallet(pub){
+        const v = __readVault();
+        return !!(v && v.pub === pub && /^S[A-Z0-9]{55}$/.test(v.sec || ""));
+      }
+      function getLocalSecret(pub){
+        try{
+          const v = __readVault();
+          if(!v) return "";
+          if(pub && v.pub !== pub) return "";
+          return v.sec || "";
+        }catch(e){ return ""; }
+      }
+
+      async function fetchActiveWallet(username){
+        const qs = username ? ("?u=" + encodeURIComponent(username)) : "";
+        const r = await fetch("/api/wallet/active"+qs, { credentials:"include" });
+        if(!r.ok) return null;
+        return r.json().catch(()=>null);
+      }
+
+      async function ensureUserAndWalletGate(){
+        const user = USER_CANON;
+        if(!user){
+          alert("Sign in with Pi first, then return to IZZA WAR ZONE.");
+          return null;
+        }
+        const active = await fetchActiveWallet(user);
+        const pub = active && active.pub || "";
+        if(!/^G[A-Z0-9]{55}$/.test(pub)){
+          alert("Open your IZZA wallet once to set an active wallet, then return here.");
+          return null;
+        }
+        if(!isLocalWallet(pub)){
+          alert("Save your IZZA wallet S key locally (same as IZZA CREATURES page) before purchasing.");
+          return null;
+        }
+        return { user, pub, sec:getLocalSecret(pub) };
+      }
+
+      // Expose for shop code
+      window.__izzaWalletGate = ensureUserAndWalletGate;
+    })();
+
+    // ---------- Overlays (friends / search / matchmaking / armory) ----------
     (function(){
       const inviteOverlay = document.getElementById("inviteOverlay");
       const searchOverlay = document.getElementById("searchOverlay");
       const deployOverlay = document.getElementById("deployOverlay");
+      const weaponsOverlay = document.getElementById("weaponsOverlay");
+      const skinsOverlay = document.getElementById("skinsOverlay");
 
       function show(id){
         const el = document.getElementById(id);
@@ -732,6 +1002,15 @@
       document.getElementById("searchBtn")?.addEventListener("click", () => show("searchOverlay"));
       document.getElementById("deployBtn")?.addEventListener("click", () => show("deployOverlay"));
 
+      document.getElementById("weaponsBtn")?.addEventListener("click", () => {
+        show("weaponsOverlay");
+        window.__izzaLoadShop && window.__izzaLoadShop("weapons");
+      });
+      document.getElementById("skinsBtn")?.addEventListener("click", () => {
+        show("skinsOverlay");
+        window.__izzaLoadShop && window.__izzaLoadShop("skins");
+      });
+
       document.querySelectorAll(".overlay-close").forEach(btn => {
         btn.addEventListener("click", function(){
           const id = this.getAttribute("data-close");
@@ -739,9 +1018,7 @@
         });
       });
 
-      // ----------------------------------------------------
-      // Custom IZZA keyboard (no OS keyboard popup)
-      // ----------------------------------------------------
+      // Custom IZZA keyboard for player search
       const searchDisplay = document.getElementById("searchDisplay");
       const keyGrid = document.getElementById("izzakeyGrid");
       const searchResults = document.getElementById("searchResults");
@@ -796,7 +1073,6 @@
           });
         });
 
-        // Space, backspace, clear
         const space = document.createElement("button");
         space.type = "button";
         space.className = "izzakey wide";
@@ -882,6 +1158,154 @@
       }
 
       searchGo?.addEventListener("click", doSearch);
+    })();
+
+    // ---------- Armory load + IZZA purchases ----------
+    (function(){
+      const weaponsList = document.getElementById("weaponsList");
+      const skinsList   = document.getElementById("skinsList");
+
+      async function loadShop(slot){
+        const listEl = slot === "weapons" ? weaponsList : skinsList;
+        if(!listEl) return;
+        listEl.textContent = "Loading " + slot + "…";
+        try{
+          const res = await fetch(`/warzone/api/shop?slot=${encodeURIComponent(slot)}`);
+          if(!res.ok){
+            listEl.textContent = "Unable to load "+slot+".";
+            return;
+          }
+          const data = await res.json();
+          const items = data.items || [];
+          if(!items.length){
+            listEl.textContent = "No "+slot+" configured yet.";
+            return;
+          }
+          listEl.innerHTML = "";
+          items.forEach(it => {
+            const row = document.createElement("div");
+            row.className = "shop-item";
+
+            const main = document.createElement("div");
+            main.className = "shop-main";
+            const nm = document.createElement("div");
+            nm.className = "shop-name";
+            nm.textContent = it.name || it.sku;
+            const sub = document.createElement("div");
+            sub.className = "shop-sub";
+            sub.textContent = it.description || "";
+            main.appendChild(nm);
+            main.appendChild(sub);
+
+            const side = document.createElement("div");
+            side.className = "shop-side";
+
+            const price = document.createElement("div");
+            price.className = "price-tag" + (it.starting ? " start" : "");
+            price.textContent = it.starting ? "Starter" : (it.price_izza + " IZZA");
+            side.appendChild(price);
+
+            const btn = document.createElement("button");
+            btn.className = "shop-btn";
+            btn.dataset.sku = it.sku;
+            btn.dataset.slot = slot;
+            btn.dataset.price = it.price_izza;
+
+            if(it.equipped){
+              btn.classList.add("equipped","owned");
+              btn.textContent = "Equipped";
+            }else if(it.owned){
+              btn.classList.add("owned");
+              btn.textContent = "Equip";
+            }else if(it.starting){
+              btn.classList.add("equipped","owned");
+              btn.textContent = "Basic";
+            }else{
+              btn.textContent = "Buy";
+            }
+
+            btn.addEventListener("click", async function(){
+              const owned = this.classList.contains("owned") && !this.classList.contains("equipped") && !it.starting;
+              if(owned){
+                // Equip
+                await equipItem(slot, it.sku, listEl);
+              }else if(!this.classList.contains("equipped") && !it.starting){
+                const price = Number(this.dataset.price || 0);
+                await purchaseItem(slot, it.sku, price, listEl);
+              }
+            });
+
+            side.appendChild(btn);
+            row.appendChild(main);
+            row.appendChild(side);
+            listEl.appendChild(row);
+          });
+        }catch(e){
+          console.error(e);
+          listEl.textContent = "Error loading "+slot+".";
+        }
+      }
+
+      async function purchaseItem(slot, sku, price, listEl){
+        try{
+          const gate = await window.__izzaWalletGate?.();
+          if(!gate) return;
+          if(!price || price <= 0){
+            alert("This item is not configured with an IZZA price yet.");
+            return;
+          }
+          const ok = confirm(`Spend ${price} IZZA to unlock "${sku}"?`);
+          if(!ok) return;
+
+          listEl && (listEl.dataset.busy = "1");
+
+          const res = await fetch("/warzone/api/purchase", {
+            method:"POST",
+            headers:{ "Content-Type":"application/json" },
+            body: JSON.stringify({
+              slot,
+              sku,
+              price_izza: price,
+              buyer_pub: gate.pub,
+              buyer_sec: gate.sec
+            })
+          });
+          const data = await res.json().catch(()=>({}));
+          if(!res.ok || !data.ok){
+            alert("Purchase failed: " + (data.error || res.status));
+          }else{
+            alert("Purchase complete. Item added to your inventory.");
+            await loadShop(slot);
+          }
+        }catch(e){
+          console.error(e);
+          alert("Purchase error. Try again.");
+        }finally{
+          if(listEl) delete listEl.dataset.busy;
+        }
+      }
+
+      async function equipItem(slot, sku, listEl){
+        try{
+          const res = await fetch("/warzone/api/equip", {
+            method:"POST",
+            headers:{ "Content-Type":"application/json" },
+            body: JSON.stringify({ slot, sku })
+          });
+          const data = await res.json().catch(()=>({}));
+          if(!res.ok || !data.ok){
+            alert("Equip failed: " + (data.error || res.status));
+          }else{
+            await loadShop(slot);
+          }
+        }catch(e){
+          console.error(e);
+          alert("Equip error. Try again.");
+        }
+      }
+
+      // make loader globally callable from overlay open
+      window.__izzaLoadShop = loadShop;
     })();
   </script>
 </body>
