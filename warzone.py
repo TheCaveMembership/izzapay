@@ -30,7 +30,15 @@ warzone_bp = Blueprint("warzone_bp", __name__, url_prefix="/warzone")
 # Helpers
 # ----------------------------------------------------------------------
 
+def _now_i() -> int:
+    return int(time())
+
+
 def _require_user_id():
+    """
+    Legacy: session-only.
+    Kept to avoid breaking anything that might rely on it.
+    """
     uid = session.get("user_id")
     if not uid:
         return None
@@ -40,8 +48,85 @@ def _require_user_id():
         return None
 
 
-def _now_i() -> int:
-    return int(time())
+def _norm_username(u):
+    if not u:
+        return None
+    u = str(u).strip().lstrip("@").lower()
+    return u or None
+
+
+def _resolve_username():
+    """
+    Match your proven wallet API resolution order:
+      1) ?u=<username>
+      2) session['pi_username'] (or session fallbacks)
+      3) session['user_id'] -> users.pi_username
+    """
+    # 1) explicit query
+    u = _norm_username(request.args.get("u"))
+    if u:
+        return u
+
+    # 2) session cache
+    for k in ("pi_username", "username", "pi_handle"):
+        u = _norm_username(session.get(k))
+        if u:
+            return u
+
+    # 3) derive from user_id
+    uid = session.get("user_id")
+    if not uid:
+        return None
+    try:
+        uid_i = int(uid)
+    except (TypeError, ValueError):
+        return None
+
+    with conn() as cx:
+        row = cx.execute(
+            "SELECT COALESCE(pi_username, username) AS u FROM users WHERE id=?",
+            (uid_i,),
+        ).fetchone()
+    return _norm_username(row["u"] if row else None)
+
+
+def _require_user_id_or_u():
+    """
+    Warzone auth fix:
+    If session user_id is missing (common in Pi Browser when you land deep-linked),
+    allow Warzone endpoints to resolve the user via ?u= or session pi_username,
+    then hydrate session['user_id'] so everything downstream (inventory, etc.) works.
+    """
+    uid = _require_user_id()
+    if uid:
+        return uid
+
+    u = _resolve_username()
+    if not u:
+        return None
+
+    with conn() as cx:
+        row = cx.execute(
+            """
+            SELECT id
+            FROM users
+            WHERE lower(COALESCE(pi_username,'')) = ?
+               OR lower(COALESCE(username,''))    = ?
+            LIMIT 1
+            """,
+            (u, u),
+        ).fetchone()
+
+    if not row:
+        return None
+
+    try:
+        uid_i = int(row["id"])
+    except Exception:
+        return None
+
+    session["user_id"] = uid_i
+    return uid_i
 
 
 # ---------- Pi Testnet Horizon + network ----------
@@ -88,6 +173,7 @@ WZ_SHOP_DEST = (
     os.getenv("WZ_SHOP_DEST")
     or os.getenv("NFT_DISTR_PUBLIC", "").strip()
 )
+
 
 def _izza_payment_config_ok() -> bool:
     return bool(IZZA_CODE and IZZA_ISSUER and WZ_SHOP_DEST)
@@ -418,6 +504,8 @@ def warzone_auth():
 
 @warzone_bp.get("/")
 def warzone_lobby():
+    # Keep existing behavior: require a real session user_id to enter the lobby
+    # (prevents breaking anything currently working)
     if "user_id" not in session:
         qs = request.query_string.decode("utf-8")
         base = "/warzone/auth"
@@ -472,7 +560,7 @@ def warzone_lobby():
 
 @warzone_bp.get("/api/search")
 def warzone_search_players():
-    uid = _require_user_id()
+    uid = _require_user_id_or_u()
     if not uid:
         return jsonify({"error": "auth_required"}), 401
 
@@ -504,7 +592,7 @@ def warzone_search_players():
 
 @warzone_bp.post("/api/invite")
 def warzone_invite_player():
-    uid = _require_user_id()
+    uid = _require_user_id_or_u()
     if not uid:
         return jsonify({"error": "auth_required"}), 401
 
@@ -537,7 +625,8 @@ def warzone_invite_player():
 
 @warzone_bp.get("/api/shop")
 def warzone_shop():
-    uid = _require_user_id()
+    # Allow shop read to work with either session OR ?u= (same as wallet endpoints)
+    uid = _require_user_id_or_u()
     inv_uid = uid if uid is not None else -1
 
     slot = (request.args.get("slot") or "weapons").strip().lower()
@@ -595,7 +684,7 @@ def warzone_shop():
 
 @warzone_bp.post("/api/purchase")
 def warzone_purchase():
-    uid = _require_user_id()
+    uid = _require_user_id_or_u()
     if not uid:
         return jsonify({"error": "auth_required"}), 401
 
@@ -712,7 +801,7 @@ def warzone_purchase():
 
 @warzone_bp.post("/api/equip")
 def warzone_equip():
-    uid = _require_user_id()
+    uid = _require_user_id_or_u()
     if not uid:
         return jsonify({"error": "auth_required"}), 401
 
