@@ -13,7 +13,7 @@ from db import conn
 import os
 from decimal import Decimal, InvalidOperation
 
-from stellar_sdk import Asset
+from stellar_sdk import Asset, Keypair, Server
 
 # Reuse the same helpers you use in IZZA CREATURES
 from nft_api import _pay_asset
@@ -45,12 +45,14 @@ def _now_i() -> int:
 IZZA_CODE = os.getenv("IZZA_TOKEN_CODE", "IZZA").strip()
 IZZA_ISSUER = os.getenv("IZZA_TOKEN_ISSUER", "").strip()
 
-# Where the IZZA payment goes – for now we default to the same
-# distributor public key you use for creatures / NFTs.
+# Where the IZZA payment goes
 WZ_SHOP_DEST = (
     os.getenv("WZ_SHOP_DEST")
     or os.getenv("NFT_DISTR_PUBLIC", "").strip()
 )
+
+# Pi Testnet Horizon
+PI_HORIZON_URL = os.getenv("PI_HORIZON_URL", "https://api.testnet.minepi.com").strip()
 
 
 def _parse_izza_amount(raw) -> Decimal | None:
@@ -64,7 +66,6 @@ def _parse_izza_amount(raw) -> Decimal | None:
         return None
     if d <= 0:
         return None
-    # Stellar supports up to 7 decimal places
     return d.quantize(Decimal("0.0000001"))
 
 
@@ -77,26 +78,75 @@ def _izza_payment_config_ok() -> bool:
     )
 
 
+def _get_active_wallet_pub_for_user(cx, user_id: int) -> str:
+    """
+    Fetch the active wallet pub for this user from your wallet system.
+    This assumes you already have /api/wallet/active working and persisting.
+
+    We try a few likely table names to stay compatible with your existing setup.
+    """
+    candidates = [
+        # table, pub column, user column
+        ("wallets", "pub", "user_id"),
+        ("user_wallets", "pub", "user_id"),
+        ("izza_wallets", "pub", "user_id"),
+        ("wallet_links", "pub", "user_id"),
+        ("wallet_active", "pub", "user_id"),
+    ]
+
+    for table, pub_col, user_col in candidates:
+        try:
+            row = cx.execute(
+                f"""
+                SELECT {pub_col} AS pub
+                FROM {table}
+                WHERE {user_col} = ?
+                ORDER BY id DESC
+                LIMIT 1
+                """,
+                (user_id,),
+            ).fetchone()
+            if row and row["pub"]:
+                return str(row["pub"]).strip().upper()
+        except Exception:
+            continue
+
+    return ""
+
+
+def _verify_tx_succeeded(tx_hash: str) -> tuple[bool, str]:
+    """
+    Confirm the tx exists and succeeded on Pi Testnet Horizon.
+    Returns (ok, detail).
+    """
+    if not tx_hash:
+        return False, "missing_tx_hash"
+    try:
+        srv = Server(horizon_url=PI_HORIZON_URL)
+        tx = srv.transactions().transaction(tx_hash).call()
+        if not tx:
+            return False, "tx_not_found"
+        if tx.get("successful") is True:
+            return True, "ok"
+        return False, "tx_not_successful"
+    except Exception as e:
+        return False, f"horizon_check_failed:{e}"
+
+
 # ---------- WAR ZONE SHOP: schema + seed ----------
 
 
 def _ensure_shop_schema(cx):
-    """
-    Create minimal tables for the War Zone shop if they do not exist.
-
-    We keep these tables local to the game and do not reuse any existing
-    IZZA shop tables in db.py.
-    """
     cx.executescript(
         """
         CREATE TABLE IF NOT EXISTS warzone_shop_items(
           id INTEGER PRIMARY KEY,
-          slot TEXT NOT NULL,              -- 'weapons' | 'skins'
+          slot TEXT NOT NULL,
           sku  TEXT NOT NULL UNIQUE,
           name TEXT,
           description TEXT,
           price_izza REAL NOT NULL DEFAULT 0,
-          starting INTEGER NOT NULL DEFAULT 0,   -- starter / default items
+          starting INTEGER NOT NULL DEFAULT 0,
           sort_order INTEGER NOT NULL DEFAULT 0,
           active INTEGER NOT NULL DEFAULT 1
         );
@@ -104,7 +154,7 @@ def _ensure_shop_schema(cx):
         CREATE TABLE IF NOT EXISTS warzone_inventory(
           id INTEGER PRIMARY KEY,
           user_id INTEGER NOT NULL,
-          slot TEXT NOT NULL,              -- 'weapons' | 'skins'
+          slot TEXT NOT NULL,
           sku TEXT NOT NULL,
           equipped INTEGER NOT NULL DEFAULT 0,
           created_at INTEGER NOT NULL,
@@ -116,18 +166,11 @@ def _ensure_shop_schema(cx):
 
 
 def _seed_shop_if_empty(cx):
-    """
-    Seed 5 weapons + 5 skins for now.
-
-    Unlimited supply, all priced in IZZA. Last 2 of each list cost 15 IZZA.
-    A single starter item per slot is free and marked as 'starting'.
-    """
     cur = cx.execute("SELECT COUNT(*) AS c FROM warzone_shop_items")
     row = cur.fetchone()
     if row and row["c"]:
         return
 
-    # Weapons
     weapons = [
         {
             "slot": "weapons",
@@ -176,7 +219,6 @@ def _seed_shop_if_empty(cx):
         },
     ]
 
-    # Skins
     skins = [
         {
             "slot": "skins",
@@ -251,28 +293,17 @@ def _seed_shop_if_empty(cx):
 
 @warzone_bp.get("/auth")
 def warzone_auth():
-    """
-    Pi auth gate for IZZA WAR ZONE.
-    Uses the same /auth/exchange handler as the rest of IZZA,
-    but themed for the War Zone FPS.
-    """
     sandbox = current_app.config.get("PI_SANDBOX", False)
     return render_template("warzone_auth.html", sandbox=sandbox)
 
 
 @warzone_bp.get("/")
 def warzone_lobby():
-    """
-    Main IZZA WAR ZONE lobby page.
-
-    If user is not logged in, redirect them to the War Zone auth page.
-    """
     if "user_id" not in session:
         qs = request.query_string.decode("utf-8")
         base = "/warzone/auth"
         return redirect(f"{base}?{qs}" if qs else base)
 
-    # Make sure we can treat user_id as int
     try:
         uid = int(session.get("user_id"))
     except (TypeError, ValueError):
@@ -280,7 +311,6 @@ def warzone_lobby():
 
     db_name = None
     if uid is not None:
-        # Pull the best display name we have from the users table
         with conn() as cx:
             row = cx.execute(
                 """
@@ -293,7 +323,6 @@ def warzone_lobby():
             if row and row["name"]:
                 db_name = row["name"]
 
-    # Fallback to session keys only if DB had nothing
     display_name = (
         db_name
         or session.get("username")
@@ -308,7 +337,6 @@ def warzone_lobby():
         "starter": session.get("warzone_starter") or "soldier_m",
     }
 
-    # For now we just use a static map key; lobby template has a default too
     map_image_url = "/assets/warzone-map-izzacity.jpg"
 
     return render_template(
@@ -326,9 +354,6 @@ def warzone_lobby():
 
 @warzone_bp.get("/api/search")
 def warzone_search_players():
-    """
-    Search IZZA users by username / pi_username for War Zone friend invites.
-    """
     uid = _require_user_id()
     if not uid:
         return jsonify({"error": "auth_required"}), 401
@@ -361,9 +386,6 @@ def warzone_search_players():
 
 @warzone_bp.post("/api/invite")
 def warzone_invite_player():
-    """
-    Create a War Zone lobby invite into warzone_invites.
-    """
     uid = _require_user_id()
     if not uid:
         return jsonify({"error": "auth_required"}), 401
@@ -398,9 +420,6 @@ def warzone_invite_player():
 
 @warzone_bp.get("/api/shop")
 def warzone_shop():
-    """
-    Return the Armory list for a given slot: 'weapons' or 'skins'.
-    """
     uid = _require_user_id()
     inv_uid = uid if uid is not None else -1
 
@@ -459,14 +478,6 @@ def warzone_shop():
 
 @warzone_bp.post("/api/purchase")
 def warzone_purchase():
-    """
-    Unlock a shop item for the current user.
-
-    Surgical change:
-    We do not attempt to create trustlines here.
-    If the user can spend IZZA, they already have the trustline.
-    We simply send IZZA to WZ_SHOP_DEST and record the unlock.
-    """
     uid = _require_user_id()
     if not uid:
         return jsonify({"error": "auth_required"}), 401
@@ -483,20 +494,35 @@ def warzone_purchase():
     except (TypeError, ValueError):
         price_izza_client = 0.0
 
-    buyer_pub = (data.get("buyer_pub") or "").strip()
-    buyer_sec = (data.get("buyer_sec") or "").strip()
+    buyer_pub = (data.get("buyer_pub") or "").strip().upper()
+    buyer_sec = (data.get("buyer_sec") or "").strip().upper()
 
     if slot not in ("weapons", "skins") or not sku:
         return jsonify({"error": "bad_request"}), 400
 
+    if not (buyer_pub.startswith("G") and len(buyer_pub) == 56):
+        return jsonify({"error": "buyer_pub_missing"}), 400
+
     if not (buyer_sec and buyer_sec.startswith("S") and len(buyer_sec) == 56):
         return jsonify({"error": "buyer_sec_missing"}), 400
-    if buyer_pub and not (buyer_pub.startswith("G") and len(buyer_pub) == 56):
-        buyer_pub = ""
+
+    # Verify sec matches pub, prevents “fake spend” and wrong key usage
+    try:
+        kp = Keypair.from_secret(buyer_sec)
+        derived_pub = kp.public_key
+        if derived_pub != buyer_pub:
+            return jsonify({"error": "buyer_key_mismatch"}), 400
+    except Exception:
+        return jsonify({"error": "buyer_key_invalid"}), 400
 
     with conn() as cx:
         _ensure_shop_schema(cx)
         _seed_shop_if_empty(cx)
+
+        # Verify buyer_pub is the active wallet for this user
+        active_pub = _get_active_wallet_pub_for_user(cx, uid)
+        if active_pub and active_pub != buyer_pub:
+            return jsonify({"error": "wallet_not_active_for_user"}), 403
 
         item = cx.execute(
             """
@@ -538,6 +564,7 @@ def warzone_purchase():
     amount_str = str(db_price)
     izza_asset = Asset(IZZA_CODE, IZZA_ISSUER)
 
+    # Execute payment
     try:
         tx_hash = _pay_asset(
             buyer_sec,
@@ -547,13 +574,18 @@ def warzone_purchase():
             f"WZ,{slot},{sku}",
         )
     except Exception as e:
-        return jsonify(
-            {"error": "payment_failed", "detail": str(e)}
-        ), 502
+        return jsonify({"error": "payment_failed", "detail": str(e)}), 502
+
+    # Confirm on horizon that it actually succeeded
+    ok_tx, tx_detail = _verify_tx_succeeded(tx_hash)
+    if not ok_tx:
+        return jsonify({"error": "payment_not_confirmed", "detail": tx_detail, "tx": tx_hash}), 502
 
     now_ts = _now_i()
     with conn() as cx:
         _ensure_shop_schema(cx)
+
+        # Record ownership
         cx.execute(
             """
             INSERT OR IGNORE INTO warzone_inventory
@@ -568,9 +600,6 @@ def warzone_purchase():
 
 @warzone_bp.post("/api/equip")
 def warzone_equip():
-    """
-    Mark a given item as equipped for the current user and slot.
-    """
     uid = _require_user_id()
     if not uid:
         return jsonify({"error": "auth_required"}), 401
@@ -639,15 +668,6 @@ def warzone_equip():
     return jsonify({"ok": True})
 
 
-# ----------------------------------------------------------------------
-# Soldier GLB test page (barebones)
-# ----------------------------------------------------------------------
-
-
 @warzone_bp.get("/test-soldier")
 def warzone_test_soldier():
-    """
-    Barebones page that only renders the pistol_soldier_m_idle.glb
-    so we can verify the asset + path independently of the lobby UI.
-    """
     return render_template("warzone_soldier_test.html")
