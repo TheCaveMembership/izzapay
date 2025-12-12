@@ -417,10 +417,14 @@ def warzone_shop():
         ...
       ]
     }
+
+    NOTE: we no longer require auth here. If there is no logged-in user
+    we still return the full item list, just with no owned/equipped
+    state beyond the free starter items.
     """
     uid = _require_user_id()
-    if not uid:
-        return jsonify({"error": "auth_required"}), 401
+    # For inventory join, use a sentinel that will never match if uid is None
+    inv_uid = uid if uid is not None else -1
 
     slot = (request.args.get("slot") or "weapons").strip().lower()
     if slot not in ("weapons", "skins"):
@@ -449,7 +453,7 @@ def warzone_shop():
               AND i.active = 1
             ORDER BY i.starting DESC, i.sort_order ASC, i.id ASC
             """,
-            (uid, slot),
+            (inv_uid, slot),
         ).fetchall()
 
     items = []
@@ -457,7 +461,9 @@ def warzone_shop():
         starting = bool(r["starting"])
         owned = bool(r["owned"]) or starting
         # first starter item becomes equipped by default if nothing else is
-        equipped = bool(r["equipped"]) or (starting and not any(i.get("equipped") for i in items))
+        equipped = bool(r["equipped"]) or (
+            starting and not any(i.get("equipped") for i in items)
+        )
         items.append(
             {
                 "slot": r["slot"],
