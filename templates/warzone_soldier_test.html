@@ -22,6 +22,8 @@
       font-size:14px;
       z-index:5;
       white-space:pre;
+      text-shadow:0 1px 0 rgba(0,0,0,.6);
+      max-width:96vw;
     }
     #renderCanvas{
       position:fixed;
@@ -55,17 +57,19 @@
       const scene  = new BABYLON.Scene(engine);
       scene.clearColor = new BABYLON.Color4(0,0,0,1);
 
+      // Camera, start zoomed out more than before
       const camera = new BABYLON.ArcRotateCamera(
         "cam",
         Math.PI * 1.25,
-        Math.PI / 2.5,
-        10.0,
+        Math.PI / 2.45,
+        18.0,
         new BABYLON.Vector3(0,1,0),
         scene
       );
       camera.attachControl(canvas, false);
       camera.inputs.clear();
       camera.panningSensibility = 0;
+      camera.wheelPrecision = 60;
 
       const hemi = new BABYLON.HemisphericLight("h", new BABYLON.Vector3(0,1,0), scene);
       hemi.intensity = 1.1;
@@ -88,6 +92,94 @@
         engine.resize();
       });
 
+      function log(line){
+        msgEl.textContent += "\n" + line;
+      }
+
+      async function fetchHeadOrGet(url){
+        // Try HEAD first, some hosts do not support it properly, fallback to GET
+        try{
+          const r = await fetch(url, { method:"HEAD", cache:"no-store" });
+          if (r && (r.ok || r.status === 404 || r.status === 403)) return r;
+        }catch(e){}
+        return fetch(url, { method:"GET", cache:"no-store" });
+      }
+
+      async function checkUrl(url){
+        try{
+          const r = await fetchHeadOrGet(url);
+          const ct = (r.headers && r.headers.get) ? (r.headers.get("content-type") || "") : "";
+          return { ok: r.ok, status: r.status, ct };
+        }catch(e){
+          return { ok:false, status:0, ct:String(e) };
+        }
+      }
+
+      function joinUrl(rootUrl, rel){
+        if (!rel) return rootUrl;
+        // Absolute URL inside gltf
+        if (/^https?:\/\//i.test(rel)) return rel;
+        // Root-relative inside gltf
+        if (rel.startsWith("/")) return rel;
+        // Normal relative
+        return rootUrl + rel;
+      }
+
+      async function preflightGltf(label, rootUrl, fileName){
+        const gltfUrl = rootUrl + fileName;
+        log("Preflight " + label + " gltf, " + gltfUrl);
+
+        const gltfCheck = await checkUrl(gltfUrl);
+        if (!gltfCheck.ok){
+          log("Preflight FAIL " + label + ", gltf missing, " + gltfCheck.status);
+          return null;
+        }
+
+        let gltf;
+        try{
+          const r = await fetch(gltfUrl, { cache:"no-store" });
+          gltf = await r.json();
+        }catch(e){
+          log("Preflight FAIL " + label + ", gltf JSON parse error, " + e);
+          return null;
+        }
+
+        const deps = [];
+
+        if (Array.isArray(gltf.buffers)){
+          gltf.buffers.forEach(b => {
+            if (b && b.uri) deps.push({ kind:"buffer", uri:b.uri });
+          });
+        }
+
+        if (Array.isArray(gltf.images)){
+          gltf.images.forEach(img => {
+            if (img && img.uri) deps.push({ kind:"image", uri:img.uri });
+          });
+        }
+
+        if (!deps.length){
+          log("Preflight " + label + ", no external deps listed, OK");
+          return gltf;
+        }
+
+        for (const d of deps){
+          const url = joinUrl(rootUrl, d.uri);
+          const st = await checkUrl(url);
+
+          if (!st.ok){
+            log("Preflight FAIL " + label + ", missing " + d.kind + ", " + url + ", status " + st.status);
+            return null;
+          }
+
+          // Helpful info, because your browser showing a ? usually means content-type is odd
+          log("Preflight OK " + label + ", " + d.kind + ", " + d.uri + ", status " + st.status + ", type " + (st.ct || "unknown"));
+        }
+
+        log("Preflight OK " + label + ", deps=" + deps.length);
+        return gltf;
+      }
+
       function getRootBounds(root){
         const b = root.getHierarchyBoundingVectors(true);
         return { min: b.min.clone(), max: b.max.clone() };
@@ -109,34 +201,36 @@
           }
 
           if(!any){
-            msgEl.textContent += "\nCamera frame failed, bounds invalid";
+            log("Camera frame failed, bounds invalid, fallback");
             camera.target = new BABYLON.Vector3(0,1,0);
-            camera.radius = 10;
+            camera.radius = 18;
             return;
           }
 
           const size = max.subtract(min);
           const center = min.add(size.scale(0.5));
           const maxDim = Math.max(size.x, size.y, size.z) || 1;
-          const radius = maxDim * 1.9;
+
+          // More zoomed out than before, and include both models side by side
+          const radius = maxDim * 3.0;
 
           camera.target = center;
           camera.radius = radius;
-          camera.lowerRadiusLimit = radius * 0.8;
-          camera.upperRadiusLimit = radius * 2.5;
+          camera.lowerRadiusLimit = radius * 0.6;
+          camera.upperRadiusLimit = radius * 3.5;
 
-          msgEl.textContent += "\nFramed camera, size=" + maxDim.toFixed(3) + ", radius=" + radius.toFixed(3);
+          log("Framed camera, size=" + maxDim.toFixed(3) + ", radius=" + radius.toFixed(3));
         }catch(e){
           console.warn("frameCameraToRoots failed", e);
-          msgEl.textContent += "\nCamera frame threw, fallback";
+          log("Camera frame threw, fallback");
           camera.target = new BABYLON.Vector3(0,1,0);
-          camera.radius = 10;
+          camera.radius = 18;
         }
       }
 
       function importSoldier(label, rootUrl, fileName, xOffset){
         return new Promise((resolve, reject) => {
-          msgEl.textContent += "\nLoading " + label + " | " + rootUrl + fileName;
+          log("Loading " + label + " | " + rootUrl + fileName);
 
           BABYLON.SceneLoader.ImportMesh(
             "",
@@ -153,17 +247,18 @@
               geoMeshes.forEach(m => { m.parent = root; });
 
               root.position.x = xOffset;
-              root.rotation.y = Math.PI; // face camera
 
               if (!geoMeshes.length){
-                msgEl.textContent += "\n" + label + " imported, but no geometry meshes";
+                log(label + " imported, but no geometry meshes");
               } else {
-                msgEl.textContent += "\n" + label + " imported OK, geoMeshes=" + geoMeshes.length;
+                log(label + " imported OK, geoMeshes=" + geoMeshes.length);
 
                 if (animGroups && animGroups.length){
                   animGroups.forEach(g => g.stop());
                   animGroups[0].start(true);
-                  msgEl.textContent += "\n" + label + " anim started, " + animGroups[0].name;
+                  log(label + " anim started, " + (animGroups[0].name || "anim0"));
+                } else {
+                  log(label + " no animGroups");
                 }
               }
 
@@ -172,7 +267,7 @@
             null,
             function(scene, message, exception){
               console.error(label + " ImportMesh error:", message, exception);
-              msgEl.textContent += "\n" + label + " import error, " + message;
+              log(label + " import error, " + message);
               reject(new Error(message || "ImportMesh error"));
             }
           );
@@ -186,27 +281,53 @@
 
       (async () => {
         try{
+          msgEl.textContent = "Booting Babylon…";
+
           // Move debug cube out of the way
-          debugBox.position.set(0, 0.3, -3);
+          debugBox.position.set(0, 0.3, -6);
 
-          const basic = await importSoldier("basic", BASIC_ROOT, FILE_NAME, -1.2);
-          const neon  = await importSoldier("neon",  NEON_ROOT,  FILE_NAME,  1.2);
+          // Preflight both, so we KNOW which dependency is failing
+          const basicOk = await preflightGltf("basic", BASIC_ROOT, FILE_NAME);
+          const neonOk  = await preflightGltf("neon",  NEON_ROOT,  FILE_NAME);
 
-          frameCameraToRoots([basic.root, neon.root]);
+          if (!basicOk){
+            log("BASIC blocked by preflight, not importing");
+          }
+          if (!neonOk){
+            log("NEON blocked by preflight, not importing");
+          }
 
-          // Slow spin both so we can see them clearly
+          // Import only the ones that pass preflight
+          const roots = [];
+
+          let basic = null;
+          let neon  = null;
+
+          if (basicOk){
+            basic = await importSoldier("basic", BASIC_ROOT, FILE_NAME, -1.8);
+            roots.push(basic.root);
+          }
+
+          if (neonOk){
+            neon = await importSoldier("neon",  NEON_ROOT,  FILE_NAME,  1.8);
+            roots.push(neon.root);
+          }
+
+          frameCameraToRoots(roots);
+
+          // Slow spin so we can see them clearly
           scene.onBeforeRenderObservable.clear();
           scene.onBeforeRenderObservable.add(() => {
             const dt = scene.getEngine().getDeltaTime() * 0.001;
-            basic.root.rotation.y += dt * 0.35;
-            neon.root.rotation.y  += dt * 0.35;
-            debugBox.rotation.y   += dt;
+            if (basic && basic.root) basic.root.rotation.y += dt * 0.35;
+            if (neon  && neon.root)  neon.root.rotation.y  += dt * 0.35;
+            debugBox.rotation.y += dt;
           });
 
-          msgEl.textContent += "\nDone";
+          log("Done");
         }catch(e){
           console.warn("Test loader failed", e);
-          msgEl.textContent += "\nFAILED, check console log";
+          log("FAILED, check console log");
         }
       })();
     }
