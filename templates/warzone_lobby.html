@@ -1108,21 +1108,14 @@
       document.getElementById("searchBtn")?.addEventListener("click", () => show("searchOverlay"));
       document.getElementById("deployBtn")?.addEventListener("click", () => show("deployOverlay"));
 
-      // Gate weapons / skins via IZZA wallet before loading shop
-      document.getElementById("weaponsBtn")?.addEventListener("click", async () => {
-        if (window.__izzaWalletGate) {
-          const gate = await window.__izzaWalletGate();
-          if (!gate) return;
-        }
+      // OPEN weapons / skins ALWAYS, load shop ALWAYS.
+      // Wallet gate only happens when clicking Buy inside the shop.
+      document.getElementById("weaponsBtn")?.addEventListener("click", () => {
         show("weaponsOverlay");
         window.__izzaLoadShop && window.__izzaLoadShop("weapons");
       });
 
-      document.getElementById("skinsBtn")?.addEventListener("click", async () => {
-        if (window.__izzaWalletGate) {
-          const gate = await window.__izzaWalletGate();
-          if (!gate) return;
-        }
+      document.getElementById("skinsBtn")?.addEventListener("click", () => {
         show("skinsOverlay");
         window.__izzaLoadShop && window.__izzaLoadShop("skins");
       });
