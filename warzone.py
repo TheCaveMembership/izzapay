@@ -11,12 +11,17 @@ from time import time
 from db import conn
 
 import os
-from decimal import Decimal, InvalidOperation
+import json
+from decimal import Decimal, InvalidOperation, ROUND_HALF_UP
 
-from stellar_sdk import Asset, Keypair, Server
+from stellar_sdk import Asset, Keypair, Server, TransactionBuilder
 
+# Keep import for compatibility, but Warzone payments now use direct stellar_sdk send.
 # Reuse the same helpers you use in IZZA CREATURES
-from nft_api import _pay_asset
+try:
+    from nft_api import _pay_asset  # noqa: F401
+except Exception:
+    _pay_asset = None
 
 warzone_bp = Blueprint("warzone_bp", __name__, url_prefix="/warzone")
 
@@ -24,7 +29,6 @@ warzone_bp = Blueprint("warzone_bp", __name__, url_prefix="/warzone")
 # ----------------------------------------------------------------------
 # Helpers
 # ----------------------------------------------------------------------
-
 
 def _require_user_id():
     uid = session.get("user_id")
@@ -40,10 +44,44 @@ def _now_i() -> int:
     return int(time())
 
 
+# ---------- Pi Testnet Horizon + network ----------
+
+PI_HORIZON_URL = os.getenv("PI_HORIZON_URL", "https://api.testnet.minepi.com").strip()
+NETWORK_PASSPHRASE = os.getenv("NETWORK_PASSPHRASE", "Pi Testnet").strip()
+
+# Pi Testnet base fee (0.01 Pi = 100,000 stroops)
+PI_BASE_FEE_STROOPS = int(os.getenv("PI_BASE_FEE_STROOPS", "100000"))
+
+_srv = Server(horizon_url=PI_HORIZON_URL)
+
+_STROOP_QUANTUM = Decimal("0.0000001")
+
+
+def _to_stellar_amount(value) -> str:
+    """
+    Convert numeric -> Horizon-safe amount string with <= 7 decimals.
+    Avoids float noise and scientific notation.
+    """
+    d = Decimal(str(value))
+    if d <= 0:
+        raise ValueError("amount must be positive")
+    dq = d.quantize(_STROOP_QUANTUM, rounding=ROUND_HALF_UP)
+    if dq <= 0:
+        raise ValueError("amount too small to send (minimum 0.0000001)")
+    return format(dq, "f")
+
+
 # ---------- IZZA token + shop payment config ----------
 
 IZZA_CODE = os.getenv("IZZA_TOKEN_CODE", "IZZA").strip()
-IZZA_ISSUER = os.getenv("IZZA_TOKEN_ISSUER", "").strip()
+
+# Make issuer robust, so Warzone doesn't silently break if you used a different env name elsewhere
+IZZA_ISSUER = (
+    os.getenv("IZZA_TOKEN_ISSUER")
+    or os.getenv("IZZA_ASSET_ISSUER")
+    or os.getenv("IZZA_ISSUER")
+    or ""
+).strip()
 
 # Where the IZZA payment goes
 WZ_SHOP_DEST = (
@@ -51,8 +89,8 @@ WZ_SHOP_DEST = (
     or os.getenv("NFT_DISTR_PUBLIC", "").strip()
 )
 
-# Pi Testnet Horizon
-PI_HORIZON_URL = os.getenv("PI_HORIZON_URL", "https://api.testnet.minepi.com").strip()
+def _izza_payment_config_ok() -> bool:
+    return bool(IZZA_CODE and IZZA_ISSUER and WZ_SHOP_DEST)
 
 
 def _parse_izza_amount(raw) -> Decimal | None:
@@ -66,34 +104,136 @@ def _parse_izza_amount(raw) -> Decimal | None:
         return None
     if d <= 0:
         return None
-    return d.quantize(Decimal("0.0000001"))
+    return d.quantize(_STROOP_QUANTUM, rounding=ROUND_HALF_UP)
 
 
-def _izza_payment_config_ok() -> bool:
-    return bool(
-        IZZA_CODE
-        and IZZA_ISSUER
-        and WZ_SHOP_DEST
-        and len(IZZA_ISSUER) > 0
+def _verify_tx_succeeded(tx_hash: str) -> tuple[bool, str]:
+    """
+    Confirm the tx exists and succeeded on Pi Testnet Horizon.
+    Returns (ok, detail).
+    """
+    if not tx_hash:
+        return False, "missing_tx_hash"
+    try:
+        tx = _srv.transactions().transaction(tx_hash).call()
+        if not tx:
+            return False, "tx_not_found"
+        if tx.get("successful") is True:
+            return True, "ok"
+        return False, "tx_not_successful"
+    except Exception as e:
+        return False, f"horizon_check_failed:{e}"
+
+
+def _send_izza_payment(from_secret: str, to_pub: str, amount: Decimal, memo_text: str = "") -> str:
+    """
+    Sends IZZA from from_secret -> to_pub on Pi Testnet. Returns tx hash.
+    """
+    if not from_secret or not to_pub:
+        raise ValueError("Missing from_secret or to_pub")
+
+    amt = _to_stellar_amount(amount)
+
+    kp = Keypair.from_secret(from_secret)
+    from_pub = kp.public_key
+
+    account = _srv.load_account(from_pub)
+
+    izza_asset = Asset(IZZA_CODE, IZZA_ISSUER)
+
+    builder = TransactionBuilder(
+        source_account=account,
+        network_passphrase=NETWORK_PASSPHRASE,
+        base_fee=PI_BASE_FEE_STROOPS,
     )
 
+    builder.append_payment_op(
+        destination=to_pub,
+        amount=amt,
+        asset=izza_asset,
+    )
 
-def _get_active_wallet_pub_for_user(cx, user_id: int) -> str:
-    """
-    Fetch the active wallet pub for this user from your wallet system.
-    This assumes you already have /api/wallet/active working and persisting.
+    if memo_text:
+        builder.add_text_memo(memo_text[:28])
 
-    We try a few likely table names to stay compatible with your existing setup.
+    tx = builder.set_timeout(300).build()
+    tx.sign(kp)
+    resp = _srv.submit_transaction(tx)
+    tx_hash = resp.get("hash") or ""
+    if not tx_hash:
+        raise RuntimeError("submit_transaction returned no hash")
+    return tx_hash
+
+
+def _get_usernames_for_user_id(cx, user_id: int) -> list[str]:
     """
+    Return possible username keys used in your wallet system.
+    Your proven system usually stores wallets in user_wallets keyed by username.
+    """
+    names: list[str] = []
+    try:
+        row = cx.execute(
+            """
+            SELECT
+              COALESCE(username, '')    AS username,
+              COALESCE(pi_username, '') AS pi_username,
+              COALESCE(pi_uid, '')      AS pi_uid
+            FROM users
+            WHERE id = ?
+            """,
+            (user_id,),
+        ).fetchone()
+        if row:
+            for k in ("username", "pi_username", "pi_uid"):
+                v = (row[k] or "").strip()
+                if v:
+                    names.append(v)
+    except Exception:
+        pass
+
+    # Also consider session values
+    for k in ("username", "pi_username", "pi_handle"):
+        v = (session.get(k) or "").strip()
+        if v:
+            names.append(v)
+
+    # normalize
+    out = []
+    seen = set()
+    for v in names:
+        norm = v.strip().lstrip("@").lower()
+        if norm and norm not in seen:
+            seen.add(norm)
+            out.append(norm)
+    return out
+
+
+def _get_linked_wallet_pub_for_user(cx, user_id: int) -> str:
+    """
+    Find the user's linked IZZA wallet pub.
+    Prefers your proven table: user_wallets keyed by username.
+    Falls back to a few user_id based tables if present.
+    """
+    # 1) Try user_wallets by username (matches your working IZZA BOT backend)
+    for uname in _get_usernames_for_user_id(cx, user_id):
+        try:
+            row = cx.execute(
+                "SELECT pub FROM user_wallets WHERE username = ?",
+                (uname,),
+            ).fetchone()
+            if row and row["pub"]:
+                return str(row["pub"]).strip().upper()
+        except Exception:
+            continue
+
+    # 2) Fallback: try user_id keyed tables (if your deployment has them)
     candidates = [
-        # table, pub column, user column
         ("wallets", "pub", "user_id"),
-        ("user_wallets", "pub", "user_id"),
+        ("user_wallets", "pub", "user_id"),   # if schema differs on this env
         ("izza_wallets", "pub", "user_id"),
         ("wallet_links", "pub", "user_id"),
         ("wallet_active", "pub", "user_id"),
     ]
-
     for table, pub_col, user_col in candidates:
         try:
             row = cx.execute(
@@ -114,27 +254,7 @@ def _get_active_wallet_pub_for_user(cx, user_id: int) -> str:
     return ""
 
 
-def _verify_tx_succeeded(tx_hash: str) -> tuple[bool, str]:
-    """
-    Confirm the tx exists and succeeded on Pi Testnet Horizon.
-    Returns (ok, detail).
-    """
-    if not tx_hash:
-        return False, "missing_tx_hash"
-    try:
-        srv = Server(horizon_url=PI_HORIZON_URL)
-        tx = srv.transactions().transaction(tx_hash).call()
-        if not tx:
-            return False, "tx_not_found"
-        if tx.get("successful") is True:
-            return True, "ok"
-        return False, "tx_not_successful"
-    except Exception as e:
-        return False, f"horizon_check_failed:{e}"
-
-
 # ---------- WAR ZONE SHOP: schema + seed ----------
-
 
 def _ensure_shop_schema(cx):
     cx.executescript(
@@ -290,7 +410,6 @@ def _seed_shop_if_empty(cx):
 # Auth / lobby
 # ----------------------------------------------------------------------
 
-
 @warzone_bp.get("/auth")
 def warzone_auth():
     sandbox = current_app.config.get("PI_SANDBOX", False)
@@ -350,7 +469,6 @@ def warzone_lobby():
 # ----------------------------------------------------------------------
 # War Zone API: friend search + lobby invites
 # ----------------------------------------------------------------------
-
 
 @warzone_bp.get("/api/search")
 def warzone_search_players():
@@ -417,7 +535,6 @@ def warzone_invite_player():
 # War Zone Armory / Shop (weapons + skins)
 # ----------------------------------------------------------------------
 
-
 @warzone_bp.get("/api/shop")
 def warzone_shop():
     uid = _require_user_id()
@@ -483,7 +600,9 @@ def warzone_purchase():
         return jsonify({"error": "auth_required"}), 401
 
     if not _izza_payment_config_ok():
-        return jsonify({"error": "shop_config_invalid"}), 500
+        return jsonify(
+            {"error": "shop_config_invalid", "detail": "Missing IZZA issuer or shop dest on server."}
+        ), 500
 
     data = request.get_json(silent=True) or {}
     slot = (data.get("slot") or "").strip().lower()
@@ -495,7 +614,7 @@ def warzone_purchase():
         price_izza_client = 0.0
 
     buyer_pub = (data.get("buyer_pub") or "").strip().upper()
-    buyer_sec = (data.get("buyer_sec") or "").strip().upper()
+    buyer_sec = (data.get("buyer_sec") or "").strip()
 
     if slot not in ("weapons", "skins") or not sku:
         return jsonify({"error": "bad_request"}), 400
@@ -506,7 +625,7 @@ def warzone_purchase():
     if not (buyer_sec and buyer_sec.startswith("S") and len(buyer_sec) == 56):
         return jsonify({"error": "buyer_sec_missing"}), 400
 
-    # Verify sec matches pub, prevents “fake spend” and wrong key usage
+    # Verify sec matches pub
     try:
         kp = Keypair.from_secret(buyer_sec)
         derived_pub = kp.public_key
@@ -519,10 +638,10 @@ def warzone_purchase():
         _ensure_shop_schema(cx)
         _seed_shop_if_empty(cx)
 
-        # Verify buyer_pub is the active wallet for this user
-        active_pub = _get_active_wallet_pub_for_user(cx, uid)
-        if active_pub and active_pub != buyer_pub:
-            return jsonify({"error": "wallet_not_active_for_user"}), 403
+        # Verify buyer_pub matches the user's linked IZZA wallet (proven pattern)
+        linked_pub = _get_linked_wallet_pub_for_user(cx, uid)
+        if linked_pub and linked_pub != buyer_pub:
+            return jsonify({"error": "wallet_not_linked_for_user"}), 403
 
         item = cx.execute(
             """
@@ -546,9 +665,7 @@ def warzone_purchase():
         if price_izza_client:
             client_dec = _parse_izza_amount(price_izza_client)
             if not client_dec or client_dec != db_price:
-                return jsonify(
-                    {"error": "price_mismatch", "price_izza": float(db_price)}
-                ), 400
+                return jsonify({"error": "price_mismatch", "price_izza": float(db_price)}), 400
 
         owned_row = cx.execute(
             """
@@ -561,17 +678,13 @@ def warzone_purchase():
         if owned_row:
             return jsonify({"ok": True, "already_owned": True})
 
-    amount_str = str(db_price)
-    izza_asset = Asset(IZZA_CODE, IZZA_ISSUER)
-
-    # Execute payment
+    # Execute IZZA payment (direct testnet stellar_sdk send)
     try:
-        tx_hash = _pay_asset(
-            buyer_sec,
-            WZ_SHOP_DEST,
-            izza_asset,
-            amount_str,
-            f"WZ,{slot},{sku}",
+        tx_hash = _send_izza_payment(
+            from_secret=buyer_sec,
+            to_pub=WZ_SHOP_DEST,
+            amount=db_price,
+            memo_text=f"WZ,{slot},{sku}",
         )
     except Exception as e:
         return jsonify({"error": "payment_failed", "detail": str(e)}), 502
@@ -585,7 +698,6 @@ def warzone_purchase():
     with conn() as cx:
         _ensure_shop_schema(cx)
 
-        # Record ownership
         cx.execute(
             """
             INSERT OR IGNORE INTO warzone_inventory
