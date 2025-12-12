@@ -1629,102 +1629,89 @@
       }
 
       async function purchaseItem(slot, sku, itemName, price, listEl){
-        let approved = false;
-        try{
-          const gate = await window.__izzaWalletGate?.();
-          if(!gate) return;
+  try{
+    const gate = await window.__izzaWalletGate?.();
+    if(!gate) return;
 
-          if(!price || price <= 0){
-            alert("This item is not configured with an IZZA price yet.");
-            return;
-          }
+    if(!price || price <= 0){
+      alert("This item is not configured with an IZZA price yet.");
+      return;
+    }
 
-          // Replace confirm() with in game overlay, fixes iOS rotated popup
-          const showOverlay = window.__izzaShowPurchaseOverlay;
-          const closeOverlay = window.__izzaClosePurchaseOverlay;
+    const showOverlay = window.__izzaShowPurchaseOverlay;
+    const closeOverlay = window.__izzaClosePurchaseOverlay;
 
-          if(showOverlay && closeOverlay){
-            window.__izzaPurchaseOverlaySetBusy?.(false);
-            window.__izzaPurchaseOverlaySetMsg?.("", "");
-            const p = showOverlay({
-              sku,
-              itemName,
-              price,
-              pub: gate.pub
-            });
+    if(showOverlay && closeOverlay){
+      window.__izzaPurchaseOverlaySetBusy?.(false);
+      window.__izzaPurchaseOverlaySetMsg?.("", "");
+      const p = showOverlay({ sku, itemName, price, pub: gate.pub });
 
-            // Hook approve button to resolve and continue
-            window.__izzaPurchaseOverlayApproveHook?.(() => {
-              approved = true;
-              closeOverlay({ approved:true });
-            });
+      window.__izzaPurchaseOverlayApproveHook?.(() => {
+        closeOverlay({ approved:true });
+      });
 
-            const res = await p;
-            if(!res || !res.approved){
-              closeOverlay({ approved:false });
-              return;
-            }
-          } else {
-            // Fallback if something breaks
-            const ok = confirm(`Spend ${price} IZZA to unlock "${sku}"?`);
-            if(!ok) return;
-          }
-
-          listEl && (listEl.dataset.busy = "1");
-
-          if(window.__izzaPurchaseOverlaySetBusy) window.__izzaPurchaseOverlaySetBusy(true);
-          if(window.__izzaPurchaseOverlaySetMsg) window.__izzaPurchaseOverlaySetMsg("Submitting IZZA payment…", "");
-
-          const res = await fetch("/warzone/api/purchase", {
-            method:"POST",
-            headers:{ "Content-Type":"application/json" },
-            body: JSON.stringify({
-              slot,
-              sku,
-              price_izza: price,
-              buyer_pub: gate.pub,
-              buyer_sec: gate.sec
-            }),
-            credentials:"include"
-          });
-
-          const data = await res.json().catch(()=>({}));
-
-          if(!res.ok || !data.ok){
-            const msg = data && (data.error || data.detail) ? (data.error || data.detail) : res.status;
-            if(window.__izzaPurchaseOverlaySetMsg){
-              window.__izzaPurchaseOverlaySetMsg("Purchase failed, " + msg, "error");
-              window.__izzaPurchaseOverlaySetBusy(false);
-              return;
-            }
-            alert("Purchase failed: " + msg);
-            return;
-          }
-
-          if(window.__izzaPurchaseOverlaySetMsg){
-            window.__izzaPurchaseOverlaySetMsg("Purchase complete, added to your inventory.", "ok");
-            window.__izzaPurchaseOverlaySetBusy(false);
-            setTimeout(() => {
-              window.__izzaClosePurchaseOverlay?.({ approved:false });
-            }, 650);
-          } else {
-            alert("Purchase complete. Item added to your inventory.");
-          }
-
-          await loadShop(slot);
-
-        }catch(e){
-          console.error(e);
-          if(window.__izzaPurchaseOverlaySetMsg){
-            window.__izzaPurchaseOverlaySetMsg("Purchase error, try again.", "error");
-            window.__izzaPurchaseOverlaySetBusy(false);
-            return;
-          }
-          alert("Purchase error. Try again.");
-        }finally{
-          if(listEl) delete listEl.dataset.busy;
-        }
+      const res = await p;
+      if(!res || !res.approved){
+        closeOverlay({ approved:false });
+        return;
       }
+    } else {
+      const ok = confirm(`Spend ${price} IZZA to unlock "${sku}"?`);
+      if(!ok) return;
+    }
+
+    if(window.__izzaPurchaseOverlaySetBusy) window.__izzaPurchaseOverlaySetBusy(true);
+    if(window.__izzaPurchaseOverlaySetMsg) window.__izzaPurchaseOverlaySetMsg("Submitting IZZA payment…", "");
+
+    const res = await fetch("/warzone/api/purchase", {
+      method:"POST",
+      headers:{ "Content-Type":"application/json" },
+      body: JSON.stringify({
+        slot,
+        sku,
+        price_izza: price,
+        buyer_pub: gate.pub,
+        buyer_sec: gate.sec
+      }),
+      credentials:"include"
+    });
+
+    const data = await res.json().catch(()=>({}));
+
+    if(!res.ok || !data.ok){
+      const msg = data && (data.error || data.detail) ? (data.error || data.detail) : res.status;
+      if(window.__izzaPurchaseOverlaySetMsg){
+        window.__izzaPurchaseOverlaySetMsg("Purchase failed, " + msg, "error");
+        window.__izzaPurchaseOverlaySetBusy(false);
+        return;
+      }
+      alert("Purchase failed: " + msg);
+      return;
+    }
+
+    if(window.__izzaPurchaseOverlaySetMsg){
+      window.__izzaPurchaseOverlaySetMsg("Purchase complete, added to your inventory.", "ok");
+      window.__izzaPurchaseOverlaySetBusy(false);
+      setTimeout(() => {
+        window.__izzaClosePurchaseOverlay?.({ approved:false });
+      }, 650);
+    } else {
+      alert("Purchase complete. Item added to your inventory.");
+    }
+
+    // Always reload, this is what makes the button switch to Equip
+    await loadShop(slot);
+
+  }catch(e){
+    console.error(e);
+    if(window.__izzaPurchaseOverlaySetMsg){
+      window.__izzaPurchaseOverlaySetMsg("Purchase error, try again.", "error");
+      window.__izzaPurchaseOverlaySetBusy(false);
+      return;
+    }
+    alert("Purchase error. Try again.");
+  }
+}
 
       async function equipItem(slot, sku, listEl){
         try{
