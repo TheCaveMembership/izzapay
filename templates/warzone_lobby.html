@@ -1146,22 +1146,35 @@
   engine.runRenderLoop(function(){ scene.render(); });
 }
 
-      async function loadShop(slot){
+            async function loadShop(slot){
         const listEl = slot === "weapons" ? weaponsList : skinsList;
         if(!listEl) return;
         listEl.textContent = "Loading " + slot + "…";
         try{
-          const res = await fetch(`/warzone/api/shop?slot=${encodeURIComponent(slot)}`);
+          const res = await fetch(
+            `/warzone/api/shop?slot=${encodeURIComponent(slot)}`,
+            { credentials: "include" }           // 🔹 carry session cookies
+          );
+
+          let data = null;
+          try {
+            data = await res.json();
+          } catch(e) {
+            data = null;
+          }
+
           if(!res.ok){
-            listEl.textContent = "Unable to load "+slot+".";
+            const msg = data && data.error ? data.error : res.status;
+            listEl.textContent = "Unable to load " + slot + " (" + msg + ").";
             return;
           }
-          const data = await res.json();
-          const items = data.items || [];
+
+          const items = (data && data.items) || [];
           if(!items.length){
-            listEl.textContent = "No "+slot+" configured yet.";
+            listEl.textContent = "No " + slot + " configured yet.";
             return;
           }
+
           listEl.innerHTML = "";
           items.forEach(it => {
             const row = document.createElement("div");
@@ -1214,7 +1227,6 @@
             btn.addEventListener("click", async function(){
               const owned = this.classList.contains("owned") && !this.classList.contains("equipped") && !it.starting;
               if(owned){
-                // Equip
                 await equipItem(slot, it.sku, listEl);
               }else if(!this.classList.contains("equipped") && !it.starting){
                 const price = Number(this.dataset.price || 0);
@@ -1229,12 +1241,12 @@
             row.appendChild(side);
             listEl.appendChild(row);
 
-            // kick off Babylon preview for this item
+            // Babylon preview
             createShopPreview(previewCanvas, slot, it.sku);
           });
         }catch(e){
           console.error(e);
-          listEl.textContent = "Error loading "+slot+".";
+          listEl.textContent = "Error loading " + slot + ".";
         }
       }
 
