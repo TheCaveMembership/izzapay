@@ -1407,10 +1407,17 @@ function frameCameraFromMeshes(meshes){
     const baseRadius = maxDim * 0.9;
     const radius     = baseRadius * 2.0;   // increase this to make soldier smaller
 
-    camera.target = center;
-    camera.radius = radius;
-    camera.lowerRadiusLimit = radius * 0.8;
-    camera.upperRadiusLimit = radius * 1.3;
+    const offsetY    = -maxDim * 0.25;   // tweak this value if needed
+const finalTarget = new BABYLON.Vector3(
+  center.x,
+  center.y + offsetY,
+  center.z
+);
+
+camera.target = finalTarget;
+camera.radius = radius;
+camera.lowerRadiusLimit = radius * 0.8;
+camera.upperRadiusLimit = radius * 1.3;
   }catch(e){
     console.warn("[WARZONE] fallback soldier framing", e);
     // safe fallback that still shows the soldier
