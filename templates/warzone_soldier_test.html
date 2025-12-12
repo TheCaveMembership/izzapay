@@ -24,6 +24,7 @@
       white-space:pre;
       text-shadow:0 1px 0 rgba(0,0,0,.6);
       max-width:96vw;
+      pointer-events:none;
     }
     #renderCanvas{
       position:fixed;
@@ -57,7 +58,7 @@
       const scene  = new BABYLON.Scene(engine);
       scene.clearColor = new BABYLON.Color4(0,0,0,1);
 
-      // Camera, start zoomed out more than before
+      // Camera
       const camera = new BABYLON.ArcRotateCamera(
         "cam",
         Math.PI * 1.25,
@@ -77,27 +78,21 @@
       const dir = new BABYLON.DirectionalLight("d", new BABYLON.Vector3(-0.3,-1,-0.4), scene);
       dir.intensity = 1.0;
 
-      // Debug cube so we always see something
+      // Debug cube
       const debugBox = BABYLON.MeshBuilder.CreateBox("debugBox", { size:0.6 }, scene);
-      debugBox.position.set(0, 0.6, 0);
+      debugBox.position.set(0, 0.6, -6);
       const debugMat = new BABYLON.StandardMaterial("dbgMat", scene);
       debugMat.emissiveColor = new BABYLON.Color3(0,1,1);
       debugBox.material = debugMat;
 
-      engine.runRenderLoop(function(){
-        scene.render();
-      });
-
-      window.addEventListener("resize", function(){
-        engine.resize();
-      });
+      engine.runRenderLoop(() => scene.render());
+      window.addEventListener("resize", () => engine.resize());
 
       function log(line){
         msgEl.textContent += "\n" + line;
       }
 
       async function fetchHeadOrGet(url){
-        // Try HEAD first, some hosts do not support it properly, fallback to GET
         try{
           const r = await fetch(url, { method:"HEAD", cache:"no-store" });
           if (r && (r.ok || r.status === 404 || r.status === 403)) return r;
@@ -117,11 +112,8 @@
 
       function joinUrl(rootUrl, rel){
         if (!rel) return rootUrl;
-        // Absolute URL inside gltf
         if (/^https?:\/\//i.test(rel)) return rel;
-        // Root-relative inside gltf
         if (rel.startsWith("/")) return rel;
-        // Normal relative
         return rootUrl + rel;
       }
 
@@ -145,34 +137,20 @@
         }
 
         const deps = [];
-
         if (Array.isArray(gltf.buffers)){
-          gltf.buffers.forEach(b => {
-            if (b && b.uri) deps.push({ kind:"buffer", uri:b.uri });
-          });
+          gltf.buffers.forEach(b => { if (b && b.uri) deps.push({ kind:"buffer", uri:b.uri }); });
         }
-
         if (Array.isArray(gltf.images)){
-          gltf.images.forEach(img => {
-            if (img && img.uri) deps.push({ kind:"image", uri:img.uri });
-          });
-        }
-
-        if (!deps.length){
-          log("Preflight " + label + ", no external deps listed, OK");
-          return gltf;
+          gltf.images.forEach(img => { if (img && img.uri) deps.push({ kind:"image", uri:img.uri }); });
         }
 
         for (const d of deps){
           const url = joinUrl(rootUrl, d.uri);
           const st = await checkUrl(url);
-
           if (!st.ok){
             log("Preflight FAIL " + label + ", missing " + d.kind + ", " + url + ", status " + st.status);
             return null;
           }
-
-          // Helpful info, because your browser showing a ? usually means content-type is odd
           log("Preflight OK " + label + ", " + d.kind + ", " + d.uri + ", status " + st.status + ", type " + (st.ct || "unknown"));
         }
 
@@ -183,6 +161,36 @@
       function getRootBounds(root){
         const b = root.getHierarchyBoundingVectors(true);
         return { min: b.min.clone(), max: b.max.clone() };
+      }
+
+      // Put feet on ground, normalize height, then offset side by side
+      function placeAndNormalize(root, targetHeight, xOffset){
+        const bb0 = getRootBounds(root);
+        const size0 = bb0.max.subtract(bb0.min);
+        const h0 = Math.max(0.00001, size0.y);
+
+        // scale to target height
+        const s = targetHeight / h0;
+        root.scaling.set(s, s, s);
+
+        // recompute after scaling
+        const bb = getRootBounds(root);
+        const size = bb.max.subtract(bb.min);
+
+        // move so bottom touches y=0
+        const yFix = -bb.min.y;
+
+        // center in Z a bit (helps when one model is offset forward)
+        const zCenter = -(bb.min.z + size.z * 0.5);
+
+        root.position.x = xOffset;
+        root.position.y += yFix;
+        root.position.z += zCenter;
+
+        // face camera consistently
+        root.rotation.y = Math.PI;
+
+        return { scale:s, height:size.y };
       }
 
       function frameCameraToRoots(roots){
@@ -211,9 +219,7 @@
           const center = min.add(size.scale(0.5));
           const maxDim = Math.max(size.x, size.y, size.z) || 1;
 
-          // More zoomed out than before, and include both models side by side
-          const radius = maxDim * 3.0;
-
+          const radius = maxDim * 2.6; // slightly less insane than before
           camera.target = center;
           camera.radius = radius;
           camera.lowerRadiusLimit = radius * 0.6;
@@ -243,15 +249,16 @@
               const geoMeshes = meshes.filter(m =>
                 m && m.getTotalVertices && m.getTotalVertices() > 0
               );
-
               geoMeshes.forEach(m => { m.parent = root; });
-
-              root.position.x = xOffset;
 
               if (!geoMeshes.length){
                 log(label + " imported, but no geometry meshes");
               } else {
                 log(label + " imported OK, geoMeshes=" + geoMeshes.length);
+
+                // Normalize both models to same height and place on ground
+                const norm = placeAndNormalize(root, 2.2, xOffset);
+                log(label + " normalized, scale=" + norm.scale.toFixed(5));
 
                 if (animGroups && animGroups.length){
                   animGroups.forEach(g => g.stop());
@@ -274,7 +281,6 @@
         });
       }
 
-      // Paths
       const BASIC_ROOT  = "/assets/warzone3d/soldier_gltf_3/";
       const NEON_ROOT   = "/assets/warzone3d/skins/wz_neon_edge/";
       const FILE_NAME   = "scene.gltf";
@@ -283,39 +289,32 @@
         try{
           msgEl.textContent = "Booting Babylon…";
 
-          // Move debug cube out of the way
-          debugBox.position.set(0, 0.3, -6);
-
-          // Preflight both, so we KNOW which dependency is failing
           const basicOk = await preflightGltf("basic", BASIC_ROOT, FILE_NAME);
           const neonOk  = await preflightGltf("neon",  NEON_ROOT,  FILE_NAME);
 
-          if (!basicOk){
-            log("BASIC blocked by preflight, not importing");
-          }
-          if (!neonOk){
-            log("NEON blocked by preflight, not importing");
-          }
-
-          // Import only the ones that pass preflight
           const roots = [];
-
           let basic = null;
           let neon  = null;
 
+          // Wider separation so they never overlap
+          const X_SPREAD = 3.2;
+
           if (basicOk){
-            basic = await importSoldier("basic", BASIC_ROOT, FILE_NAME, -1.8);
+            basic = await importSoldier("basic", BASIC_ROOT, FILE_NAME, -X_SPREAD);
             roots.push(basic.root);
+          } else {
+            log("BASIC blocked by preflight, not importing");
           }
 
           if (neonOk){
-            neon = await importSoldier("neon",  NEON_ROOT,  FILE_NAME,  1.8);
+            neon  = await importSoldier("neon",  NEON_ROOT,  FILE_NAME,  X_SPREAD);
             roots.push(neon.root);
+          } else {
+            log("NEON blocked by preflight, not importing");
           }
 
           frameCameraToRoots(roots);
 
-          // Slow spin so we can see them clearly
           scene.onBeforeRenderObservable.clear();
           scene.onBeforeRenderObservable.add(() => {
             const dt = scene.getEngine().getDeltaTime() * 0.001;
