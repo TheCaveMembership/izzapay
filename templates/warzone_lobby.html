@@ -597,6 +597,7 @@
       }
     }
   </style>
+
   <script src="https://sdk.minepi.com/pi-sdk.js"></script>
   <!-- Babylon.js for 3D lobby soldier + shop previews -->
   <script src="https://cdn.babylonjs.com/babylon.js"></script>
@@ -632,16 +633,14 @@
                 IZZA maps · rotated view
               </div>
             </div>
-            <!-- map image comes from map_image_url, or falls back to /assets/warzone-map-izzacity.jpg -->
+
             <div
               class="zone-canvas-shell"
               id="zoneCanvasShell"
               style="background-image:url('{{ map_image_url or "/assets/warzone-map-izzacity.jpg" }}');">
-              <!-- 3D soldier rendered on top of the map -->
               <canvas id="soldierCanvas" class="zone-soldier-canvas"></canvas>
             </div>
 
-            <!-- IZZA WALLET controls under the image area -->
             <div class="loadout-bar">
               <div class="loadout-label">IZZA wallet</div>
               <div class="loadout-actions">
@@ -753,7 +752,7 @@
           </div>
         </div>
 
-        <!-- WALLET OVERLAY (S-key save, same flow as IZZA CREATURES) -->
+        <!-- WALLET OVERLAY -->
         <div class="overlay" id="walletOverlay">
           <div class="overlay-card">
             <div class="overlay-header">
@@ -981,7 +980,6 @@
         return r.json().catch(()=>null);
       }
 
-      // Wallet overlay elements
       const walletOverlay = document.getElementById("walletOverlay");
       const mwUser   = document.getElementById("mwUser");
       const mwPub    = document.getElementById("mwPub");
@@ -1081,12 +1079,12 @@
         return { user, pub, sec:getLocalSecret(pub) };
       }
 
-      // Expose for shop code + wallet button
       window.__izzaWalletGate = ensureUserAndWalletGate;
       window.__izzaOpenWalletOverlay = openWalletOverlay;
+      window.__izzaUserCanon = USER_CANON;
     })();
 
-    // ---------- Overlays (friends / search / matchmaking / armory / wallet button hooks) ----------
+    // ---------- Overlays + buttons ----------
     (function(){
       function show(id){
         const el = document.getElementById(id);
@@ -1188,11 +1186,11 @@
         keyGrid.appendChild(back);
 
         const clear = document.createElement("button");
-clear.type = "button";
-clear.className = "izzakey wide clear";
-clear.textContent = "clear";
-clear.addEventListener("click", clearAll);
-keyGrid.appendChild(clear);
+        clear.type = "button";
+        clear.className = "izzakey wide clear";
+        clear.textContent = "clear";
+        clear.addEventListener("click", clearAll);
+        keyGrid.appendChild(clear);
       }
 
       buildKeyboard();
@@ -1287,6 +1285,9 @@ keyGrid.appendChild(clear);
       const weaponsList = document.getElementById("weaponsList");
       const skinsList   = document.getElementById("skinsList");
 
+      // IMPORTANT: use the same soldier model for the BASIC SKIN preview too
+      const SOLDIER_ASSET = "/assets/warzone3d/soldier_gltf_3/scene.gltf";
+
       function createShopPreview(canvas, slot, sku){
         if (!canvas || !window.BABYLON) return;
 
@@ -1314,15 +1315,18 @@ keyGrid.appendChild(clear);
         const light = new BABYLON.HemisphericLight("h", new BABYLON.Vector3(0,1,0), scene);
         light.intensity = 1.1;
 
-        let base = "/assets/warzone3d/";
+        // Resolve preview URL
         let url;
-
         if (slot === "weapons") {
-          base += "weapons/";
-          url = base + sku + ".glb";
+          url = "/assets/warzone3d/weapons/" + sku + ".glb";
         } else {
-          base += "skins/";
-          url = base + sku + "/scene.gltf";
+          // skins
+          if (sku === "wz_basic_soldier") {
+            // show the same basic soldier model used in the lobby
+            url = SOLDIER_ASSET;
+          } else {
+            url = "/assets/warzone3d/skins/" + sku + "/scene.gltf";
+          }
         }
 
         const lastSlash = url.lastIndexOf("/");
@@ -1459,16 +1463,20 @@ keyGrid.appendChild(clear);
         try{
           const gate = await window.__izzaWalletGate?.();
           if(!gate) return;
+
           if(!price || price <= 0){
             alert("This item is not configured with an IZZA price yet.");
             return;
           }
+
           const ok = confirm(`Spend ${price} IZZA to unlock "${sku}"?`);
           if(!ok) return;
 
           listEl && (listEl.dataset.busy = "1");
 
-          const res = await fetch("/warzone/api/purchase", {
+          // IMPORTANT: pass u= so server can record inventory without session auth
+          const u = encodeURIComponent(window.__izzaUserCanon || gate.user || "");
+          const res = await fetch("/warzone/api/purchase?u=" + u, {
             method:"POST",
             headers:{ "Content-Type":"application/json" },
             body: JSON.stringify({
@@ -1480,6 +1488,7 @@ keyGrid.appendChild(clear);
             }),
             credentials:"include"
           });
+
           const data = await res.json().catch(()=>({}));
           if(!res.ok || !data.ok){
             alert("Purchase failed: " + (data.error || res.status));
@@ -1497,7 +1506,9 @@ keyGrid.appendChild(clear);
 
       async function equipItem(slot, sku, listEl){
         try{
-          const res = await fetch("/warzone/api/equip", {
+          // IMPORTANT: pass u= so server can equip without session auth
+          const u = encodeURIComponent(window.__izzaUserCanon || "");
+          const res = await fetch("/warzone/api/equip?u=" + u, {
             method:"POST",
             headers:{ "Content-Type":"application/json" },
             body: JSON.stringify({ slot, sku }),
