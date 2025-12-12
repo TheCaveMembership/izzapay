@@ -181,7 +181,6 @@
       background-size:cover;
       background-position:center;
       background-repeat:no-repeat;
-      /* slightly shorter so wallet buttons stay fully in view on rotated phones */
       aspect-ratio:16 / 8;
       flex:0 0 auto;
     }
@@ -968,7 +967,7 @@
         if(secret && /^S[A-Z0-9]{55}$/.test(secret)) body.secret = secret.trim();
         const r = await fetch("/api/wallet/link"+qs, {
           method:"POST",
-          headers:{ "content-Type":"application/json" },
+          headers:{ "Content-Type":"application/json" },
           body: JSON.stringify(body),
           credentials:"include"
         });
@@ -1089,12 +1088,6 @@
 
     // ---------- Overlays (friends / search / matchmaking / armory / wallet button hooks) ----------
     (function(){
-      const inviteOverlay = document.getElementById("inviteOverlay");
-      const searchOverlay = document.getElementById("searchOverlay");
-      const deployOverlay = document.getElementById("deployOverlay");
-      const weaponsOverlay = document.getElementById("weaponsOverlay");
-      const skinsOverlay = document.getElementById("skinsOverlay");
-
       function show(id){
         const el = document.getElementById(id);
         if (el) el.classList.add("visible");
@@ -1108,8 +1101,6 @@
       document.getElementById("searchBtn")?.addEventListener("click", () => show("searchOverlay"));
       document.getElementById("deployBtn")?.addEventListener("click", () => show("deployOverlay"));
 
-      // OPEN weapons / skins ALWAYS, load shop ALWAYS.
-      // Wallet gate only happens when clicking Buy inside the shop.
       document.getElementById("weaponsBtn")?.addEventListener("click", () => {
         show("weaponsOverlay");
         window.__izzaLoadShop && window.__izzaLoadShop("weapons");
@@ -1200,7 +1191,7 @@
         clear.type = "button";
         clear.className = "izzakey wide clear";
         clear.textContent = "clear";
-        clear.addEventListener("click", clearAll);
+        clear.addEventListener("click", clearAll));
         keyGrid.appendChild(clear);
       }
 
@@ -1214,7 +1205,7 @@
           return;
         }
         try{
-          const res = await fetch(`/warzone/api/search?q=${encodeURIComponent(q)}`);
+          const res = await fetch(`/warzone/api/search?q=${encodeURIComponent(q)}`, { credentials:"include" });
           if (!res.ok){
             searchResults.textContent = "Search failed. Try again.";
             return;
@@ -1245,7 +1236,8 @@
                 const res = await fetch("/warzone/api/invite", {
                   method: "POST",
                   headers: { "Content-Type": "application/json" },
-                  body: JSON.stringify({ target_id: id })
+                  body: JSON.stringify({ target_id: id }),
+                  credentials:"include"
                 });
                 if (res.ok){
                   this.textContent = "Invited";
@@ -1327,10 +1319,9 @@
 
         if (slot === "weapons") {
           base += "weapons/";
-          url = base + sku + ".glb";                // weapons stay as .glb
+          url = base + sku + ".glb";
         } else {
           base += "skins/";
-          // each skin is a folder containing scene.gltf
           url = base + sku + "/scene.gltf";
         }
 
@@ -1372,15 +1363,11 @@
         try{
           const res = await fetch(
             `/warzone/api/shop?slot=${encodeURIComponent(slot)}`,
-            { credentials: "include" }           // carry session cookies
+            { credentials: "include" }
           );
 
           let data = null;
-          try {
-            data = await res.json();
-          } catch(e) {
-            data = null;
-          }
+          try { data = await res.json(); } catch(e) { data = null; }
 
           if(!res.ok){
             const msg = data && data.error ? data.error : res.status;
@@ -1460,7 +1447,6 @@
             row.appendChild(side);
             listEl.appendChild(row);
 
-            // Babylon preview
             createShopPreview(previewCanvas, slot, it.sku);
           });
         }catch(e){
@@ -1491,7 +1477,8 @@
               price_izza: price,
               buyer_pub: gate.pub,
               buyer_sec: gate.sec
-            })
+            }),
+            credentials:"include"
           });
           const data = await res.json().catch(()=>({}));
           if(!res.ok || !data.ok){
@@ -1513,7 +1500,8 @@
           const res = await fetch("/warzone/api/equip", {
             method:"POST",
             headers:{ "Content-Type":"application/json" },
-            body: JSON.stringify({ slot, sku })
+            body: JSON.stringify({ slot, sku }),
+            credentials:"include"
           });
           const data = await res.json().catch(()=>({}));
           if(!res.ok || !data.ok){
@@ -1527,7 +1515,6 @@
         }
       }
 
-      // make loader globally callable from overlay open
       window.__izzaLoadShop = loadShop;
     })();
 
@@ -1551,18 +1538,18 @@
 
       function createScene(){
         scene = new BABYLON.Scene(engine);
-        scene.clearColor = new BABYLON.Color4(0,0,0,0); // transparent
+        scene.clearColor = new BABYLON.Color4(0,0,0,0);
 
         camera = new BABYLON.ArcRotateCamera(
           "cam",
           Math.PI * 1.3,
           Math.PI / 2.4,
-          3.0,                          // default radius
+          3.0,
           new BABYLON.Vector3(0,1,0),
           scene
         );
         camera.attachControl(canvas, false);
-        camera.inputs.clear();           // lock user controls
+        camera.inputs.clear();
         camera.panningSensibility = 0;
 
         const light = new BABYLON.HemisphericLight(
@@ -1583,7 +1570,6 @@
         });
       }
 
-      // keep the same size / position, just re-aim the camera at the soldier
       function frameCameraFromMeshes(meshes){
         try{
           if (!meshes || !meshes.length || !camera) return;
@@ -1616,15 +1602,9 @@
             any = true;
           }
 
-          if (!any){
-            throw new Error("no finite bounds");
-          }
+          if (!any) throw new Error("no finite bounds");
 
           const size = max.subtract(min);
-          if (!isFinite(size.x) || !isFinite(size.y) || !isFinite(size.z)){
-            throw new Error("non-finite size");
-          }
-
           const maxDim = Math.max(size.x, size.y, size.z) || 1.0;
           const center = min.add(size.scale(0.5));
 
@@ -1632,11 +1612,7 @@
           const radius     = baseRadius * 3.0;
 
           const offsetY    = maxDim * 0.50;
-          const finalTarget = new BABYLON.Vector3(
-            center.x,
-            center.y + offsetY,
-            center.z
-          );
+          const finalTarget = new BABYLON.Vector3(center.x, center.y + offsetY, center.z);
 
           camera.target = finalTarget;
           camera.radius = radius;
@@ -1668,7 +1644,7 @@
 
         const lastSlash = url.lastIndexOf("/");
         const rootUrl = url.substring(0,lastSlash+1);
-        theFileName = url.substring(lastSlash+1);
+        const theFileName = url.substring(lastSlash+1);
 
         BABYLON.SceneLoader.ImportMesh(
           "",
@@ -1677,9 +1653,7 @@
           scene,
           function(meshes, ps, skeletons, animGroups){
             currentRoot = new BABYLON.TransformNode("soldierRoot", scene);
-            meshes.forEach(m => {
-              m.parent = currentRoot;
-            });
+            meshes.forEach(m => { m.parent = currentRoot; });
 
             currentRoot.position = new BABYLON.Vector3(0,0,0);
             currentRoot.rotation = new BABYLON.Vector3(0,Math.PI,0);
