@@ -998,6 +998,11 @@
       const SRV_USER = {{ (player.username or '') | tojson }};
       function stripAt(s){ return (s||"").toString().trim().replace(/^@+/, ""); }
 
+      // NEW: canonical username + a helper that always returns a safe ?u=<username> querystring.
+      function canonU(s){
+        const v = stripAt(s);
+        return v ? v.toLowerCase() : "";
+      }
       const USER_CANON = (()=>{
         const fromSrv = stripAt(SRV_USER);
         if(fromSrv) return fromSrv;
@@ -1017,10 +1022,16 @@
         return "";
       })();
 
+      // NEW: this is what we will use everywhere to guarantee the backend receives ?u=
+      const USER_U = canonU(USER_CANON);
+      function uQS(){
+        return USER_U ? ("?u=" + encodeURIComponent(USER_U)) : "";
+      }
+
       if(USER_CANON){
         try{
           localStorage.setItem("izzaUserCanon", USER_CANON);
-          localStorage.setItem("izzaUserU", USER_CANON.toLowerCase());
+          localStorage.setItem("izzaUserU", USER_U);
         }catch(e){}
       }
 
@@ -1056,13 +1067,13 @@
       }
 
       async function fetchActiveWallet(username){
-        const qs = username ? ("?u=" + encodeURIComponent(username)) : "";
+        const qs = username ? ("?u=" + encodeURIComponent(username)) : uQS();
         const r = await fetch("/api/wallet/active"+qs, { credentials:"include" });
         if(!r.ok) return null;
         return r.json().catch(()=>null);
       }
       async function linkActiveWallet(username, pub, secret){
-        const qs = username ? ("?u="+encodeURIComponent(username)) : "";
+        const qs = username ? ("?u="+encodeURIComponent(username)) : uQS();
         const body = { pub:String(pub||"").trim().toUpperCase() };
         if(secret && /^S[A-Z0-9]{55}$/.test(secret)) body.secret = secret.trim();
         const r = await fetch("/api/wallet/link"+qs, {
@@ -1075,7 +1086,7 @@
         return { ok:r.ok, status:r.status, json:j };
       }
       async function fetchBalances(username){
-        const qs = username ? ("?u="+encodeURIComponent(username)) : "";
+        const qs = username ? ("?u="+encodeURIComponent(username)) : uQS();
         const r = await fetch("/api/wallet/balances"+qs, { credentials:"include" });
         if(!r.ok) return null;
         return r.json().catch(()=>null);
@@ -1096,13 +1107,13 @@
         if(!walletOverlay) return;
         if(mwUser) mwUser.textContent = USER_CANON ? "@"+USER_CANON : "—";
 
-        const active = await fetchActiveWallet(USER_CANON);
+        const active = await fetchActiveWallet(USER_U);
         const pub = active && active.pub || "";
         if(mwPub) mwPub.textContent = pub || "—";
 
         if(balPi || balIzza){
           try{
-            const b = await fetchBalances(USER_CANON);
+            const b = await fetchBalances(USER_U);
             if(balPi)   balPi.textContent   = b && b.pi   || "—";
             if(balIzza) balIzza.textContent = b && b.izza || "—";
           }catch(e){
@@ -1126,7 +1137,7 @@
       }
 
       mwSaveBtn?.addEventListener("click", async function(){
-        const active = await fetchActiveWallet(USER_CANON);
+        const active = await fetchActiveWallet(USER_U);
         const pub = active && active.pub || "";
         if(!/^G[A-Z0-9]{55}$/.test(pub)){
           alert("Open your IZZA wallet once to set an active wallet, then return.");
@@ -1143,7 +1154,7 @@
         v.sec = secret;
         __writeVault(v);
 
-        const link = await linkActiveWallet(USER_CANON, pub, secret);
+        const link = await linkActiveWallet(USER_U, pub, secret);
         if(!link.ok){
           alert("Server link failed: " + ((link.json && link.json.error) || link.status));
         }else{
@@ -1155,14 +1166,14 @@
       });
 
       mwForgetBtn?.addEventListener("click", async function(){
-        const active = await fetchActiveWallet(USER_CANON);
+        const active = await fetchActiveWallet(USER_U);
         const pub = active && active.pub || "";
         if(pub) __forgetSecret(pub);
         refreshWalletOverlay();
       });
 
       async function ensureUserAndWalletGate(){
-        const user = USER_CANON;
+        const user = USER_U || canonU(USER_CANON);
         if(!user){
           alert("Sign in with Pi first, then return to IZZA WAR ZONE.");
           return null;
@@ -1184,6 +1195,10 @@
       // Expose for shop code + wallet button
       window.__izzaWalletGate = ensureUserAndWalletGate;
       window.__izzaOpenWalletOverlay = openWalletOverlay;
+
+      // NEW: expose canonical ?u for Warzone API calls
+      window.__izzaUserU = USER_U;
+      window.__izzaUserQS = uQS;
     })();
 
     // ---------- Overlays (friends / search / matchmaking / armory / wallet button hooks) ----------
@@ -1534,6 +1549,7 @@
         if(!listEl) return;
         listEl.textContent = "Loading " + slot + "…";
         try{
+          // Keep cookies, but purchases will also include ?u=.
           const res = await fetch(
             `/warzone/api/shop?slot=${encodeURIComponent(slot)}`,
             { credentials: "include" }
@@ -1629,89 +1645,91 @@
       }
 
       async function purchaseItem(slot, sku, itemName, price, listEl){
-  try{
-    const gate = await window.__izzaWalletGate?.();
-    if(!gate) return;
+        try{
+          const gate = await window.__izzaWalletGate?.();
+          if(!gate) return;
 
-    if(!price || price <= 0){
-      alert("This item is not configured with an IZZA price yet.");
-      return;
-    }
+          if(!price || price <= 0){
+            alert("This item is not configured with an IZZA price yet.");
+            return;
+          }
 
-    const showOverlay = window.__izzaShowPurchaseOverlay;
-    const closeOverlay = window.__izzaClosePurchaseOverlay;
+          const showOverlay = window.__izzaShowPurchaseOverlay;
+          const closeOverlay = window.__izzaClosePurchaseOverlay;
 
-    if(showOverlay && closeOverlay){
-      window.__izzaPurchaseOverlaySetBusy?.(false);
-      window.__izzaPurchaseOverlaySetMsg?.("", "");
-      const p = showOverlay({ sku, itemName, price, pub: gate.pub });
+          if(showOverlay && closeOverlay){
+            window.__izzaPurchaseOverlaySetBusy?.(false);
+            window.__izzaPurchaseOverlaySetMsg?.("", "");
+            const p = showOverlay({ sku, itemName, price, pub: gate.pub });
 
-      window.__izzaPurchaseOverlayApproveHook?.(() => {
-        closeOverlay({ approved:true });
-      });
+            window.__izzaPurchaseOverlayApproveHook?.(() => {
+              closeOverlay({ approved:true });
+            });
 
-      const res = await p;
-      if(!res || !res.approved){
-        closeOverlay({ approved:false });
-        return;
+            const res = await p;
+            if(!res || !res.approved){
+              closeOverlay({ approved:false });
+              return;
+            }
+          } else {
+            const ok = confirm(`Spend ${price} IZZA to unlock "${sku}"?`);
+            if(!ok) return;
+          }
+
+          if(window.__izzaPurchaseOverlaySetBusy) window.__izzaPurchaseOverlaySetBusy(true);
+          if(window.__izzaPurchaseOverlaySetMsg) window.__izzaPurchaseOverlaySetMsg("Submitting IZZA payment…", "");
+
+          // NEW: always include ?u=<username> on purchase (bulletproof against iOS cookie issues)
+          const qs = (window.__izzaUserQS && window.__izzaUserQS()) || "";
+          const res = await fetch("/warzone/api/purchase" + qs, {
+            method:"POST",
+            headers:{ "Content-Type":"application/json" },
+            body: JSON.stringify({
+              slot,
+              sku,
+              price_izza: price,
+              buyer_pub: gate.pub,
+              buyer_sec: gate.sec
+            }),
+            credentials:"include"
+          });
+
+          const data = await res.json().catch(()=>({}));
+
+          if(!res.ok || !data.ok){
+            const msg = data && (data.error || data.detail) ? (data.error || data.detail) : res.status;
+            if(window.__izzaPurchaseOverlaySetMsg){
+              window.__izzaPurchaseOverlaySetMsg("Purchase failed, " + msg, "error");
+              window.__izzaPurchaseOverlaySetBusy(false);
+              return;
+            }
+            alert("Purchase failed: " + msg);
+            return;
+          }
+
+          if(window.__izzaPurchaseOverlaySetMsg){
+            window.__izzaPurchaseOverlaySetMsg("Purchase complete, added to your inventory.", "ok");
+            window.__izzaPurchaseOverlaySetBusy(false);
+            setTimeout(() => {
+              window.__izzaClosePurchaseOverlay?.({ approved:false });
+            }, 650);
+          } else {
+            alert("Purchase complete. Item added to your inventory.");
+          }
+
+          // Always reload, this is what makes the button switch to Equip
+          await loadShop(slot);
+
+        }catch(e){
+          console.error(e);
+          if(window.__izzaPurchaseOverlaySetMsg){
+            window.__izzaPurchaseOverlaySetMsg("Purchase error, try again.", "error");
+            window.__izzaPurchaseOverlaySetBusy(false);
+            return;
+          }
+          alert("Purchase error. Try again.");
+        }
       }
-    } else {
-      const ok = confirm(`Spend ${price} IZZA to unlock "${sku}"?`);
-      if(!ok) return;
-    }
-
-    if(window.__izzaPurchaseOverlaySetBusy) window.__izzaPurchaseOverlaySetBusy(true);
-    if(window.__izzaPurchaseOverlaySetMsg) window.__izzaPurchaseOverlaySetMsg("Submitting IZZA payment…", "");
-
-    const res = await fetch("/warzone/api/purchase", {
-      method:"POST",
-      headers:{ "Content-Type":"application/json" },
-      body: JSON.stringify({
-        slot,
-        sku,
-        price_izza: price,
-        buyer_pub: gate.pub,
-        buyer_sec: gate.sec
-      }),
-      credentials:"include"
-    });
-
-    const data = await res.json().catch(()=>({}));
-
-    if(!res.ok || !data.ok){
-      const msg = data && (data.error || data.detail) ? (data.error || data.detail) : res.status;
-      if(window.__izzaPurchaseOverlaySetMsg){
-        window.__izzaPurchaseOverlaySetMsg("Purchase failed, " + msg, "error");
-        window.__izzaPurchaseOverlaySetBusy(false);
-        return;
-      }
-      alert("Purchase failed: " + msg);
-      return;
-    }
-
-    if(window.__izzaPurchaseOverlaySetMsg){
-      window.__izzaPurchaseOverlaySetMsg("Purchase complete, added to your inventory.", "ok");
-      window.__izzaPurchaseOverlaySetBusy(false);
-      setTimeout(() => {
-        window.__izzaClosePurchaseOverlay?.({ approved:false });
-      }, 650);
-    } else {
-      alert("Purchase complete. Item added to your inventory.");
-    }
-
-    // Always reload, this is what makes the button switch to Equip
-    await loadShop(slot);
-
-  }catch(e){
-    console.error(e);
-    if(window.__izzaPurchaseOverlaySetMsg){
-      window.__izzaPurchaseOverlaySetMsg("Purchase error, try again.", "error");
-      window.__izzaPurchaseOverlaySetBusy(false);
-      return;
-    }
-    alert("Purchase error. Try again.");
-  }
-}
 
       async function equipItem(slot, sku, listEl){
         try{
