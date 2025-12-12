@@ -590,6 +590,64 @@
       color:#9fb0d6;
     }
 
+    /* Purchase confirm overlay, replaces iOS rotated confirm() */
+    .purchase-box{
+      border-radius:14px;
+      border:1px solid rgba(66,91,168,.85);
+      background:linear-gradient(145deg,#060a1b,#02030c);
+      padding:10px;
+      margin-top:8px;
+    }
+    .purchase-line{
+      display:flex;
+      justify-content:space-between;
+      gap:8px;
+      font-size:11px;
+      color:#c3cff5;
+      margin-top:6px;
+      align-items:center;
+    }
+    .purchase-line strong{
+      color:#e7f0ff;
+      font-size:12px;
+    }
+    .purchase-actions{
+      display:flex;
+      gap:8px;
+      margin-top:10px;
+      justify-content:flex-end;
+      flex-wrap:wrap;
+    }
+    .purchase-actions button{
+      padding:7px 12px;
+      border-radius:999px;
+      border:1px solid rgba(127,209,255,.8);
+      background:linear-gradient(90deg,#021021,#03253b);
+      color:#e7f0ff;
+      font-size:11px;
+      text-transform:uppercase;
+      letter-spacing:.14em;
+      cursor:pointer;
+      white-space:nowrap;
+    }
+    .purchase-actions button.approve{
+      border:none;
+      background:linear-gradient(90deg,#0ff,#ff3b6b);
+      color:#001520;
+      font-weight:800;
+      box-shadow:
+        0 0 18px rgba(0,255,255,.35),
+        0 0 18px rgba(255,59,107,.25);
+    }
+    .purchase-msg{
+      margin-top:8px;
+      font-size:11px;
+      color:#9fb0d6;
+      min-height:16px;
+    }
+    .purchase-msg.error{ color:#ffb86b; }
+    .purchase-msg.ok{ color:#5ad49e; }
+
     /* Stack panels on very short screens */
     @media (max-height:620px){
       .main-row{
@@ -597,7 +655,6 @@
       }
     }
   </style>
-
   <script src="https://sdk.minepi.com/pi-sdk.js"></script>
   <!-- Babylon.js for 3D lobby soldier + shop previews -->
   <script src="https://cdn.babylonjs.com/babylon.js"></script>
@@ -633,14 +690,16 @@
                 IZZA maps · rotated view
               </div>
             </div>
-
+            <!-- map image comes from map_image_url, or falls back to /assets/warzone-map-izzacity.jpg -->
             <div
               class="zone-canvas-shell"
               id="zoneCanvasShell"
               style="background-image:url('{{ map_image_url or "/assets/warzone-map-izzacity.jpg" }}');">
+              <!-- 3D soldier rendered on top of the map -->
               <canvas id="soldierCanvas" class="zone-soldier-canvas"></canvas>
             </div>
 
+            <!-- IZZA WALLET controls under the image area -->
             <div class="loadout-bar">
               <div class="loadout-label">IZZA wallet</div>
               <div class="loadout-actions">
@@ -752,7 +811,7 @@
           </div>
         </div>
 
-        <!-- WALLET OVERLAY -->
+        <!-- WALLET OVERLAY (S-key save, same flow as IZZA CREATURES) -->
         <div class="overlay" id="walletOverlay">
           <div class="overlay-card">
             <div class="overlay-header">
@@ -851,6 +910,48 @@
                 Skins are pure cosmetics and are <b>not</b> NFTs. They live in
                 your IZZA WAR ZONE inventory, purchased with IZZA like game
                 credits.
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- PURCHASE CONFIRM OVERLAY, replaces confirm() so iOS rotation is correct -->
+        <div class="overlay" id="purchaseOverlay">
+          <div class="overlay-card">
+            <div class="overlay-header">
+              <div class="overlay-title">Approve IZZA payment</div>
+              <button class="overlay-close" data-close="purchaseOverlay">Close</button>
+            </div>
+            <div class="overlay-body">
+              <p>
+                You are about to purchase an in game War Zone item with IZZA.
+                This is not an NFT, it is a game unlock stored in your War Zone inventory.
+              </p>
+
+              <div class="purchase-box">
+                <div class="purchase-line">
+                  <div>Item</div>
+                  <strong id="poItem">—</strong>
+                </div>
+                <div class="purchase-line">
+                  <div>Cost</div>
+                  <strong id="poCost">—</strong>
+                </div>
+                <div class="purchase-line">
+                  <div>From wallet</div>
+                  <div id="poFrom" style="font-family:ui-monospace,Menlo,Consolas,monospace;word-break:break-all;text-align:right;max-width:250px;">—</div>
+                </div>
+                <div class="purchase-line">
+                  <div>To</div>
+                  <div style="color:#9fb0d6;">IZZA distributor</div>
+                </div>
+
+                <div class="purchase-actions">
+                  <button type="button" id="poCancel">Cancel</button>
+                  <button type="button" class="approve" id="poApprove">Approve</button>
+                </div>
+
+                <div class="purchase-msg" id="poMsg"></div>
               </div>
             </div>
           </div>
@@ -980,6 +1081,7 @@
         return r.json().catch(()=>null);
       }
 
+      // Wallet overlay elements
       const walletOverlay = document.getElementById("walletOverlay");
       const mwUser   = document.getElementById("mwUser");
       const mwPub    = document.getElementById("mwPub");
@@ -1079,12 +1181,12 @@
         return { user, pub, sec:getLocalSecret(pub) };
       }
 
+      // Expose for shop code + wallet button
       window.__izzaWalletGate = ensureUserAndWalletGate;
       window.__izzaOpenWalletOverlay = openWalletOverlay;
-      window.__izzaUserCanon = USER_CANON;
     })();
 
-    // ---------- Overlays + buttons ----------
+    // ---------- Overlays (friends / search / matchmaking / armory / wallet button hooks) ----------
     (function(){
       function show(id){
         const el = document.getElementById(id);
@@ -1278,15 +1380,73 @@
           alert(`IZZA wallet synced for @${gate.user}. You can now buy weapons and skins.`);
         }
       });
+
+      // Purchase overlay helpers
+      const po = document.getElementById("purchaseOverlay");
+      const poItem = document.getElementById("poItem");
+      const poCost = document.getElementById("poCost");
+      const poFrom = document.getElementById("poFrom");
+      const poMsg  = document.getElementById("poMsg");
+      const poCancel = document.getElementById("poCancel");
+      const poApprove = document.getElementById("poApprove");
+
+      let __poResolve = null;
+      let __poBusy = false;
+
+      function showPurchaseOverlay(payload){
+        if(!po) return Promise.resolve({ approved:false });
+        po.classList.add("visible");
+        if(poMsg){
+          poMsg.textContent = "";
+          poMsg.className = "purchase-msg";
+        }
+        if(poItem) poItem.textContent = payload.itemName || payload.sku || "Item";
+        if(poCost) poCost.textContent = (payload.price || 0) + " IZZA";
+        if(poFrom) poFrom.textContent = payload.pub || "—";
+
+        return new Promise((resolve) => {
+          __poResolve = resolve;
+        });
+      }
+
+      function closePurchaseOverlay(result){
+        if(!po) return;
+        po.classList.remove("visible");
+        const r = result || { approved:false };
+        if(__poResolve){
+          __poResolve(r);
+          __poResolve = null;
+        }
+      }
+
+      poCancel?.addEventListener("click", () => {
+        if(__poBusy) return;
+        closePurchaseOverlay({ approved:false });
+      });
+
+      // Approve click is handled by purchaseItem so it can show progress, and then close.
+      window.__izzaShowPurchaseOverlay = showPurchaseOverlay;
+      window.__izzaClosePurchaseOverlay = closePurchaseOverlay;
+      window.__izzaPurchaseOverlaySetMsg = function(txt, kind){
+        if(!poMsg) return;
+        poMsg.textContent = txt || "";
+        poMsg.className = "purchase-msg" + (kind ? (" " + kind) : "");
+      };
+      window.__izzaPurchaseOverlaySetBusy = function(b){
+        __poBusy = !!b;
+        if(poApprove) poApprove.disabled = __poBusy;
+        if(poCancel)  poCancel.disabled  = __poBusy;
+      };
+      window.__izzaPurchaseOverlayApproveHook = function(fn){
+        if(!poApprove) return;
+        poApprove.onclick = fn;
+      };
     })();
 
     // ---------- Armory load + IZZA purchases + 3D previews ----------
     (function(){
       const weaponsList = document.getElementById("weaponsList");
       const skinsList   = document.getElementById("skinsList");
-
-      // IMPORTANT: use the same soldier model for the BASIC SKIN preview too
-      const SOLDIER_ASSET = "/assets/warzone3d/soldier_gltf_3/scene.gltf";
 
       function createShopPreview(canvas, slot, sku){
         if (!canvas || !window.BABYLON) return;
@@ -1315,18 +1475,15 @@
         const light = new BABYLON.HemisphericLight("h", new BABYLON.Vector3(0,1,0), scene);
         light.intensity = 1.1;
 
-        // Resolve preview URL
+        let base = "/assets/warzone3d/";
         let url;
+
         if (slot === "weapons") {
-          url = "/assets/warzone3d/weapons/" + sku + ".glb";
+          base += "weapons/";
+          url = base + sku + ".glb";
         } else {
-          // skins
-          if (sku === "wz_basic_soldier") {
-            // show the same basic soldier model used in the lobby
-            url = SOLDIER_ASSET;
-          } else {
-            url = "/assets/warzone3d/skins/" + sku + "/scene.gltf";
-          }
+          base += "skins/";
+          url = base + sku + "/scene.gltf";
         }
 
         const lastSlash = url.lastIndexOf("/");
@@ -1342,9 +1499,21 @@
             const root = new BABYLON.TransformNode("shopRoot", scene);
             meshes.forEach(m => { m.parent = root; });
 
-            root.position = new BABYLON.Vector3(0,-0.5,0);
-            root.rotation = new BABYLON.Vector3(0,Math.PI,0);
-            root.scaling  = new BABYLON.Vector3(1.2,1.2,1.2);
+            // Surgical fix for the starter skin preview being too zoomed.
+            // Only affects wz_basic_soldier in skins list.
+            if(slot === "skins" && sku === "wz_basic_soldier"){
+              root.position = new BABYLON.Vector3(0,-0.85,0);
+              root.rotation = new BABYLON.Vector3(0,Math.PI,0);
+              root.scaling  = new BABYLON.Vector3(0.42,0.42,0.42);
+              camera.radius = 3.4;
+              camera.lowerRadiusLimit = camera.radius;
+              camera.upperRadiusLimit = camera.radius;
+              camera.target = new BABYLON.Vector3(0,0.75,0);
+            } else {
+              root.position = new BABYLON.Vector3(0,-0.5,0);
+              root.rotation = new BABYLON.Vector3(0,Math.PI,0);
+              root.scaling  = new BABYLON.Vector3(1.2,1.2,1.2);
+            }
 
             if (animGroups && animGroups.length){
               animGroups.forEach(g => g.stop());
@@ -1440,7 +1609,7 @@
                 await equipItem(slot, it.sku, listEl);
               }else if(!this.classList.contains("equipped") && !it.starting){
                 const price = Number(this.dataset.price || 0);
-                await purchaseItem(slot, it.sku, price, listEl);
+                await purchaseItem(slot, it.sku, it.name || it.sku, price, listEl);
               }
             });
 
@@ -1459,7 +1628,8 @@
         }
       }
 
-      async function purchaseItem(slot, sku, price, listEl){
+      async function purchaseItem(slot, sku, itemName, price, listEl){
+        let approved = false;
         try{
           const gate = await window.__izzaWalletGate?.();
           if(!gate) return;
@@ -1469,14 +1639,43 @@
             return;
           }
 
-          const ok = confirm(`Spend ${price} IZZA to unlock "${sku}"?`);
-          if(!ok) return;
+          // Replace confirm() with in game overlay, fixes iOS rotated popup
+          const showOverlay = window.__izzaShowPurchaseOverlay;
+          const closeOverlay = window.__izzaClosePurchaseOverlay;
+
+          if(showOverlay && closeOverlay){
+            window.__izzaPurchaseOverlaySetBusy?.(false);
+            window.__izzaPurchaseOverlaySetMsg?.("", "");
+            const p = showOverlay({
+              sku,
+              itemName,
+              price,
+              pub: gate.pub
+            });
+
+            // Hook approve button to resolve and continue
+            window.__izzaPurchaseOverlayApproveHook?.(() => {
+              approved = true;
+              closeOverlay({ approved:true });
+            });
+
+            const res = await p;
+            if(!res || !res.approved){
+              closeOverlay({ approved:false });
+              return;
+            }
+          } else {
+            // Fallback if something breaks
+            const ok = confirm(`Spend ${price} IZZA to unlock "${sku}"?`);
+            if(!ok) return;
+          }
 
           listEl && (listEl.dataset.busy = "1");
 
-          // IMPORTANT: pass u= so server can record inventory without session auth
-          const u = encodeURIComponent(window.__izzaUserCanon || gate.user || "");
-          const res = await fetch("/warzone/api/purchase?u=" + u, {
+          if(window.__izzaPurchaseOverlaySetBusy) window.__izzaPurchaseOverlaySetBusy(true);
+          if(window.__izzaPurchaseOverlaySetMsg) window.__izzaPurchaseOverlaySetMsg("Submitting IZZA payment…", "");
+
+          const res = await fetch("/warzone/api/purchase", {
             method:"POST",
             headers:{ "Content-Type":"application/json" },
             body: JSON.stringify({
@@ -1490,14 +1689,37 @@
           });
 
           const data = await res.json().catch(()=>({}));
+
           if(!res.ok || !data.ok){
-            alert("Purchase failed: " + (data.error || res.status));
-          }else{
-            alert("Purchase complete. Item added to your inventory.");
-            await loadShop(slot);
+            const msg = data && (data.error || data.detail) ? (data.error || data.detail) : res.status;
+            if(window.__izzaPurchaseOverlaySetMsg){
+              window.__izzaPurchaseOverlaySetMsg("Purchase failed, " + msg, "error");
+              window.__izzaPurchaseOverlaySetBusy(false);
+              return;
+            }
+            alert("Purchase failed: " + msg);
+            return;
           }
+
+          if(window.__izzaPurchaseOverlaySetMsg){
+            window.__izzaPurchaseOverlaySetMsg("Purchase complete, added to your inventory.", "ok");
+            window.__izzaPurchaseOverlaySetBusy(false);
+            setTimeout(() => {
+              window.__izzaClosePurchaseOverlay?.({ approved:false });
+            }, 650);
+          } else {
+            alert("Purchase complete. Item added to your inventory.");
+          }
+
+          await loadShop(slot);
+
         }catch(e){
           console.error(e);
+          if(window.__izzaPurchaseOverlaySetMsg){
+            window.__izzaPurchaseOverlaySetMsg("Purchase error, try again.", "error");
+            window.__izzaPurchaseOverlaySetBusy(false);
+            return;
+          }
           alert("Purchase error. Try again.");
         }finally{
           if(listEl) delete listEl.dataset.busy;
@@ -1506,9 +1728,7 @@
 
       async function equipItem(slot, sku, listEl){
         try{
-          // IMPORTANT: pass u= so server can equip without session auth
-          const u = encodeURIComponent(window.__izzaUserCanon || "");
-          const res = await fetch("/warzone/api/equip?u=" + u, {
+          const res = await fetch("/warzone/api/equip", {
             method:"POST",
             headers:{ "Content-Type":"application/json" },
             body: JSON.stringify({ slot, sku }),
