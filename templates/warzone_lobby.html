@@ -1076,78 +1076,75 @@
       const skinsList   = document.getElementById("skinsList");
 
       function createShopPreview(canvas, slot, sku){
-        if (!canvas || !window.BABYLON) return;
+  if (!canvas || !window.BABYLON) return;
 
-        const engine = new BABYLON.Engine(canvas, true, {
-          preserveDrawingBuffer:true,
-          stencil:false
-        });
-        const scene = new BABYLON.Scene(engine);
-        scene.clearColor = new BABYLON.Color4(0,0,0,0);
+  const engine = new BABYLON.Engine(canvas, true, {
+    preserveDrawingBuffer:true,
+    stencil:false
+  });
+  const scene = new BABYLON.Scene(engine);
+  scene.clearColor = new BABYLON.Color4(0,0,0,0);
 
-        const camera = new BABYLON.ArcRotateCamera(
-          "c",
-          Math.PI * 1.4,
-          Math.PI / 2.4,
-          2.0,
-          new BABYLON.Vector3(0,0.8,0),
-          scene
-        );
-        camera.attachControl(canvas, false);
-        camera.inputs.clear();
-        camera.lowerRadiusLimit = camera.radius;
-        camera.upperRadiusLimit = camera.radius;
-        camera.panningSensibility = 0;
+  const camera = new BABYLON.ArcRotateCamera(
+    "c",
+    Math.PI * 1.4,
+    Math.PI / 2.4,
+    2.0,
+    new BABYLON.Vector3(0,0.8,0),
+    scene
+  );
+  camera.attachControl(canvas, false);
+  camera.inputs.clear();
+  camera.lowerRadiusLimit = camera.radius;
+  camera.upperRadiusLimit = camera.radius;
+  camera.panningSensibility = 0;
 
-        const light = new BABYLON.HemisphericLight(
-          "h",
-          new BABYLON.Vector3(0,1,0),
-          scene
-        );
-        light.intensity = 1.1;
+  const light = new BABYLON.HemisphericLight("h", new BABYLON.Vector3(0,1,0), scene);
+  light.intensity = 1.1;
 
-        let base = "/assets/warzone3d/";
-        if (slot === "weapons"){
-          base += "weapons/";
-        } else {
-          base += "skins/";
-        }
-        const url = base + sku + ".glb";
+  // 🔽 new bit
+  let base = "/assets/warzone3d/";
+  let url;
 
-        const lastSlash = url.lastIndexOf("/");
-        const rootUrl = url.substring(0,lastSlash+1);
-        const fileName = url.substring(lastSlash+1);   
+  if (slot === "weapons") {
+    base += "weapons/";
+    url = base + sku + ".glb";                // weapons stay as .glb
+  } else {
+    base += "skins/";
+    // each skin is a folder containing scene.gltf
+    url = base + sku + "/scene.gltf";
+  }
 
-        BABYLON.SceneLoader.ImportMesh(
-          "",
-          rootUrl,
-          fileName,
-          scene,
-          function(meshes, ps, skeletons, animGroups){
-            const root = new BABYLON.TransformNode("shopRoot", scene);
-            meshes.forEach(m => {
-              m.parent = root;
-            });
+  const lastSlash = url.lastIndexOf("/");
+  const rootUrl = url.substring(0, lastSlash + 1);
+  const fileName = url.substring(lastSlash + 1);
 
-            root.position = new BABYLON.Vector3(0,-0.5,0);
-            root.rotation = new BABYLON.Vector3(0,Math.PI,0);
-            root.scaling = new BABYLON.Vector3(1.2,1.2,1.2);
+  BABYLON.SceneLoader.ImportMesh(
+    "",
+    rootUrl,
+    fileName,
+    scene,
+    function(meshes, ps, skeletons, animGroups){
+      const root = new BABYLON.TransformNode("shopRoot", scene);
+      meshes.forEach(m => { m.parent = root; });
 
-            if (animGroups && animGroups.length){
-              animGroups.forEach(g => g.stop());
-              animGroups[0].start(true);
-            }
-          },
-          null,
-          function(err){
-            console.warn("Preview load failed for", slot, sku, err);
-          }
-        );
+      root.position = new BABYLON.Vector3(0,-0.5,0);
+      root.rotation = new BABYLON.Vector3(0,Math.PI,0);
+      root.scaling  = new BABYLON.Vector3(1.2,1.2,1.2);
 
-        engine.runRenderLoop(function(){
-          scene.render();
-        });
+      if (animGroups && animGroups.length){
+        animGroups.forEach(g => g.stop());
+        animGroups[0].start(true);
       }
+    },
+    null,
+    function(err){
+      console.warn("Preview load failed for", slot, sku, err);
+    }
+  );
+
+  engine.runRenderLoop(function(){ scene.render(); });
+}
 
       async function loadShop(slot){
         const listEl = slot === "weapons" ? weaponsList : skinsList;
