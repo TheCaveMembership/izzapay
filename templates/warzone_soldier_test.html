@@ -21,6 +21,7 @@
       left:10px;
       font-size:14px;
       z-index:5;
+      white-space:pre;
     }
     #renderCanvas{
       position:fixed;
@@ -54,12 +55,11 @@
       const scene  = new BABYLON.Scene(engine);
       scene.clearColor = new BABYLON.Color4(0,0,0,1);
 
-      // Camera looking at the origin by default
       const camera = new BABYLON.ArcRotateCamera(
         "cam",
-        Math.PI * 1.3,
-        Math.PI / 2.4,
-        8.0,
+        Math.PI * 1.25,
+        Math.PI / 2.5,
+        10.0,
         new BABYLON.Vector3(0,1,0),
         scene
       );
@@ -67,16 +67,15 @@
       camera.inputs.clear();
       camera.panningSensibility = 0;
 
-      const light = new BABYLON.HemisphericLight(
-        "h",
-        new BABYLON.Vector3(0,1,0),
-        scene
-      );
-      light.intensity = 1.2;
+      const hemi = new BABYLON.HemisphericLight("h", new BABYLON.Vector3(0,1,0), scene);
+      hemi.intensity = 1.1;
 
-      // Debug cube so we always see *something*
-      const debugBox = BABYLON.MeshBuilder.CreateBox("debugBox", { size:1 }, scene);
-      debugBox.position.y = 1;
+      const dir = new BABYLON.DirectionalLight("d", new BABYLON.Vector3(-0.3,-1,-0.4), scene);
+      dir.intensity = 1.0;
+
+      // Debug cube so we always see something
+      const debugBox = BABYLON.MeshBuilder.CreateBox("debugBox", { size:0.6 }, scene);
+      debugBox.position.set(0, 0.6, 0);
       const debugMat = new BABYLON.StandardMaterial("dbgMat", scene);
       debugMat.emissiveColor = new BABYLON.Color3(0,1,1);
       debugBox.material = debugMat;
@@ -89,95 +88,127 @@
         engine.resize();
       });
 
-      function safeFrameCamera(root){
+      function getRootBounds(root){
+        const b = root.getHierarchyBoundingVectors(true);
+        return { min: b.min.clone(), max: b.max.clone() };
+      }
+
+      function frameCameraToRoots(roots){
         try{
-          const bounds = root.getHierarchyBoundingVectors(true);
-          const min = bounds.min;
-          const max = bounds.max;
-          const size = max.subtract(min);
-          const center = min.add(size.scale(0.5));
+          let min = new BABYLON.Vector3( 1e9, 1e9, 1e9);
+          let max = new BABYLON.Vector3(-1e9,-1e9,-1e9);
+          let any = false;
 
-          const maxDim = Math.max(size.x, size.y, size.z);
+          for(const r of roots){
+            if(!r) continue;
+            const bb = getRootBounds(r);
+            if(!isFinite(bb.min.x) || !isFinite(bb.max.x)) continue;
+            min = BABYLON.Vector3.Minimize(min, bb.min);
+            max = BABYLON.Vector3.Maximize(max, bb.max);
+            any = true;
+          }
 
-          if (!isFinite(maxDim) || maxDim <= 0){
-            msgEl.textContent = "Soldier imported but bounds invalid – fallback camera";
+          if(!any){
+            msgEl.textContent += "\nCamera frame failed, bounds invalid";
             camera.target = new BABYLON.Vector3(0,1,0);
-            camera.radius = 8;
-            camera.lowerRadiusLimit = 4;
-            camera.upperRadiusLimit = 20;
+            camera.radius = 10;
             return;
           }
 
-          const radius = maxDim * 1.8;
-
-          msgEl.textContent =
-            "Soldier imported OK | size: " +
-            maxDim.toFixed(3) +
-            " | radius: " +
-            radius.toFixed(3);
+          const size = max.subtract(min);
+          const center = min.add(size.scale(0.5));
+          const maxDim = Math.max(size.x, size.y, size.z) || 1;
+          const radius = maxDim * 1.9;
 
           camera.target = center;
           camera.radius = radius;
           camera.lowerRadiusLimit = radius * 0.8;
-          camera.upperRadiusLimit = radius * 2.2;
+          camera.upperRadiusLimit = radius * 2.5;
+
+          msgEl.textContent += "\nFramed camera, size=" + maxDim.toFixed(3) + ", radius=" + radius.toFixed(3);
         }catch(e){
-          console.warn("safeFrameCamera failed", e);
-          msgEl.textContent = "Soldier imported, camera frame failed – fallback";
+          console.warn("frameCameraToRoots failed", e);
+          msgEl.textContent += "\nCamera frame threw, fallback";
           camera.target = new BABYLON.Vector3(0,1,0);
-          camera.radius = 8;
+          camera.radius = 10;
         }
       }
 
-      // ==== NEW: point to the glTF you just uploaded ====
-      const ROOT_URL  = "/assets/warzone3d/soldier_gltf_3/";
-      const FILE_NAME = "scene.gltf";
+      function importSoldier(label, rootUrl, fileName, xOffset){
+        return new Promise((resolve, reject) => {
+          msgEl.textContent += "\nLoading " + label + " | " + rootUrl + fileName;
 
-      msgEl.textContent = "Loading soldier (gltf)…";
+          BABYLON.SceneLoader.ImportMesh(
+            "",
+            rootUrl,
+            fileName,
+            scene,
+            function(meshes, ps, skeletons, animGroups){
+              const root = new BABYLON.TransformNode(label + "Root", scene);
 
-      BABYLON.SceneLoader.ImportMesh(
-        "",
-        ROOT_URL,
-        FILE_NAME,
-        scene,
-        function(meshes, ps, skeletons, animGroups){
-          // Keep the cube so we can see the camera hasn't broken
-          debugBox.position.x = -3;
-          debugBox.position.y = 0.5;
+              const geoMeshes = meshes.filter(m =>
+                m && m.getTotalVertices && m.getTotalVertices() > 0
+              );
 
-          const root = new BABYLON.TransformNode("soldierRoot", scene);
+              geoMeshes.forEach(m => { m.parent = root; });
 
-          const geoMeshes = meshes.filter(m =>
-            m && m.getTotalVertices && m.getTotalVertices() > 0
+              root.position.x = xOffset;
+              root.rotation.y = Math.PI; // face camera
+
+              if (!geoMeshes.length){
+                msgEl.textContent += "\n" + label + " imported, but no geometry meshes";
+              } else {
+                msgEl.textContent += "\n" + label + " imported OK, geoMeshes=" + geoMeshes.length;
+
+                if (animGroups && animGroups.length){
+                  animGroups.forEach(g => g.stop());
+                  animGroups[0].start(true);
+                  msgEl.textContent += "\n" + label + " anim started, " + animGroups[0].name;
+                }
+              }
+
+              resolve({ root, animGroups });
+            },
+            null,
+            function(scene, message, exception){
+              console.error(label + " ImportMesh error:", message, exception);
+              msgEl.textContent += "\n" + label + " import error, " + message;
+              reject(new Error(message || "ImportMesh error"));
+            }
           );
-          geoMeshes.forEach(m => {
-            m.parent = root;
+        });
+      }
+
+      // Paths
+      const BASIC_ROOT  = "/assets/warzone3d/soldier_gltf_3/";
+      const NEON_ROOT   = "/assets/warzone3d/skins/wz_neon_edge/";
+      const FILE_NAME   = "scene.gltf";
+
+      (async () => {
+        try{
+          // Move debug cube out of the way
+          debugBox.position.set(0, 0.3, -3);
+
+          const basic = await importSoldier("basic", BASIC_ROOT, FILE_NAME, -1.2);
+          const neon  = await importSoldier("neon",  NEON_ROOT,  FILE_NAME,  1.2);
+
+          frameCameraToRoots([basic.root, neon.root]);
+
+          // Slow spin both so we can see them clearly
+          scene.onBeforeRenderObservable.clear();
+          scene.onBeforeRenderObservable.add(() => {
+            const dt = scene.getEngine().getDeltaTime() * 0.001;
+            basic.root.rotation.y += dt * 0.35;
+            neon.root.rotation.y  += dt * 0.35;
+            debugBox.rotation.y   += dt;
           });
 
-          if (!geoMeshes.length){
-            msgEl.textContent = "Soldier imported but no geometry meshes";
-          } else {
-            safeFrameCamera(root);
-
-            // Slow spin so it's obvious when it appears
-            scene.onBeforeRenderObservable.clear();
-            scene.onBeforeRenderObservable.add(() => {
-              const dt = scene.getEngine().getDeltaTime() * 0.001;
-              root.rotation.y      += dt * 0.5;
-              debugBox.rotation.y  += dt;
-            });
-
-            if (animGroups && animGroups.length){
-              animGroups.forEach(g => g.stop());
-              animGroups[0].start(true);
-            }
-          }
-        },
-        null,
-        function(scene, message, exception){
-          console.error("ImportMesh error:", message, exception);
-          msgEl.textContent = "Import error: " + message;
+          msgEl.textContent += "\nDone";
+        }catch(e){
+          console.warn("Test loader failed", e);
+          msgEl.textContent += "\nFAILED, check console log";
         }
-      );
+      })();
     }
   </script>
 </body>
