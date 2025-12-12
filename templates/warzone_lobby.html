@@ -181,7 +181,8 @@
       background-size:cover;
       background-position:center;
       background-repeat:no-repeat;
-      aspect-ratio:16 / 9;
+      /* slightly shorter so wallet buttons stay fully in view on rotated phones */
+      aspect-ratio:16 / 8;
       flex:0 0 auto;
     }
     .zone-canvas-shell::before{
@@ -209,7 +210,7 @@
       display:block;
     }
 
-    /* Loadout bar styles (kept for reuse of .btn-loadout) */
+    /* Loadout / wallet bar */
     .loadout-bar{
       margin-top:4px;
       padding:6px 10px;
@@ -332,7 +333,7 @@
       flex-wrap:wrap;
     }
 
-    /* Overlays (friends / search / matchmaking / shop) */
+    /* Overlays (friends / search / matchmaking / shop / wallet) */
     .overlay{
       position:absolute;
       inset:0;
@@ -641,7 +642,7 @@
               <canvas id="soldierCanvas" class="zone-soldier-canvas"></canvas>
             </div>
 
-            <!-- NEW: IZZA WALLET controls under the image area -->
+            <!-- IZZA WALLET controls under the image area -->
             <div class="loadout-bar">
               <div class="loadout-label">IZZA wallet</div>
               <div class="loadout-actions">
@@ -753,6 +754,61 @@
           </div>
         </div>
 
+        <!-- WALLET OVERLAY (S-key save, same flow as IZZA CREATURES) -->
+        <div class="overlay" id="walletOverlay">
+          <div class="overlay-card">
+            <div class="overlay-header">
+              <div class="overlay-title">My IZZA wallet</div>
+              <button class="overlay-close" data-close="walletOverlay">Close</button>
+            </div>
+            <div class="overlay-body">
+              <div style="margin-bottom:8px;font-size:11px;">
+                <div>Signed in as <strong id="mwUser">—</strong></div>
+              </div>
+              <div style="margin-bottom:8px;font-size:11px;">
+                <div>Active wallet (public key)</div>
+                <div id="mwPub" style="font-family:ui-monospace,Menlo,Consolas,monospace;word-break:break-all;">—</div>
+                <div style="margin-top:4px;color:#9fb0d6;">
+                  Need to set or switch your active wallet? Open or create the full wallet once below.
+                  After creation go into your full wallet, reveal your S key once and store it somewhere safe.
+                  Then return here to save your S key locally.
+                </div>
+              </div>
+              <div style="margin-bottom:8px;font-size:11px;">
+                <div>Balances — Testnet</div>
+                <div>Test Pi: <strong id="balPi">—</strong></div>
+                <div>Test IZZA: <strong id="balIzza">—</strong></div>
+              </div>
+              <div style="margin-bottom:8px;font-size:11px;">
+                <div>Local S key status: <span id="mwSStatus">—</span></div>
+                <div class="overlay-input-row" style="margin-top:6px;">
+                  <input
+                    id="mwSInput"
+                    placeholder="S... private key"
+                    autocomplete="off"
+                    spellcheck="false"
+                    autocapitalize="none"
+                    style="flex:1;min-width:0;border-radius:999px;border:1px solid rgba(127,209,255,.6);background:#02061b;color:#edf3ff;font-size:12px;padding:7px 10px;outline:none;">
+                  <button type="button" id="mwSaveBtn">Save</button>
+                  <button type="button" id="mwForgetBtn" style="background:linear-gradient(90deg,#ff3b6b,#ff9c6b);">
+                    Forget
+                  </button>
+                </div>
+                <div style="margin-top:4px;color:#9fb0d6;">
+                  Your S key is stored locally on this device only.
+                </div>
+              </div>
+              <div style="display:flex;justify-content:flex-end;margin-top:10px;">
+                <a
+                  href="/token/auth?next=/token/izza"
+                  style="text-decoration:none;padding:7px 12px;border-radius:999px;border:1px solid rgba(255,207,77,.9);background:linear-gradient(90deg,#ffcf4d,#ff9c3b);color:#1a1200;font-size:11px;text-transform:uppercase;letter-spacing:.16em;">
+                  Open full wallet
+                </a>
+              </div>
+            </div>
+          </div>
+        </div>
+
         <!-- ARMORY: WEAPONS -->
         <div class="overlay" id="weaponsOverlay">
           <div class="overlay-card">
@@ -838,11 +894,29 @@
       updateLayout();
     })();
 
-    // ---------- Minimal IZZA wallet helpers (ported from creatures flow) ----------
+    // ---------- IZZA wallet helpers + wallet overlay (mirrors creatures flow) ----------
     (function(){
       const SRV_USER = {{ (player.username or '') | tojson }};
       function stripAt(s){ return (s||"").toString().trim().replace(/^@+/, ""); }
-      const USER_CANON = stripAt(SRV_USER || localStorage.getItem("izzaUserCanon") || "");
+
+      const USER_CANON = (()=>{
+        const fromSrv = stripAt(SRV_USER);
+        if(fromSrv) return fromSrv;
+        try{
+          const raw = localStorage.getItem("piAuthUser");
+          if(raw){
+            const j = JSON.parse(raw);
+            if(j && j.username) return stripAt(j.username);
+          }
+        }catch(e){}
+        try{
+          const uCanon = localStorage.getItem("izzaUserCanon");
+          if(uCanon) return stripAt(uCanon);
+          const u = localStorage.getItem("izzaUserU");
+          if(u) return stripAt(u);
+        }catch(e){}
+        return "";
+      })();
 
       if(USER_CANON){
         try{
@@ -859,6 +933,15 @@
       }
       function __writeVault(j){
         try{ localStorage.setItem("izza_test_wallet", JSON.stringify(j || {})); }catch(e){}
+      }
+      function __forgetSecret(pub){
+        try{
+          const v = __readVault() || {};
+          if(v && v.pub === pub){
+            delete v.sec;
+            __writeVault(v);
+          }
+        }catch(e){}
       }
       function isLocalWallet(pub){
         const v = __readVault();
@@ -879,6 +962,105 @@
         if(!r.ok) return null;
         return r.json().catch(()=>null);
       }
+      async function linkActiveWallet(username, pub, secret){
+        const qs = username ? ("?u="+encodeURIComponent(username)) : "";
+        const body = { pub:String(pub||"").trim().toUpperCase() };
+        if(secret && /^S[A-Z0-9]{55}$/.test(secret)) body.secret = secret.trim();
+        const r = await fetch("/api/wallet/link"+qs, {
+          method:"POST",
+          headers:{ "content-Type":"application/json" },
+          body: JSON.stringify(body),
+          credentials:"include"
+        });
+        const j = await r.json().catch(()=>null);
+        return { ok:r.ok, status:r.status, json:j };
+      }
+      async function fetchBalances(username){
+        const qs = username ? ("?u="+encodeURIComponent(username)) : "";
+        const r = await fetch("/api/wallet/balances"+qs, { credentials:"include" });
+        if(!r.ok) return null;
+        return r.json().catch(()=>null);
+      }
+
+      // Wallet overlay elements
+      const walletOverlay = document.getElementById("walletOverlay");
+      const mwUser   = document.getElementById("mwUser");
+      const mwPub    = document.getElementById("mwPub");
+      const balPi    = document.getElementById("balPi");
+      const balIzza  = document.getElementById("balIzza");
+      const mwSStatus= document.getElementById("mwSStatus");
+      const mwSInput = document.getElementById("mwSInput");
+      const mwSaveBtn= document.getElementById("mwSaveBtn");
+      const mwForgetBtn = document.getElementById("mwForgetBtn");
+
+      async function refreshWalletOverlay(){
+        if(!walletOverlay) return;
+        if(mwUser) mwUser.textContent = USER_CANON ? "@"+USER_CANON : "—";
+
+        const active = await fetchActiveWallet(USER_CANON);
+        const pub = active && active.pub || "";
+        if(mwPub) mwPub.textContent = pub || "—";
+
+        if(balPi || balIzza){
+          try{
+            const b = await fetchBalances(USER_CANON);
+            if(balPi)   balPi.textContent   = b && b.pi   || "—";
+            if(balIzza) balIzza.textContent = b && b.izza || "—";
+          }catch(e){
+            if(balPi)   balPi.textContent   = "—";
+            if(balIzza) balIzza.textContent = "—";
+          }
+        }
+
+        const has = pub && isLocalWallet(pub);
+        if(mwSStatus){
+          mwSStatus.innerHTML = has
+            ? '<span style="color:#5ad49e;">Saved locally</span>'
+            : '<span style="color:#ffb86b;">Not saved</span>';
+        }
+      }
+
+      function openWalletOverlay(){
+        if(!walletOverlay) return;
+        walletOverlay.classList.add("visible");
+        refreshWalletOverlay();
+      }
+
+      mwSaveBtn?.addEventListener("click", async function(){
+        const active = await fetchActiveWallet(USER_CANON);
+        const pub = active && active.pub || "";
+        if(!/^G[A-Z0-9]{55}$/.test(pub)){
+          alert("Open your IZZA wallet once to set an active wallet, then return.");
+          return;
+        }
+        const secret = (mwSInput?.value || "").trim();
+        if(!/^S[A-Z0-9]{55}$/.test(secret)){
+          alert("Enter a valid S key starting with S…");
+          return;
+        }
+
+        const v = __readVault() || {};
+        v.pub = pub;
+        v.sec = secret;
+        __writeVault(v);
+
+        const link = await linkActiveWallet(USER_CANON, pub, secret);
+        if(!link.ok){
+          alert("Server link failed: " + ((link.json && link.json.error) || link.status));
+        }else{
+          alert("S key saved locally and linked.");
+        }
+
+        if(mwSInput) mwSInput.value = "";
+        refreshWalletOverlay();
+      });
+
+      mwForgetBtn?.addEventListener("click", async function(){
+        const active = await fetchActiveWallet(USER_CANON);
+        const pub = active && active.pub || "";
+        if(pub) __forgetSecret(pub);
+        refreshWalletOverlay();
+      });
 
       async function ensureUserAndWalletGate(){
         const user = USER_CANON;
@@ -893,17 +1075,19 @@
           return null;
         }
         if(!isLocalWallet(pub)){
+          openWalletOverlay();
           alert("Save your IZZA wallet S key locally (same as IZZA CREATURES page) before purchasing.");
           return null;
         }
         return { user, pub, sec:getLocalSecret(pub) };
       }
 
-      // Expose for shop code
+      // Expose for shop code + wallet button
       window.__izzaWalletGate = ensureUserAndWalletGate;
+      window.__izzaOpenWalletOverlay = openWalletOverlay;
     })();
 
-    // ---------- Overlays (friends / search / matchmaking / armory) ----------
+    // ---------- Overlays (friends / search / matchmaking / armory / wallet button hooks) ----------
     (function(){
       const inviteOverlay = document.getElementById("inviteOverlay");
       const searchOverlay = document.getElementById("searchOverlay");
@@ -924,7 +1108,7 @@
       document.getElementById("searchBtn")?.addEventListener("click", () => show("searchOverlay"));
       document.getElementById("deployBtn")?.addEventListener("click", () => show("deployOverlay"));
 
-      // UPDATED: gate weapons / skins via IZZA wallet before loading shop
+      // Gate weapons / skins via IZZA wallet before loading shop
       document.getElementById("weaponsBtn")?.addEventListener("click", async () => {
         if (window.__izzaWalletGate) {
           const gate = await window.__izzaWalletGate();
@@ -1091,13 +1275,14 @@
 
       searchGo?.addEventListener("click", doSearch);
 
-      // NEW: IZZA WALLET button behaviour
+      // IZZA WALLET buttons
       const walletManageBtn = document.getElementById("walletManageBtn");
       const walletSyncBtn   = document.getElementById("walletSyncBtn");
 
       walletManageBtn?.addEventListener("click", () => {
-        // go to the full IZZA wallet page where all capabilities live
-        window.location.href = "/wallet";
+        if (window.__izzaOpenWalletOverlay){
+          window.__izzaOpenWalletOverlay();
+        }
       });
 
       walletSyncBtn?.addEventListener("click", async () => {
@@ -1406,7 +1591,6 @@
       }
 
       // keep the same size / position, just re-aim the camera at the soldier
-      // robust framing: keep soldier same size in frame, just point camera correctly
       function frameCameraFromMeshes(meshes){
         try{
           if (!meshes || !meshes.length || !camera) return;
@@ -1451,11 +1635,9 @@
           const maxDim = Math.max(size.x, size.y, size.z) || 1.0;
           const center = min.add(size.scale(0.5));
 
-          // radius based on model size (so he isn't huge)
           const baseRadius = maxDim * 0.9;
-          const radius     = baseRadius * 3.0;   // tweak this if he feels a bit big/small
+          const radius     = baseRadius * 3.0;
 
-          // push target up a bit so feet are in frame
           const offsetY    = maxDim * 0.50;
           const finalTarget = new BABYLON.Vector3(
             center.x,
@@ -1466,7 +1648,6 @@
           camera.target = finalTarget;
           camera.radius = radius;
 
-          // keep same nice front angle as createScene
           camera.alpha  = Math.PI * 1.3;
           camera.beta   = Math.PI / 2.4;
 
@@ -1494,18 +1675,14 @@
 
         const lastSlash = url.lastIndexOf("/");
         const rootUrl = url.substring(0,lastSlash+1);
-        const fileName = url.substring(lastSlash+1);
-
-        console.log("[WARZONE] Importing soldier GLB:", rootUrl, fileName);
+        theFileName = url.substring(lastSlash+1);
 
         BABYLON.SceneLoader.ImportMesh(
           "",
           rootUrl,
-          fileName,
+          theFileName,
           scene,
           function(meshes, ps, skeletons, animGroups){
-            console.log("[WARZONE] soldier GLB imported. meshes:", meshes.length);
-
             currentRoot = new BABYLON.TransformNode("soldierRoot", scene);
             meshes.forEach(m => {
               m.parent = currentRoot;
@@ -1515,10 +1692,8 @@
             currentRoot.rotation = new BABYLON.Vector3(0,Math.PI,0);
             currentRoot.scaling  = new BABYLON.Vector3(0.6, 0.6, 0.6);
 
-            // robust framing that works even in Pi Browser
             frameCameraFromMeshes(meshes);
 
-            // Slow rotate for a bit of life
             scene.onBeforeRenderObservable.clear();
             scene.onBeforeRenderObservable.add(() => {
               if (currentRoot) {
@@ -1526,7 +1701,6 @@
               }
             });
 
-            // Play first animation if available
             if (animGroups && animGroups.length){
               animGroups.forEach(g => g.stop());
               animGroups[0].start(true);
