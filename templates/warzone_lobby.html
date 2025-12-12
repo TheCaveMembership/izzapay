@@ -1356,65 +1356,70 @@
       }
 
       // robust bounding helper that avoids Infinity / NaN issues in Pi Browser
-      function frameCameraFromMeshes(meshes){
-        try{
-          if (!meshes || !meshes.length || !camera) return;
+function frameCameraFromMeshes(meshes){
+  try{
+    if (!meshes || !meshes.length || !camera) return;
 
-          let min = new BABYLON.Vector3(
-            Number.POSITIVE_INFINITY,
-            Number.POSITIVE_INFINITY,
-            Number.POSITIVE_INFINITY
-          );
-          let max = new BABYLON.Vector3(
-            Number.NEGATIVE_INFINITY,
-            Number.NEGATIVE_INFINITY,
-            Number.NEGATIVE_INFINITY
-          );
+    let min = new BABYLON.Vector3(
+      Number.POSITIVE_INFINITY,
+      Number.POSITIVE_INFINITY,
+      Number.POSITIVE_INFINITY
+    );
+    let max = new BABYLON.Vector3(
+      Number.NEGATIVE_INFINITY,
+      Number.NEGATIVE_INFINITY,
+      Number.NEGATIVE_INFINITY
+    );
 
-          let any = false;
+    let any = false;
 
-          for (const m of meshes){
-            if (!m || !m.getBoundingInfo || m.getTotalVertices() === 0) continue;
-            // make sure world matrix / bounds are up to date
-            m.computeWorldMatrix(true);
-            const bi = m.getBoundingInfo();
-            const bmin = bi.boundingBox.minimumWorld;
-            const bmax = bi.boundingBox.maximumWorld;
+    for (const m of meshes){
+      if (!m || !m.getBoundingInfo || m.getTotalVertices() === 0) continue;
+      // make sure world matrix / bounds are up to date
+      m.computeWorldMatrix(true);
+      const bi = m.getBoundingInfo();
+      const bmin = bi.boundingBox.minimumWorld;
+      const bmax = bi.boundingBox.maximumWorld;
 
-            if (!isFinite(bmin.x) || !isFinite(bmin.y) || !isFinite(bmin.z)) continue;
-            if (!isFinite(bmax.x) || !isFinite(bmax.y) || !isFinite(bmax.z)) continue;
+      if (!isFinite(bmin.x) || !isFinite(bmin.y) || !isFinite(bmin.z)) continue;
+      if (!isFinite(bmax.x) || !isFinite(bmax.y) || !isFinite(bmax.z)) continue;
 
-            min = BABYLON.Vector3.Minimize(min, bmin);
-            max = BABYLON.Vector3.Maximize(max, bmax);
-            any = true;
-          }
+      min = BABYLON.Vector3.Minimize(min, bmin);
+      max = BABYLON.Vector3.Maximize(max, bmax);
+      any = true;
+    }
 
-          if (!any){
-            throw new Error("no finite bounds");
-          }
+    if (!any){
+      throw new Error("no finite bounds");
+    }
 
-          const size = max.subtract(min);
-          if (!isFinite(size.x) || !isFinite(size.y) || !isFinite(size.z)){
-            throw new Error("non-finite size");
-          }
+    const size = max.subtract(min);
+    if (!isFinite(size.x) || !isFinite(size.y) || !isFinite(size.z)){
+      throw new Error("non-finite size");
+    }
 
-          const maxDim = Math.max(size.x, size.y, size.z) || 1.0;
-          const center = min.add(size.scale(0.5));
-          const radius = maxDim * 0.9;
+    const maxDim = Math.max(size.x, size.y, size.z) || 1.0;
+    const center = min.add(size.scale(0.5));
 
-          camera.target = center;
-          camera.radius = radius;
-          camera.lowerRadiusLimit = radius * 0.9;
-          camera.upperRadiusLimit = radius * 1.2;
-        }catch(e){
-          console.warn("[WARZONE] fallback soldier framing", e);
-          // safe fallback that still shows the soldier
-          camera.target = new BABYLON.Vector3(0,1,0);
-          camera.radius = 3.0;
-          camera.lowerRadiusLimit = 2.5;
-          camera.upperRadiusLimit = 3.5;
-        }
-      }
+    // OLD:
+    // const radius = maxDim * 0.9;
+    // NEW: use a base radius from the model, then pull camera back more
+    const baseRadius = maxDim * 0.9;
+    const radius     = baseRadius * 1.6;   // increase this to make soldier smaller
+
+    camera.target = center;
+    camera.radius = radius;
+    camera.lowerRadiusLimit = radius * 0.8;
+    camera.upperRadiusLimit = radius * 1.3;
+  }catch(e){
+    console.warn("[WARZONE] fallback soldier framing", e);
+    // safe fallback that still shows the soldier
+    camera.target = new BABYLON.Vector3(0,1,0);
+    camera.radius = 3.0;
+    camera.lowerRadiusLimit = 2.5;
+    camera.upperRadiusLimit = 3.5;
+  }
+}
 
       function loadSoldier(){
         const url = SOLDIER_ASSET;
