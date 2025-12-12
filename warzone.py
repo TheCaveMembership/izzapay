@@ -27,6 +27,9 @@ warzone_bp = Blueprint("warzone_bp", __name__, url_prefix="/warzone")
 
 
 def _require_user_id():
+    """
+    Session-based user_id if present and valid, else None.
+    """
     uid = session.get("user_id")
     if not uid:
         return None
@@ -40,17 +43,71 @@ def _now_i() -> int:
     return int(time())
 
 
+def _strip_at(s: str | None) -> str:
+    return (s or "").strip().lstrip("@").strip()
+
+
+def _resolve_uid_from_username(u_raw: str | None) -> int | None:
+    """
+    Resolve a user_id from a username/pi_username/pi_uid string.
+    This lets purchase/equip work WITHOUT session auth, using ?u=...
+    """
+    u = _strip_at(u_raw)
+    if not u:
+        return None
+
+    # Also try lowercase match for safety
+    u_l = u.lower()
+
+    with conn() as cx:
+        row = cx.execute(
+            """
+            SELECT id
+            FROM users
+            WHERE lower(username) = ?
+               OR lower(pi_username) = ?
+               OR lower(pi_uid) = ?
+            LIMIT 1
+            """,
+            (u_l, u_l, u_l),
+        ).fetchone()
+
+    if not row:
+        return None
+    try:
+        return int(row["id"])
+    except Exception:
+        return None
+
+
+def _get_uid_for_inventory() -> int | None:
+    """
+    Preferred: session user_id.
+    Fallback: ?u= (or JSON body "u") to resolve user id for inventory writes.
+    """
+    uid = _require_user_id()
+    if uid:
+        return uid
+
+    u_qs = request.args.get("u")
+    if u_qs:
+        return _resolve_uid_from_username(u_qs)
+
+    data = request.get_json(silent=True) or {}
+    u_body = data.get("u")
+    if u_body:
+        return _resolve_uid_from_username(u_body)
+
+    return None
+
+
 # ---------- IZZA token + shop payment config ----------
 
 IZZA_CODE = os.getenv("IZZA_TOKEN_CODE", "IZZA").strip()
 IZZA_ISSUER = os.getenv("IZZA_TOKEN_ISSUER", "").strip()
 
-# Where the IZZA payment goes – for now we default to the same
-# distributor public key you use for creatures / NFTs.
-WZ_SHOP_DEST = (
-    os.getenv("WZ_SHOP_DEST")
-    or os.getenv("NFT_DISTR_PUBLIC", "").strip()
-)
+# Where the IZZA payment goes – default to same distributor public you use elsewhere
+WZ_SHOP_DEST = (os.getenv("WZ_SHOP_DEST") or os.getenv("NFT_DISTR_PUBLIC", "").strip())
 
 
 def _parse_izza_amount(raw) -> Decimal | None:
@@ -64,29 +121,17 @@ def _parse_izza_amount(raw) -> Decimal | None:
         return None
     if d <= 0:
         return None
-    # Stellar supports up to 7 decimal places
     return d.quantize(Decimal("0.0000001"))
 
 
 def _izza_payment_config_ok() -> bool:
-    return bool(
-        IZZA_CODE
-        and IZZA_ISSUER
-        and WZ_SHOP_DEST
-        and len(IZZA_ISSUER) > 0
-    )
+    return bool(IZZA_CODE and IZZA_ISSUER and WZ_SHOP_DEST and len(IZZA_ISSUER) > 0)
 
 
 # ---------- WAR ZONE SHOP: schema + seed ----------
 
 
 def _ensure_shop_schema(cx):
-    """
-    Create minimal tables for the War Zone shop if they do not exist.
-
-    We keep these tables local to the game and do not reuse any existing
-    IZZA shop tables in db.py.
-    """
     cx.executescript(
         """
         CREATE TABLE IF NOT EXISTS warzone_shop_items(
@@ -96,7 +141,7 @@ def _ensure_shop_schema(cx):
           name TEXT,
           description TEXT,
           price_izza REAL NOT NULL DEFAULT 0,
-          starting INTEGER NOT NULL DEFAULT 0,   -- starter / default items
+          starting INTEGER NOT NULL DEFAULT 0,
           sort_order INTEGER NOT NULL DEFAULT 0,
           active INTEGER NOT NULL DEFAULT 1
         );
@@ -111,23 +156,26 @@ def _ensure_shop_schema(cx):
           UNIQUE(user_id, slot, sku),
           FOREIGN KEY(user_id) REFERENCES users(id)
         );
+
+        -- Invites table (safe-create if you haven't added it elsewhere yet)
+        CREATE TABLE IF NOT EXISTS warzone_invites(
+          id INTEGER PRIMARY KEY,
+          from_user_id INTEGER NOT NULL,
+          to_user_id INTEGER NOT NULL,
+          status TEXT NOT NULL DEFAULT 'pending',
+          created_at INTEGER NOT NULL,
+          UNIQUE(from_user_id, to_user_id, status)
+        );
         """
     )
 
 
 def _seed_shop_if_empty(cx):
-    """
-    Seed 5 weapons + 5 skins for now.
-
-    Unlimited supply, all priced in IZZA. Last 2 of each list cost 15 IZZA.
-    A single starter item per slot is free and marked as 'starting'.
-    """
     cur = cx.execute("SELECT COUNT(*) AS c FROM warzone_shop_items")
     row = cur.fetchone()
     if row and row["c"]:
         return
 
-    # Weapons
     weapons = [
         {
             "slot": "weapons",
@@ -176,7 +224,6 @@ def _seed_shop_if_empty(cx):
         },
     ]
 
-    # Skins
     skins = [
         {
             "slot": "skins",
@@ -251,28 +298,17 @@ def _seed_shop_if_empty(cx):
 
 @warzone_bp.get("/auth")
 def warzone_auth():
-    """
-    Pi auth gate for IZZA WAR ZONE.
-    Uses the same /auth/exchange handler as the rest of IZZA,
-    but themed for the War Zone FPS.
-    """
     sandbox = current_app.config.get("PI_SANDBOX", False)
     return render_template("warzone_auth.html", sandbox=sandbox)
 
 
 @warzone_bp.get("/")
 def warzone_lobby():
-    """
-    Main IZZA WAR ZONE lobby page.
-
-    If user is not logged in, redirect them to the War Zone auth page.
-    """
     if "user_id" not in session:
         qs = request.query_string.decode("utf-8")
         base = "/warzone/auth"
         return redirect(f"{base}?{qs}" if qs else base)
 
-    # Make sure we can treat user_id as int
     try:
         uid = int(session.get("user_id"))
     except (TypeError, ValueError):
@@ -280,7 +316,6 @@ def warzone_lobby():
 
     db_name = None
     if uid is not None:
-        # Pull the best display name we have from the users table
         with conn() as cx:
             row = cx.execute(
                 """
@@ -293,7 +328,6 @@ def warzone_lobby():
             if row and row["name"]:
                 db_name = row["name"]
 
-    # Fallback to session keys only if DB had nothing
     display_name = (
         db_name
         or session.get("username")
@@ -308,7 +342,6 @@ def warzone_lobby():
         "starter": session.get("warzone_starter") or "soldier_m",
     }
 
-    # For now we just use a static map key; lobby template has a default too
     map_image_url = "/assets/warzone-map-izzacity.jpg"
 
     return render_template(
@@ -326,9 +359,6 @@ def warzone_lobby():
 
 @warzone_bp.get("/api/search")
 def warzone_search_players():
-    """
-    Search IZZA users by username / pi_username for War Zone friend invites.
-    """
     uid = _require_user_id()
     if not uid:
         return jsonify({"error": "auth_required"}), 401
@@ -344,7 +374,7 @@ def warzone_search_players():
             SELECT id,
                    COALESCE(username, pi_username) AS username
             FROM users
-            WHERE (username    LIKE ? OR pi_username LIKE ?)
+            WHERE (username LIKE ? OR pi_username LIKE ?)
               AND id != ?
             ORDER BY username COLLATE NOCASE
             LIMIT 20
@@ -352,18 +382,12 @@ def warzone_search_players():
             (like, like, uid),
         ).fetchall()
 
-    results = [
-        {"id": r["id"], "username": r["username"] or f"User #{r['id']}"}
-        for r in rows
-    ]
+    results = [{"id": r["id"], "username": r["username"] or f"User #{r['id']}"} for r in rows]
     return jsonify({"results": results})
 
 
 @warzone_bp.post("/api/invite")
 def warzone_invite_player():
-    """
-    Create a War Zone lobby invite into warzone_invites.
-    """
     uid = _require_user_id()
     if not uid:
         return jsonify({"error": "auth_required"}), 401
@@ -379,6 +403,7 @@ def warzone_invite_player():
 
     now_ts = _now_i()
     with conn() as cx:
+        _ensure_shop_schema(cx)
         cx.execute(
             """
             INSERT OR IGNORE INTO warzone_invites
@@ -398,32 +423,7 @@ def warzone_invite_player():
 
 @warzone_bp.get("/api/shop")
 def warzone_shop():
-    """
-    Return the Armory list for a given slot: 'weapons' or 'skins'.
-
-    Response shape expected by the lobby JS:
-
-    {
-      "items": [
-        {
-          "sku": "wz_basic_pistol",
-          "name": "Basic Pistol",
-          "description": "...",
-          "price_izza": 0,
-          "starting": true,
-          "owned": true,
-          "equipped": true
-        },
-        ...
-      ]
-    }
-
-    NOTE: we no longer require auth here. If there is no logged-in user
-    we still return the full item list, just with no owned/equipped
-    state beyond the free starter items.
-    """
     uid = _require_user_id()
-    # For inventory join, use a sentinel that will never match if uid is None
     inv_uid = uid if uid is not None else -1
 
     slot = (request.args.get("slot") or "weapons").strip().lower()
@@ -460,10 +460,7 @@ def warzone_shop():
     for r in rows:
         starting = bool(r["starting"])
         owned = bool(r["owned"]) or starting
-        # first starter item becomes equipped by default if nothing else is
-        equipped = bool(r["equipped"]) or (
-            starting and not any(i.get("equipped") for i in items)
-        )
+        equipped = bool(r["equipped"]) or (starting and not any(i.get("equipped") for i in items))
         items.append(
             {
                 "slot": r["slot"],
@@ -483,27 +480,22 @@ def warzone_shop():
 @warzone_bp.post("/api/purchase")
 def warzone_purchase():
     """
-    Unlock a shop item for the current user.
-
-    This now performs a real on-chain IZZA payment:
-
-    - Validates the item + server-side price
-    - Ensures the buyer has an IZZA trustline
-    - Sends `price_izza` IZZA from buyer to WZ_SHOP_DEST
-    - On success, records the item in warzone_inventory
+    NO SESSION AUTH REQUIRED.
+    Inventory ownership is recorded using ?u=<pi username> (or JSON 'u').
+    On-chain payment still requires buyer_sec and uses the same helpers
+    you already use successfully (_change_trust + _pay_asset).
     """
-    uid = _require_user_id()
-    if not uid:
-        return jsonify({"error": "auth_required"}), 401
-
     if not _izza_payment_config_ok():
         return jsonify({"error": "shop_config_invalid"}), 500
+
+    uid = _get_uid_for_inventory()
+    if not uid:
+        return jsonify({"error": "user_resolve_failed"}), 400
 
     data = request.get_json(silent=True) or {}
     slot = (data.get("slot") or "").strip().lower()
     sku = (data.get("sku") or "").strip()
 
-    # client price is only used as a hint; server controls the real price
     try:
         price_izza_client = float(data.get("price_izza") or 0)
     except (TypeError, ValueError):
@@ -515,12 +507,10 @@ def warzone_purchase():
     if slot not in ("weapons", "skins") or not sku:
         return jsonify({"error": "bad_request"}), 400
 
-    # Basic sanity on buyer keys
     if not (buyer_sec and buyer_sec.startswith("S") and len(buyer_sec) == 56):
         return jsonify({"error": "buyer_sec_missing"}), 400
+
     if buyer_pub and not (buyer_pub.startswith("G") and len(buyer_pub) == 56):
-        # we allow empty pub (we can derive from sec in helpers), but if provided
-        # it should at least look like a Stellar pubkey
         buyer_pub = ""
 
     with conn() as cx:
@@ -542,20 +532,15 @@ def warzone_purchase():
         if item["starting"]:
             return jsonify({"error": "starter_is_free"}), 400
 
-        # Parse and enforce server-side price as Decimal
         db_price = _parse_izza_amount(item["price_izza"])
         if db_price is None:
             return jsonify({"error": "invalid_price_config"}), 500
 
-        # Optional mismatched client price check (avoid spoofed cheaper prices)
         if price_izza_client:
             client_dec = _parse_izza_amount(price_izza_client)
             if not client_dec or client_dec != db_price:
-                return jsonify(
-                    {"error": "price_mismatch", "price_izza": float(db_price)}
-                ), 400
+                return jsonify({"error": "price_mismatch", "price_izza": float(db_price)}), 400
 
-        # Already owned?
         owned_row = cx.execute(
             """
             SELECT id, equipped
@@ -567,29 +552,17 @@ def warzone_purchase():
         if owned_row:
             return jsonify({"ok": True, "already_owned": True})
 
-    # At this point we know:
-    # - item exists
-    # - has a valid price
-    # - user does not own it yet
     amount_str = str(db_price)
-
-    # Build IZZA asset
     izza_asset = Asset(IZZA_CODE, IZZA_ISSUER)
 
-    # 1) Ensure trustline to IZZA for this buyer
+    # 1) Trustline
     try:
-        # Assuming _change_trust(secret, code, issuer, limit_str=None)
         _change_trust(buyer_sec, IZZA_CODE, IZZA_ISSUER, None)
     except Exception as e:
-        return jsonify(
-            {"error": "trustline_failed", "detail": str(e)}
-        ), 502
+        return jsonify({"error": "trustline_failed", "detail": str(e)}), 502
 
-    # 2) Send IZZA from buyer to the shop destination (WZ_SHOP_DEST)
+    # 2) Payment
     try:
-        # Assuming _pay_asset(
-        #   src_secret, dst_pub, asset, amount_str, memo_txt=None
-        # )
         tx_hash = _pay_asset(
             buyer_sec,
             WZ_SHOP_DEST,
@@ -598,11 +571,9 @@ def warzone_purchase():
             f"WZ-{slot}-{sku}",
         )
     except Exception as e:
-        return jsonify(
-            {"error": "payment_failed", "detail": str(e)}
-        ), 502
+        return jsonify({"error": "payment_failed", "detail": str(e)}), 502
 
-    # 3) On success, record ownership in SQLite
+    # 3) Record ownership
     now_ts = _now_i()
     with conn() as cx:
         _ensure_shop_schema(cx)
@@ -621,11 +592,12 @@ def warzone_purchase():
 @warzone_bp.post("/api/equip")
 def warzone_equip():
     """
-    Mark a given item as equipped for the current user and slot.
+    NO SESSION AUTH REQUIRED.
+    Equips an item for user resolved via ?u= (or JSON 'u').
     """
-    uid = _require_user_id()
+    uid = _get_uid_for_inventory()
     if not uid:
-        return jsonify({"error": "auth_required"}), 401
+        return jsonify({"error": "user_resolve_failed"}), 400
 
     data = request.get_json(silent=True) or {}
     slot = (data.get("slot") or "").strip().lower()
@@ -650,7 +622,6 @@ def warzone_equip():
         if not item:
             return jsonify({"error": "unknown_item"}), 400
 
-        # Non-starter items must be owned before equip
         if not item["starting"]:
             owned = cx.execute(
                 """
@@ -663,7 +634,6 @@ def warzone_equip():
             if not owned:
                 return jsonify({"error": "not_owned"}), 400
 
-        # Clear equipped for this slot
         cx.execute(
             """
             UPDATE warzone_inventory
@@ -673,7 +643,6 @@ def warzone_equip():
             (uid, slot),
         )
 
-        # Ensure row exists and set equipped = 1
         cx.execute(
             """
             INSERT OR IGNORE INTO warzone_inventory
@@ -701,8 +670,4 @@ def warzone_equip():
 
 @warzone_bp.get("/test-soldier")
 def warzone_test_soldier():
-    """
-    Barebones page that only renders the pistol_soldier_m_idle.glb
-    so we can verify the asset + path independently of the lobby UI.
-    """
     return render_template("warzone_soldier_test.html")
