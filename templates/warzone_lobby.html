@@ -150,7 +150,7 @@
       border-radius:14px;
       background:linear-gradient(145deg,#050815,#02030c);
       border:1px solid rgba(66,91,168,.8);
-      padding:10px 10px 6px; /* UPDATED: reduce bottom padding so the map box can reach lower */
+      padding:10px 10px 6px;
       display:flex;
       flex-direction:column;
       gap:8px;
@@ -802,7 +802,7 @@
       searchGo?.addEventListener("click", doSearch);
     })();
 
-    // ---------- USER QS HELPERS (NEW, matches shop) ----------
+    // ---------- USER QS HELPERS (matches shop) ----------
     const SRV_USER = {{ (player.username or '') | tojson }};
     function stripAt(s){ return (s||"").toString().trim().replace(/^@+/, ""); }
     function canonU(s){
@@ -840,100 +840,135 @@
       }catch(e){}
     }
     // --------------------------------------------------------
-// ---------- Babylon.js lobby soldier ----------
-(function(){
-  const canvas = document.getElementById("soldierCanvas");
-  if (!canvas || !window.BABYLON) {
-    console.warn("[WARZONE] soldier canvas or BABYLON missing");
-    return;
-  }
 
-  const engine = new BABYLON.Engine(canvas, true, {
-    preserveDrawingBuffer:true,
-    stencil:true
-  });
-
-  let scene, camera;
-  let currentWrapper = null;
-  let currentContainer = null;
-
-  /* SHADOW ANCHOR (NEW) */
-  let shadowPlane = null;
-  let shadowMat = null;
-  const SHADOW_WORLD_Y = 0.005;
-
-  function ensureShadowMaterial(){
-    if(shadowMat) return shadowMat;
-
-    const dt = new BABYLON.DynamicTexture("shadowDT", { width:512, height:512 }, scene, true);
-    dt.hasAlpha = true;
-
-    const ctx = dt.getContext();
-    ctx.clearRect(0,0,512,512);
-
-    const g = ctx.createRadialGradient(256,256,6,256,256,220);
-    g.addColorStop(0.00, "rgba(0,0,0,1.00)");
-    g.addColorStop(0.20, "rgba(0,0,0,0.98)");
-    g.addColorStop(0.40, "rgba(0,0,0,0.82)");
-    g.addColorStop(0.62, "rgba(0,0,0,0.45)");
-    g.addColorStop(0.80, "rgba(0,0,0,0.14)");
-    g.addColorStop(1.00, "rgba(0,0,0,0.00)");
-
-    ctx.fillStyle = g;
-    ctx.beginPath();
-    ctx.ellipse(256, 305, 200, 120, 0, 0, Math.PI * 2);
-    ctx.fill();
-
-    dt.update(false);
-
-    shadowMat = new BABYLON.StandardMaterial("shadowMat", scene);
-    shadowMat.diffuseColor = new BABYLON.Color3(0,0,0);
-    shadowMat.emissiveColor = new BABYLON.Color3(0,0,0);
-    shadowMat.specularColor = new BABYLON.Color3(0,0,0);
-    shadowMat.opacityTexture = dt;
-    shadowMat.alpha = 1.0;
-    shadowMat.disableLighting = true;
-
-    return shadowMat;
-  }
-
-  function attachShadowToWrapper(wrapper){
-    try{
-      if(shadowPlane){
-        shadowPlane.dispose(false, true);
-        shadowPlane = null;
+    // ---------- Babylon.js lobby soldier ----------
+    (function(){
+      const canvas = document.getElementById("soldierCanvas");
+      if (!canvas || !window.BABYLON) {
+        console.warn("[WARZONE] soldier canvas or BABYLON missing");
+        return;
       }
-    }catch(e){}
 
-    const mat = ensureShadowMaterial();
+      const engine = new BABYLON.Engine(canvas, true, {
+        preserveDrawingBuffer:true,
+        stencil:true
+      });
 
-    shadowPlane = BABYLON.MeshBuilder.CreateGround(
-      "shadowPlane",
-      { width: 9.30, height: 9.30 },
-      scene
-    );
-    shadowPlane.material = mat;
-    shadowPlane.isPickable = false;
-    shadowPlane.renderingGroupId = 0;
+      let scene, camera;
+      let currentWrapper = null;
+      let currentContainer = null;
 
-    shadowPlane.parent = wrapper;
+      // NEW: weapon state
+      let currentWeaponContainer = null;
+      let currentWeaponRoot = null;
+      let currentWeaponGrip = null;
 
-    const localY = SHADOW_WORLD_Y - (wrapper.position.y || 0);
-    shadowPlane.position.y = localY;
+      /* SHADOW ANCHOR */
+      let shadowPlane = null;
+      let shadowMat = null;
+      const SHADOW_WORLD_Y = 0.005;
 
-    // ROTATE shadow 90 degrees in the ground plane (your “shifted 90 degrees”)
-    shadowPlane.rotation.y = Math.PI / 2;
+      // UPDATED: match test soldier auto rotation style
+      const AUTO_OSC_SPEED = 0.35;
+      const AUTO_MAX_YAW   = Math.PI * 0.45;
 
-    // re-center under both feet (tune if needed: -0.95, -1.05, etc)
-    shadowPlane.position.x = -0.85;
+      // ✅ LOCKED IN pistol attachment (same as your test soldier)
+      const WEAPON_SCALE = 0.07;
+      const WEAPON_YAW_FIX = Math.PI * 0.5;
 
-    // keep centered front/back unless you need a tiny nudge
-    shadowPlane.position.z = 0.00;
-  }
-  /* END SHADOW ANCHOR (NEW) */
+      const WEAPON_POS      = new BABYLON.Vector3(-1.069,  0.327, -0.058);
+      const WEAPON_GRIP_POS = new BABYLON.Vector3( 3.634, -0.030, -11.272);
+      const WEAPON_GRIP_ROT = new BABYLON.Vector3(-0.260, -0.040,  0.010);
+
+      // Arm correction, same pattern you used in test soldier
+      const qArm     = BABYLON.Quaternion.FromEulerAngles(-0.10,  0.00,  0.00);
+      const qForeArm = BABYLON.Quaternion.FromEulerAngles(-0.25,  0.00,  0.00);
+      const qShould  = BABYLON.Quaternion.FromEulerAngles( 0.00,  0.00, -0.05);
+      const WRIST_TWIST_ON = false;
+      const qWrist = BABYLON.Quaternion.FromEulerAngles(0.00, 0.00, -0.25);
+
+      function ensureShadowMaterial(){
+        if(shadowMat) return shadowMat;
+
+        const dt = new BABYLON.DynamicTexture("shadowDT", { width:512, height:512 }, scene, true);
+        dt.hasAlpha = true;
+
+        const ctx = dt.getContext();
+        ctx.clearRect(0,0,512,512);
+
+        const g = ctx.createRadialGradient(256,256,6,256,256,220);
+        g.addColorStop(0.00, "rgba(0,0,0,1.00)");
+        g.addColorStop(0.20, "rgba(0,0,0,0.98)");
+        g.addColorStop(0.40, "rgba(0,0,0,0.82)");
+        g.addColorStop(0.62, "rgba(0,0,0,0.45)");
+        g.addColorStop(0.80, "rgba(0,0,0,0.14)");
+        g.addColorStop(1.00, "rgba(0,0,0,0.00)");
+
+        ctx.fillStyle = g;
+        ctx.beginPath();
+        ctx.ellipse(256, 305, 200, 120, 0, 0, Math.PI * 2);
+        ctx.fill();
+
+        dt.update(false);
+
+        shadowMat = new BABYLON.StandardMaterial("shadowMat", scene);
+        shadowMat.diffuseColor = new BABYLON.Color3(0,0,0);
+        shadowMat.emissiveColor = new BABYLON.Color3(0,0,0);
+        shadowMat.specularColor = new BABYLON.Color3(0,0,0);
+        shadowMat.opacityTexture = dt;
+        shadowMat.alpha = 1.0;
+        shadowMat.disableLighting = true;
+
+        return shadowMat;
+      }
+
+      function attachShadowToWrapper(wrapper){
+        try{
+          if(shadowPlane){
+            shadowPlane.dispose(false, true);
+            shadowPlane = null;
+          }
+        }catch(e){}
+
+        const mat = ensureShadowMaterial();
+
+        shadowPlane = BABYLON.MeshBuilder.CreateGround(
+          "shadowPlane",
+          { width: 9.30, height: 9.30 },
+          scene
+        );
+        shadowPlane.material = mat;
+        shadowPlane.isPickable = false;
+        shadowPlane.renderingGroupId = 0;
+
+        shadowPlane.parent = wrapper;
+
+        const localY = SHADOW_WORLD_Y - (wrapper.position.y || 0);
+        shadowPlane.position.y = localY;
+
+        shadowPlane.rotation.y = Math.PI / 2;
+        shadowPlane.position.x = -0.85;
+        shadowPlane.position.z = 0.00;
+      }
+      /* END SHADOW ANCHOR */
 
       function getSkinAsset(){
         return { rootUrl:"/assets/warzone3d/soldier_gltf_3/", fileName:"scene.gltf" };
+      }
+
+      // NEW: weapon assets mapping
+      function getWeaponAsset(weaponSku){
+        const sku = (weaponSku || "").toString().trim();
+
+        // For now only pistol is hooked up, add more SKUs here later
+        if(sku === "wz_basic_pistol"){
+          return { rootUrl:"/assets/warzone3d/weapons/wz_basic_pistol/", fileName:"scene.gltf" };
+        }
+
+        // Future examples (leave commented until assets exist)
+        // if(sku === "wz_cityrunner_smg") return { rootUrl:"/assets/warzone3d/weapons/wz_cityrunner_smg/", fileName:"scene.gltf" };
+
+        return null;
       }
 
       function getBounds(node){
@@ -957,9 +992,8 @@
           const maxDim = Math.max(size.x, size.y, size.z) || 1.0;
           const center = bb.min.add(size.scale(0.5));
 
-          const radius = Math.max(2.6, maxDim * 2.4) * 1.05; /* UPDATED: zoom out the smallest bit */
+          const radius = Math.max(2.6, maxDim * 2.4) * 1.05;
 
-          /* UPDATED: aim a touch lower and more level so feet stay flat through rotation */
           camera.target = new BABYLON.Vector3(center.x, center.y + (maxDim * 0.50), center.z);
           camera.radius = radius;
           camera.alpha  = Math.PI * 1.3;
@@ -1055,9 +1089,102 @@
         return wrapper;
       }
 
+      // NEW: skeleton helpers for weapon attach
+      function findSkinnedMeshFromContainer(container){
+        try{
+          const meshes = (container && container.meshes) ? container.meshes : [];
+          return meshes.find(m => m && m.skeleton) || null;
+        }catch(e){
+          return null;
+        }
+      }
+
+      function findBoneByNameOrIncludes(skeleton, want){
+        if (!skeleton || !skeleton.bones) return null;
+
+        const exact = skeleton.bones.find(b => (b.name || "") === want);
+        if (exact) return exact;
+
+        const wantLow = (want || "").toLowerCase();
+        return skeleton.bones.find(b => ((b.name || "").toLowerCase().includes(wantLow))) || null;
+      }
+
+      // NEW: clear current weapon safely
+      function clearWeapon(){
+        try{
+          if(currentWeaponRoot){
+            currentWeaponRoot.dispose(true, false);
+            currentWeaponRoot = null;
+          }
+        }catch(e){}
+        try{
+          if(currentWeaponGrip){
+            currentWeaponGrip.dispose(true, false);
+            currentWeaponGrip = null;
+          }
+        }catch(e){}
+        try{
+          if(currentWeaponContainer){
+            currentWeaponContainer.removeAllFromScene();
+            currentWeaponContainer.dispose();
+            currentWeaponContainer = null;
+          }
+        }catch(e){}
+      }
+
+      // NEW: attach equipped weapon to current soldier wrapper
+      async function setLobbyWeapon(weaponSku){
+        clearWeapon();
+
+        if(!scene || !currentWrapper || !currentContainer) return;
+
+        const asset = getWeaponAsset(weaponSku);
+        if(!asset) return;
+
+        const skinned = findSkinnedMeshFromContainer(currentContainer);
+        const skeleton = skinned?.skeleton || null;
+        if(!skinned || !skeleton) return;
+
+        const boneNameExact = "mixamorig:RightHand.209_221";
+        let rightHand = findBoneByNameOrIncludes(skeleton, boneNameExact);
+        if(!rightHand){
+          rightHand = skeleton.bones.find(b => /RightHand/i.test(b.name || "")) || null;
+        }
+        if(!rightHand) return;
+
+        // Load weapon model
+        const w = await BABYLON.SceneLoader.LoadAssetContainerAsync(asset.rootUrl, asset.fileName, scene);
+        w.addAllToScene();
+        currentWeaponContainer = w;
+
+        // weaponRoot attaches to bone, matches test soldier
+        const weaponRoot = new BABYLON.TransformNode("weaponRoot", scene);
+        weaponRoot.attachToBone(rightHand, skinned);
+        weaponRoot.position.copyFrom(WEAPON_POS);
+        weaponRoot.rotation.set(0, Math.PI + WEAPON_YAW_FIX, 0);
+        weaponRoot.scaling.set(WEAPON_SCALE, WEAPON_SCALE, WEAPON_SCALE);
+        currentWeaponRoot = weaponRoot;
+
+        // weaponGrip
+        const weaponGrip = new BABYLON.TransformNode("weaponGrip", scene);
+        weaponGrip.parent = weaponRoot;
+        weaponGrip.position.copyFrom(WEAPON_GRIP_POS);
+        weaponGrip.rotation.copyFrom(WEAPON_GRIP_ROT);
+        currentWeaponGrip = weaponGrip;
+
+        // Parent weapon meshes under grip (skip gltf root)
+        const wMeshes = (w.meshes || []);
+        wMeshes.forEach(m => {
+          if(!m) return;
+          if(m === wMeshes[0]) return;
+          try{ m.parent = weaponGrip; }catch(e){}
+        });
+      }
+
       async function setLobbySkin(skinSku){
         if(!scene) return;
 
+        // Keep old behavior
         try{
           if(currentContainer){
             currentContainer.removeAllFromScene();
@@ -1078,6 +1205,9 @@
           }
         }catch(e){}
 
+        // NEW: also clear weapon when skin reloads
+        clearWeapon();
+
         try{
           const asset = getSkinAsset();
           const container = await BABYLON.SceneLoader.LoadAssetContainerAsync(asset.rootUrl, asset.fileName, scene);
@@ -1093,16 +1223,20 @@
           normalizeToGroundAndHeight(wrapper, 1.75);
           wrapper.scaling.scaleInPlace(0.72);
 
-          wrapper.position.y += 0.06; /* UPDATED: lift a hair so feet never clip */
+          wrapper.position.y += 0.06;
 
           frameCameraToRoot(wrapper);
 
-          attachShadowToWrapper(wrapper); /* SHADOW ANCHOR (NEW) */
+          attachShadowToWrapper(wrapper);
 
           if(container.animationGroups && container.animationGroups.length){
             container.animationGroups.forEach(g => g.stop());
             container.animationGroups[0].start(true);
           }
+
+          // NEW: after skin is loaded, apply equipped weapon
+          const weaponSku = await fetchEquippedWeaponSku();
+          await setLobbyWeapon(weaponSku);
 
         }catch(e){
           console.error("[WARZONE] setLobbySkin failed", skinSku, e);
@@ -1121,6 +1255,19 @@
         return "wz_basic_soldier";
       }
 
+      // NEW: read equipped weapon SKU from same API (no backend changes needed)
+      async function fetchEquippedWeaponSku(){
+        try{
+          const res = await fetch("/warzone/api/shop?slot=weapons" + uQS(), { credentials:"include" });
+          if(!res.ok) return "wz_basic_pistol";
+          const data = await res.json().catch(()=>null);
+          const items = (data && data.items) || [];
+          const eq = items.find(x => x && x.equipped);
+          if(eq && eq.sku) return String(eq.sku);
+        }catch(e){}
+        return "wz_basic_pistol";
+      }
+
       function createScene(){
         scene = new BABYLON.Scene(engine);
         scene.clearColor = new BABYLON.Color4(0,0,0,0);
@@ -1128,8 +1275,8 @@
         camera = new BABYLON.ArcRotateCamera(
           "cam",
           Math.PI * 1.3,
-          Math.PI / 2.08,  /* UPDATED: slightly more level than before */
-          3.15,            /* UPDATED: tiny zoom out baseline, framing still handled by frameCameraToRoot */
+          Math.PI / 2.08,
+          3.15,
           new BABYLON.Vector3(0,1,0),
           scene
         );
@@ -1153,9 +1300,48 @@
         canvas.addEventListener("pointercancel", () => { userInteracting = false; }, { passive:true });
         canvas.addEventListener("pointerleave", () => { userInteracting = false; }, { passive:true });
 
+        // UPDATED: oscillation rotation, same as test soldier
+        let t = 0;
+        const baseY = Math.PI;
+
         scene.onBeforeRenderObservable.add(() => {
-          if(currentWrapper && !userInteracting){
-            currentWrapper.rotation.y += scene.getEngine().getDeltaTime() * 0.0003;
+          if(!currentWrapper) return;
+
+          // Apply arm correction so weapon stays clean in palm like test soldier
+          try{
+            const skinned = currentContainer ? findSkinnedMeshFromContainer(currentContainer) : null;
+            const skeleton = skinned?.skeleton || null;
+            if(skinned && skeleton){
+              const rightShoulder = findBoneByNameOrIncludes(skeleton, "mixamorig:RightShoulder.206_218") || findBoneByNameOrIncludes(skeleton, "RightShoulder");
+              const rightArm      = findBoneByNameOrIncludes(skeleton, "mixamorig:RightArm.207_219") || findBoneByNameOrIncludes(skeleton, "RightArm");
+              const rightForeArm  = findBoneByNameOrIncludes(skeleton, "mixamorig:RightForeArm.208_220") || findBoneByNameOrIncludes(skeleton, "RightForeArm");
+              const rightHand     = skeleton.bones.find(b => /RightHand/i.test(b.name || "")) || null;
+
+              if (rightShoulder && rightShoulder.getRotationQuaternion){
+                const cur = rightShoulder.getRotationQuaternion(BABYLON.Space.LOCAL, skinned) || BABYLON.Quaternion.Identity();
+                rightShoulder.setRotationQuaternion(cur.multiply(qShould), BABYLON.Space.LOCAL, skinned);
+              }
+              if (rightArm && rightArm.getRotationQuaternion){
+                const cur = rightArm.getRotationQuaternion(BABYLON.Space.LOCAL, skinned) || BABYLON.Quaternion.Identity();
+                rightArm.setRotationQuaternion(cur.multiply(qArm), BABYLON.Space.LOCAL, skinned);
+              }
+              if (rightForeArm && rightForeArm.getRotationQuaternion){
+                const cur = rightForeArm.getRotationQuaternion(BABYLON.Space.LOCAL, skinned) || BABYLON.Quaternion.Identity();
+                rightForeArm.setRotationQuaternion(cur.multiply(qForeArm), BABYLON.Space.LOCAL, skinned);
+              }
+              if (WRIST_TWIST_ON && rightHand && rightHand.getRotationQuaternion){
+                const cur = rightHand.getRotationQuaternion(BABYLON.Space.LOCAL, skinned) || BABYLON.Quaternion.Identity();
+                rightHand.setRotationQuaternion(cur.multiply(qWrist), BABYLON.Space.LOCAL, skinned);
+              }
+            }
+          }catch(e){}
+
+          // Oscillation only when not interacting
+          if(!userInteracting){
+            const dt = scene.getEngine().getDeltaTime() * 0.001;
+            t += dt * AUTO_OSC_SPEED;
+            const yaw = Math.sin(t) * AUTO_MAX_YAW;
+            currentWrapper.rotation.y = baseY + yaw;
           }
         });
 
@@ -1165,6 +1351,7 @@
         })();
       }
 
+      // Expose for future uses (kept)
       window.__warzoneSetLobbySkin = setLobbySkin;
 
       createScene();
