@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="utf-8">
-  <title>War Zone soldier test</title>
+  <title>War Zone soldier test, base vs neon edge override</title>
   <meta name="viewport" content="width=device-width,initial-scale=1">
   <style>
     html,body{
@@ -24,6 +24,7 @@
       white-space:pre;
       text-shadow:0 1px 0 rgba(0,0,0,.6);
       max-width:96vw;
+      pointer-events:none;
     }
     #renderCanvas{
       position:fixed;
@@ -135,7 +136,6 @@
         }
 
         const deps = [];
-
         if (Array.isArray(gltf.buffers)){
           gltf.buffers.forEach(b => b?.uri && deps.push({ kind:"buffer", uri:b.uri }));
         }
@@ -157,22 +157,34 @@
         return gltf;
       }
 
+      async function preflightThemeFiles(label, folderUrl, files){
+        log("Preflight " + label + " theme folder, " + folderUrl);
+        for (const f of files){
+          const url = folderUrl + f;
+          const st = await checkUrl(url);
+          if(!st.ok){
+            log("Preflight FAIL " + label + ", missing theme file, " + f + ", status " + st.status);
+            return false;
+          }
+          log("Preflight OK " + label + ", theme file, " + f + ", status " + st.status + ", type " + (st.ct || "unknown"));
+        }
+        log("Preflight OK " + label + ", theme files=" + files.length);
+        return true;
+      }
+
       function getBounds(node){
         const b = node.getHierarchyBoundingVectors(true);
         return { min: b.min.clone(), max: b.max.clone() };
       }
 
       function normalizeToGroundAndHeight(root, targetHeight = 1.75){
-        // 1) compute bounds in current space
         const bb1 = getBounds(root);
         const size1 = bb1.max.subtract(bb1.min);
         const h1 = Math.max(0.000001, size1.y);
 
-        // 2) uniform scale so model height ~ targetHeight
         const s = targetHeight / h1;
         root.scaling = new BABYLON.Vector3(s, s, s);
 
-        // 3) recompute bounds AFTER scaling and move so feet touch y=0
         const bb2 = getBounds(root);
         const minY = bb2.min.y;
         root.position.y -= minY;
@@ -206,17 +218,68 @@
         const maxDim = Math.max(size.x, size.y, size.z) || 1;
 
         camera.target = center;
-        camera.radius = maxDim * 1.9;   // zoomed out enough for full bodies
+        camera.radius = maxDim * 1.9;
         camera.lowerRadiusLimit = camera.radius * 0.5;
         camera.upperRadiusLimit = camera.radius * 4.0;
 
         log("Framed camera, size=" + maxDim.toFixed(3) + ", radius=" + camera.radius.toFixed(3));
       }
 
+      function fileFromAnyUrl(u){
+        try{
+          const s = (u || "").toString();
+          const q = s.split("?")[0];
+          const parts = q.split("/");
+          return parts[parts.length - 1] || "";
+        }catch(e){
+          return "";
+        }
+      }
+
+      function overrideTextureOnMaterial(mat, texProp, baseTexturesUrl, themeFolder, allowedFiles){
+        try{
+          const tex = mat && mat[texProp];
+          if(!tex) return false;
+
+          const urlOrName = (tex.url || tex.name || "");
+          const file = fileFromAnyUrl(urlOrName);
+          if(!file) return false;
+
+          if(!allowedFiles.includes(file)) return false;
+
+          const newUrl = `${baseTexturesUrl}${themeFolder}/${file}`;
+          const newTex = new BABYLON.Texture(newUrl, scene, true, false);
+          newTex.hasAlpha = tex.hasAlpha || false;
+          newTex.level = (typeof tex.level === "number") ? tex.level : 1.0;
+
+          mat[texProp] = newTex;
+          return true;
+        }catch(e){
+          return false;
+        }
+      }
+
+      function applyThemeOverridesToImportedMeshes(importResult, baseTexturesUrl, themeFolder, allowedFiles){
+        const meshes = (importResult && importResult.meshes) ? importResult.meshes : [];
+        let touched = 0;
+
+        meshes.forEach(m => {
+          if(!m || !m.material) return;
+          const mat = m.material;
+
+          // glTF typically uses PBRMaterial (albedoTexture), but we safely try both
+          const t1 = overrideTextureOnMaterial(mat, "albedoTexture",  baseTexturesUrl, themeFolder, allowedFiles);
+          const t2 = overrideTextureOnMaterial(mat, "diffuseTexture", baseTexturesUrl, themeFolder, allowedFiles);
+
+          if (t1 || t2) touched++;
+        });
+
+        log("Theme apply, folder=" + themeFolder + ", materials touched=" + touched);
+      }
+
       async function importSoldier(label, rootUrl, fileName){
         log("Loading " + label + " | " + rootUrl + fileName);
 
-        // ImportMeshAsync keeps the GLTF hierarchy intact
         const result = await BABYLON.SceneLoader.ImportMeshAsync(
           "",
           rootUrl,
@@ -224,20 +287,15 @@
           scene
         );
 
-        // Wrapper root we control
         const wrapper = new BABYLON.TransformNode(label + "Root", scene);
 
-        // IMPORTANT: parent the GLTF's own root under wrapper
-        // Usually result.meshes[0] is __root__ for glTF
         const gltfRoot = result.meshes && result.meshes.length ? result.meshes[0] : null;
         if (gltfRoot){
           gltfRoot.parent = wrapper;
         } else {
-          // fallback: parent everything (rare)
           result.meshes.forEach(m => { m.parent = wrapper; });
         }
 
-        // face the camera
         wrapper.rotation.y = Math.PI;
 
         const geoMeshes = result.meshes.filter(m => m && m.getTotalVertices && m.getTotalVertices() > 0);
@@ -254,47 +312,58 @@
         return { root: wrapper, result };
       }
 
-      // Paths
-      const BASIC_ROOT  = "/assets/warzone3d/soldier_gltf_3/";
-      const NEON_ROOT   = "/assets/warzone3d/skins/wz_neon_edge/";
-      const FILE_NAME   = "scene.gltf";
+      // ---------- Paths (NEW METHOD, SAME BASE SOLDIER) ----------
+      const SOLDIER_ROOT   = "/assets/warzone3d/soldier_gltf_3/";
+      const SOLDIER_GLTFF  = "scene.gltf";
+
+      // Theme folder lives under the SAME textures base
+      const TEXTURES_BASE  = "/assets/warzone3d/soldier_gltf_3/textures/";
+      const NEON_FOLDER    = "neon_edge/";
+
+      // ONLY the 4 files you showed, nothing else touched
+      const OVERRIDE_FILES = [
+        "material_8_diffuse.png",
+        "material_9_diffuse.png",
+        "material_10_diffuse.png",
+        "material_11_diffuse.png"
+      ];
+      // ----------------------------------------------------------
 
       (async () => {
         try{
           msgEl.textContent = "Booting Babylon…";
 
-          const basicOk = await preflightGltf("basic", BASIC_ROOT, FILE_NAME);
-          const neonOk  = await preflightGltf("neon",  NEON_ROOT,  FILE_NAME);
+          // Base gltf must exist
+          const ok = await preflightGltf("base-soldier", SOLDIER_ROOT, SOLDIER_GLTFF);
+          if(!ok){
+            log("Base soldier failed preflight, stop");
+            return;
+          }
+
+          // Neon theme files must exist
+          const neonOk = await preflightThemeFiles("neon_edge", TEXTURES_BASE + "neon_edge/", OVERRIDE_FILES);
+          if(!neonOk){
+            log("Neon theme files missing, stop");
+            return;
+          }
 
           const roots = [];
-          let basic = null;
-          let neon  = null;
 
-          if (basicOk){
-            basic = await importSoldier("basic", BASIC_ROOT, FILE_NAME);
-            normalizeToGroundAndHeight(basic.root, 1.75);
-            roots.push(basic.root);
-          } else {
-            log("BASIC blocked by preflight, not importing");
-          }
+          // Load BASE (left)
+          const base = await importSoldier("base", SOLDIER_ROOT, SOLDIER_GLTFF);
+          normalizeToGroundAndHeight(base.root, 1.75);
+          base.root.position.x = -1.2;
+          roots.push(base.root);
 
-          if (neonOk){
-            neon = await importSoldier("neon", NEON_ROOT, FILE_NAME);
-            normalizeToGroundAndHeight(neon.root, 1.75);
-            roots.push(neon.root);
-          } else {
-            log("NEON blocked by preflight, not importing");
-          }
+          // Load NEON (right), same model, but apply texture overrides
+          const neon = await importSoldier("neon_edge", SOLDIER_ROOT, SOLDIER_GLTFF);
 
-          // Put them side-by-side AFTER normalization so spacing is correct
-          if (basic && neon){
-            basic.root.position.x = -1.2;
-            neon.root.position.x  =  1.2;
-          } else if (basic){
-            basic.root.position.x = 0;
-          } else if (neon){
-            neon.root.position.x = 0;
-          }
+          // Apply overrides on the imported meshes BEFORE normalize, does not matter but keeps it consistent
+          applyThemeOverridesToImportedMeshes(neon.result, TEXTURES_BASE, "neon_edge", OVERRIDE_FILES);
+
+          normalizeToGroundAndHeight(neon.root, 1.75);
+          neon.root.position.x = 1.2;
+          roots.push(neon.root);
 
           frameCameraToRoots(roots);
 
@@ -302,12 +371,12 @@
           scene.onBeforeRenderObservable.clear();
           scene.onBeforeRenderObservable.add(() => {
             const dt = scene.getEngine().getDeltaTime() * 0.001;
-            if (basic?.root) basic.root.rotation.y += dt * 0.35;
-            if (neon?.root)  neon.root.rotation.y  += dt * 0.35;
+            if (base?.root) base.root.rotation.y += dt * 0.35;
+            if (neon?.root) neon.root.rotation.y += dt * 0.35;
             debugBox.rotation.y += dt;
           });
 
-          log("Done");
+          log("Done, base vs neon_edge override");
         }catch(e){
           console.warn("Test loader failed", e);
           log("FAILED, check console log");
