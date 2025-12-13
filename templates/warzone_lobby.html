@@ -659,7 +659,9 @@
     }
   </style>
 
+  <!-- Keep Pi SDK only for Pi auth context inside Pi Browser, NOT for payments -->
   <script src="https://sdk.minepi.com/pi-sdk.js"></script>
+
   <script src="https://cdn.babylonjs.com/babylon.js"></script>
   <script src="https://cdn.babylonjs.com/loaders/babylonjs.loaders.min.js"></script>
 </head>
@@ -884,8 +886,8 @@
                 Loading weapons…
               </div>
               <div class="shop-note">
-                Purchases are paid with Testnet IZZA tokens from your active IZZA wallet,
-                using the same Pi approval flow as IZZA purchases elsewhere.
+                Purchases are paid with Testnet IZZA from your active IZZA wallet,
+                using the same server-signed transfer flow as bot bucket purchases.
               </div>
             </div>
           </div>
@@ -908,8 +910,8 @@
                 Loading skins…
               </div>
               <div class="shop-note">
-                Skins are in game unlocks stored in your IZZA WAR ZONE inventory,
-                paid with real Testnet IZZA tokens from your IZZA wallet.
+                Skins are stored in your IZZA WAR ZONE inventory,
+                paid with real Testnet IZZA from your IZZA wallet.
               </div>
             </div>
           </div>
@@ -919,13 +921,13 @@
         <div class="overlay" id="purchaseOverlay">
           <div class="overlay-card">
             <div class="overlay-header">
-              <div class="overlay-title">Approve IZZA payment</div>
+              <div class="overlay-title">Confirm IZZA purchase</div>
               <button class="overlay-close" data-close="purchaseOverlay">Close</button>
             </div>
             <div class="overlay-body">
               <p>
-                You are about to spend Testnet IZZA tokens from your IZZA wallet to unlock a War Zone item.
-                After approval, the item becomes equipable and the Buy button turns into Equip.
+                You are about to spend Testnet IZZA from your active IZZA wallet to unlock a War Zone item.
+                This uses the exact same IZZA transfer flow as bot bucket purchases.
               </p>
 
               <div class="purchase-box">
@@ -948,7 +950,7 @@
 
                 <div class="purchase-actions">
                   <button type="button" id="poCancel">Cancel</button>
-                  <button type="button" class="approve" id="poApprove">Approve</button>
+                  <button type="button" class="approve" id="poApprove">Confirm</button>
                   <button type="button" class="closeonly" id="poClose" style="display:none;">Close</button>
                 </div>
 
@@ -963,7 +965,7 @@
   </div>
 
   <script>
-    // Pi SDK init
+    // Pi SDK init (auth context only)
     (function(){
       const sandbox = {{ 'true' if PI_SANDBOX else 'false' }};
       try{
@@ -1184,7 +1186,7 @@
         }
         if(!isLocalWallet(pub)){
           openWalletOverlay();
-          alert("Save your IZZA wallet S key locally (same as other IZZA pages) before purchasing.");
+          alert("Save your IZZA wallet S key locally (same as bot buckets) before purchasing.");
           return null;
         }
         return { user, pub, sec:getLocalSecret(pub) };
@@ -1581,7 +1583,6 @@
         }
 
         if(style === "neon_edge_black_cyan"){
-          // Neon Edge, black armor with cyan edge lights and subtle neon trims
           applyToAllMats(wrapper, (mesh, mat) => {
             if(mat.albedoColor) setMatColor(mat, "albedo", safeColor3(0.12, 0.13, 0.16));
             if(mat.diffuseColor) setMatColor(mat, "diffuse", safeColor3(0.12, 0.13, 0.16));
@@ -1589,7 +1590,6 @@
             if(isGlowPart(mesh, mat)){
               setMatColor(mat, "emissive", safeColor3(0.0, 1.0, 1.0));
             } else {
-              // subtle cyan spill, very low
               setMatColor(mat, "emissive", safeColor3(0.0, 0.03, 0.035));
             }
           });
@@ -1895,117 +1895,8 @@
         }
       }
 
-      async function piFlowPurchase(slot, sku, itemName, price, gate){
-        // Front end is ready for the Pi approve screen, backend will be updated next.
-        // This tries Pi flow endpoints first, if missing it throws, caller can fallback.
-        if(!window.Pi || !Pi.createPayment){
-          throw new Error("Pi SDK not available");
-        }
-
-        const qs = (window.__izzaUserQS && window.__izzaUserQS()) || "";
-        const createRes = await fetch("/warzone/api/pi_payment/create" + qs, {
-          method:"POST",
-          headers:{ "Content-Type":"application/json" },
-          body: JSON.stringify({
-            slot,
-            sku,
-            item_name: itemName,
-            amount_izza: price,
-            buyer_pub: gate.pub
-          }),
-          credentials:"include"
-        });
-        const createData = await createRes.json().catch(()=>null);
-        if(!createRes.ok || !createData){
-          throw new Error((createData && (createData.error || createData.detail)) || ("create " + createRes.status));
-        }
-
-        // Accept a few shapes so you can wire backend however you want
-        const paymentData =
-          createData.payment_data ||
-          createData.payment ||
-          createData.data ||
-          createData;
-
-        if(!paymentData || typeof paymentData !== "object"){
-          throw new Error("Bad payment data");
-        }
-
-        const payment = {
-          amount: paymentData.amount ?? String(price),
-          memo: paymentData.memo ?? ("IZZA WAR ZONE, " + (itemName || sku)),
-          metadata: paymentData.metadata ?? {
-            app: "izza-warzone",
-            slot,
-            sku,
-            buyer: gate.user
-          }
-        };
-
-        return new Promise((resolve, reject) => {
-          let settled = false;
-          function doneOk(payload){
-            if(settled) return;
-            settled = true;
-            resolve(payload || { ok:true });
-          }
-          function doneErr(err){
-            if(settled) return;
-            settled = true;
-            reject(err || new Error("Pi payment failed"));
-          }
-
-          try{
-            Pi.createPayment(payment, {
-              onReadyForServerApproval: async function(paymentId){
-                try{
-                  const r = await fetch("/warzone/api/pi_payment/approve" + qs, {
-                    method:"POST",
-                    headers:{ "Content-Type":"application/json" },
-                    body: JSON.stringify({ payment_id: paymentId, slot, sku }),
-                    credentials:"include"
-                  });
-                  const j = await r.json().catch(()=>({}));
-                  if(!r.ok || !j.ok){
-                    doneErr(new Error(j.error || j.detail || ("approve " + r.status)));
-                  }
-                }catch(e){
-                  doneErr(e);
-                }
-              },
-              onReadyForServerCompletion: async function(paymentId, txid){
-                try{
-                  const r = await fetch("/warzone/api/pi_payment/complete" + qs, {
-                    method:"POST",
-                    headers:{ "Content-Type":"application/json" },
-                    body: JSON.stringify({ payment_id: paymentId, txid: txid || null }),
-                    credentials:"include"
-                  });
-                  const j = await r.json().catch(()=>({}));
-                  if(!r.ok || !j.ok){
-                    doneErr(new Error(j.error || j.detail || ("complete " + r.status)));
-                    return;
-                  }
-                  doneOk(j);
-                }catch(e){
-                  doneErr(e);
-                }
-              },
-              onCancel: function(){
-                doneErr(new Error("cancelled"));
-              },
-              onError: function(err){
-                doneErr(err instanceof Error ? err : new Error(String(err || "error")));
-              }
-            });
-          }catch(e){
-            doneErr(e);
-          }
-        });
-      }
-
       async function directSecretPurchase(slot, sku, itemName, price, gate){
-        // Existing direct method, keeps working until backend Pi flow is wired
+        // THIS is the bot-bucket style flow: server builds/signs/submits the IZZA asset transfer using buyer S key
         const qs = (window.__izzaUserQS && window.__izzaUserQS()) || "";
         const res = await fetch("/warzone/api/purchase" + qs, {
           method:"POST",
@@ -2064,33 +1955,17 @@
           }
 
           window.__izzaPurchaseOverlaySetBusy?.(true);
-          window.__izzaPurchaseOverlaySetMsg?.("Opening Pi approval…", "");
+          window.__izzaPurchaseOverlaySetMsg?.("Submitting IZZA transfer…", "");
 
           let purchaseOk = false;
           let lastErr = null;
 
-          // Prefer Pi approval flow, fallback to direct secret method until backend is wired
           try{
-            await piFlowPurchase(slot, sku, itemName, price, gate);
+            await directSecretPurchase(slot, sku, itemName, price, gate);
             purchaseOk = true;
           }catch(e){
             lastErr = e;
-            // If user cancelled, treat as cancel and keep buttons normal
-            const msg = String((e && e.message) || e || "");
-            if(msg.toLowerCase().includes("cancel")){
-              window.__izzaPurchaseOverlaySetBusy?.(false);
-              window.__izzaPurchaseOverlaySetMsg?.("Purchase cancelled.", "error");
-              return;
-            }
-            // fallback
-            try{
-              window.__izzaPurchaseOverlaySetMsg?.("Pi approval unavailable, submitting purchase…", "");
-              await directSecretPurchase(slot, sku, itemName, price, gate);
-              purchaseOk = true;
-            }catch(e2){
-              lastErr = e2;
-              purchaseOk = false;
-            }
+            purchaseOk = false;
           }
 
           if(!purchaseOk){
@@ -2105,7 +1980,6 @@
           window.__izzaPurchaseOverlaySetBusy?.(false);
           window.__izzaPurchaseOverlaySetButtonsMode?.("close");
 
-          // When they close, the item should already be equipable, we reload now so it flips immediately
           await loadShop(slot);
 
         }catch(e){
