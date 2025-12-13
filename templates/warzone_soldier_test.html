@@ -219,6 +219,53 @@
       return skeleton.bones.find(b => ((b.name || "").toLowerCase().includes(wantLow))) || null;
     }
 
+    function listBoneMap(skeleton){
+      if(!skeleton || !skeleton.bones) return;
+
+      const names = skeleton.bones.map(b => b?.name || "").filter(Boolean);
+      const pick = (patterns) => {
+        for (const p of patterns){
+          const b = findBoneByNameOrIncludes(skeleton, p);
+          if (b) return b;
+        }
+        for (const p of patterns){
+          const re = new RegExp(p, "i");
+          const b = skeleton.bones.find(x => re.test(x?.name || ""));
+          if (b) return b;
+        }
+        return null;
+      };
+
+      const rightHand = pick(["mixamorig:RightHand", "RightHand", "hand_r"]);
+      const rightArm  = pick(["mixamorig:RightArm", "RightArm", "upperarm_r", "arm_r"]);
+      const rightFore = pick(["mixamorig:RightForeArm", "RightForeArm", "lowerarm_r", "forearm_r"]);
+      const rightShoulder = pick(["mixamorig:RightShoulder", "RightShoulder", "shoulder_r"]);
+      const spine = pick(["mixamorig:Spine", "Spine"]);
+      const spine1 = pick(["mixamorig:Spine1", "Spine1", "Chest"]);
+      const hips = pick(["mixamorig:Hips", "Hips", "Pelvis"]);
+
+      log("");
+      log("Bones needed to make this perfect,");
+      log("Skeleton name, " + (skeleton.name || "(unnamed)") + ", bones=" + names.length);
+      log("RightHand attach, " + (rightHand ? rightHand.name : "NOT FOUND"));
+      log("RightArm aim, " + (rightArm ? rightArm.name : "NOT FOUND"));
+      log("RightForeArm aim, " + (rightFore ? rightFore.name : "NOT FOUND"));
+      log("RightShoulder optional, " + (rightShoulder ? rightShoulder.name : "NOT FOUND"));
+      log("Spine optional, " + (spine ? spine.name : "NOT FOUND"));
+      log("Spine1 or Chest optional, " + (spine1 ? spine1.name : "NOT FOUND"));
+      log("Hips optional, " + (hips ? hips.name : "NOT FOUND"));
+
+      const keyWords = ["hand","arm","forearm","shoulder","spine","chest","hips","pelvis","wrist","elbow","clav","neck","head"];
+      const relevant = names
+        .filter(n => keyWords.some(k => n.toLowerCase().includes(k)))
+        .slice(0, 40);
+
+      log("");
+      log("Top relevant bones, " + relevant.length);
+      relevant.forEach(n => log(" , " + n));
+      log("");
+    }
+
     function attachWeaponToRightHand(soldierImport, weaponImport){
       const skinned = findSkinnedMesh(soldierImport.result);
       const skeleton = skinned?.skeleton || (soldierImport.result?.skeletons?.[0] || null);
@@ -228,46 +275,45 @@
         return false;
       }
 
-      // Your glTF bone name from the file you gave me
+      // Print bone map once
+      listBoneMap(skeleton);
+
+      // Your known good bone
       const boneNameExact = "mixamorig:RightHand.209_221";
 
-      // First try exact, then fallback includes RightHand
       let bone = findBoneByNameOrIncludes(skeleton, boneNameExact);
       if (!bone){
         bone = skeleton.bones.find(b => /RightHand/i.test(b.name || "")) || null;
       }
       if (!bone){
         log("ATTACH FAIL, RightHand bone not found");
-        log("Tip, open console, print skeleton.bones to see names");
         return false;
       }
 
-      // Make a clean weapon root that holds all weapon meshes
       const weaponRoot = new BABYLON.TransformNode("weaponRoot", scene);
 
-      // Parent all loaded weapon meshes under weaponRoot
       (weaponImport.result?.meshes || []).forEach(m => {
         if (!m) return;
-        if (m === weaponImport.result.meshes[0]) return; // usually the scene root
+        if (m === weaponImport.result.meshes[0]) return;
         m.parent = weaponRoot;
       });
 
-      // Attach weaponRoot to the bone, using the skinned mesh as the bone host
+      // This is the method that was working for you
       weaponRoot.attachToBone(bone, skinned);
 
-      // TUNING, adjust these 3 numbers to align the pistol in hand
-      // Start here, then tweak if needed
+      // Keep the same placement you already had
       weaponRoot.position.set(0.02, 0.00, 0.06);
       weaponRoot.rotation.set(0, Math.PI, 0);
 
-      // Scale is model dependent, tweak if pistol is too big or small
-      weaponRoot.scaling.set(0.25, 0.25, 0.25);
+      // KEY CHANGE, 10x smaller than 0.25
+      weaponRoot.scaling.set(0.025, 0.025, 0.025);
 
       log("Weapon attached to bone, " + (bone.name || "RightHand"));
+      log("Weapon scale, " + weaponRoot.scaling.x.toFixed(5));
+      log("Weapon pos, X " + weaponRoot.position.x.toFixed(3) + " Y " + weaponRoot.position.y.toFixed(3) + " Z " + weaponRoot.position.z.toFixed(3));
       return true;
     }
 
-    // Paths
     const SOLDIER_ROOT = "/assets/warzone3d/soldier_gltf_3/";
     const SOLDIER_FILE = "scene.gltf";
 
@@ -294,7 +340,6 @@
         soldier.root.rotation.y = Math.PI;
         normalizeToGroundAndHeight(soldier.root, 1.75);
 
-        // Start first animation group if present
         const ag = soldier.result?.animationGroups || [];
         if (ag.length){
           ag.forEach(g => g.stop());
@@ -306,7 +351,7 @@
 
         const pistol = await importModel("pistol", WEAPON_ROOT, WEAPON_FILE);
 
-        // Keep pistol from floating on its own before attach
+        // Do not show the pistol wrapper, only the attached weaponRoot
         pistol.root.setEnabled(false);
 
         const attached = attachWeaponToRightHand(soldier, pistol);
@@ -316,7 +361,6 @@
 
         frameCameraToRoot(soldier.root);
 
-        // Optional slow spin so you can inspect
         scene.onBeforeRenderObservable.clear();
         scene.onBeforeRenderObservable.add(() => {
           const dt = scene.getEngine().getDeltaTime() * 0.001;
