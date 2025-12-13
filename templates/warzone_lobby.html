@@ -201,7 +201,6 @@
       transform:translateX(-50%);
       width:60%;
       height:125%;
-      /* CHANGED, allow manual rotate, pinch zoom */
       pointer-events:auto;
       z-index:2;
       display:block;
@@ -800,7 +799,46 @@
       searchGo?.addEventListener("click", doSearch);
     })();
 
-    // ---------- Babylon.js lobby soldier (UPDATED SURGICALLY) ----------
+    // ---------- USER QS HELPERS (NEW, matches shop) ----------
+    const SRV_USER = {{ (player.username or '') | tojson }};
+    function stripAt(s){ return (s||"").toString().trim().replace(/^@+/, ""); }
+    function canonU(s){
+      const v = stripAt(s);
+      return v ? v.toLowerCase() : "";
+    }
+
+    const USER_CANON = (()=>{
+      const fromSrv = stripAt(SRV_USER);
+      if(fromSrv) return fromSrv;
+      try{
+        const raw = localStorage.getItem("piAuthUser");
+        if(raw){
+          const j = JSON.parse(raw);
+          if(j && j.username) return stripAt(j.username);
+        }
+      }catch(e){}
+      try{
+        const uCanon = localStorage.getItem("izzaUserCanon");
+        if(uCanon) return stripAt(uCanon);
+        const u = localStorage.getItem("izzaUserU");
+        if(u) return stripAt(u);
+      }catch(e){}
+      return "";
+    })();
+
+    const USER_U = canonU(USER_CANON);
+    function uQS(){
+      return USER_U ? ("&u=" + encodeURIComponent(USER_U)) : "";
+    }
+    if(USER_CANON){
+      try{
+        localStorage.setItem("izzaUserCanon", USER_CANON);
+        localStorage.setItem("izzaUserU", USER_U);
+      }catch(e){}
+    }
+    // --------------------------------------------------------
+
+    // ---------- Babylon.js lobby soldier ----------
     (function(){
       const canvas = document.getElementById("soldierCanvas");
       if (!canvas || !window.BABYLON) {
@@ -848,7 +886,6 @@
           camera.alpha  = Math.PI * 1.3;
           camera.beta   = Math.PI / 2.35;
 
-          /* CHANGED, allow manual zoom like test page but keep lobby framing */
           camera.lowerRadiusLimit = radius * 0.65;
           camera.upperRadiusLimit = radius * 1.25;
 
@@ -860,7 +897,7 @@
         }
       }
 
-      // ---------- TEXTURE OVERRIDES (ONLY) ----------
+      // ---------- TEXTURE OVERRIDES ----------
       const TEXTURE_BASE = "/assets/warzone3d/soldier_gltf_3/textures/";
 
       const OVERRIDE_FILES = [
@@ -922,7 +959,6 @@
       }
       // ---------- END TEXTURE OVERRIDES ----------
 
-      /* NEW, force wrapper ownership of the whole hierarchy (prevents missed parenting) */
       function buildWrapperFromContainer(container){
         const wrapper = new BABYLON.TransformNode("lobbySkinWrap", scene);
         const nodes = []
@@ -962,7 +998,6 @@
           container.addAllToScene();
           currentContainer = container;
 
-          /* CHANGED, wrapper now owns everything */
           const wrapper = buildWrapperFromContainer(container);
           currentWrapper = wrapper;
 
@@ -984,7 +1019,8 @@
 
       async function fetchEquippedSkinSku(){
         try{
-          const res = await fetch("/warzone/api/shop?slot=skins", { credentials:"include" });
+          // FIX: include u= so API can resolve the correct user and not fall back to anon
+          const res = await fetch("/warzone/api/shop?slot=skins" + uQS(), { credentials:"include" });
           if(!res.ok) return "wz_basic_soldier";
           const data = await res.json().catch(()=>null);
           const items = (data && data.items) || [];
@@ -1007,7 +1043,6 @@
           scene
         );
 
-        /* CHANGED, restore interaction like test page */
         camera.attachControl(canvas, true);
         camera.panningSensibility = 0;
         camera.wheelPrecision = 60;
@@ -1021,7 +1056,6 @@
         engine.runRenderLoop(() => { if(scene) scene.render(); });
         window.addEventListener("resize", () => engine.resize());
 
-        /* Keep your auto spin, pause while user is dragging */
         let userInteracting = false;
         canvas.addEventListener("pointerdown", () => { userInteracting = true; }, { passive:true });
         canvas.addEventListener("pointerup", () => { userInteracting = false; }, { passive:true });
