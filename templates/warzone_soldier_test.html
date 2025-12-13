@@ -266,7 +266,6 @@
       log("");
     }
 
-    // NEW, used to apply aim pose correction each frame (after animation)
     function quatFromEuler(x,y,z){
       return BABYLON.Quaternion.FromEulerAngles(x,y,z);
     }
@@ -304,15 +303,20 @@
       weaponRoot.attachToBone(bone, skinned);
 
       weaponRoot.position.set(0.02, 0.00, 0.06);
-      weaponRoot.rotation.set(0, Math.PI, 0);
+
+      // IMPORTANT, gun orientation fix
+      // If the pistol is sideways, it needs a roll around local Z
+      // 90 degrees is the common fix, flip sign if it rolls the wrong way
+      weaponRoot.rotation.set(0, Math.PI, -Math.PI * 0.5);
 
       weaponRoot.scaling.set(0.07, 0.07, 0.07);
 
       log("Weapon attached to bone, " + (bone.name || "RightHand"));
       log("Weapon scale, " + weaponRoot.scaling.x.toFixed(5));
       log("Weapon pos, X " + weaponRoot.position.x.toFixed(3) + " Y " + weaponRoot.position.y.toFixed(3) + " Z " + weaponRoot.position.z.toFixed(3));
+      log("Weapon rot, X " + weaponRoot.rotation.x.toFixed(3) + " Y " + weaponRoot.rotation.y.toFixed(3) + " Z " + weaponRoot.rotation.z.toFixed(3));
 
-      // Return skeleton + bones we care about so we can pose-correct
+      const rightHand    = bone;
       const rightArm     = findBoneByNameOrIncludes(skeleton, "mixamorig:RightArm.207_219") || findBoneByNameOrIncludes(skeleton, "RightArm");
       const rightForeArm = findBoneByNameOrIncludes(skeleton, "mixamorig:RightForeArm.208_220") || findBoneByNameOrIncludes(skeleton, "RightForeArm");
       const rightShoulder= findBoneByNameOrIncludes(skeleton, "mixamorig:RightShoulder.206_218") || findBoneByNameOrIncludes(skeleton, "RightShoulder");
@@ -322,7 +326,7 @@
         skeleton,
         skinned,
         weaponRoot,
-        bones: { rightArm, rightForeArm, rightShoulder }
+        bones: { rightHand, rightArm, rightForeArm, rightShoulder }
       };
     }
 
@@ -359,7 +363,6 @@
           anim0 = ag[0];
           anim0.start(true);
 
-          // NEW, slow the animation down
           anim0.speedRatio = 0.65;
 
           log("Soldier anim started, " + (anim0.name || "anim0") + ", speedRatio=" + anim0.speedRatio);
@@ -377,30 +380,29 @@
 
         frameCameraToRoot(soldier.root);
 
-        // NEW, auto rotate only front-to-side and back (no full back view)
         scene.onBeforeRenderObservable.clear();
 
         let t = 0;
-        const baseY = soldier.root.rotation.y;          // start angle
-        const maxYaw = Math.PI * 0.45;                 // ~81 degrees each way (front to side)
-        const autoSpeed = 0.35;                        // slower than before
+        const baseY = soldier.root.rotation.y;
+        const maxYaw = Math.PI * 0.45;
+        const autoSpeed = 0.35;
 
-        // NEW, arm-straightening correction (small, safe, tweakable)
-        // Goal: reduce the “guard” bend, push toward pistol aim.
-        // Increase these slightly if you want more straightening.
-        const qArm     = quatFromEuler(-0.10,  0.00,  0.00);  // shoulder/upper arm
-        const qForeArm = quatFromEuler(-0.25,  0.00,  0.00);  // forearm straighten
-        const qShould  = quatFromEuler( 0.00,  0.00, -0.05);  // optional shoulder roll
+        const qArm     = quatFromEuler(-0.10,  0.00,  0.00);
+        const qForeArm = quatFromEuler(-0.25,  0.00,  0.00);
+        const qShould  = quatFromEuler( 0.00,  0.00, -0.05);
+
+        // Optional wrist twist, OFF by default
+        // If you want to use it, set WRIST_TWIST_ON = true and tweak qWrist
+        const WRIST_TWIST_ON = false;
+        const qWrist = quatFromEuler(0.00, 0.00, -0.35);
 
         scene.onBeforeRenderObservable.add(() => {
           const dt = scene.getEngine().getDeltaTime() * 0.001;
 
-          // auto oscillate yaw
           t += dt * autoSpeed;
           const yaw = Math.sin(t) * maxYaw;
           soldier.root.rotation.y = baseY + yaw;
 
-          // pose correction AFTER animation updates, every frame
           const bones = attachInfo?.bones;
           const skinned = attachInfo?.skinned;
 
@@ -416,6 +418,11 @@
             if (bones.rightForeArm && bones.rightForeArm.getRotationQuaternion){
               const cur = bones.rightForeArm.getRotationQuaternion(BABYLON.Space.LOCAL, skinned) || BABYLON.Quaternion.Identity();
               bones.rightForeArm.setRotationQuaternion(cur.multiply(qForeArm), BABYLON.Space.LOCAL, skinned);
+            }
+
+            if (WRIST_TWIST_ON && bones.rightHand && bones.rightHand.getRotationQuaternion){
+              const cur = bones.rightHand.getRotationQuaternion(BABYLON.Space.LOCAL, skinned) || BABYLON.Quaternion.Identity();
+              bones.rightHand.setRotationQuaternion(cur.multiply(qWrist), BABYLON.Space.LOCAL, skinned);
             }
           }
         });
