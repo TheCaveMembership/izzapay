@@ -858,6 +858,73 @@
       let currentWrapper = null;
       let currentContainer = null;
 
+      /* SHADOW ANCHOR (NEW) */
+      let shadowPlane = null;
+      let shadowMat = null;
+      const SHADOW_WORLD_Y = 0.005;
+
+      function ensureShadowMaterial(){
+        if(shadowMat) return shadowMat;
+
+        const dt = new BABYLON.DynamicTexture("shadowDT", { width:256, height:256 }, scene, true);
+        dt.hasAlpha = true;
+
+        const ctx = dt.getContext();
+        ctx.clearRect(0,0,256,256);
+
+        const g = ctx.createRadialGradient(128,128,10,128,128,120);
+        g.addColorStop(0.00, "rgba(0,0,0,0.55)");
+        g.addColorStop(0.40, "rgba(0,0,0,0.30)");
+        g.addColorStop(0.75, "rgba(0,0,0,0.12)");
+        g.addColorStop(1.00, "rgba(0,0,0,0.00)");
+
+        ctx.fillStyle = g;
+        ctx.beginPath();
+        ctx.ellipse(128, 140, 92, 60, 0, 0, Math.PI * 2);
+        ctx.fill();
+
+        dt.update(false);
+
+        shadowMat = new BABYLON.StandardMaterial("shadowMat", scene);
+        shadowMat.diffuseColor = new BABYLON.Color3(0,0,0);
+        shadowMat.emissiveColor = new BABYLON.Color3(0,0,0);
+        shadowMat.specularColor = new BABYLON.Color3(0,0,0);
+        shadowMat.opacityTexture = dt;
+        shadowMat.alpha = 0.75;
+        shadowMat.disableLighting = true;
+
+        return shadowMat;
+      }
+
+      function attachShadowToWrapper(wrapper){
+        try{
+          if(shadowPlane){
+            shadowPlane.dispose(false, true);
+            shadowPlane = null;
+          }
+        }catch(e){}
+
+        const mat = ensureShadowMaterial();
+
+        shadowPlane = BABYLON.MeshBuilder.CreateGround(
+          "shadowPlane",
+          { width: 1.55, height: 1.55 },
+          scene
+        );
+        shadowPlane.material = mat;
+        shadowPlane.isPickable = false;
+        shadowPlane.renderingGroupId = 0;
+
+        shadowPlane.parent = wrapper;
+
+        const localY = SHADOW_WORLD_Y - (wrapper.position.y || 0);
+        shadowPlane.position.y = localY;
+
+        shadowPlane.position.x = 0;
+        shadowPlane.position.z = 0;
+      }
+      /* END SHADOW ANCHOR (NEW) */
+
       function getSkinAsset(){
         return { rootUrl:"/assets/warzone3d/soldier_gltf_3/", fileName:"scene.gltf" };
       }
@@ -997,6 +1064,12 @@
             currentWrapper = null;
           }
         }catch(e){}
+        try{
+          if(shadowPlane){
+            shadowPlane.dispose(false, true);
+            shadowPlane = null;
+          }
+        }catch(e){}
 
         try{
           const asset = getSkinAsset();
@@ -1016,6 +1089,8 @@
           wrapper.position.y += 0.06; /* UPDATED: lift a hair so feet never clip */
 
           frameCameraToRoot(wrapper);
+
+          attachShadowToWrapper(wrapper); /* SHADOW ANCHOR (NEW) */
 
           if(container.animationGroups && container.animationGroups.length){
             container.animationGroups.forEach(g => g.stop());
