@@ -69,26 +69,47 @@
     const WEAPON_ROOT  = "/assets/warzone3d/weapons/wz_basic_pistol/";
     const WEAPON_FILE  = "scene.gltf";
 
-    // animation speed
     const SOLDIER_ANIM_SPEED = 0.65;
 
-    // auto rotate: front to side, then back
     const AUTO_OSC_SPEED = 0.35;
-    const AUTO_MAX_YAW   = Math.PI * 0.45;  // about 81 degrees
+    const AUTO_MAX_YAW   = Math.PI * 0.45;
 
-    // weapon placement
-    // FIX: move the pistol BACK toward the wrist so the hand grips the HANDLE (not the barrel).
-    // If you want even more handle-grip, make Z more negative in small steps (ex: -0.060, -0.070).
-    const WEAPON_POS   = new BABYLON.Vector3(0.02, -0.01, -0.055);
+    // Your values
     const WEAPON_SCALE = 0.07;
-
-    // gun orientation, 90 degrees yaw fix
     const WEAPON_YAW_FIX = Math.PI * 0.5;
 
-    // arm correction, small and safe, tweak later
+    // Hand-space placement (small changes here move the whole gun relative to the hand bone)
+    // If the gun is still sitting on the back of the hand, usually:
+    // - move slightly "into palm" with X
+    // - drop slightly with Y
+    // - slide back/forward with Z
+    const WEAPON_POS = new BABYLON.Vector3(0.02, -0.01, -0.055);
+
+    // NEW: Grip alignment inside the weapon itself (this fixes "holding barrel/backhand" issues)
+    // This re-centers the pistol model so the GRIP is what lands in the palm.
+    // Tweak these surgically:
+    // - If hand is too far forward on barrel: make Z more POSITIVE (brings grip toward hand)
+    // - If grip is behind palm: make Z more NEGATIVE
+    // - If gun sits on back of hand: adjust X and Y slightly
+    const WEAPON_GRIP_POS = new BABYLON.Vector3(0.00, 0.00, 0.055);
+
+    // Optional micro-rotation of the pistol around its own local axes to sit correctly in the palm.
+    // Keep small values. Start with 0s, then adjust one axis at a time.
+    const WEAPON_GRIP_ROT = new BABYLON.Vector3(
+      0.00,  // pitch
+      0.00,  // yaw
+      0.00   // roll
+    );
+
+    // Arm correction (unchanged)
     const qArm     = BABYLON.Quaternion.FromEulerAngles(-0.10,  0.00,  0.00);
     const qForeArm = BABYLON.Quaternion.FromEulerAngles(-0.25,  0.00,  0.00);
     const qShould  = BABYLON.Quaternion.FromEulerAngles( 0.00,  0.00, -0.05);
+
+    // NEW: Optional wrist twist to make the palm wrap the grip more naturally.
+    // Leave OFF unless you want a bit more “finger-on-trigger” vibe.
+    const WRIST_TWIST_ON = false;
+    const qWrist = BABYLON.Quaternion.FromEulerAngles(0.00, 0.00, -0.25);
 
     // ---------- helpers ----------
     async function fetchHeadOrGet(url){
@@ -218,22 +239,26 @@
       }
       if (!rightHand) return { ok:false };
 
+      // weaponRoot attaches to the hand bone (hand-space positioning stays stable)
       const weaponRoot = new BABYLON.TransformNode("weaponRoot", scene);
-
-      (weaponImport.result?.meshes || []).forEach(m => {
-        if (!m) return;
-        if (m === weaponImport.result.meshes[0]) return;
-        m.parent = weaponRoot;
-      });
-
       weaponRoot.attachToBone(rightHand, skinned);
 
       weaponRoot.position.copyFrom(WEAPON_POS);
-
-      // Base yaw (180) plus your 90 degree fix
       weaponRoot.rotation.set(0, Math.PI + WEAPON_YAW_FIX, 0);
-
       weaponRoot.scaling.set(WEAPON_SCALE, WEAPON_SCALE, WEAPON_SCALE);
+
+      // NEW: weaponGrip is a child used to re-center the pistol so the GRIP lands in the palm
+      const weaponGrip = new BABYLON.TransformNode("weaponGrip", scene);
+      weaponGrip.parent = weaponRoot;
+      weaponGrip.position.copyFrom(WEAPON_GRIP_POS);
+      weaponGrip.rotation.copyFrom(WEAPON_GRIP_ROT);
+
+      // Parent pistol meshes under weaponGrip (NOT weaponRoot)
+      (weaponImport.result?.meshes || []).forEach(m => {
+        if (!m) return;
+        if (m === weaponImport.result.meshes[0]) return; // skip gltf root
+        m.parent = weaponGrip;
+      });
 
       const rightArm      = findBoneByNameOrIncludes(skeleton, "mixamorig:RightArm.207_219") || findBoneByNameOrIncludes(skeleton, "RightArm");
       const rightForeArm  = findBoneByNameOrIncludes(skeleton, "mixamorig:RightForeArm.208_220") || findBoneByNameOrIncludes(skeleton, "RightForeArm");
@@ -242,7 +267,7 @@
       return {
         ok:true,
         skinned,
-        bones: { rightArm, rightForeArm, rightShoulder }
+        bones: { rightHand, rightArm, rightForeArm, rightShoulder }
       };
     }
 
@@ -278,12 +303,10 @@
         scene.onBeforeRenderObservable.add(() => {
           const dt = scene.getEngine().getDeltaTime() * 0.001;
 
-          // auto oscillate yaw, front to side, then back
           t += dt * AUTO_OSC_SPEED;
           const yaw = Math.sin(t) * AUTO_MAX_YAW;
           soldier.root.rotation.y = baseY + yaw;
 
-          // arm pose correction after animation
           if (attachInfo?.ok && attachInfo?.bones && attachInfo?.skinned){
             const skinned = attachInfo.skinned;
             const b = attachInfo.bones;
@@ -299,6 +322,12 @@
             if (b.rightForeArm && b.rightForeArm.getRotationQuaternion){
               const cur = b.rightForeArm.getRotationQuaternion(BABYLON.Space.LOCAL, skinned) || BABYLON.Quaternion.Identity();
               b.rightForeArm.setRotationQuaternion(cur.multiply(qForeArm), BABYLON.Space.LOCAL, skinned);
+            }
+
+            // Optional wrist twist
+            if (WRIST_TWIST_ON && b.rightHand && b.rightHand.getRotationQuaternion){
+              const cur = b.rightHand.getRotationQuaternion(BABYLON.Space.LOCAL, skinned) || BABYLON.Quaternion.Identity();
+              b.rightHand.setRotationQuaternion(cur.multiply(qWrist), BABYLON.Space.LOCAL, skinned);
             }
           }
         });
