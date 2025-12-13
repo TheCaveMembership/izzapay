@@ -342,29 +342,28 @@ def warzone_auth():
 
 @warzone_bp.get("/")
 def warzone_lobby():
-    if "user_id" not in session:
+    """
+    FIX:
+    Use the same resolver as shop/api so deep links with ?u= work.
+    This prevents the lobby from loading "basic" due to missing session user_id.
+    """
+    uid = _require_user_id_or_u()
+    if not uid:
         qs = request.query_string.decode("utf-8")
         base = "/warzone/auth"
         return redirect(f"{base}?{qs}" if qs else base)
 
-    try:
-        uid = int(session.get("user_id"))
-    except (TypeError, ValueError):
-        uid = None
+    with conn() as cx:
+        row = cx.execute(
+            """
+            SELECT COALESCE(username, pi_username, pi_uid) AS name
+            FROM users
+            WHERE id = ?
+            """,
+            (uid,),
+        ).fetchone()
 
-    db_name = None
-    if uid is not None:
-        with conn() as cx:
-            row = cx.execute(
-                """
-                SELECT COALESCE(username, pi_username, pi_uid) AS name
-                FROM users
-                WHERE id = ?
-                """,
-                (uid,),
-            ).fetchone()
-            if row and row["name"]:
-                db_name = row["name"]
+    db_name = row["name"] if row and row["name"] else None
 
     display_name = (
         db_name
@@ -513,7 +512,7 @@ def warzone_invite_player():
 
 
 # ----------------------------------------------------------------------
-# War Zone Shop API (same as you posted)
+# War Zone Shop API
 # ----------------------------------------------------------------------
 
 @warzone_bp.get("/api/shop")
@@ -528,6 +527,22 @@ def warzone_shop():
     with conn() as cx:
         _ensure_shop_schema(cx)
         _seed_shop_if_empty(cx)
+
+        # FIX:
+        # Determine equipped sku for this slot, so starter can be marked equipped
+        equipped_sku = None
+        if inv_uid != -1:
+            eq = cx.execute(
+                """
+                SELECT sku
+                FROM warzone_inventory
+                WHERE user_id = ? AND slot = ? AND equipped = 1
+                LIMIT 1
+                """,
+                (inv_uid, slot),
+            ).fetchone()
+            if eq and eq["sku"]:
+                equipped_sku = str(eq["sku"])
 
         rows = cx.execute(
             """
@@ -555,7 +570,18 @@ def warzone_shop():
     for r in rows:
         starting = bool(r["starting"])
         owned = bool(r["owned"]) or starting
-        equipped = bool(r["equipped"])
+
+        if starting:
+            # FIX:
+            # Starter is equipped if there is no equipped item in this slot,
+            # OR if the equipped sku explicitly equals the starter sku.
+            if equipped_sku is None:
+                equipped = True
+            else:
+                equipped = (equipped_sku == r["sku"])
+        else:
+            equipped = bool(r["equipped"])
+
         items.append(
             {
                 "slot": r["slot"],
@@ -738,6 +764,7 @@ def warzone_equip():
             if not owned:
                 return jsonify({"error": "not_owned"}), 400
 
+        # Clear equipped for this slot
         cx.execute(
             """
             UPDATE warzone_inventory
@@ -747,6 +774,7 @@ def warzone_equip():
             (uid, slot),
         )
 
+        # Ensure row exists (starter can be inserted too)
         cx.execute(
             """
             INSERT OR IGNORE INTO warzone_inventory
@@ -756,6 +784,7 @@ def warzone_equip():
             (uid, slot, sku, now_ts),
         )
 
+        # Set equipped
         cx.execute(
             """
             UPDATE warzone_inventory
