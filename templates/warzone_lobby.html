@@ -887,8 +887,8 @@
       const WRIST_TWIST_ON = false;
       const qWrist = BABYLON.Quaternion.FromEulerAngles(0.00, 0.00, -0.25);
 
-      // ✅ NEW: slow down GLTF animation playback (same idea as test soldier)
-      const LOBBY_ANIM_SPEED = 0.85;
+      // ✅ MATCH TEST SOLDIER: slow the actual GLTF animation speed
+      const SOLDIER_ANIM_SPEED = 0.65;
 
       function ensureShadowMaterial(){
         if(shadowMat) return shadowMat;
@@ -1232,12 +1232,11 @@
 
           attachShadowToWrapper(wrapper);
 
-          // ✅ UPDATED: slow the GLTF animation bounce (no other behavior changed)
+          // ✅ MATCH TEST SOLDIER EXACTLY: start anim, then set speedRatio
           if(container.animationGroups && container.animationGroups.length){
             container.animationGroups.forEach(g => g.stop());
-            const g0 = container.animationGroups[0];
-            g0.speedRatio = LOBBY_ANIM_SPEED;
-            g0.start(true);
+            container.animationGroups[0].start(true);
+            container.animationGroups[0].speedRatio = SOLDIER_ANIM_SPEED;
           }
 
           // NEW: after skin is loaded, apply equipped weapon
