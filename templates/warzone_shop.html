@@ -1,0 +1,774 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>IZZA WAR ZONE, Shop</title>
+  <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+  <style>
+    :root{
+      --bg:#02030a;
+      --panel:#070b18;
+      --panelSoft:#0b1020;
+      --line:#222b47;
+      --txt:#edf3ff;
+      --muted:#9fb0d6;
+      --accent1:#0ff;
+      --accent2:#ff3b6b;
+      --accent3:#ffcf4d;
+    }
+    *{box-sizing:border-box;margin:0;padding:0}
+    html,body{
+      width:100%;
+      height:100%;
+      background:radial-gradient(circle at top,#15192e 0,#02030a 55%,#000 100%);
+      color:var(--txt);
+      font-family:Inter,system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;
+      overflow:hidden;
+    }
+
+    .rot-wrapper{
+      position:fixed;
+      top:0;
+      left:0;
+      width:100vh;
+      height:100vw;
+      transform-origin:top left;
+      transform:rotate(90deg) translateY(-100%);
+      transition:transform .15s ease,width .15s ease,height .15s ease;
+    }
+
+    .root{
+      width:100%;
+      height:100%;
+      padding:6px;
+    }
+
+    .shell{
+      width:100%;
+      height:100%;
+      border-radius:18px;
+      border:1px solid rgba(132,153,255,.4);
+      background:radial-gradient(circle at top,#182136 0,#06091a 52%,#01020a 100%);
+      box-shadow:
+        0 0 40px rgba(0,0,0,.8),
+        0 0 80px rgba(0,255,255,.08),
+        0 0 80px rgba(255,59,107,.12);
+      padding:10px;
+      display:grid;
+      grid-template-rows:auto auto 1fr auto;
+      gap:10px;
+      overflow:auto;
+      -webkit-overflow-scrolling:touch;
+    }
+    .shell::-webkit-scrollbar{ width:0;height:0; }
+
+    .top{
+      display:flex;
+      align-items:center;
+      justify-content:space-between;
+      gap:10px;
+      flex-wrap:wrap;
+    }
+    .logo{
+      display:flex;
+      align-items:center;
+      gap:10px;
+      text-transform:uppercase;
+      letter-spacing:.22em;
+      font-size:11px;
+      color:#c5d4ff;
+    }
+    .izzacoin{
+      width:30px;height:30px;border-radius:50%;
+      background:
+        url("/assets/izza.png") center/cover no-repeat,
+        radial-gradient(circle at 30% 10%,#ffe9b5 0,#ffcf4d 30%,#b87910 65%,#442400 100%);
+      box-shadow:0 0 18px rgba(255,207,77,.6);
+      flex-shrink:0;
+    }
+    .pill{
+      padding:6px 10px;
+      border-radius:999px;
+      border:1px solid rgba(127,209,255,.6);
+      background:linear-gradient(90deg,rgba(2,8,36,.9),rgba(0,87,126,.7));
+      font-size:11px;
+      display:flex;
+      align-items:center;
+      gap:8px;
+    }
+    .pill .label{
+      color:#9fb0d6;
+      text-transform:uppercase;
+      letter-spacing:.16em;
+      font-size:10px;
+    }
+    .pill .name{ font-weight:600;color:#e7f0ff; }
+
+    .bar{
+      display:flex;
+      align-items:center;
+      justify-content:space-between;
+      gap:10px;
+      flex-wrap:wrap;
+      border-radius:14px;
+      background:var(--panel);
+      border:1px solid rgba(66,91,168,.8);
+      padding:10px;
+    }
+    .tabs{
+      display:flex;
+      gap:8px;
+      flex-wrap:wrap;
+    }
+    .tabbtn{
+      padding:7px 12px;
+      border-radius:999px;
+      border:1px solid rgba(127,209,255,.7);
+      background:linear-gradient(90deg,rgba(3,12,38,.9),rgba(4,27,61,.95));
+      color:#e7f0ff;
+      font-size:11px;
+      text-transform:uppercase;
+      letter-spacing:.14em;
+      cursor:pointer;
+      white-space:nowrap;
+    }
+    .tabbtn.active{
+      border:none;
+      background:linear-gradient(90deg,#0ff,#ff3b6b);
+      color:#001520;
+      font-weight:800;
+      box-shadow:
+        0 0 18px rgba(0,255,255,.35),
+        0 0 18px rgba(255,59,107,.25);
+    }
+    .actions{
+      display:flex;
+      gap:8px;
+      flex-wrap:wrap;
+      justify-content:flex-end;
+    }
+    .btn{
+      padding:7px 12px;
+      border-radius:999px;
+      border:1px solid rgba(127,209,255,.7);
+      background:linear-gradient(90deg,rgba(3,12,38,.9),rgba(4,27,61,.95));
+      color:#e7f0ff;
+      font-size:11px;
+      text-transform:uppercase;
+      letter-spacing:.14em;
+      cursor:pointer;
+      white-space:nowrap;
+      text-decoration:none;
+      display:inline-flex;
+      align-items:center;
+      justify-content:center;
+      gap:8px;
+    }
+    .btn.gold{
+      border:none;
+      background:linear-gradient(90deg,#ffcf4d,#ff9c3b);
+      color:#1a1200;
+      font-weight:900;
+    }
+    .btn.danger{
+      border:none;
+      background:linear-gradient(90deg,#ff3b6b,#ff9c6b);
+      color:#1a0006;
+      font-weight:900;
+    }
+
+    .grid{
+      display:grid;
+      grid-template-columns:1.2fr 1fr;
+      gap:10px;
+      min-height:0;
+    }
+    @media (max-height:620px){
+      .grid{ grid-template-columns:1fr; }
+    }
+
+    .card{
+      border-radius:14px;
+      background:var(--panel);
+      border:1px solid rgba(66,91,168,.8);
+      padding:10px;
+      min-height:0;
+      display:flex;
+      flex-direction:column;
+      gap:8px;
+    }
+    .title{
+      font-size:11px;
+      text-transform:uppercase;
+      letter-spacing:.18em;
+      color:#9fb0d6;
+    }
+    .small{
+      font-size:11px;
+      color:#9fb0d6;
+      line-height:1.5;
+    }
+
+    .shop-list{
+      margin-top:4px;
+      max-height:9999px;
+      overflow:auto;
+      padding:4px;
+      border-radius:10px;
+      border:1px solid rgba(66,91,168,.7);
+      background:radial-gradient(circle at top,#050919,#010308);
+      min-height:0;
+      flex:1;
+    }
+    .shop-item{
+      display:flex;
+      align-items:flex-start;
+      justify-content:space-between;
+      gap:8px;
+      padding:8px 6px 8px 2px;
+      border-bottom:1px solid rgba(44,64,122,.65);
+    }
+    .shop-item:last-child{border-bottom:none;}
+    .shop-main{flex:1;min-width:0;}
+    .shop-name{font-size:12px;font-weight:700;margin-bottom:2px;}
+    .shop-sub{font-size:11px;color:#9fb0d6;}
+    .shop-side{
+      display:flex;
+      flex-direction:column;
+      gap:6px;
+      align-items:flex-end;
+      justify-content:center;
+      min-width:120px;
+    }
+    .price-tag{
+      font-size:11px;
+      padding:2px 8px;
+      border-radius:999px;
+      border:1px solid rgba(255,207,77,.8);
+      background:linear-gradient(90deg,#3b2b0b,#5a3f10);
+      color:#ffe8a6;
+      white-space:nowrap;
+    }
+    .price-tag.start{
+      border-color:rgba(127,209,255,.8);
+      background:linear-gradient(90deg,#041626,#04384d);
+      color:#cfe9ff;
+    }
+    .shop-btn{
+      padding:6px 10px;
+      border-radius:999px;
+      border:1px solid rgba(127,209,255,.8);
+      background:linear-gradient(90deg,#021021,#03253b);
+      color:#e7f0ff;
+      font-size:10px;
+      text-transform:uppercase;
+      letter-spacing:.14em;
+      cursor:pointer;
+      white-space:nowrap;
+    }
+    .shop-btn.owned{
+      border-color:rgba(159,176,214,.8);
+      background:#111826;
+      color:#9fb0d6;
+    }
+    .shop-btn.equipped{
+      border-color:rgba(0,255,170,.9);
+      background:linear-gradient(90deg,#00e5b0,#62ffd5);
+      color:#001b11;
+      font-weight:900;
+    }
+
+    .msg{
+      min-height:18px;
+      font-size:11px;
+      color:#9fb0d6;
+    }
+    .msg.ok{ color:#5ad49e; }
+    .msg.err{ color:#ffb86b; }
+
+    .footer{
+      display:flex;
+      justify-content:space-between;
+      align-items:center;
+      gap:10px;
+      flex-wrap:wrap;
+      padding:10px;
+      border-radius:14px;
+      background:var(--panel);
+      border:1px solid rgba(66,91,168,.8);
+    }
+    .mono{
+      font-family:ui-monospace,Menlo,Consolas,monospace;
+      word-break:break-all;
+      font-size:10px;
+      color:#c3cff5;
+    }
+  </style>
+</head>
+<body>
+  <div class="rot-wrapper" id="rotWrapper">
+    <div class="root">
+      <div class="shell">
+        <div class="top">
+          <div class="logo">
+            <div class="izzacoin"></div>
+            <span>IZZA, WAR ZONE SHOP</span>
+          </div>
+          <div class="pill">
+            <span class="label">Operator</span>
+            <span class="name">{{ player.username }}</span>
+          </div>
+        </div>
+
+        <div class="bar">
+          <div class="tabs">
+            <button class="tabbtn" id="tabWeapons">Weapons</button>
+            <button class="tabbtn" id="tabSkins">Skins</button>
+          </div>
+          <div class="actions">
+            <button class="btn gold" id="walletBtn">IZZA Wallet</button>
+            <a class="btn" href="{{ back_url }}">Back to Lobby</a>
+          </div>
+        </div>
+
+        <div class="grid">
+          <div class="card">
+            <div class="title" id="listTitle">Items</div>
+            <div class="small" id="listDesc">
+              Buy with Testnet IZZA token transfers, same as bot buckets, then equip here.
+            </div>
+            <div class="shop-list" id="shopList">Loading…</div>
+            <div class="msg" id="msg"></div>
+          </div>
+
+          <div class="card">
+            <div class="title">Wallet Gate</div>
+            <div class="small">
+              You must have an active linked wallet, and your S key saved locally on this device, to purchase.
+              Equip works without the S key.
+            </div>
+            <div class="small" style="margin-top:6px;">Active wallet pub</div>
+            <div class="mono" id="pub">—</div>
+
+            <div class="small" style="margin-top:10px;">Local S key</div>
+            <div class="mono" id="sStatus">—</div>
+
+            <div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:10px;">
+              <input id="sInput" placeholder="S... private key"
+                autocomplete="off" spellcheck="false" autocapitalize="none"
+                style="flex:1;min-width:220px;border-radius:999px;border:1px solid rgba(127,209,255,.6);background:#02061b;color:#edf3ff;font-size:12px;padding:8px 10px;outline:none;">
+              <button class="btn" id="saveS">Save S</button>
+              <button class="btn danger" id="forgetS">Forget</button>
+            </div>
+
+            <div class="small" style="margin-top:10px;">
+              Open full wallet if you need to create one, set active wallet, or reveal your S key.
+            </div>
+            <div style="display:flex;justify-content:flex-end;margin-top:10px;">
+              <a class="btn gold" href="/token/auth?next=/token/izza">Open full wallet</a>
+            </div>
+          </div>
+        </div>
+
+        <div class="footer">
+          <div class="small">
+            If you equip a skin or weapon here, it will persist in your DB inventory, and the lobby can show it on return.
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    // Manual landscape
+    (function(){
+      const wrapper = document.getElementById("rotWrapper");
+      function updateLayout(){
+        if (!wrapper) return;
+        const landscape = window.innerWidth >= window.innerHeight;
+        if (landscape){
+          wrapper.style.transform = "none";
+          wrapper.style.width = "100%";
+          wrapper.style.height = "100%";
+        } else {
+          wrapper.style.width = window.innerHeight + "px";
+          wrapper.style.height = window.innerWidth + "px";
+          wrapper.style.transform = "rotate(90deg) translateY(-100%)";
+        }
+      }
+      window.addEventListener("resize", updateLayout);
+      window.addEventListener("orientationchange", updateLayout);
+      updateLayout();
+    })();
+
+    // Username QS, same pattern you already use
+    const SRV_USER = {{ (player.username or '') | tojson }};
+    function stripAt(s){ return (s||"").toString().trim().replace(/^@+/, ""); }
+    function canonU(s){
+      const v = stripAt(s);
+      return v ? v.toLowerCase() : "";
+    }
+
+    const USER_CANON = (()=>{
+      const fromSrv = stripAt(SRV_USER);
+      if(fromSrv) return fromSrv;
+      try{
+        const raw = localStorage.getItem("piAuthUser");
+        if(raw){
+          const j = JSON.parse(raw);
+          if(j && j.username) return stripAt(j.username);
+        }
+      }catch(e){}
+      try{
+        const uCanon = localStorage.getItem("izzaUserCanon");
+        if(uCanon) return stripAt(uCanon);
+        const u = localStorage.getItem("izzaUserU");
+        if(u) return stripAt(u);
+      }catch(e){}
+      return "";
+    })();
+
+    const USER_U = canonU(USER_CANON);
+    function uQS(){
+      return USER_U ? ("?u=" + encodeURIComponent(USER_U)) : "";
+    }
+    if(USER_CANON){
+      try{
+        localStorage.setItem("izzaUserCanon", USER_CANON);
+        localStorage.setItem("izzaUserU", USER_U);
+      }catch(e){}
+    }
+
+    // Local vault, same as your lobby
+    function readVault(){
+      try{
+        const s = localStorage.getItem("izza_test_wallet");
+        return s ? JSON.parse(s) : null;
+      }catch(e){ return null; }
+    }
+    function writeVault(j){
+      try{ localStorage.setItem("izza_test_wallet", JSON.stringify(j || {})); }catch(e){}
+    }
+    function isLocalWallet(pub){
+      const v = readVault();
+      return !!(v && v.pub === pub && /^S[A-Z0-9]{55}$/.test(v.sec || ""));
+    }
+    function getLocalSecret(pub){
+      try{
+        const v = readVault();
+        if(!v) return "";
+        if(pub && v.pub !== pub) return "";
+        return v.sec || "";
+      }catch(e){ return ""; }
+    }
+    function forgetSecret(pub){
+      try{
+        const v = readVault() || {};
+        if(v && v.pub === pub){
+          delete v.sec;
+          writeVault(v);
+        }
+      }catch(e){}
+    }
+
+    async function fetchActiveWallet(){
+      const r = await fetch("/api/wallet/active" + uQS(), { credentials:"include" });
+      if(!r.ok) return null;
+      return r.json().catch(()=>null);
+    }
+    async function fetchBalances(){
+      const r = await fetch("/api/wallet/balances" + uQS(), { credentials:"include" });
+      if(!r.ok) return null;
+      return r.json().catch(()=>null);
+    }
+    async function linkActiveWallet(pub, secret){
+      const body = { pub:String(pub||"").trim().toUpperCase() };
+      if(secret && /^S[A-Z0-9]{55}$/.test(secret)) body.secret = secret.trim();
+      const r = await fetch("/api/wallet/link" + uQS(), {
+        method:"POST",
+        headers:{ "Content-Type":"application/json" },
+        body: JSON.stringify(body),
+        credentials:"include"
+      });
+      const j = await r.json().catch(()=>null);
+      return { ok:r.ok, status:r.status, json:j };
+    }
+
+    const elPub = document.getElementById("pub");
+    const elSStatus = document.getElementById("sStatus");
+    const elMsg = document.getElementById("msg");
+    const elShopList = document.getElementById("shopList");
+
+    function setMsg(t, kind){
+      if(!elMsg) return;
+      elMsg.textContent = t || "";
+      elMsg.className = "msg" + (kind ? (" " + kind) : "");
+    }
+
+    let ACTIVE_PUB = "";
+
+    async function refreshWalletUI(){
+      const active = await fetchActiveWallet();
+      const pub = (active && active.pub) ? String(active.pub).trim().toUpperCase() : "";
+      ACTIVE_PUB = pub;
+
+      if(elPub) elPub.textContent = pub || "—";
+
+      const hasS = pub && isLocalWallet(pub);
+      if(elSStatus){
+        elSStatus.textContent = hasS ? "Saved locally" : "Not saved";
+      }
+      return { pub, hasS };
+    }
+
+    async function walletGateForPurchase(){
+      if(!USER_U){
+        setMsg("Missing username, return to lobby and re-enter shop.", "err");
+        return null;
+      }
+      const { pub, hasS } = await refreshWalletUI();
+      if(!/^G[A-Z0-9]{55}$/.test(pub)){
+        setMsg("No active wallet, open full wallet, set active wallet, then return.", "err");
+        return null;
+      }
+      if(!hasS){
+        setMsg("Save your S key locally on this device before purchasing.", "err");
+        return null;
+      }
+      return { user: USER_U, pub, sec: getLocalSecret(pub) };
+    }
+
+    document.getElementById("saveS")?.addEventListener("click", async () => {
+      const active = await fetchActiveWallet();
+      const pub = (active && active.pub) ? String(active.pub).trim().toUpperCase() : "";
+      if(!/^G[A-Z0-9]{55}$/.test(pub)){
+        setMsg("No active wallet pub found. Open full wallet and set active wallet first.", "err");
+        return;
+      }
+      const secret = (document.getElementById("sInput")?.value || "").trim();
+      if(!/^S[A-Z0-9]{55}$/.test(secret)){
+        setMsg("Invalid S key, must start with S and be 56 chars.", "err");
+        return;
+      }
+      const v = readVault() || {};
+      v.pub = pub;
+      v.sec = secret;
+      writeVault(v);
+
+      const link = await linkActiveWallet(pub, secret);
+      if(!link.ok){
+        setMsg("Server link failed, " + ((link.json && link.json.error) || link.status), "err");
+      }else{
+        setMsg("S key saved locally and linked.", "ok");
+      }
+
+      document.getElementById("sInput").value = "";
+      await refreshWalletUI();
+    });
+
+    document.getElementById("forgetS")?.addEventListener("click", async () => {
+      await refreshWalletUI();
+      if(ACTIVE_PUB) forgetSecret(ACTIVE_PUB);
+      await refreshWalletUI();
+      setMsg("Local S key removed for this wallet on this device.", "ok");
+    });
+
+    document.getElementById("walletBtn")?.addEventListener("click", async () => {
+      await refreshWalletUI();
+      const b = await fetchBalances();
+      if(b){
+        setMsg("Balances, PI " + (b.pi || "—") + ", IZZA " + (b.izza || "—"), "ok");
+      }else{
+        setMsg("Unable to load balances right now.", "err");
+      }
+    });
+
+    // Shop logic
+    let CURRENT_TAB = "{{ default_tab }}";
+    const tabWeapons = document.getElementById("tabWeapons");
+    const tabSkins = document.getElementById("tabSkins");
+    const listTitle = document.getElementById("listTitle");
+    const listDesc = document.getElementById("listDesc");
+
+    function setActiveTab(tab){
+      CURRENT_TAB = tab;
+      tabWeapons?.classList.toggle("active", tab === "weapons");
+      tabSkins?.classList.toggle("active", tab === "skins");
+      if(listTitle) listTitle.textContent = tab === "weapons" ? "Weapons" : "Skins";
+      if(listDesc) listDesc.textContent = tab === "weapons"
+        ? "Unlock weapons, then equip before returning to lobby."
+        : "Unlock skins, then equip before returning to lobby.";
+    }
+
+    async function loadShop(){
+      setMsg("", "");
+      if(!elShopList) return;
+      elShopList.textContent = "Loading…";
+      try{
+        const res = await fetch("/warzone/api/shop?slot=" + encodeURIComponent(CURRENT_TAB) + "&" + (USER_U ? ("u=" + encodeURIComponent(USER_U)) : ""), {
+          credentials:"include"
+        });
+        const data = await res.json().catch(()=>null);
+        if(!res.ok){
+          elShopList.textContent = "Failed to load.";
+          setMsg("Shop load failed, " + ((data && data.error) || res.status), "err");
+          return;
+        }
+
+        const items = (data && data.items) || [];
+        elShopList.innerHTML = "";
+        if(!items.length){
+          elShopList.textContent = "No items configured.";
+          return;
+        }
+
+        items.forEach(it => {
+          const row = document.createElement("div");
+          row.className = "shop-item";
+
+          const main = document.createElement("div");
+          main.className = "shop-main";
+
+          const nm = document.createElement("div");
+          nm.className = "shop-name";
+          nm.textContent = it.name || it.sku;
+
+          const sub = document.createElement("div");
+          sub.className = "shop-sub";
+          sub.textContent = it.description || "";
+
+          main.appendChild(nm);
+          main.appendChild(sub);
+
+          const side = document.createElement("div");
+          side.className = "shop-side";
+
+          const price = document.createElement("div");
+          price.className = "price-tag" + (it.starting ? " start" : "");
+          price.textContent = it.starting ? "Starter" : (it.price_izza + " IZZA");
+          side.appendChild(price);
+
+          const btn = document.createElement("button");
+          btn.className = "shop-btn";
+          btn.dataset.sku = it.sku;
+          btn.dataset.price = it.price_izza;
+
+          if(it.equipped){
+            btn.classList.add("equipped","owned");
+            btn.textContent = "Equipped";
+          }else if(it.owned){
+            btn.classList.add("owned");
+            btn.textContent = "Equip";
+          }else if(it.starting){
+            btn.classList.add("equipped","owned");
+            btn.textContent = "Basic";
+          }else{
+            btn.textContent = "Buy";
+          }
+
+          btn.addEventListener("click", async () => {
+            if(it.starting) return;
+
+            if(it.owned && !it.equipped){
+              await equipItem(it.sku);
+              return;
+            }
+
+            if(!it.owned){
+              await purchaseItem(it.sku, it.name || it.sku, Number(it.price_izza || 0));
+              return;
+            }
+          });
+
+          side.appendChild(btn);
+
+          row.appendChild(main);
+          row.appendChild(side);
+          elShopList.appendChild(row);
+        });
+
+      }catch(e){
+        console.error(e);
+        elShopList.textContent = "Error loading shop.";
+        setMsg("Shop error.", "err");
+      }
+    }
+
+    async function purchaseItem(sku, name, price){
+      if(!price || price <= 0){
+        setMsg("Item price is not configured.", "err");
+        return;
+      }
+
+      const gate = await walletGateForPurchase();
+      if(!gate) return;
+
+      const ok = confirm("Spend " + price + " IZZA to unlock " + name + "?");
+      if(!ok) return;
+
+      setMsg("Submitting IZZA transfer…", "");
+
+      const res = await fetch("/warzone/api/purchase" + uQS(), {
+        method:"POST",
+        headers:{ "Content-Type":"application/json" },
+        body: JSON.stringify({
+          slot: CURRENT_TAB,
+          sku,
+          price_izza: price,
+          buyer_pub: gate.pub,
+          buyer_sec: gate.sec
+        }),
+        credentials:"include"
+      });
+
+      const data = await res.json().catch(()=>({}));
+
+      if(!res.ok || !data.ok){
+        setMsg("Purchase failed, " + String((data && (data.error || data.detail)) || res.status), "err");
+        return;
+      }
+
+      if(data.already_owned){
+        setMsg("Already owned, showing Equip.", "ok");
+      }else{
+        setMsg("Purchased, now equip it.", "ok");
+      }
+
+      await loadShop();
+      await refreshWalletUI();
+    }
+
+    async function equipItem(sku){
+      setMsg("Equipping…", "");
+      const res = await fetch("/warzone/api/equip" + uQS(), {
+        method:"POST",
+        headers:{ "Content-Type":"application/json" },
+        body: JSON.stringify({ slot: CURRENT_TAB, sku }),
+        credentials:"include"
+      });
+      const data = await res.json().catch(()=>({}));
+      if(!res.ok || !data.ok){
+        setMsg("Equip failed, " + String((data && data.error) || res.status), "err");
+        return;
+      }
+      setMsg("Equipped.", "ok");
+      await loadShop();
+    }
+
+    tabWeapons?.addEventListener("click", async () => {
+      setActiveTab("weapons");
+      await loadShop();
+    });
+    tabSkins?.addEventListener("click", async () => {
+      setActiveTab("skins");
+      await loadShop();
+    });
+
+    (async () => {
+      setActiveTab(CURRENT_TAB);
+      await refreshWalletUI();
+      await loadShop();
+    })();
+  </script>
+</body>
+</html>
