@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="utf-8">
-  <title>IZZA WAR ZONE — Lobby</title>
+  <title>IZZA WAR ZONE, Lobby</title>
   <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
   <style>
     :root{
@@ -639,6 +639,12 @@
         0 0 18px rgba(0,255,255,.35),
         0 0 18px rgba(255,59,107,.25);
     }
+    .purchase-actions button.closeonly{
+      border:none;
+      background:linear-gradient(90deg,#00e5b0,#62ffd5);
+      color:#001b11;
+      font-weight:900;
+    }
     .purchase-msg{
       margin-top:8px;
       font-size:11px;
@@ -664,7 +670,7 @@
         <div class="top-row">
           <div class="logo-block">
             <div class="izzacoin"></div>
-            <span>IZZA • WAR ZONE</span>
+            <span>IZZA, WAR ZONE</span>
           </div>
           <button class="deploy-btn" id="deployBtn">
             <span>Deploy</span>
@@ -681,10 +687,10 @@
             <div class="zone-header">
               <div>
                 <span>Drop zone</span>
-                <strong>Pre-deployment view</strong>
+                <strong>Pre deployment view</strong>
               </div>
               <div style="font-size:10px;color:#7fd1ff;">
-                IZZA maps · rotated view
+                IZZA maps, rotated view
               </div>
             </div>
 
@@ -716,7 +722,7 @@
                 <button class="btn-ghost secondary" id="searchBtn">Search players</button>
               </div>
               <div class="friends-foot">
-                War Zone runs its own party system. Invited Pi-authed friends
+                War Zone runs its own party system. Invited Pi authed friends
                 will appear standing beside your operator when they accept.
               </div>
             </div>
@@ -774,7 +780,7 @@
             </div>
             <div class="overlay-body">
               <p>
-                Use the IZZA keyboard to search Pi-authed IZZA WAR ZONE players
+                Use the IZZA keyboard to search Pi authed IZZA WAR ZONE players
                 and send lobby invites.
               </p>
               <div class="overlay-input-row">
@@ -827,7 +833,7 @@
                 </div>
               </div>
               <div style="margin-bottom:8px;font-size:11px;">
-                <div>Balances — Testnet</div>
+                <div>Balances, Testnet</div>
                 <div>Test Pi: <strong id="balPi">—</strong></div>
                 <div>Test IZZA: <strong id="balIzza">—</strong></div>
               </div>
@@ -865,7 +871,7 @@
         <div class="overlay" id="weaponsOverlay">
           <div class="overlay-card">
             <div class="overlay-header">
-              <div class="overlay-title">Armory — Weapons</div>
+              <div class="overlay-title">Armory, Weapons</div>
               <button class="overlay-close" data-close="weaponsOverlay">Close</button>
             </div>
             <div class="overlay-body">
@@ -878,8 +884,8 @@
                 Loading weapons…
               </div>
               <div class="shop-note">
-                Purchases are paid with Testnet IZZA from your active IZZA wallet,
-                using the same flow as IZZA CREATURE mints.
+                Purchases are paid with Testnet IZZA tokens from your active IZZA wallet,
+                using the same Pi approval flow as IZZA purchases elsewhere.
               </div>
             </div>
           </div>
@@ -889,7 +895,7 @@
         <div class="overlay" id="skinsOverlay">
           <div class="overlay-card">
             <div class="overlay-header">
-              <div class="overlay-title">Armory — Skins</div>
+              <div class="overlay-title">Armory, Skins</div>
               <button class="overlay-close" data-close="skinsOverlay">Close</button>
             </div>
             <div class="overlay-body">
@@ -902,9 +908,8 @@
                 Loading skins…
               </div>
               <div class="shop-note">
-                Skins are pure cosmetics and are <b>not</b> NFTs. They live in
-                your IZZA WAR ZONE inventory, purchased with IZZA like game
-                credits.
+                Skins are in game unlocks stored in your IZZA WAR ZONE inventory,
+                paid with real Testnet IZZA tokens from your IZZA wallet.
               </div>
             </div>
           </div>
@@ -919,8 +924,8 @@
             </div>
             <div class="overlay-body">
               <p>
-                You are about to purchase an in game War Zone item with IZZA.
-                This is not an NFT, it is a game unlock stored in your War Zone inventory.
+                You are about to spend Testnet IZZA tokens from your IZZA wallet to unlock a War Zone item.
+                After approval, the item becomes equipable and the Buy button turns into Equip.
               </p>
 
               <div class="purchase-box">
@@ -944,6 +949,7 @@
                 <div class="purchase-actions">
                   <button type="button" id="poCancel">Cancel</button>
                   <button type="button" class="approve" id="poApprove">Approve</button>
+                  <button type="button" class="closeonly" id="poClose" style="display:none;">Close</button>
                 </div>
 
                 <div class="purchase-msg" id="poMsg"></div>
@@ -1178,7 +1184,7 @@
         }
         if(!isLocalWallet(pub)){
           openWalletOverlay();
-          alert("Save your IZZA wallet S key locally (same as IZZA CREATURES page) before purchasing.");
+          alert("Save your IZZA wallet S key locally (same as other IZZA pages) before purchasing.");
           return null;
         }
         return { user, pub, sec:getLocalSecret(pub) };
@@ -1394,13 +1400,29 @@
       const poMsg  = document.getElementById("poMsg");
       const poCancel = document.getElementById("poCancel");
       const poApprove = document.getElementById("poApprove");
+      const poClose = document.getElementById("poClose");
 
       let __poResolve = null;
       let __poBusy = false;
 
+      function setButtonsMode(mode){
+        // mode: "approve" or "close"
+        if(!poCancel || !poApprove || !poClose) return;
+        if(mode === "close"){
+          poCancel.style.display = "none";
+          poApprove.style.display = "none";
+          poClose.style.display = "inline-block";
+        } else {
+          poCancel.style.display = "inline-block";
+          poApprove.style.display = "inline-block";
+          poClose.style.display = "none";
+        }
+      }
+
       function showPurchaseOverlay(payload){
         if(!po) return Promise.resolve({ approved:false });
         po.classList.add("visible");
+        setButtonsMode("approve");
         if(poMsg){
           poMsg.textContent = "";
           poMsg.className = "purchase-msg";
@@ -1427,6 +1449,11 @@
         closePurchaseOverlay({ approved:false });
       });
 
+      poClose?.addEventListener("click", () => {
+        if(__poBusy) return;
+        closePurchaseOverlay({ approved:false });
+      });
+
       window.__izzaShowPurchaseOverlay = showPurchaseOverlay;
       window.__izzaClosePurchaseOverlay = closePurchaseOverlay;
       window.__izzaPurchaseOverlaySetMsg = function(txt, kind){
@@ -1438,14 +1465,16 @@
         __poBusy = !!b;
         if(poApprove) poApprove.disabled = __poBusy;
         if(poCancel)  poCancel.disabled  = __poBusy;
+        if(poClose)   poClose.disabled   = __poBusy;
       };
       window.__izzaPurchaseOverlayApproveHook = function(fn){
         if(!poApprove) return;
         poApprove.onclick = fn;
       };
+      window.__izzaPurchaseOverlaySetButtonsMode = setButtonsMode;
     })();
 
-    // ---------- War Zone skin styling (Option A, same base soldier, different premium looks) ----------
+    // ---------- War Zone skin styling, same base soldier, different premium looks ----------
     (function(){
       if(!window.BABYLON) return;
 
@@ -1454,17 +1483,14 @@
 
         if(!s || s === "wz_basic_soldier") return "basic";
 
-        // Backward compatibility, if your shop still returns old sku names
-        if(s === "wz_neon_edge") return "neon_cyan";
+        if(s === "wz_neon_edge") return "neon_edge_black_cyan";
 
-        // Common premium names you can use in your shop config
         if(s.includes("gold")) return "gold_glow";
-        if(s.includes("cyan") || s.includes("neon")) return "neon_cyan";
+        if(s.includes("neon") || s.includes("cyan")) return "neon_edge_black_cyan";
         if(s.includes("purple") || s.includes("edge")) return "purple_edge";
         if(s.includes("crimson") || s.includes("red")) return "crimson_core";
         if(s.includes("obsidian") || s.includes("shadow") || s.includes("black")) return "obsidian_violet";
 
-        // default premium style
         return "purple_edge";
       }
 
@@ -1473,7 +1499,7 @@
         if(scene.__izzaGlowLayer) return scene.__izzaGlowLayer;
         try{
           const glow = new BABYLON.GlowLayer("izzaGlow", scene);
-          glow.intensity = 0.85;
+          glow.intensity = 0.95;
           scene.__izzaGlowLayer = glow;
           return glow;
         }catch(e){
@@ -1527,21 +1553,17 @@
         const style = styleForSku(sku);
         ensureGlowLayer(scene);
 
-        // Reset-ish defaults, keep it simple and consistent
+        // Reset defaults
         applyToAllMats(wrapper, (mesh, mat) => {
-          // If PBR material has metallic/roughness, leave it, only tint and emissive
-          // If StandardMaterial, also tint diffuse
           if(mat.albedoColor) setMatColor(mat, "albedo", safeColor3(0.92, 0.95, 1.0));
           if(mat.diffuseColor) setMatColor(mat, "diffuse", safeColor3(0.92, 0.95, 1.0));
           if(mat.emissiveColor) setMatColor(mat, "emissive", safeColor3(0,0,0));
         });
 
-        // Premium variants, same base soldier
         if(style === "basic"){
-          // small subtle glow so it still feels alive
           applyToAllMats(wrapper, (mesh, mat) => {
             if(isGlowPart(mesh, mat)){
-              setMatColor(mat, "emissive", safeColor3(0.0, 0.35, 0.4));
+              setMatColor(mat, "emissive", safeColor3(0.0, 0.28, 0.32));
             }
           });
           return;
@@ -1549,11 +1571,8 @@
 
         if(style === "gold_glow"){
           applyToAllMats(wrapper, (mesh, mat) => {
-            // warm gold tint
             if(mat.albedoColor) setMatColor(mat, "albedo", safeColor3(1.0, 0.84, 0.32));
             if(mat.diffuseColor) setMatColor(mat, "diffuse", safeColor3(1.0, 0.84, 0.32));
-
-            // highlight parts, strong emissive
             if(isGlowPart(mesh, mat)){
               setMatColor(mat, "emissive", safeColor3(1.0, 0.55, 0.10));
             }
@@ -1561,14 +1580,17 @@
           return;
         }
 
-        if(style === "neon_cyan"){
+        if(style === "neon_edge_black_cyan"){
+          // Neon Edge, black armor with cyan edge lights and subtle neon trims
           applyToAllMats(wrapper, (mesh, mat) => {
-            // cooler steel base
-            if(mat.albedoColor) setMatColor(mat, "albedo", safeColor3(0.70, 0.85, 1.0));
-            if(mat.diffuseColor) setMatColor(mat, "diffuse", safeColor3(0.70, 0.85, 1.0));
+            if(mat.albedoColor) setMatColor(mat, "albedo", safeColor3(0.12, 0.13, 0.16));
+            if(mat.diffuseColor) setMatColor(mat, "diffuse", safeColor3(0.12, 0.13, 0.16));
 
             if(isGlowPart(mesh, mat)){
               setMatColor(mat, "emissive", safeColor3(0.0, 1.0, 1.0));
+            } else {
+              // subtle cyan spill, very low
+              setMatColor(mat, "emissive", safeColor3(0.0, 0.03, 0.035));
             }
           });
           return;
@@ -1576,10 +1598,8 @@
 
         if(style === "purple_edge"){
           applyToAllMats(wrapper, (mesh, mat) => {
-            // dark tech base
-            if(mat.albedoColor) setMatColor(mat, "albedo", safeColor3(0.35, 0.38, 0.55));
-            if(mat.diffuseColor) setMatColor(mat, "diffuse", safeColor3(0.35, 0.38, 0.55));
-
+            if(mat.albedoColor) setMatColor(mat, "albedo", safeColor3(0.28, 0.30, 0.42));
+            if(mat.diffuseColor) setMatColor(mat, "diffuse", safeColor3(0.28, 0.30, 0.42));
             if(isGlowPart(mesh, mat)){
               setMatColor(mat, "emissive", safeColor3(0.78, 0.22, 1.0));
             }
@@ -1589,9 +1609,8 @@
 
         if(style === "crimson_core"){
           applyToAllMats(wrapper, (mesh, mat) => {
-            if(mat.albedoColor) setMatColor(mat, "albedo", safeColor3(0.55, 0.32, 0.35));
-            if(mat.diffuseColor) setMatColor(mat, "diffuse", safeColor3(0.55, 0.32, 0.35));
-
+            if(mat.albedoColor) setMatColor(mat, "albedo", safeColor3(0.46, 0.26, 0.28));
+            if(mat.diffuseColor) setMatColor(mat, "diffuse", safeColor3(0.46, 0.26, 0.28));
             if(isGlowPart(mesh, mat)){
               setMatColor(mat, "emissive", safeColor3(1.0, 0.15, 0.25));
             }
@@ -1601,9 +1620,8 @@
 
         if(style === "obsidian_violet"){
           applyToAllMats(wrapper, (mesh, mat) => {
-            if(mat.albedoColor) setMatColor(mat, "albedo", safeColor3(0.20, 0.22, 0.28));
-            if(mat.diffuseColor) setMatColor(mat, "diffuse", safeColor3(0.20, 0.22, 0.28));
-
+            if(mat.albedoColor) setMatColor(mat, "albedo", safeColor3(0.18, 0.19, 0.23));
+            if(mat.diffuseColor) setMatColor(mat, "diffuse", safeColor3(0.18, 0.19, 0.23));
             if(isGlowPart(mesh, mat)){
               setMatColor(mat, "emissive", safeColor3(0.55, 0.25, 1.0));
             }
@@ -1611,7 +1629,6 @@
           return;
         }
 
-        // fallback
         applyToAllMats(wrapper, (mesh, mat) => {
           if(isGlowPart(mesh, mat)){
             setMatColor(mat, "emissive", safeColor3(0.0, 1.0, 1.0));
@@ -1627,6 +1644,28 @@
     (function(){
       const weaponsList = document.getElementById("weaponsList");
       const skinsList   = document.getElementById("skinsList");
+
+      const SKIN_DESCRIPTIONS = {
+        wz_neon_edge: "Neon Edge, black armor with cyan edge lights and subtle neon trims.",
+        wz_gold_glow: "Gold Glow, warm gold plating with bright emissive highlights.",
+        wz_purple_edge: "Purple Edge, dark tech armor with violet edge lighting and visor glow.",
+        wz_crimson_core: "Crimson Core, red energy lines and aggressive core glow.",
+        wz_obsidian_violet: "Obsidian Violet, near black armor with deep violet emissive accents."
+      };
+
+      function normSku(s){ return (s || "").toString().trim().toLowerCase(); }
+
+      function guessSkinDescBySku(sku){
+        const s = normSku(sku);
+        if(!s) return "";
+        if(SKIN_DESCRIPTIONS[s]) return SKIN_DESCRIPTIONS[s];
+        if(s.includes("neon") || s.includes("cyan")) return SKIN_DESCRIPTIONS.wz_neon_edge;
+        if(s.includes("gold")) return SKIN_DESCRIPTIONS.wz_gold_glow;
+        if(s.includes("crimson") || s.includes("red")) return SKIN_DESCRIPTIONS.wz_crimson_core;
+        if(s.includes("obsidian") || s.includes("shadow") || s.includes("black")) return SKIN_DESCRIPTIONS.wz_obsidian_violet;
+        if(s.includes("purple") || s.includes("edge")) return SKIN_DESCRIPTIONS.wz_purple_edge;
+        return "Premium operator skin, unique armor tint and emissive edge lighting.";
+      }
 
       // OPTION A, Always use the working basic soldier asset for all skins
       function getSkinAsset(sku){
@@ -1715,7 +1754,6 @@
               normalizeToGroundAndHeight(wrapper, 1.75);
               wrapper.position.y += 0.05;
 
-              // APPLY premium style for this sku, still using the base soldier model
               if(window.__warzoneApplySkinStyle){
                 window.__warzoneApplySkinStyle(scene, wrapper, sku);
               }
@@ -1786,12 +1824,22 @@
 
             const main = document.createElement("div");
             main.className = "shop-main";
+
             const nm = document.createElement("div");
             nm.className = "shop-name";
             nm.textContent = it.name || it.sku;
+
             const sub = document.createElement("div");
             sub.className = "shop-sub";
-            sub.textContent = it.description || "";
+
+            let desc = it.description || "";
+            if(slot === "skins"){
+              if(!desc || !desc.trim()){
+                desc = guessSkinDescBySku(it.sku);
+              }
+            }
+            sub.textContent = desc;
+
             main.appendChild(nm);
             main.appendChild(sub);
 
@@ -1847,6 +1895,140 @@
         }
       }
 
+      async function piFlowPurchase(slot, sku, itemName, price, gate){
+        // Front end is ready for the Pi approve screen, backend will be updated next.
+        // This tries Pi flow endpoints first, if missing it throws, caller can fallback.
+        if(!window.Pi || !Pi.createPayment){
+          throw new Error("Pi SDK not available");
+        }
+
+        const qs = (window.__izzaUserQS && window.__izzaUserQS()) || "";
+        const createRes = await fetch("/warzone/api/pi_payment/create" + qs, {
+          method:"POST",
+          headers:{ "Content-Type":"application/json" },
+          body: JSON.stringify({
+            slot,
+            sku,
+            item_name: itemName,
+            amount_izza: price,
+            buyer_pub: gate.pub
+          }),
+          credentials:"include"
+        });
+        const createData = await createRes.json().catch(()=>null);
+        if(!createRes.ok || !createData){
+          throw new Error((createData && (createData.error || createData.detail)) || ("create " + createRes.status));
+        }
+
+        // Accept a few shapes so you can wire backend however you want
+        const paymentData =
+          createData.payment_data ||
+          createData.payment ||
+          createData.data ||
+          createData;
+
+        if(!paymentData || typeof paymentData !== "object"){
+          throw new Error("Bad payment data");
+        }
+
+        const payment = {
+          amount: paymentData.amount ?? String(price),
+          memo: paymentData.memo ?? ("IZZA WAR ZONE, " + (itemName || sku)),
+          metadata: paymentData.metadata ?? {
+            app: "izza-warzone",
+            slot,
+            sku,
+            buyer: gate.user
+          }
+        };
+
+        return new Promise((resolve, reject) => {
+          let settled = false;
+          function doneOk(payload){
+            if(settled) return;
+            settled = true;
+            resolve(payload || { ok:true });
+          }
+          function doneErr(err){
+            if(settled) return;
+            settled = true;
+            reject(err || new Error("Pi payment failed"));
+          }
+
+          try{
+            Pi.createPayment(payment, {
+              onReadyForServerApproval: async function(paymentId){
+                try{
+                  const r = await fetch("/warzone/api/pi_payment/approve" + qs, {
+                    method:"POST",
+                    headers:{ "Content-Type":"application/json" },
+                    body: JSON.stringify({ payment_id: paymentId, slot, sku }),
+                    credentials:"include"
+                  });
+                  const j = await r.json().catch(()=>({}));
+                  if(!r.ok || !j.ok){
+                    doneErr(new Error(j.error || j.detail || ("approve " + r.status)));
+                  }
+                }catch(e){
+                  doneErr(e);
+                }
+              },
+              onReadyForServerCompletion: async function(paymentId, txid){
+                try{
+                  const r = await fetch("/warzone/api/pi_payment/complete" + qs, {
+                    method:"POST",
+                    headers:{ "Content-Type":"application/json" },
+                    body: JSON.stringify({ payment_id: paymentId, txid: txid || null }),
+                    credentials:"include"
+                  });
+                  const j = await r.json().catch(()=>({}));
+                  if(!r.ok || !j.ok){
+                    doneErr(new Error(j.error || j.detail || ("complete " + r.status)));
+                    return;
+                  }
+                  doneOk(j);
+                }catch(e){
+                  doneErr(e);
+                }
+              },
+              onCancel: function(){
+                doneErr(new Error("cancelled"));
+              },
+              onError: function(err){
+                doneErr(err instanceof Error ? err : new Error(String(err || "error")));
+              }
+            });
+          }catch(e){
+            doneErr(e);
+          }
+        });
+      }
+
+      async function directSecretPurchase(slot, sku, itemName, price, gate){
+        // Existing direct method, keeps working until backend Pi flow is wired
+        const qs = (window.__izzaUserQS && window.__izzaUserQS()) || "";
+        const res = await fetch("/warzone/api/purchase" + qs, {
+          method:"POST",
+          headers:{ "Content-Type":"application/json" },
+          body: JSON.stringify({
+            slot,
+            sku,
+            price_izza: price,
+            buyer_pub: gate.pub,
+            buyer_sec: gate.sec
+          }),
+          credentials:"include"
+        });
+        const data = await res.json().catch(()=>({}));
+        if(!res.ok || !data.ok){
+          const msg = data && (data.error || data.detail) ? (data.error || data.detail) : res.status;
+          const err = new Error(String(msg || "purchase failed"));
+          err.__detail = msg;
+          throw err;
+        }
+        return data;
+      }
+
       async function purchaseItem(slot, sku, itemName, price){
         try{
           const gate = await window.__izzaWalletGate?.();
@@ -1863,6 +2045,8 @@
           if(showOverlay && closeOverlay){
             window.__izzaPurchaseOverlaySetBusy?.(false);
             window.__izzaPurchaseOverlaySetMsg?.("", "");
+            window.__izzaPurchaseOverlaySetButtonsMode?.("approve");
+
             const p = showOverlay({ sku, itemName, price, pub: gate.pub });
 
             window.__izzaPurchaseOverlayApproveHook?.(() => {
@@ -1875,52 +2059,60 @@
               return;
             }
           } else {
-            const ok = confirm(`Spend ${price} IZZA to unlock "${sku}"?`);
+            const ok = confirm(`Spend ${price} IZZA to unlock "${itemName || sku}"?`);
             if(!ok) return;
           }
 
           window.__izzaPurchaseOverlaySetBusy?.(true);
-          window.__izzaPurchaseOverlaySetMsg?.("Submitting IZZA payment…", "");
+          window.__izzaPurchaseOverlaySetMsg?.("Opening Pi approval…", "");
 
-          const qs = (window.__izzaUserQS && window.__izzaUserQS()) || "";
-          const res = await fetch("/warzone/api/purchase" + qs, {
-            method:"POST",
-            headers:{ "Content-Type":"application/json" },
-            body: JSON.stringify({
-              slot,
-              sku,
-              price_izza: price,
-              buyer_pub: gate.pub,
-              buyer_sec: gate.sec
-            }),
-            credentials:"include"
-          });
+          let purchaseOk = false;
+          let lastErr = null;
 
-          const data = await res.json().catch(()=>({}));
+          // Prefer Pi approval flow, fallback to direct secret method until backend is wired
+          try{
+            await piFlowPurchase(slot, sku, itemName, price, gate);
+            purchaseOk = true;
+          }catch(e){
+            lastErr = e;
+            // If user cancelled, treat as cancel and keep buttons normal
+            const msg = String((e && e.message) || e || "");
+            if(msg.toLowerCase().includes("cancel")){
+              window.__izzaPurchaseOverlaySetBusy?.(false);
+              window.__izzaPurchaseOverlaySetMsg?.("Purchase cancelled.", "error");
+              return;
+            }
+            // fallback
+            try{
+              window.__izzaPurchaseOverlaySetMsg?.("Pi approval unavailable, submitting purchase…", "");
+              await directSecretPurchase(slot, sku, itemName, price, gate);
+              purchaseOk = true;
+            }catch(e2){
+              lastErr = e2;
+              purchaseOk = false;
+            }
+          }
 
-          if(!res.ok || !data.ok){
-            const msg = data && (data.error || data.detail) ? (data.error || data.detail) : res.status;
-            window.__izzaPurchaseOverlaySetMsg?.("Purchase failed, " + msg, "error");
+          if(!purchaseOk){
+            const em = String((lastErr && lastErr.__detail) || (lastErr && lastErr.message) || lastErr || "Unknown error");
+            window.__izzaPurchaseOverlaySetMsg?.("Purchase failed, " + em, "error");
             window.__izzaPurchaseOverlaySetBusy?.(false);
-            if(!window.__izzaPurchaseOverlaySetMsg) alert("Purchase failed: " + msg);
+            window.__izzaPurchaseOverlaySetButtonsMode?.("close");
             return;
           }
 
-          window.__izzaPurchaseOverlaySetMsg?.("Purchase complete, added to your inventory.", "ok");
+          window.__izzaPurchaseOverlaySetMsg?.("Success, you can now equip this item.", "ok");
           window.__izzaPurchaseOverlaySetBusy?.(false);
+          window.__izzaPurchaseOverlaySetButtonsMode?.("close");
 
-          setTimeout(() => {
-            window.__izzaClosePurchaseOverlay?.({ approved:false });
-          }, 650);
-
-          // THIS IS THE SIMPLE FIX YOU WANT,
-          // purchase succeeds, reload shop so button flips Buy -> Equip immediately
+          // When they close, the item should already be equipable, we reload now so it flips immediately
           await loadShop(slot);
 
         }catch(e){
           console.error(e);
           window.__izzaPurchaseOverlaySetMsg?.("Purchase error, try again.", "error");
           window.__izzaPurchaseOverlaySetBusy?.(false);
+          window.__izzaPurchaseOverlaySetButtonsMode?.("close");
           if(!window.__izzaPurchaseOverlaySetMsg) alert("Purchase error. Try again.");
         }
       }
@@ -1942,7 +2134,6 @@
 
           await loadShop(slot);
 
-          // Update lobby soldier instantly, same base model, premium style applied by sku
           if(slot === "skins" && window.__warzoneSetLobbySkin){
             window.__warzoneSetLobbySkin(sku);
           }
@@ -1972,7 +2163,6 @@
       let currentWrapper = null;
       let currentContainer = null;
 
-      // OPTION A, Always use the working basic soldier for lobby
       function getSkinAsset(sku){
         return { rootUrl:"/assets/warzone3d/soldier_gltf_3/", fileName:"scene.gltf" };
       }
@@ -2016,7 +2206,6 @@
 
         const asset = getSkinAsset(sku || "wz_basic_soldier");
 
-        // dispose old
         try{
           if(currentContainer){
             currentContainer.removeAllFromScene();
@@ -2048,7 +2237,6 @@
           wrapper.scaling.scaleInPlace(0.72);
           wrapper.position.y += 0.02;
 
-          // APPLY premium skin visuals based on sku
           if(window.__warzoneApplySkinStyle){
             window.__warzoneApplySkinStyle(scene, wrapper, sku || "wz_basic_soldier");
           }
