@@ -840,7 +840,22 @@
       }catch(e){}
     }
     // --------------------------------------------------------
+// ---------- Babylon.js lobby soldier ----------
+(function(){
+  const canvas = document.getElementById("soldierCanvas");
+  if (!canvas || !window.BABYLON) {
+    console.warn("[WARZONE] soldier canvas or BABYLON missing");
+    return;
+  }
 
+  const engine = new BABYLON.Engine(canvas, true, {
+    preserveDrawingBuffer:true,
+    stencil:true
+  });
+
+  let scene, camera;
+  let currentWrapper = null;
+  let currentContainer = null;
       /* SHADOW ANCHOR (NEW) */
   let shadowPlane = null;
   let shadowMat = null;
