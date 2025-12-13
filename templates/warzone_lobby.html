@@ -332,7 +332,7 @@
       flex-wrap:wrap;
     }
 
-    /* Overlays (friends / search / matchmaking / shop / wallet) */
+    /* Overlays */
     .overlay{
       position:absolute;
       inset:0;
@@ -590,7 +590,7 @@
       color:#9fb0d6;
     }
 
-    /* Purchase confirm overlay, replaces iOS rotated confirm() */
+    /* Purchase confirm overlay */
     .purchase-box{
       border-radius:14px;
       border:1px solid rgba(66,91,168,.85);
@@ -648,15 +648,12 @@
     .purchase-msg.error{ color:#ffb86b; }
     .purchase-msg.ok{ color:#5ad49e; }
 
-    /* Stack panels on very short screens */
     @media (max-height:620px){
-      .main-row{
-        grid-template-columns:1fr;
-      }
+      .main-row{ grid-template-columns:1fr; }
     }
   </style>
+
   <script src="https://sdk.minepi.com/pi-sdk.js"></script>
-  <!-- Babylon.js for 3D lobby soldier + shop previews -->
   <script src="https://cdn.babylonjs.com/babylon.js"></script>
   <script src="https://cdn.babylonjs.com/loaders/babylonjs.loaders.min.js"></script>
 </head>
@@ -690,16 +687,14 @@
                 IZZA maps · rotated view
               </div>
             </div>
-            <!-- map image comes from map_image_url, or falls back to /assets/warzone-map-izzacity.jpg -->
+
             <div
               class="zone-canvas-shell"
               id="zoneCanvasShell"
               style="background-image:url('{{ map_image_url or "/assets/warzone-map-izzacity.jpg" }}');">
-              <!-- 3D soldier rendered on top of the map -->
               <canvas id="soldierCanvas" class="zone-soldier-canvas"></canvas>
             </div>
 
-            <!-- IZZA WALLET controls under the image area -->
             <div class="loadout-bar">
               <div class="loadout-label">IZZA wallet</div>
               <div class="loadout-actions">
@@ -770,7 +765,7 @@
           </div>
         </div>
 
-        <!-- SEARCH OVERLAY (custom IZZA keyboard) -->
+        <!-- SEARCH OVERLAY -->
         <div class="overlay" id="searchOverlay">
           <div class="overlay-card">
             <div class="overlay-header">
@@ -811,7 +806,7 @@
           </div>
         </div>
 
-        <!-- WALLET OVERLAY (S-key save, same flow as IZZA CREATURES) -->
+        <!-- WALLET OVERLAY -->
         <div class="overlay" id="walletOverlay">
           <div class="overlay-card">
             <div class="overlay-header">
@@ -915,7 +910,7 @@
           </div>
         </div>
 
-        <!-- PURCHASE CONFIRM OVERLAY, replaces confirm() so iOS rotation is correct -->
+        <!-- PURCHASE CONFIRM OVERLAY -->
         <div class="overlay" id="purchaseOverlay">
           <div class="overlay-card">
             <div class="overlay-header">
@@ -962,7 +957,7 @@
   </div>
 
   <script>
-    // Pi SDK init (same pattern as creatures page)
+    // Pi SDK init
     (function(){
       const sandbox = {{ 'true' if PI_SANDBOX else 'false' }};
       try{
@@ -972,7 +967,7 @@
       }catch(e){}
     })();
 
-    // Manual landscape: disable rotation when the browser is truly landscape (desktop)
+    // Manual landscape
     (function(){
       const wrapper = document.getElementById("rotWrapper");
       function updateLayout(){
@@ -993,16 +988,15 @@
       updateLayout();
     })();
 
-    // ---------- IZZA wallet helpers + wallet overlay (mirrors creatures flow) ----------
+    // ---------- IZZA wallet helpers ----------
     (function(){
       const SRV_USER = {{ (player.username or '') | tojson }};
       function stripAt(s){ return (s||"").toString().trim().replace(/^@+/, ""); }
-
-      // NEW: canonical username + a helper that always returns a safe ?u=<username> querystring.
       function canonU(s){
         const v = stripAt(s);
         return v ? v.toLowerCase() : "";
       }
+
       const USER_CANON = (()=>{
         const fromSrv = stripAt(SRV_USER);
         if(fromSrv) return fromSrv;
@@ -1022,7 +1016,6 @@
         return "";
       })();
 
-      // NEW: this is what we will use everywhere to guarantee the backend receives ?u=
       const USER_U = canonU(USER_CANON);
       function uQS(){
         return USER_U ? ("?u=" + encodeURIComponent(USER_U)) : "";
@@ -1092,7 +1085,6 @@
         return r.json().catch(()=>null);
       }
 
-      // Wallet overlay elements
       const walletOverlay = document.getElementById("walletOverlay");
       const mwUser   = document.getElementById("mwUser");
       const mwPub    = document.getElementById("mwPub");
@@ -1192,16 +1184,14 @@
         return { user, pub, sec:getLocalSecret(pub) };
       }
 
-      // Expose for shop code + wallet button
       window.__izzaWalletGate = ensureUserAndWalletGate;
       window.__izzaOpenWalletOverlay = openWalletOverlay;
 
-      // NEW: expose canonical ?u for Warzone API calls
       window.__izzaUserU = USER_U;
       window.__izzaUserQS = uQS;
     })();
 
-    // ---------- Overlays (friends / search / matchmaking / armory / wallet button hooks) ----------
+    // ---------- Overlays ----------
     (function(){
       function show(id){
         const el = document.getElementById(id);
@@ -1419,9 +1409,7 @@
         if(poCost) poCost.textContent = (payload.price || 0) + " IZZA";
         if(poFrom) poFrom.textContent = payload.pub || "—";
 
-        return new Promise((resolve) => {
-          __poResolve = resolve;
-        });
+        return new Promise((resolve) => { __poResolve = resolve; });
       }
 
       function closePurchaseOverlay(result){
@@ -1439,7 +1427,6 @@
         closePurchaseOverlay({ approved:false });
       });
 
-      // Approve click is handled by purchaseItem so it can show progress, and then close.
       window.__izzaShowPurchaseOverlay = showPurchaseOverlay;
       window.__izzaClosePurchaseOverlay = closePurchaseOverlay;
       window.__izzaPurchaseOverlaySetMsg = function(txt, kind){
@@ -1458,10 +1445,58 @@
       };
     })();
 
-    // ---------- Armory load + IZZA purchases + 3D previews ----------
+    // ---------- Armory load + purchases + 3D previews ----------
     (function(){
       const weaponsList = document.getElementById("weaponsList");
       const skinsList   = document.getElementById("skinsList");
+
+      // IMPORTANT: skin asset routing, matches your working test page
+      function getSkinAsset(sku){
+        // your two known working skins
+        if(sku === "wz_basic_soldier"){
+          return { rootUrl:"/assets/warzone3d/soldier_gltf_3/", fileName:"scene.gltf" };
+        }
+        if(sku === "wz_neon_edge"){
+          return { rootUrl:"/assets/warzone3d/skins/wz_neon_edge/", fileName:"scene.gltf" };
+        }
+        // future default convention
+        return { rootUrl:"/assets/warzone3d/skins/" + sku + "/", fileName:"scene.gltf" };
+      }
+
+      function getWeaponAsset(sku){
+        // you can change this later when you add real weapon assets
+        return { rootUrl:"/assets/warzone3d/weapons/", fileName: sku + ".glb" };
+      }
+
+      // shared normalization helpers (same idea as your working test page)
+      function getBounds(node){
+        const b = node.getHierarchyBoundingVectors(true);
+        return { min: b.min.clone(), max: b.max.clone() };
+      }
+      function normalizeToGroundAndHeight(root, targetHeight){
+        const bb1 = getBounds(root);
+        const h1 = Math.max(0.000001, (bb1.max.y - bb1.min.y));
+        const s = (targetHeight || 1.75) / h1;
+        root.scaling = new BABYLON.Vector3(s,s,s);
+
+        const bb2 = getBounds(root);
+        root.position.y -= bb2.min.y;
+
+        return s;
+      }
+      function frameCameraToRoot(camera, root){
+        try{
+          const bb = getBounds(root);
+          const size = bb.max.subtract(bb.min);
+          const maxDim = Math.max(size.x, size.y, size.z) || 1.0;
+          const center = bb.min.add(size.scale(0.5));
+
+          camera.target = new BABYLON.Vector3(center.x, center.y + (maxDim * 0.25), center.z);
+          camera.radius = Math.max(2.2, maxDim * 2.1);
+          camera.lowerRadiusLimit = camera.radius;
+          camera.upperRadiusLimit = camera.radius;
+        }catch(e){}
+      }
 
       function createShopPreview(canvas, slot, sku){
         if (!canvas || !window.BABYLON) return;
@@ -1470,78 +1505,81 @@
           preserveDrawingBuffer:true,
           stencil:false
         });
+
         const scene = new BABYLON.Scene(engine);
         scene.clearColor = new BABYLON.Color4(0,0,0,0);
 
         const camera = new BABYLON.ArcRotateCamera(
           "c",
-          Math.PI * 1.4,
-          Math.PI / 2.4,
-          2.0,
-          new BABYLON.Vector3(0,0.8,0),
+          Math.PI * 1.35,
+          Math.PI / 2.35,
+          3.0,
+          new BABYLON.Vector3(0,0.9,0),
           scene
         );
         camera.attachControl(canvas, false);
         camera.inputs.clear();
-        camera.lowerRadiusLimit = camera.radius;
-        camera.upperRadiusLimit = camera.radius;
         camera.panningSensibility = 0;
 
         const light = new BABYLON.HemisphericLight("h", new BABYLON.Vector3(0,1,0), scene);
-        light.intensity = 1.1;
+        light.intensity = 1.15;
 
-        let base = "/assets/warzone3d/";
-        let url;
-
-        if (slot === "weapons") {
-          base += "weapons/";
-          url = base + sku + ".glb";
+        let asset;
+        if(slot === "weapons"){
+          asset = getWeaponAsset(sku);
         } else {
-          base += "skins/";
-          url = base + sku + "/scene.gltf";
+          asset = getSkinAsset(sku);
         }
 
-        const lastSlash = url.lastIndexOf("/");
-        const rootUrl = url.substring(0, lastSlash + 1);
-        const fileName = url.substring(lastSlash + 1);
+        // KEY FIX: preserve GLTF hierarchy, do NOT reparent every mesh
+        (async () => {
+          try{
+            const container = await BABYLON.SceneLoader.LoadAssetContainerAsync(asset.rootUrl, asset.fileName, scene);
+            container.addAllToScene();
 
-        BABYLON.SceneLoader.ImportMesh(
-          "",
-          rootUrl,
-          fileName,
-          scene,
-          function(meshes, ps, skeletons, animGroups){
-            const root = new BABYLON.TransformNode("shopRoot", scene);
-            meshes.forEach(m => { m.parent = root; });
+            const wrapper = new BABYLON.TransformNode("shopWrap_" + slot + "_" + sku, scene);
 
-            // Surgical fix for the starter skin preview being too zoomed.
-            // Only affects wz_basic_soldier in skins list.
-            if(slot === "skins" && sku === "wz_basic_soldier"){
-              root.position = new BABYLON.Vector3(0,-0.85,0);
-              root.rotation = new BABYLON.Vector3(0,Math.PI,0);
-              root.scaling  = new BABYLON.Vector3(0.42,0.42,0.42);
-              camera.radius = 3.4;
-              camera.lowerRadiusLimit = camera.radius;
-              camera.upperRadiusLimit = camera.radius;
-              camera.target = new BABYLON.Vector3(0,0.75,0);
+            // Only parent top-level nodes/meshes (no parent) to wrapper
+            container.meshes.forEach(m => { if(m && !m.parent) m.parent = wrapper; });
+            container.transformNodes.forEach(n => { if(n && !n.parent) n.parent = wrapper; });
+
+            wrapper.rotation.y = Math.PI;
+
+            // normalize and frame
+            if(slot === "skins"){
+              normalizeToGroundAndHeight(wrapper, 1.75);
+
+              // Small “looks nice” nudge for tiny preview boxes
+              wrapper.position.y += 0.05;
             } else {
-              root.position = new BABYLON.Vector3(0,-0.5,0);
-              root.rotation = new BABYLON.Vector3(0,Math.PI,0);
-              root.scaling  = new BABYLON.Vector3(1.2,1.2,1.2);
+              // weapons: keep simple for now, you can upgrade later
+              wrapper.position.y = 0;
             }
 
-            if (animGroups && animGroups.length){
-              animGroups.forEach(g => g.stop());
-              animGroups[0].start(true);
+            frameCameraToRoot(camera, wrapper);
+
+            if(container.animationGroups && container.animationGroups.length){
+              container.animationGroups.forEach(g => g.stop());
+              container.animationGroups[0].start(true);
             }
-          },
-          null,
-          function(err){
-            console.warn("Preview load failed for", slot, sku, err);
+
+            scene.onBeforeRenderObservable.add(() => {
+              wrapper.rotation.y += engine.getDeltaTime() * 0.00035;
+            });
+
+          }catch(e){
+            console.warn("Preview load failed for", slot, sku, e);
           }
-        );
+        })();
 
-        engine.runRenderLoop(function(){ scene.render(); });
+        engine.runRenderLoop(() => scene.render());
+
+        // avoid leaks when overlay closes later
+        window.addEventListener("beforeunload", () => {
+          try{ engine.stopRenderLoop(); }catch(e){}
+          try{ scene.dispose(); }catch(e){}
+          try{ engine.dispose(); }catch(e){}
+        });
       }
 
       async function loadShop(slot){
@@ -1549,7 +1587,6 @@
         if(!listEl) return;
         listEl.textContent = "Loading " + slot + "…";
         try{
-          // Keep cookies, but purchases will also include ?u=.
           const res = await fetch(
             `/warzone/api/shop?slot=${encodeURIComponent(slot)}`,
             { credentials: "include" }
@@ -1620,12 +1657,12 @@
             }
 
             btn.addEventListener("click", async function(){
-              const owned = this.classList.contains("owned") && !this.classList.contains("equipped") && !it.starting;
-              if(owned){
-                await equipItem(slot, it.sku, listEl);
+              const canEquip = this.classList.contains("owned") && !this.classList.contains("equipped") && !it.starting;
+              if(canEquip){
+                await equipItem(slot, it.sku);
               }else if(!this.classList.contains("equipped") && !it.starting){
                 const price = Number(this.dataset.price || 0);
-                await purchaseItem(slot, it.sku, it.name || it.sku, price, listEl);
+                await purchaseItem(slot, it.sku, it.name || it.sku, price);
               }
             });
 
@@ -1644,7 +1681,7 @@
         }
       }
 
-      async function purchaseItem(slot, sku, itemName, price, listEl){
+      async function purchaseItem(slot, sku, itemName, price){
         try{
           const gate = await window.__izzaWalletGate?.();
           if(!gate) return;
@@ -1676,10 +1713,9 @@
             if(!ok) return;
           }
 
-          if(window.__izzaPurchaseOverlaySetBusy) window.__izzaPurchaseOverlaySetBusy(true);
-          if(window.__izzaPurchaseOverlaySetMsg) window.__izzaPurchaseOverlaySetMsg("Submitting IZZA payment…", "");
+          window.__izzaPurchaseOverlaySetBusy?.(true);
+          window.__izzaPurchaseOverlaySetMsg?.("Submitting IZZA payment…", "");
 
-          // NEW: always include ?u=<username> on purchase (bulletproof against iOS cookie issues)
           const qs = (window.__izzaUserQS && window.__izzaUserQS()) || "";
           const res = await fetch("/warzone/api/purchase" + qs, {
             method:"POST",
@@ -1698,42 +1734,34 @@
 
           if(!res.ok || !data.ok){
             const msg = data && (data.error || data.detail) ? (data.error || data.detail) : res.status;
-            if(window.__izzaPurchaseOverlaySetMsg){
-              window.__izzaPurchaseOverlaySetMsg("Purchase failed, " + msg, "error");
-              window.__izzaPurchaseOverlaySetBusy(false);
-              return;
-            }
-            alert("Purchase failed: " + msg);
+            window.__izzaPurchaseOverlaySetMsg?.("Purchase failed, " + msg, "error");
+            window.__izzaPurchaseOverlaySetBusy?.(false);
+            if(!window.__izzaPurchaseOverlaySetMsg) alert("Purchase failed: " + msg);
             return;
           }
 
-          if(window.__izzaPurchaseOverlaySetMsg){
-            window.__izzaPurchaseOverlaySetMsg("Purchase complete, added to your inventory.", "ok");
-            window.__izzaPurchaseOverlaySetBusy(false);
-            setTimeout(() => {
-              window.__izzaClosePurchaseOverlay?.({ approved:false });
-            }, 650);
-          } else {
-            alert("Purchase complete. Item added to your inventory.");
-          }
+          window.__izzaPurchaseOverlaySetMsg?.("Purchase complete, added to your inventory.", "ok");
+          window.__izzaPurchaseOverlaySetBusy?.(false);
 
-          // Always reload, this is what makes the button switch to Equip
+          setTimeout(() => {
+            window.__izzaClosePurchaseOverlay?.({ approved:false });
+          }, 650);
+
+          // reload to flip Buy -> Equip
           await loadShop(slot);
 
         }catch(e){
           console.error(e);
-          if(window.__izzaPurchaseOverlaySetMsg){
-            window.__izzaPurchaseOverlaySetMsg("Purchase error, try again.", "error");
-            window.__izzaPurchaseOverlaySetBusy(false);
-            return;
-          }
-          alert("Purchase error. Try again.");
+          window.__izzaPurchaseOverlaySetMsg?.("Purchase error, try again.", "error");
+          window.__izzaPurchaseOverlaySetBusy?.(false);
+          if(!window.__izzaPurchaseOverlaySetMsg) alert("Purchase error. Try again.");
         }
       }
 
-      async function equipItem(slot, sku, listEl){
+      async function equipItem(slot, sku){
         try{
-          const res = await fetch("/warzone/api/equip", {
+          const qs = (window.__izzaUserQS && window.__izzaUserQS()) || "";
+          const res = await fetch("/warzone/api/equip" + qs, {
             method:"POST",
             headers:{ "Content-Type":"application/json" },
             body: JSON.stringify({ slot, sku }),
@@ -1742,8 +1770,15 @@
           const data = await res.json().catch(()=>({}));
           if(!res.ok || !data.ok){
             alert("Equip failed: " + (data.error || res.status));
-          }else{
-            await loadShop(slot);
+            return;
+          }
+
+          // Reload list so Equipped badge updates
+          await loadShop(slot);
+
+          // ALSO update the lobby soldier immediately when a skin is equipped
+          if(slot === "skins" && window.__warzoneSetLobbySkin){
+            window.__warzoneSetLobbySkin(sku);
           }
         }catch(e){
           console.error(e);
@@ -1752,9 +1787,11 @@
       }
 
       window.__izzaLoadShop = loadShop;
+
+      // Optional: auto refresh shop button states after purchase overlay closes
     })();
 
-    // ---------- Babylon.js mini-scene for lobby soldier ----------
+    // ---------- Babylon.js lobby soldier ----------
     (function(){
       const canvas = document.getElementById("soldierCanvas");
       if (!canvas || !window.BABYLON) {
@@ -1768,9 +1805,121 @@
       });
 
       let scene, camera;
-      let currentRoot = null;
 
-      const SOLDIER_ASSET = "/assets/warzone3d/soldier_gltf_3/scene.gltf";
+      // current container/wrapper for lobby soldier
+      let currentWrapper = null;
+      let currentContainer = null;
+
+      // Same routing as shop previews
+      function getSkinAsset(sku){
+        if(sku === "wz_neon_edge"){
+          return { rootUrl:"/assets/warzone3d/skins/wz_neon_edge/", fileName:"scene.gltf" };
+        }
+        // default + starter
+        return { rootUrl:"/assets/warzone3d/soldier_gltf_3/", fileName:"scene.gltf" };
+      }
+
+      function getBounds(node){
+        const b = node.getHierarchyBoundingVectors(true);
+        return { min: b.min.clone(), max: b.max.clone() };
+      }
+      function normalizeToGroundAndHeight(root, targetHeight){
+        const bb1 = getBounds(root);
+        const h1 = Math.max(0.000001, (bb1.max.y - bb1.min.y));
+        const s = (targetHeight || 1.75) / h1;
+        root.scaling = new BABYLON.Vector3(s,s,s);
+        const bb2 = getBounds(root);
+        root.position.y -= bb2.min.y;
+        return s;
+      }
+
+      function frameCameraToRoot(root){
+        try{
+          const bb = getBounds(root);
+          const size = bb.max.subtract(bb.min);
+          const maxDim = Math.max(size.x, size.y, size.z) || 1.0;
+          const center = bb.min.add(size.scale(0.5));
+
+          const radius = Math.max(2.6, maxDim * 2.4);
+          camera.target = new BABYLON.Vector3(center.x, center.y + (maxDim * 0.42), center.z);
+          camera.radius = radius;
+          camera.alpha  = Math.PI * 1.3;
+          camera.beta   = Math.PI / 2.35;
+          camera.lowerRadiusLimit = radius * 0.95;
+          camera.upperRadiusLimit = radius * 1.2;
+        }catch(e){
+          camera.target = new BABYLON.Vector3(0,1,0);
+          camera.radius = 3.0;
+        }
+      }
+
+      async function setLobbySkin(sku){
+        if(!scene) return;
+
+        const asset = getSkinAsset(sku || "wz_basic_soldier");
+
+        // dispose old
+        try{
+          if(currentContainer){
+            currentContainer.removeAllFromScene();
+            currentContainer.dispose();
+            currentContainer = null;
+          }
+        }catch(e){}
+        try{
+          if(currentWrapper){
+            currentWrapper.dispose(true, false);
+            currentWrapper = null;
+          }
+        }catch(e){}
+
+        try{
+          const container = await BABYLON.SceneLoader.LoadAssetContainerAsync(asset.rootUrl, asset.fileName, scene);
+          container.addAllToScene();
+          currentContainer = container;
+
+          const wrapper = new BABYLON.TransformNode("lobbySkinWrap", scene);
+          currentWrapper = wrapper;
+
+          // parent only top-level nodes/meshes (preserve hierarchy)
+          container.meshes.forEach(m => { if(m && !m.parent) m.parent = wrapper; });
+          container.transformNodes.forEach(n => { if(n && !n.parent) n.parent = wrapper; });
+
+          wrapper.rotation.y = Math.PI;
+
+          // Keep your current lobby look: slightly smaller and centered
+          normalizeToGroundAndHeight(wrapper, 1.75);
+          wrapper.scaling.scaleInPlace(0.72);
+
+          // small position tweak so boots sit nicely in the map window
+          wrapper.position.y += 0.02;
+
+          frameCameraToRoot(wrapper);
+
+          // animation if exists
+          if(container.animationGroups && container.animationGroups.length){
+            container.animationGroups.forEach(g => g.stop());
+            container.animationGroups[0].start(true);
+          }
+
+        }catch(e){
+          console.error("[WARZONE] setLobbySkin failed", sku, e);
+        }
+      }
+
+      async function fetchEquippedSkinSku(){
+        // If your backend already returns equipped inside /warzone/api/shop?slot=skins,
+        // we can reuse that without adding a new endpoint.
+        try{
+          const res = await fetch("/warzone/api/shop?slot=skins", { credentials:"include" });
+          if(!res.ok) return "wz_basic_soldier";
+          const data = await res.json().catch(()=>null);
+          const items = (data && data.items) || [];
+          const eq = items.find(x => x && x.equipped);
+          if(eq && eq.sku) return eq.sku;
+        }catch(e){}
+        return "wz_basic_soldier";
+      }
 
       function createScene(){
         scene = new BABYLON.Scene(engine);
@@ -1779,7 +1928,7 @@
         camera = new BABYLON.ArcRotateCamera(
           "cam",
           Math.PI * 1.3,
-          Math.PI / 2.4,
+          Math.PI / 2.35,
           3.0,
           new BABYLON.Vector3(0,1,0),
           scene
@@ -1788,133 +1937,26 @@
         camera.inputs.clear();
         camera.panningSensibility = 0;
 
-        const light = new BABYLON.HemisphericLight(
-          "h",
-          new BABYLON.Vector3(0,1,0),
-          scene
-        );
+        const light = new BABYLON.HemisphericLight("h", new BABYLON.Vector3(0,1,0), scene);
         light.intensity = 1.2;
 
-        loadSoldier();
+        engine.runRenderLoop(() => { if(scene) scene.render(); });
+        window.addEventListener("resize", () => engine.resize());
 
-        engine.runRenderLoop(function(){
-          if (scene){ scene.render(); }
+        // Spin (keeps your existing lobby vibe)
+        scene.onBeforeRenderObservable.add(() => {
+          if(currentWrapper){
+            currentWrapper.rotation.y += scene.getEngine().getDeltaTime() * 0.0003;
+          }
         });
 
-        window.addEventListener("resize", function(){
-          engine.resize();
-        });
+        (async () => {
+          const equippedSku = await fetchEquippedSkinSku();
+          await setLobbySkin(equippedSku);
+        })();
       }
 
-      function frameCameraFromMeshes(meshes){
-        try{
-          if (!meshes || !meshes.length || !camera) return;
-
-          let min = new BABYLON.Vector3(
-            Number.POSITIVE_INFINITY,
-            Number.POSITIVE_INFINITY,
-            Number.POSITIVE_INFINITY
-          );
-          let max = new BABYLON.Vector3(
-            Number.NEGATIVE_INFINITY,
-            Number.NEGATIVE_INFINITY,
-            Number.NEGATIVE_INFINITY
-          );
-
-          let any = false;
-
-          for (const m of meshes){
-            if (!m || !m.getBoundingInfo || m.getTotalVertices() === 0) continue;
-            m.computeWorldMatrix(true);
-            const bi   = m.getBoundingInfo();
-            const bmin = bi.boundingBox.minimumWorld;
-            const bmax = bi.boundingBox.maximumWorld;
-
-            if (!isFinite(bmin.x) || !isFinite(bmin.y) || !isFinite(bmin.z)) continue;
-            if (!isFinite(bmax.x) || !isFinite(bmax.y) || !isFinite(bmax.z)) continue;
-
-            min = BABYLON.Vector3.Minimize(min, bmin);
-            max = BABYLON.Vector3.Maximize(max, bmax);
-            any = true;
-          }
-
-          if (!any) throw new Error("no finite bounds");
-
-          const size = max.subtract(min);
-          const maxDim = Math.max(size.x, size.y, size.z) || 1.0;
-          const center = min.add(size.scale(0.5));
-
-          const baseRadius = maxDim * 0.9;
-          const radius     = baseRadius * 3.0;
-
-          const offsetY    = maxDim * 0.50;
-          const finalTarget = new BABYLON.Vector3(center.x, center.y + offsetY, center.z);
-
-          camera.target = finalTarget;
-          camera.radius = radius;
-
-          camera.alpha  = Math.PI * 1.3;
-          camera.beta   = Math.PI / 2.4;
-
-          camera.lowerRadiusLimit = radius * 0.8;
-          camera.upperRadiusLimit = radius * 1.3;
-        }catch(e){
-          console.warn("[WARZONE] fallback soldier framing", e);
-          camera.target = new BABYLON.Vector3(0,1,0);
-          camera.radius = 3.0;
-          camera.alpha  = Math.PI * 1.3;
-          camera.beta   = Math.PI / 2.4;
-          camera.lowerRadiusLimit = 2.5;
-          camera.upperRadiusLimit = 3.5;
-        }
-      }
-
-      function loadSoldier(){
-        const url = SOLDIER_ASSET;
-        if (!scene || !BABYLON.SceneLoader) return;
-
-        if (currentRoot){
-          currentRoot.dispose(true, false);
-          currentRoot = null;
-        }
-
-        const lastSlash = url.lastIndexOf("/");
-        const rootUrl = url.substring(0,lastSlash+1);
-        const theFileName = url.substring(lastSlash+1);
-
-        BABYLON.SceneLoader.ImportMesh(
-          "",
-          rootUrl,
-          theFileName,
-          scene,
-          function(meshes, ps, skeletons, animGroups){
-            currentRoot = new BABYLON.TransformNode("soldierRoot", scene);
-            meshes.forEach(m => { m.parent = currentRoot; });
-
-            currentRoot.position = new BABYLON.Vector3(0,0,0);
-            currentRoot.rotation = new BABYLON.Vector3(0,Math.PI,0);
-            currentRoot.scaling  = new BABYLON.Vector3(0.6, 0.6, 0.6);
-
-            frameCameraFromMeshes(meshes);
-
-            scene.onBeforeRenderObservable.clear();
-            scene.onBeforeRenderObservable.add(() => {
-              if (currentRoot) {
-                currentRoot.rotation.y += scene.getEngine().getDeltaTime() * 0.0003;
-              }
-            });
-
-            if (animGroups && animGroups.length){
-              animGroups.forEach(g => g.stop());
-              animGroups[0].start(true);
-            }
-          },
-          null,
-          function(scene, message, exception){
-            console.error("[WARZONE] soldier ImportMesh error:", message, exception);
-          }
-        );
-      }
+      window.__warzoneSetLobbySkin = setLobbySkin;
 
       createScene();
     })();
