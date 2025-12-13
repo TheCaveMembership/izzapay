@@ -11,17 +11,10 @@ from time import time
 from db import conn
 
 import os
-import json
 from decimal import Decimal, InvalidOperation, ROUND_HALF_UP
 
 from stellar_sdk import Asset, Keypair, Server, TransactionBuilder
 
-# Keep import for compatibility, but Warzone payments now use direct stellar_sdk send.
-# Reuse the same helpers you use in IZZA CREATURES
-try:
-    from nft_api import _pay_asset  # noqa: F401
-except Exception:
-    _pay_asset = None
 
 warzone_bp = Blueprint("warzone_bp", __name__, url_prefix="/warzone")
 
@@ -157,26 +150,32 @@ def _to_stellar_amount(value) -> str:
 
 
 # ---------- IZZA token + shop payment config ----------
+# Match IZZA BOT naming, but keep old env names as fallbacks.
 
-IZZA_CODE = os.getenv("IZZA_TOKEN_CODE", "IZZA").strip()
-
-# Make issuer robust, so Warzone doesn't silently break if you used a different env name elsewhere
-IZZA_ISSUER = (
-    os.getenv("IZZA_TOKEN_ISSUER")
-    or os.getenv("IZZA_ASSET_ISSUER")
-    or os.getenv("IZZA_ISSUER")
-    or ""
+IZZA_ASSET_CODE = (
+    os.getenv("IZZA_ASSET_CODE")
+    or os.getenv("IZZA_TOKEN_CODE")
+    or os.getenv("IZZA_CODE")
+    or "IZZA"
 ).strip()
 
-# Where the IZZA payment goes
+IZZA_ASSET_ISSUER = (
+    os.getenv("IZZA_ASSET_ISSUER")
+    or os.getenv("IZZA_TOKEN_ISSUER")
+    or os.getenv("IZZA_ISSUER")
+    or "GDKS3KFAM5RBBTSYTFUEHHN7GYRPHV7A6K2BI44LL3QQKXCA6ODBCS57"
+).strip()
+
+# Where IZZA payments go for Warzone shop purchases
 WZ_SHOP_DEST = (
     os.getenv("WZ_SHOP_DEST")
-    or os.getenv("NFT_DISTR_PUBLIC", "").strip()
-)
+    or os.getenv("BOT_WALLET_PUB")
+    or os.getenv("NFT_DISTR_PUBLIC", "")
+).strip()
 
 
 def _izza_payment_config_ok() -> bool:
-    return bool(IZZA_CODE and IZZA_ISSUER and WZ_SHOP_DEST)
+    return bool(IZZA_ASSET_CODE and IZZA_ASSET_ISSUER and WZ_SHOP_DEST)
 
 
 def _parse_izza_amount(raw) -> Decimal | None:
@@ -193,27 +192,10 @@ def _parse_izza_amount(raw) -> Decimal | None:
     return d.quantize(_STROOP_QUANTUM, rounding=ROUND_HALF_UP)
 
 
-def _verify_tx_succeeded(tx_hash: str) -> tuple[bool, str]:
-    """
-    Confirm the tx exists and succeeded on Pi Testnet Horizon.
-    Returns (ok, detail).
-    """
-    if not tx_hash:
-        return False, "missing_tx_hash"
-    try:
-        tx = _srv.transactions().transaction(tx_hash).call()
-        if not tx:
-            return False, "tx_not_found"
-        if tx.get("successful") is True:
-            return True, "ok"
-        return False, "tx_not_successful"
-    except Exception as e:
-        return False, f"horizon_check_failed:{e}"
-
-
 def _send_izza_payment(from_secret: str, to_pub: str, amount: Decimal, memo_text: str = "") -> str:
     """
     Sends IZZA from from_secret -> to_pub on Pi Testnet. Returns tx hash.
+    This mirrors IZZA BOT's direct Horizon payment style.
     """
     if not from_secret or not to_pub:
         raise ValueError("Missing from_secret or to_pub")
@@ -225,7 +207,7 @@ def _send_izza_payment(from_secret: str, to_pub: str, amount: Decimal, memo_text
 
     account = _srv.load_account(from_pub)
 
-    izza_asset = Asset(IZZA_CODE, IZZA_ISSUER)
+    izza_asset = Asset(IZZA_ASSET_CODE, IZZA_ASSET_ISSUER)
 
     builder = TransactionBuilder(
         source_account=account,
@@ -251,96 +233,36 @@ def _send_izza_payment(from_secret: str, to_pub: str, amount: Decimal, memo_text
     return tx_hash
 
 
-def _get_usernames_for_user_id(cx, user_id: int) -> list[str]:
+# ----------------------------------------------------------------------
+# Wallet link helpers (match IZZA BOT behavior)
+# ----------------------------------------------------------------------
+
+def _linked_wallet_pub_for_username(uname: str) -> str:
     """
-    Return possible username keys used in your wallet system.
-    Your proven system usually stores wallets in user_wallets keyed by username.
+    EXACT SAME source of truth as IZZA BOT:
+      user_wallets.pub keyed by username (lowercase)
     """
-    names: list[str] = []
+    if not uname:
+        return ""
+    u = uname.strip().lstrip("@").lower()
+    if not u:
+        return ""
     try:
-        row = cx.execute(
-            """
-            SELECT
-              COALESCE(username, '')    AS username,
-              COALESCE(pi_username, '') AS pi_username,
-              COALESCE(pi_uid, '')      AS pi_uid
-            FROM users
-            WHERE id = ?
-            """,
-            (user_id,),
-        ).fetchone()
-        if row:
-            for k in ("username", "pi_username", "pi_uid"):
-                v = (row[k] or "").strip()
-                if v:
-                    names.append(v)
-    except Exception:
-        pass
-
-    # Also consider session values
-    for k in ("username", "pi_username", "pi_handle"):
-        v = (session.get(k) or "").strip()
-        if v:
-            names.append(v)
-
-    # normalize
-    out = []
-    seen = set()
-    for v in names:
-        norm = v.strip().lstrip("@").lower()
-        if norm and norm not in seen:
-            seen.add(norm)
-            out.append(norm)
-    return out
-
-
-def _get_linked_wallet_pub_for_user(cx, user_id: int) -> str:
-    """
-    Find the user's linked IZZA wallet pub.
-    Prefers your proven table: user_wallets keyed by username.
-    Falls back to a few user_id based tables if present.
-    """
-    # 1) Try user_wallets by username (matches your working IZZA BOT backend)
-    for uname in _get_usernames_for_user_id(cx, user_id):
-        try:
+        with conn() as cx:
             row = cx.execute(
                 "SELECT pub FROM user_wallets WHERE username = ?",
-                (uname,),
+                (u,),
             ).fetchone()
-            if row and row["pub"]:
-                return str(row["pub"]).strip().upper()
-        except Exception:
-            continue
-
-    # 2) Fallback: try user_id keyed tables (if your deployment has them)
-    candidates = [
-        ("wallets", "pub", "user_id"),
-        ("user_wallets", "pub", "user_id"),   # if schema differs on this env
-        ("izza_wallets", "pub", "user_id"),
-        ("wallet_links", "pub", "user_id"),
-        ("wallet_active", "pub", "user_id"),
-    ]
-    for table, pub_col, user_col in candidates:
-        try:
-            row = cx.execute(
-                f"""
-                SELECT {pub_col} AS pub
-                FROM {table}
-                WHERE {user_col} = ?
-                ORDER BY id DESC
-                LIMIT 1
-                """,
-                (user_id,),
-            ).fetchone()
-            if row and row["pub"]:
-                return str(row["pub"]).strip().upper()
-        except Exception:
-            continue
-
+        if row and row["pub"]:
+            return str(row["pub"]).strip().upper()
+    except Exception:
+        return ""
     return ""
 
 
-# ---------- WAR ZONE SHOP: schema + seed ----------
+# ----------------------------------------------------------------------
+# WAR ZONE SHOP: schema + seed
+# ----------------------------------------------------------------------
 
 def _ensure_shop_schema(cx):
     cx.executescript(
@@ -378,99 +300,39 @@ def _seed_shop_if_empty(cx):
         return
 
     weapons = [
-        {
-            "slot": "weapons",
-            "sku": "wz_basic_pistol",
-            "name": "Basic Pistol",
-            "description": "Standard-issue sidearm. You always deploy with this for free.",
-            "price": 0,
-            "starting": 1,
-            "order": 0,
-        },
-        {
-            "slot": "weapons",
-            "sku": "wz_cityrunner_smg",
-            "name": "Cityrunner SMG",
-            "description": "High-rate SMG tuned for close-quarters street fights.",
-            "price": 5,
-            "starting": 0,
-            "order": 10,
-        },
-        {
-            "slot": "weapons",
-            "sku": "wz_neon_marksman",
-            "name": "Neon Marksman",
-            "description": "Burst rifle with a glowing IZZA reticle and tight recoil.",
-            "price": 5,
-            "starting": 0,
-            "order": 20,
-        },
-        {
-            "slot": "weapons",
-            "sku": "wz_skyline_sniper",
-            "name": "Skyline Sniper",
-            "description": "Long-range bolt-action tuned for rooftop control.",
-            "price": 15,
-            "starting": 0,
-            "order": 30,
-        },
-        {
-            "slot": "weapons",
-            "sku": "wz_pulse_rifle",
-            "name": "Pulse Rifle",
-            "description": "Experimental IZZA tech that fires charged plasma rounds.",
-            "price": 15,
-            "starting": 0,
-            "order": 40,
-        },
+        {"slot": "weapons", "sku": "wz_basic_pistol", "name": "Basic Pistol",
+         "description": "Standard-issue sidearm. You always deploy with this for free.",
+         "price": 0, "starting": 1, "order": 0},
+        {"slot": "weapons", "sku": "wz_cityrunner_smg", "name": "Cityrunner SMG",
+         "description": "High-rate SMG tuned for close-quarters street fights.",
+         "price": 5, "starting": 0, "order": 10},
+        {"slot": "weapons", "sku": "wz_neon_marksman", "name": "Neon Marksman",
+         "description": "Burst rifle with a glowing IZZA reticle and tight recoil.",
+         "price": 5, "starting": 0, "order": 20},
+        {"slot": "weapons", "sku": "wz_skyline_sniper", "name": "Skyline Sniper",
+         "description": "Long-range bolt-action tuned for rooftop control.",
+         "price": 15, "starting": 0, "order": 30},
+        {"slot": "weapons", "sku": "wz_pulse_rifle", "name": "Pulse Rifle",
+         "description": "Experimental IZZA tech that fires charged plasma rounds.",
+         "price": 15, "starting": 0, "order": 40},
     ]
 
     skins = [
-        {
-            "slot": "skins",
-            "sku": "wz_basic_soldier",
-            "name": "Basic IZZA Soldier",
-            "description": "Standard operator kit in dark IZZA city camo.",
-            "price": 0,
-            "starting": 1,
-            "order": 0,
-        },
-        {
-            "slot": "skins",
-            "sku": "wz_neon_edge",
-            "name": "Neon Edge",
-            "description": "Black armor with cyan edge lights and subtle neon trims.",
-            "price": 5,
-            "starting": 0,
-            "order": 10,
-        },
-        {
-            "slot": "skins",
-            "sku": "wz_urban_shadow",
-            "name": "Urban Shadow",
-            "description": "Stealth trench and face mask tuned for city outskirts.",
-            "price": 5,
-            "starting": 0,
-            "order": 20,
-        },
-        {
-            "slot": "skins",
-            "sku": "wz_cinder_camo",
-            "name": "Cinder Camo",
-            "description": "Burnt orange and charcoal pattern inspired by IZZA tokens.",
-            "price": 15,
-            "starting": 0,
-            "order": 30,
-        },
-        {
-            "slot": "skins",
-            "sku": "wz_glow_legend",
-            "name": "Glow Legend",
-            "description": "Premium holo-vest with animated neon highlights.",
-            "price": 15,
-            "starting": 0,
-            "order": 40,
-        },
+        {"slot": "skins", "sku": "wz_basic_soldier", "name": "Basic IZZA Soldier",
+         "description": "Standard operator kit in dark IZZA city camo.",
+         "price": 0, "starting": 1, "order": 0},
+        {"slot": "skins", "sku": "wz_neon_edge", "name": "Neon Edge",
+         "description": "Black armor with cyan edge lights and subtle neon trims.",
+         "price": 5, "starting": 0, "order": 10},
+        {"slot": "skins", "sku": "wz_urban_shadow", "name": "Urban Shadow",
+         "description": "Stealth trench and face mask tuned for city outskirts.",
+         "price": 5, "starting": 0, "order": 20},
+        {"slot": "skins", "sku": "wz_cinder_camo", "name": "Cinder Camo",
+         "description": "Burnt orange and charcoal pattern inspired by IZZA tokens.",
+         "price": 15, "starting": 0, "order": 30},
+        {"slot": "skins", "sku": "wz_glow_legend", "name": "Glow Legend",
+         "description": "Premium holo-vest with animated neon highlights.",
+         "price": 15, "starting": 0, "order": 40},
     ]
 
     for it in weapons + skins:
@@ -480,15 +342,7 @@ def _seed_shop_if_empty(cx):
               (slot, sku, name, description, price_izza, starting, sort_order, active)
             VALUES (?, ?, ?, ?, ?, ?, ?, 1)
             """,
-            (
-                it["slot"],
-                it["sku"],
-                it["name"],
-                it["description"],
-                it["price"],
-                it["starting"],
-                it["order"],
-            ),
+            (it["slot"], it["sku"], it["name"], it["description"], it["price"], it["starting"], it["order"]),
         )
 
 
@@ -504,8 +358,6 @@ def warzone_auth():
 
 @warzone_bp.get("/")
 def warzone_lobby():
-    # Keep existing behavior: require a real session user_id to enter the lobby
-    # (prevents breaking anything currently working)
     if "user_id" not in session:
         qs = request.query_string.decode("utf-8")
         base = "/warzone/auth"
@@ -583,10 +435,7 @@ def warzone_search_players():
             (like, like, uid),
         ).fetchall()
 
-    results = [
-        {"id": r["id"], "username": r["username"] or f"User #{r['id']}"}
-        for r in rows
-    ]
+    results = [{"id": r["id"], "username": r["username"] or f"User #{r['id']}"} for r in rows]
     return jsonify({"results": results})
 
 
@@ -625,7 +474,6 @@ def warzone_invite_player():
 
 @warzone_bp.get("/api/shop")
 def warzone_shop():
-    # Allow shop read to work with either session OR ?u= (same as wallet endpoints)
     uid = _require_user_id_or_u()
     inv_uid = uid if uid is not None else -1
 
@@ -663,9 +511,7 @@ def warzone_shop():
     for r in rows:
         starting = bool(r["starting"])
         owned = bool(r["owned"]) or starting
-        equipped = bool(r["equipped"]) or (
-            starting and not any(i.get("equipped") for i in items)
-        )
+        equipped = bool(r["equipped"])
         items.append(
             {
                 "slot": r["slot"],
@@ -690,13 +536,14 @@ def warzone_purchase():
 
     if not _izza_payment_config_ok():
         return jsonify(
-            {"error": "shop_config_invalid", "detail": "Missing IZZA issuer or shop dest on server."}
+            {"error": "shop_config_invalid", "detail": "Missing IZZA asset code/issuer or shop dest on server."}
         ), 500
 
     data = request.get_json(silent=True) or {}
     slot = (data.get("slot") or "").strip().lower()
     sku = (data.get("sku") or "").strip()
 
+    # keep client price check (anti-tamper)
     try:
         price_izza_client = float(data.get("price_izza") or 0)
     except (TypeError, ValueError):
@@ -708,29 +555,39 @@ def warzone_purchase():
     if slot not in ("weapons", "skins") or not sku:
         return jsonify({"error": "bad_request"}), 400
 
-    if not (buyer_pub.startswith("G") and len(buyer_pub) == 56):
-        return jsonify({"error": "buyer_pub_missing"}), 400
-
+    # REQUIRED: secret (matches bot bucket behavior)
     if not (buyer_sec and buyer_sec.startswith("S") and len(buyer_sec) == 56):
         return jsonify({"error": "buyer_sec_missing"}), 400
 
-    # Verify sec matches pub
+    # Derive pub from secret and (optionally) validate buyer_pub if provided
     try:
         kp = Keypair.from_secret(buyer_sec)
         derived_pub = kp.public_key
-        if derived_pub != buyer_pub:
-            return jsonify({"error": "buyer_key_mismatch"}), 400
     except Exception:
         return jsonify({"error": "buyer_key_invalid"}), 400
 
+    if buyer_pub:
+        if not (buyer_pub.startswith("G") and len(buyer_pub) == 56):
+            return jsonify({"error": "buyer_pub_invalid"}), 400
+        if derived_pub != buyer_pub:
+            return jsonify({"error": "buyer_key_mismatch"}), 400
+
+    # Resolve username (same system key as wallets)
+    uname = _resolve_username()
+    if not uname:
+        return jsonify({"error": "username_required"}), 401
+
+    # Verify derived_pub matches linked wallet pub in user_wallets (EXACT same as bot bucket)
+    linked_pub = _linked_wallet_pub_for_username(uname)
+    if not linked_pub:
+        return jsonify({"error": "no_linked_wallet"}), 403
+    if linked_pub != derived_pub:
+        return jsonify({"error": "wallet_not_linked_for_user"}), 403
+
+    # Load item + validate price + not owned
     with conn() as cx:
         _ensure_shop_schema(cx)
         _seed_shop_if_empty(cx)
-
-        # Verify buyer_pub matches the user's linked IZZA wallet (proven pattern)
-        linked_pub = _get_linked_wallet_pub_for_user(cx, uid)
-        if linked_pub and linked_pub != buyer_pub:
-            return jsonify({"error": "wallet_not_linked_for_user"}), 403
 
         item = cx.execute(
             """
@@ -758,16 +615,17 @@ def warzone_purchase():
 
         owned_row = cx.execute(
             """
-            SELECT id, equipped
+            SELECT id
             FROM warzone_inventory
             WHERE user_id = ? AND slot = ? AND sku = ?
             """,
             (uid, slot, sku),
         ).fetchone()
         if owned_row:
-            return jsonify({"ok": True, "already_owned": True})
+            # Already owned, tell frontend to show Equip
+            return jsonify({"ok": True, "already_owned": True, "slot": slot, "sku": sku, "owned": True})
 
-    # Execute IZZA payment (direct testnet stellar_sdk send)
+    # Execute IZZA payment (direct Horizon payment, same as bot bucket)
     try:
         tx_hash = _send_izza_payment(
             from_secret=buyer_sec,
@@ -778,15 +636,9 @@ def warzone_purchase():
     except Exception as e:
         return jsonify({"error": "payment_failed", "detail": str(e)}), 502
 
-    # Confirm on horizon that it actually succeeded
-    ok_tx, tx_detail = _verify_tx_succeeded(tx_hash)
-    if not ok_tx:
-        return jsonify({"error": "payment_not_confirmed", "detail": tx_detail, "tx": tx_hash}), 502
-
     now_ts = _now_i()
     with conn() as cx:
         _ensure_shop_schema(cx)
-
         cx.execute(
             """
             INSERT OR IGNORE INTO warzone_inventory
@@ -796,7 +648,18 @@ def warzone_purchase():
             (uid, slot, sku, now_ts),
         )
 
-    return jsonify({"ok": True, "tx": tx_hash})
+    # Return payload that lets frontend flip Buy -> Equip immediately (no refresh needed)
+    return jsonify(
+        {
+            "ok": True,
+            "tx": tx_hash,
+            "slot": slot,
+            "sku": sku,
+            "owned": True,
+            "equipped": False,
+            "price_izza": float(db_price),
+        }
+    )
 
 
 @warzone_bp.post("/api/equip")
@@ -840,6 +703,7 @@ def warzone_equip():
             if not owned:
                 return jsonify({"error": "not_owned"}), 400
 
+        # Unequip all in slot, then equip this one
         cx.execute(
             """
             UPDATE warzone_inventory
@@ -849,6 +713,7 @@ def warzone_equip():
             (uid, slot),
         )
 
+        # Ensure record exists (starter items may not have been inserted)
         cx.execute(
             """
             INSERT OR IGNORE INTO warzone_inventory
@@ -857,6 +722,7 @@ def warzone_equip():
             """,
             (uid, slot, sku, now_ts),
         )
+
         cx.execute(
             """
             UPDATE warzone_inventory
@@ -866,7 +732,7 @@ def warzone_equip():
             (uid, slot, sku),
         )
 
-    return jsonify({"ok": True})
+    return jsonify({"ok": True, "slot": slot, "sku": sku, "equipped": True})
 
 
 @warzone_bp.get("/test-soldier")
