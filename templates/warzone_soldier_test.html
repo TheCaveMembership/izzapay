@@ -23,6 +23,7 @@
       height:100%;
       display:block;
       touch-action:none;
+      outline:none;
     }
     #hud{
       position:fixed;
@@ -50,6 +51,10 @@
     const canvas = document.getElementById("renderCanvas");
     const hud = document.getElementById("hud");
 
+    // ✅ Make canvas focusable, click once to lock keyboard to tuning
+    canvas.tabIndex = 1;
+    canvas.addEventListener("pointerdown", () => canvas.focus());
+
     const engine = new BABYLON.Engine(canvas, true, {
       preserveDrawingBuffer:true,
       stencil:true
@@ -66,9 +71,19 @@
       new BABYLON.Vector3(0, 1.0, 0),
       scene
     );
+
     camera.attachControl(canvas, true);
     camera.panningSensibility = 0;
     camera.wheelPrecision = 60;
+
+    // ✅ IMPORTANT: stop camera from hijacking arrow keys
+    camera.inputs.removeByType("ArcRotateCameraKeyboardMoveInput");
+    if (camera.inputs && camera.inputs.attached && camera.inputs.attached.keyboard) {
+      camera.inputs.attached.keyboard.keysUp = [];
+      camera.inputs.attached.keyboard.keysDown = [];
+      camera.inputs.attached.keyboard.keysLeft = [];
+      camera.inputs.attached.keyboard.keysRight = [];
+    }
 
     const hemi = new BABYLON.HemisphericLight("h", new BABYLON.Vector3(0,1,0), scene);
     hemi.intensity = 1.05;
@@ -106,7 +121,7 @@
 
     // Arm correction
     const qArm     = BABYLON.Quaternion.FromEulerAngles(-0.10,  0.00,  0.00);
-    const qForeArm = BABYLON.Quaternion.FromEulerAngles(-0.25,  0.00,  0.00);
+    const qForeArm = BABYLON.Quaternion.FromEulerAngles(-0.25,  0.00,  0.00); // ✅ fixed, your line was corrupted
     const qShould  = BABYLON.Quaternion.FromEulerAngles( 0.00,  0.00, -0.05);
 
     const WRIST_TWIST_ON = false;
@@ -231,21 +246,13 @@
     let weaponRoot = null;
     let weaponGrip = null;
 
-    function applyTuning(){
-      if (!weaponRoot || !weaponGrip) return;
-      weaponRoot.position.copyFrom(tune.WEAPON_POS);
-      weaponGrip.position.copyFrom(tune.WEAPON_GRIP_POS);
-      weaponGrip.rotation.copyFrom(tune.WEAPON_GRIP_ROT);
-      updateHud();
-    }
-
     function updateHud(){
       const wp = tune.WEAPON_POS;
       const gp = tune.WEAPON_GRIP_POS;
       const gr = tune.WEAPON_GRIP_ROT;
 
       hud.textContent =
-`LIVE TUNING
+`LIVE TUNING (click the scene once, then use keys)
 Mode: ${tune.mode}
 Step position: ${tune.stepPos.toFixed(3)}, step rotation: ${tune.stepRot.toFixed(3)}
 
@@ -257,14 +264,23 @@ Shift = 4x faster
 [, ] = decrease, increase step (depends on mode)
 P = print values to console
 
-WEAPON_POS     = (${wp.x.toFixed(3)}, ${wp.y.toFixed(3)}, ${wp.z.toFixed(3)})
-WEAPON_GRIP_POS= (${gp.x.toFixed(3)}, ${gp.y.toFixed(3)}, ${gp.z.toFixed(3)})
-WEAPON_GRIP_ROT= (${gr.x.toFixed(3)}, ${gr.y.toFixed(3)}, ${gr.z.toFixed(3)})
+WEAPON_POS      = (${wp.x.toFixed(3)}, ${wp.y.toFixed(3)}, ${wp.z.toFixed(3)})
+WEAPON_GRIP_POS = (${gp.x.toFixed(3)}, ${gp.y.toFixed(3)}, ${gp.z.toFixed(3)})
+WEAPON_GRIP_ROT = (${gr.x.toFixed(3)}, ${gr.y.toFixed(3)}, ${gr.z.toFixed(3)})
 
-What you asked for
-Slide along arm to hand: tweak Z in WEAPON_POS
-Move forward toward camera: tweak Z in WEAPON_GRIP_POS
-Seat into palm: tweak X and Y in WEAPON_POS, then small roll in WEAPON_GRIP_ROT.z`;
+Tips
+Slide gun along forearm: tune WEAPON_POS.z
+Seat into palm: tune WEAPON_POS.x and WEAPON_POS.y
+Bring grip toward palm: tune WEAPON_GRIP_POS.z
+Roll to match palm wrap: tune WEAPON_GRIP_ROT.z`;
+    }
+
+    function applyTuning(){
+      if (!weaponRoot || !weaponGrip) return;
+      weaponRoot.position.copyFrom(tune.WEAPON_POS);
+      weaponGrip.position.copyFrom(tune.WEAPON_GRIP_POS);
+      weaponGrip.rotation.copyFrom(tune.WEAPON_GRIP_ROT);
+      updateHud();
     }
 
     function adjustVec3(vec, dx, dy, dz){
@@ -280,6 +296,12 @@ Seat into palm: tweak X and Y in WEAPON_POS, then small roll in WEAPON_GRIP_ROT.
     }
 
     window.addEventListener("keydown", (e) => {
+      // ✅ stop browser/camera from consuming arrows and paging
+      if (["ArrowUp","ArrowDown","ArrowLeft","ArrowRight","PageUp","PageDown"].includes(e.code)) {
+        e.preventDefault();
+        e.stopPropagation();
+      }
+
       const fast = e.shiftKey ? 4 : 1;
 
       if (e.key === "1") tune.mode = "weaponPos";
@@ -315,7 +337,7 @@ Seat into palm: tweak X and Y in WEAPON_POS, then small roll in WEAPON_GRIP_ROT.
       }
 
       applyTuning();
-    });
+    }, { passive:false });
 
     function attachWeaponToRightHand(soldierImport, weaponImport){
       const skinned = findSkinnedMesh(soldierImport.result);
@@ -338,6 +360,7 @@ Seat into palm: tweak X and Y in WEAPON_POS, then small roll in WEAPON_GRIP_ROT.
       weaponGrip = new BABYLON.TransformNode("weaponGrip", scene);
       weaponGrip.parent = weaponRoot;
 
+      // Apply initial tuning
       applyTuning();
 
       (weaponImport.result?.meshes || []).forEach(m => {
