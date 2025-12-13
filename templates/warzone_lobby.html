@@ -201,9 +201,11 @@
       transform:translateX(-50%);
       width:60%;
       height:125%;
-      pointer-events:none;
+      /* CHANGED, allow manual rotate, pinch zoom */
+      pointer-events:auto;
       z-index:2;
       display:block;
+      touch-action:none;
     }
 
     /* Right side: friends + character */
@@ -798,7 +800,7 @@
       searchGo?.addEventListener("click", doSearch);
     })();
 
-    // ---------- Babylon.js lobby soldier ----------
+    // ---------- Babylon.js lobby soldier (UPDATED SURGICALLY) ----------
     (function(){
       const canvas = document.getElementById("soldierCanvas");
       if (!canvas || !window.BABYLON) {
@@ -816,7 +818,6 @@
       let currentContainer = null;
 
       function getSkinAsset(){
-        // soldier model is always the same, textures are swapped based on equipped skin
         return { rootUrl:"/assets/warzone3d/soldier_gltf_3/", fileName:"scene.gltf" };
       }
 
@@ -846,11 +847,16 @@
           camera.radius = radius;
           camera.alpha  = Math.PI * 1.3;
           camera.beta   = Math.PI / 2.35;
-          camera.lowerRadiusLimit = radius * 0.95;
-          camera.upperRadiusLimit = radius * 1.2;
+
+          /* CHANGED, allow manual zoom like test page but keep lobby framing */
+          camera.lowerRadiusLimit = radius * 0.65;
+          camera.upperRadiusLimit = radius * 1.25;
+
         }catch(e){
           camera.target = new BABYLON.Vector3(0,1,0);
           camera.radius = 3.0;
+          camera.lowerRadiusLimit = 2.0;
+          camera.upperRadiusLimit = 4.0;
         }
       }
 
@@ -864,8 +870,6 @@
         "material_11_diffuse.png"
       ];
 
-      // Map your BACKEND skin SKUs -> an existing folder under /textures/
-      // Add more lines ONLY when you actually create those folders.
       const SKU_TO_TEXTURE_FOLDER = {
         "wz_neon_edge": "neon_edge"
       };
@@ -906,8 +910,6 @@
 
       function applyTextureOverrides(container, skinSku){
         const sku = (skinSku || "").toString().trim();
-        if(!sku) return;
-
         const folder = SKU_TO_TEXTURE_FOLDER[sku];
         if(!folder) return;
 
@@ -919,6 +921,20 @@
         });
       }
       // ---------- END TEXTURE OVERRIDES ----------
+
+      /* NEW, force wrapper ownership of the whole hierarchy (prevents missed parenting) */
+      function buildWrapperFromContainer(container){
+        const wrapper = new BABYLON.TransformNode("lobbySkinWrap", scene);
+        const nodes = []
+          .concat(container.meshes || [])
+          .concat(container.transformNodes || []);
+        nodes.forEach(n => {
+          if(!n) return;
+          try{ n.parent = wrapper; }catch(e){}
+        });
+        wrapper.rotation.y = Math.PI;
+        return wrapper;
+      }
 
       async function setLobbySkin(skinSku){
         if(!scene) return;
@@ -941,19 +957,14 @@
           const asset = getSkinAsset();
           const container = await BABYLON.SceneLoader.LoadAssetContainerAsync(asset.rootUrl, asset.fileName, scene);
 
-          // Only swap textures, no color hacks
           applyTextureOverrides(container, skinSku);
 
           container.addAllToScene();
           currentContainer = container;
 
-          const wrapper = new BABYLON.TransformNode("lobbySkinWrap", scene);
+          /* CHANGED, wrapper now owns everything */
+          const wrapper = buildWrapperFromContainer(container);
           currentWrapper = wrapper;
-
-          container.meshes.forEach(m => { if(m && !m.parent) m.parent = wrapper; });
-          container.transformNodes.forEach(n => { if(n && !n.parent) n.parent = wrapper; });
-
-          wrapper.rotation.y = Math.PI;
 
           normalizeToGroundAndHeight(wrapper, 1.75);
           wrapper.scaling.scaleInPlace(0.72);
@@ -995,9 +1006,14 @@
           new BABYLON.Vector3(0,1,0),
           scene
         );
-        camera.attachControl(canvas, false);
-        camera.inputs.clear();
+
+        /* CHANGED, restore interaction like test page */
+        camera.attachControl(canvas, true);
         camera.panningSensibility = 0;
+        camera.wheelPrecision = 60;
+        camera.pinchPrecision = 200;
+        camera.angularSensibilityX = 2200;
+        camera.angularSensibilityY = 2200;
 
         const light = new BABYLON.HemisphericLight("h", new BABYLON.Vector3(0,1,0), scene);
         light.intensity = 1.2;
@@ -1005,8 +1021,15 @@
         engine.runRenderLoop(() => { if(scene) scene.render(); });
         window.addEventListener("resize", () => engine.resize());
 
+        /* Keep your auto spin, pause while user is dragging */
+        let userInteracting = false;
+        canvas.addEventListener("pointerdown", () => { userInteracting = true; }, { passive:true });
+        canvas.addEventListener("pointerup", () => { userInteracting = false; }, { passive:true });
+        canvas.addEventListener("pointercancel", () => { userInteracting = false; }, { passive:true });
+        canvas.addEventListener("pointerleave", () => { userInteracting = false; }, { passive:true });
+
         scene.onBeforeRenderObservable.add(() => {
-          if(currentWrapper){
+          if(currentWrapper && !userInteracting){
             currentWrapper.rotation.y += scene.getEngine().getDeltaTime() * 0.0003;
           }
         });
