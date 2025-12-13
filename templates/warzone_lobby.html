@@ -652,9 +652,9 @@
 
       // Shop button (wallet + purchases handled on shop page)
       document.getElementById("warzoneShopBtn")?.addEventListener("click", () => {
-  const qs = window.location.search || "";
-  window.location.href = "/warzone/shop" + qs;
-});
+        const qs = window.location.search || "";
+        window.location.href = "/warzone/shop" + qs;
+      });
 
       // Custom IZZA keyboard for player search
       const searchDisplay = document.getElementById("searchDisplay");
@@ -1012,6 +1012,96 @@
         }
       }
 
+      // ---------- THEME TEXTURE OVERRIDES ----------
+      const THEME_BASE = "/assets/warzone3d/soldier_gltf_3/textures/";
+
+      // these are the ONLY 4 files you showed, we override only these to stay safe
+      const THEME_FILES = [
+        "material_8_diffuse.png",
+        "material_9_diffuse.png",
+        "material_10_diffuse.png",
+        "material_11_diffuse.png"
+      ];
+
+      // Folder names you will create, same method, same 4 file names
+      const THEME_FOLDERS = {
+        neon_edge: "neon_edge",
+        gold_glow: "gold_glow",
+        purple_edge: "purple_edge",
+        crimson_core: "crimson_core",
+        obsidian_violet: "obsidian_violet"
+      };
+
+      function themeFromSku(sku){
+        const s = (sku || "").toString().trim().toLowerCase();
+        if(!s) return null;
+
+        // exact skus first
+        if(s === "wz_neon_edge") return THEME_FOLDERS.neon_edge;
+
+        // keyword skus (lets you add more skins without code changes)
+        if(s.includes("gold")) return THEME_FOLDERS.gold_glow;
+        if(s.includes("crimson") || s.includes("red")) return THEME_FOLDERS.crimson_core;
+        if(s.includes("obsidian") || s.includes("shadow") || s.includes("violet") || s.includes("black")) return THEME_FOLDERS.obsidian_violet;
+        if(s.includes("purple")) return THEME_FOLDERS.purple_edge;
+        if(s.includes("neon") || s.includes("cyan") || s.includes("edge")) return THEME_FOLDERS.neon_edge;
+
+        return null;
+      }
+
+      function fileFromAnyUrl(u){
+        try{
+          const s = (u || "").toString();
+          const q = s.split("?")[0];
+          const parts = q.split("/");
+          return parts[parts.length - 1] || "";
+        }catch(e){
+          return "";
+        }
+      }
+
+      function overrideTextureOnMaterial(mat, texProp, themeFolder){
+        try{
+          const tex = mat && mat[texProp];
+          if(!tex) return false;
+
+          // Babylon texture may have url or name depending on loader
+          const urlOrName = (tex.url || tex.name || "");
+          const file = fileFromAnyUrl(urlOrName);
+          if(!file) return false;
+
+          if(!THEME_FILES.includes(file)) return false;
+
+          const newUrl = `${THEME_BASE}${themeFolder}/${file}`;
+
+          // Replace with a fresh texture, safest across loaders
+          const newTex = new BABYLON.Texture(newUrl, scene, true, false);
+          newTex.hasAlpha = tex.hasAlpha || false;
+          newTex.level = (typeof tex.level === "number") ? tex.level : 1.0;
+
+          mat[texProp] = newTex;
+          return true;
+        }catch(e){
+          return false;
+        }
+      }
+
+      function applyThemeOverrides(container, sku){
+        const themeFolder = themeFromSku(sku);
+        if(!themeFolder) return;
+
+        // touch only materials that exist in this container
+        const mats = (container && container.materials) ? container.materials : [];
+        mats.forEach(mat => {
+          if(!mat) return;
+
+          // glTF is usually PBRMaterial, but we also cover StandardMaterial safely
+          overrideTextureOnMaterial(mat, "albedoTexture", themeFolder);
+          overrideTextureOnMaterial(mat, "diffuseTexture", themeFolder);
+        });
+      }
+      // ---------- END THEME OVERRIDES ----------
+
       async function setLobbySkin(sku){
         if(!scene) return;
 
@@ -1033,6 +1123,10 @@
 
         try{
           const container = await BABYLON.SceneLoader.LoadAssetContainerAsync(asset.rootUrl, asset.fileName, scene);
+
+          // Apply texture overrides BEFORE adding to scene, keeps it clean
+          applyThemeOverrides(container, sku || "wz_basic_soldier");
+
           container.addAllToScene();
           currentContainer = container;
 
