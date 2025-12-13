@@ -2,318 +2,1922 @@
 <html lang="en">
 <head>
   <meta charset="utf-8">
-  <title>War Zone soldier test</title>
-  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>IZZA WAR ZONE — Lobby</title>
+  <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
   <style>
+    :root{
+      --bg:#02030a;
+      --panel:#070b18;
+      --panelSoft:#0b1020;
+      --line:#222b47;
+      --txt:#edf3ff;
+      --muted:#9fb0d6;
+      --accent1:#0ff;
+      --accent2:#ff3b6b;
+      --accent3:#ffcf4d;
+    }
+    *{box-sizing:border-box;margin:0;padding:0}
     html,body{
-      margin:0;
-      padding:0;
       width:100%;
       height:100%;
-      background:#000;
-      color:#0f0;
-      font-family:system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;
+      background:radial-gradient(circle at top,#15192e 0,#02030a 55%,#000 100%);
+      color:var(--txt);
+      font-family:Inter,system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;
       overflow:hidden;
     }
-    #msg{
+
+    /* Manual landscape for Pi Browser */
+    .rot-wrapper{
       position:fixed;
-      top:8px;
-      left:10px;
-      font-size:14px;
-      z-index:5;
-      white-space:pre;
-      text-shadow:0 1px 0 rgba(0,0,0,.6);
-      max-width:96vw;
-    }
-    #renderCanvas{
-      position:fixed;
-      left:0;
       top:0;
+      left:0;
+      width:100vh;
+      height:100vw;
+      transform-origin:top left;
+      transform:rotate(90deg) translateY(-100%);
+      transition:transform .15s ease,width .15s ease,height .15s ease;
+    }
+
+    .lobby-root{
+      width:100%;
+      height:100%;
+      padding:6px;
+    }
+
+    .shell{
+      width:100%;
+      height:100%;
+      border-radius:18px;
+      border:1px solid rgba(132,153,255,.4);
+      background:radial-gradient(circle at top,#182136 0,#06091a 52%,#01020a 100%);
+      box-shadow:
+        0 0 40px rgba(0,0,0,.8),
+        0 0 80px rgba(0,255,255,.08),
+        0 0 80px rgba(255,59,107,.12);
+      padding:8px 10px;
+      display:grid;
+      grid-template-rows:auto 1fr;
+      row-gap:6px;
+      position:relative;
+      overflow:auto;
+      -webkit-overflow-scrolling:touch;
+    }
+    .shell::-webkit-scrollbar{
+      width:0;
+      height:0;
+    }
+
+    .top-row{
+      display:flex;
+      align-items:center;
+      justify-content:space-between;
+      gap:10px;
+      flex-wrap:wrap;
+    }
+    .logo-block{
+      display:flex;
+      align-items:center;
+      gap:10px;
+      text-transform:uppercase;
+      letter-spacing:.22em;
+      font-size:11px;
+      color:#c5d4ff;
+    }
+    .izzacoin{
+      width:30px;height:30px;border-radius:50%;
+      background:
+        url("/assets/izza.png") center/cover no-repeat,
+        radial-gradient(circle at 30% 10%,#ffe9b5 0,#ffcf4d 30%,#b87910 65%,#442400 100%);
+      box-shadow:0 0 18px rgba(255,207,77,.6);
+      flex-shrink:0;
+    }
+
+    .deploy-btn{
+      min-width:170px;
+      padding:9px 14px;
+      border-radius:999px;
+      border:none;
+      cursor:pointer;
+      font-weight:700;
+      font-size:12px;
+      letter-spacing:.18em;
+      text-transform:uppercase;
+      display:inline-flex;
+      align-items:center;
+      justify-content:center;
+      gap:8px;
+      background:linear-gradient(90deg,#0ff,#ff3b6b);
+      color:#001520;
+      box-shadow:
+        0 0 24px rgba(0,255,255,.6),
+        0 0 34px rgba(255,59,107,.55);
+      white-space:nowrap;
+    }
+    .deploy-btn span.tag{
+      font-size:10px;
+      text-transform:uppercase;
+      letter-spacing:.16em;
+      opacity:.9;
+    }
+
+    .player-pill{
+      padding:6px 10px;
+      border-radius:999px;
+      border:1px solid rgba(127,209,255,.6);
+      background:linear-gradient(90deg,rgba(2,8,36,.9),rgba(0,87,126,.7));
+      font-size:11px;
+      display:flex;
+      align-items:center;
+      gap:8px;
+    }
+    .player-pill span.label{
+      color:#9fb0d6;
+      text-transform:uppercase;
+      letter-spacing:.16em;
+      font-size:10px;
+    }
+    .player-pill span.name{
+      font-weight:600;
+      color:#e7f0ff;
+    }
+
+    .main-row{
+      min-height:0;
+      display:grid;
+      grid-template-columns:2.1fr 1.2fr;
+      gap:10px;
+    }
+
+    /* Left side: map / drop zone preview */
+    .zone-panel{
+      border-radius:14px;
+      background:linear-gradient(145deg,#050815,#02030c);
+      border:1px solid rgba(66,91,168,.8);
+      padding:10px;
+      display:flex;
+      flex-direction:column;
+      gap:8px;
+      position:relative;
+      overflow:hidden;
+    }
+    .zone-header{
+      display:flex;
+      justify-content:space-between;
+      align-items:center;
+      font-size:11px;
+      text-transform:uppercase;
+      letter-spacing:.16em;
+      color:#9fb0d6;
+    }
+    .zone-header strong{
+      color:#e7f0ff;
+      font-size:12px;
+    }
+    .zone-canvas-shell{
+      border-radius:10px;
+      border:1px solid rgba(39,62,130,.9);
+      position:relative;
+      overflow:hidden;
+      background-size:cover;
+      background-position:center;
+      background-repeat:no-repeat;
+      aspect-ratio:16 / 8;
+      flex:0 0 auto;
+    }
+    .zone-canvas-shell::before{
+      content:"";
+      position:absolute;
+      inset:0;
+      background:
+        radial-gradient(circle at 20% 0,rgba(26,35,69,.9) 0,transparent 55%),
+        radial-gradient(circle at 80% 100%,rgba(11,22,54,.9) 0,transparent 65%);
+      mix-blend-mode:soft-light;
+      pointer-events:none;
+      z-index:1;
+    }
+
+    /* 3D soldier canvas over the map */
+    .zone-soldier-canvas{
+      position:absolute;
+      left:50%;
+      bottom:-8%;
+      transform:translateX(-50%);
+      width:60%;
+      height:125%;
+      pointer-events:none;
+      z-index:2;
+      display:block;
+    }
+
+    /* Loadout / wallet bar */
+    .loadout-bar{
+      margin-top:4px;
+      padding:6px 10px;
+      border-radius:10px;
+      border:1px solid rgba(66,91,168,.8);
+      background:linear-gradient(145deg,#050815,#030616);
+      display:flex;
+      align-items:center;
+      justify-content:space-between;
+      gap:10px;
+      font-size:11px;
+    }
+    .loadout-label{
+      font-size:10px;
+      text-transform:uppercase;
+      letter-spacing:.18em;
+      color:#7fd1ff;
+      white-space:nowrap;
+    }
+    .loadout-actions{
+      display:flex;
+      flex-wrap:wrap;
+      gap:6px;
+      justify-content:flex-end;
+    }
+    .btn-loadout{
+      padding:6px 10px;
+      border-radius:999px;
+      border:1px solid rgba(127,209,255,.7);
+      background:linear-gradient(90deg,rgba(3,12,38,.9),rgba(4,27,61,.95));
+      color:#e7f0ff;
+      font-size:10px;
+      text-transform:uppercase;
+      letter-spacing:.16em;
+      cursor:pointer;
+      white-space:nowrap;
+    }
+    .btn-loadout.secondary{
+      border-color:rgba(255,207,77,.7);
+      background:linear-gradient(90deg,#312008,#4a3410);
+      color:#ffefc6;
+    }
+
+    /* Right side: friends + armory */
+    .side-panel{
+      display:flex;
+      flex-direction:column;
+      gap:8px;
+      min-width:0;
+    }
+    .friends-card,
+    .character-card{
+      border-radius:14px;
+      background:var(--panel);
+      border:1px solid rgba(66,91,168,.8);
+      padding:10px;
+    }
+    .card-title{
+      font-size:11px;
+      text-transform:uppercase;
+      letter-spacing:.18em;
+      color:#9fb0d6;
+      margin-bottom:6px;
+    }
+
+    .friends-actions{
+      display:flex;
+      flex-direction:column;
+      gap:6px;
+      margin-bottom:6px;
+    }
+    .btn-ghost{
+      width:100%;
+      padding:7px 8px;
+      border-radius:999px;
+      border:1px solid rgba(127,209,255,.6);
+      background:linear-gradient(90deg,rgba(3,12,38,.8),rgba(3,38,58,.9));
+      color:#e7f0ff;
+      font-size:11px;
+      text-transform:uppercase;
+      letter-spacing:.14em;
+      cursor:pointer;
+      text-align:center;
+      white-space:nowrap;
+    }
+    .btn-ghost.secondary{
+      border-color:rgba(159,176,214,.6);
+      background:linear-gradient(90deg,rgba(5,11,30,.9),rgba(4,18,42,.9));
+      color:#c3cff5;
+    }
+    .friends-foot{
+      font-size:11px;
+      color:var(--muted);
+    }
+
+    .character-body{
+      display:flex;
+      gap:8px;
+    }
+    .character-info{
+      flex:1;
+      display:flex;
+      flex-direction:column;
+      gap:4px;
+      min-width:0;
+    }
+    .char-name{
+      font-size:12px;
+      font-weight:600;
+    }
+    .char-sub{
+      font-size:11px;
+      color:var(--muted);
+    }
+
+    .char-toggle{
+      display:flex;
+      gap:6px;
+      margin-top:6px;
+      flex-wrap:wrap;
+    }
+
+    /* Overlays (friends / search / matchmaking / shop / wallet) */
+    .overlay{
+      position:absolute;
+      inset:0;
+      display:none;
+      align-items:center;
+      justify-content:center;
+      background:radial-gradient(circle at top,rgba(7,11,30,.96),rgba(1,2,10,.98));
+      z-index:20;
+    }
+    .overlay.visible{display:flex;}
+    .overlay-card{
+      width:90%;
+      max-width:460px;
+      border-radius:18px;
+      border:1px solid rgba(132,153,255,.7);
+      background:linear-gradient(145deg,#050818,#02030c);
+      padding:16px 18px 14px;
+      box-shadow:0 0 40px rgba(0,0,0,.9);
+    }
+    .overlay-header{
+      display:flex;
+      justify-content:space-between;
+      align-items:center;
+      margin-bottom:8px;
+      gap:8px;
+    }
+    .overlay-title{
+      font-size:12px;
+      text-transform:uppercase;
+      letter-spacing:.22em;
+      color:#9fb0d6;
+    }
+    .overlay-close{
+      border:none;
+      background:transparent;
+      color:#9fb0d6;
+      font-size:12px;
+      cursor:pointer;
+      text-transform:uppercase;
+      letter-spacing:.12em;
+    }
+    .overlay-body{
+      font-size:12px;
+      color:#c3cff5;
+      line-height:1.6;
+    }
+
+    .overlay-input-row{
+      display:flex;
+      gap:6px;
+      margin-top:6px;
+      align-items:center;
+    }
+
+    /* Custom IZZA keyboard display */
+    .izzakey-display{
+      flex:1;
+      min-height:30px;
+      border-radius:999px;
+      border:1px solid rgba(127,209,255,.6);
+      padding:6px 10px;
+      background:#02061b;
+      color:#edf3ff;
+      font-size:12px;
+      display:flex;
+      align-items:center;
+      overflow:hidden;
+      white-space:nowrap;
+      text-overflow:ellipsis;
+    }
+    .izzakey-display.empty{
+      color:#5d6aa0;
+    }
+
+    .overlay-input-row button{
+      padding:6px 10px;
+      border-radius:999px;
+      border:none;
+      font-size:11px;
+      text-transform:uppercase;
+      letter-spacing:.14em;
+      background:linear-gradient(90deg,#0ff,#7fd1ff);
+      color:#001520;
+      cursor:pointer;
+      white-space:nowrap;
+    }
+
+    .izzakey-grid{
+      margin-top:6px;
+      display:grid;
+      grid-template-columns:repeat(10,1fr);
+      gap:4px;
+      font-size:11px;
+    }
+    .izzakey{
+      padding:6px 0;
+      border-radius:6px;
+      border:1px solid rgba(127,209,255,.35);
+      background:#050b1f;
+      color:#d0defe;
+      text-align:center;
+      cursor:pointer;
+      user-select:none;
+    }
+    .izzakey.wide{
+      grid-column:span 2;
+    }
+    .izzakey.back{
+      background:#25112a;
+      border-color:rgba(255,59,107,.7);
+    }
+    .izzakey.clear{
+      background:#231f0b;
+      border-color:rgba(255,207,77,.7);
+    }
+
+    .party-list{
+      margin-top:8px;
+      padding:8px;
+      border-radius:10px;
+      border:1px dashed rgba(127,209,255,.5);
+      font-size:11px;
+      color:#9fb0d6;
+      max-height:180px;
+      overflow:auto;
+    }
+    .party-row{
+      display:flex;
+      align-items:center;
+      gap:8px;
+      margin-bottom:4px;
+    }
+    .party-row:last-child{margin-bottom:0;}
+    .party-avatar{
+      width:20px;height:20px;border-radius:50%;
+      background:url("/assets/izza.png") center/cover no-repeat,
+        radial-gradient(circle at 30% 10%,#ffe9b5 0,#ffcf4d 40%,#b87910 70%,#281305 100%);
+    }
+    .party-name{
+      flex:1;
+      color:#e7f0ff;
+    }
+    .party-status{
+      font-size:10px;
+      text-transform:uppercase;
+      letter-spacing:.14em;
+      color:#7fd1ff;
+    }
+    .invite-btn{
+      border:none;
+      border-radius:999px;
+      padding:3px 8px;
+      font-size:10px;
+      text-transform:uppercase;
+      letter-spacing:.12em;
+      background:linear-gradient(90deg,#0ff,#ff3b6b);
+      color:#001520;
+      cursor:pointer;
+    }
+
+    /* Shop / armory lists */
+    .shop-list{
+      margin-top:8px;
+      max-height:260px;
+      overflow:auto;
+      padding:4px;
+      border-radius:10px;
+      border:1px solid rgba(66,91,168,.7);
+      background:radial-gradient(circle at top,#050919,#010308);
+    }
+    .shop-item{
+      display:flex;
+      align-items:flex-start;
+      justify-content:space-between;
+      gap:8px;
+      padding:6px 6px 6px 2px;
+      border-bottom:1px solid rgba(44,64,122,.65);
+    }
+    .shop-item:last-child{border-bottom:none;}
+    .shop-preview{
+      width:80px;
+      height:64px;
+      border-radius:8px;
+      border:1px solid rgba(66,91,168,.8);
+      background:radial-gradient(circle at top,#060c20,#02030a);
+      overflow:hidden;
+      flex-shrink:0;
+    }
+    .shop-preview-canvas{
       width:100%;
       height:100%;
       display:block;
-      touch-action:none;
+    }
+    .shop-main{
+      flex:1;
+      min-width:0;
+    }
+    .shop-name{
+      font-size:12px;
+      font-weight:600;
+      margin-bottom:2px;
+    }
+    .shop-sub{
+      font-size:11px;
+      color:#9fb0d6;
+    }
+    .shop-side{
+      display:flex;
+      flex-direction:column;
+      gap:4px;
+      align-items:flex-end;
+      justify-content:center;
+      min-width:92px;
+    }
+    .price-tag{
+      font-size:11px;
+      padding:2px 8px;
+      border-radius:999px;
+      border:1px solid rgba(255,207,77,.8);
+      background:linear-gradient(90deg,#3b2b0b,#5a3f10);
+      color:#ffe8a6;
+      white-space:nowrap;
+    }
+    .price-tag.start{
+      border-color:rgba(127,209,255,.8);
+      background:linear-gradient(90deg,#041626,#04384d);
+      color:#cfe9ff;
+    }
+    .shop-btn{
+      padding:5px 8px;
+      border-radius:999px;
+      border:1px solid rgba(127,209,255,.8);
+      background:linear-gradient(90deg,#021021,#03253b);
+      color:#e7f0ff;
+      font-size:10px;
+      text-transform:uppercase;
+      letter-spacing:.14em;
+      cursor:pointer;
+      white-space:nowrap;
+    }
+    .shop-btn.owned{
+      border-color:rgba(159,176,214,.8);
+      background:#111826;
+      color:#9fb0d6;
+    }
+    .shop-btn.equipped{
+      border-color:rgba(0,255,170,.9);
+      background:linear-gradient(90deg,#00e5b0,#62ffd5);
+      color:#001b11;
+      font-weight:700;
+    }
+    .shop-note{
+      margin-top:6px;
+      font-size:11px;
+      color:#9fb0d6;
+    }
+
+    /* Purchase confirm overlay, replaces iOS rotated confirm() */
+    .purchase-box{
+      border-radius:14px;
+      border:1px solid rgba(66,91,168,.85);
+      background:linear-gradient(145deg,#060a1b,#02030c);
+      padding:10px;
+      margin-top:8px;
+    }
+    .purchase-line{
+      display:flex;
+      justify-content:space-between;
+      gap:8px;
+      font-size:11px;
+      color:#c3cff5;
+      margin-top:6px;
+      align-items:center;
+    }
+    .purchase-line strong{
+      color:#e7f0ff;
+      font-size:12px;
+    }
+    .purchase-actions{
+      display:flex;
+      gap:8px;
+      margin-top:10px;
+      justify-content:flex-end;
+      flex-wrap:wrap;
+    }
+    .purchase-actions button{
+      padding:7px 12px;
+      border-radius:999px;
+      border:1px solid rgba(127,209,255,.8);
+      background:linear-gradient(90deg,#021021,#03253b);
+      color:#e7f0ff;
+      font-size:11px;
+      text-transform:uppercase;
+      letter-spacing:.14em;
+      cursor:pointer;
+      white-space:nowrap;
+    }
+    .purchase-actions button.approve{
+      border:none;
+      background:linear-gradient(90deg,#0ff,#ff3b6b);
+      color:#001520;
+      font-weight:800;
+      box-shadow:
+        0 0 18px rgba(0,255,255,.35),
+        0 0 18px rgba(255,59,107,.25);
+    }
+    .purchase-msg{
+      margin-top:8px;
+      font-size:11px;
+      color:#9fb0d6;
+      min-height:16px;
+    }
+    .purchase-msg.error{ color:#ffb86b; }
+    .purchase-msg.ok{ color:#5ad49e; }
+
+    /* Stack panels on very short screens */
+    @media (max-height:620px){
+      .main-row{
+        grid-template-columns:1fr;
+      }
     }
   </style>
+  <script src="https://sdk.minepi.com/pi-sdk.js"></script>
+  <!-- Babylon.js for 3D lobby soldier + shop previews -->
   <script src="https://cdn.babylonjs.com/babylon.js"></script>
   <script src="https://cdn.babylonjs.com/loaders/babylonjs.loaders.min.js"></script>
 </head>
 <body>
-  <div id="msg">Booting Babylon…</div>
-  <canvas id="renderCanvas"></canvas>
+  <div class="rot-wrapper" id="rotWrapper">
+    <div class="lobby-root">
+      <div class="shell">
+        <div class="top-row">
+          <div class="logo-block">
+            <div class="izzacoin"></div>
+            <span>IZZA • WAR ZONE</span>
+          </div>
+          <button class="deploy-btn" id="deployBtn">
+            <span>Deploy</span>
+            <span class="tag">drop in</span>
+          </button>
+          <div class="player-pill">
+            <span class="label">Operator</span>
+            <span class="name">{{ player.username }}</span>
+          </div>
+        </div>
+
+        <div class="main-row">
+          <section class="zone-panel">
+            <div class="zone-header">
+              <div>
+                <span>Drop zone</span>
+                <strong>Pre-deployment view</strong>
+              </div>
+              <div style="font-size:10px;color:#7fd1ff;">
+                IZZA maps · rotated view
+              </div>
+            </div>
+            <!-- map image comes from map_image_url, or falls back to /assets/warzone-map-izzacity.jpg -->
+            <div
+              class="zone-canvas-shell"
+              id="zoneCanvasShell"
+              style="background-image:url('{{ map_image_url or "/assets/warzone-map-izzacity.jpg" }}');">
+              <!-- 3D soldier rendered on top of the map -->
+              <canvas id="soldierCanvas" class="zone-soldier-canvas"></canvas>
+            </div>
+
+            <!-- IZZA WALLET controls under the image area -->
+            <div class="loadout-bar">
+              <div class="loadout-label">IZZA wallet</div>
+              <div class="loadout-actions">
+                <button class="btn-loadout secondary" id="walletManageBtn">
+                  IZZA WALLET
+                </button>
+                <button class="btn-loadout" id="walletSyncBtn">
+                  Sync wallet
+                </button>
+              </div>
+            </div>
+          </section>
+
+          <aside class="side-panel">
+            <div class="friends-card">
+              <div class="card-title">Party and friends</div>
+              <div class="friends-actions">
+                <button class="btn-ghost" id="inviteBtn">Invite friends</button>
+                <button class="btn-ghost secondary" id="searchBtn">Search players</button>
+              </div>
+              <div class="friends-foot">
+                War Zone runs its own party system. Invited Pi-authed friends
+                will appear standing beside your operator when they accept.
+              </div>
+            </div>
+
+            <div class="character-card">
+              <div class="card-title">IZZA soldier and armory</div>
+              <div class="character-body">
+                <div class="character-info">
+                  <div class="char-name" id="charName">
+                    IZZA Soldier
+                  </div>
+                  <div class="char-sub">
+                    All players start as the basic IZZA Soldier. Unlock extra weapons
+                    and operator skins in the Armory, then equip your favorites
+                    before dropping into IZZA WAR ZONE.
+                  </div>
+                  <div class="char-toggle">
+                    <button class="btn-loadout secondary" id="weaponsBtn">Weapons</button>
+                    <button class="btn-loadout" id="skinsBtn">Skins</button>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </aside>
+        </div>
+
+        <!-- INVITE OVERLAY -->
+        <div class="overlay" id="inviteOverlay">
+          <div class="overlay-card">
+            <div class="overlay-header">
+              <div class="overlay-title">War zone party</div>
+              <button class="overlay-close" data-close="inviteOverlay">Close</button>
+            </div>
+            <div class="overlay-body">
+              <p>
+                Current squad. When friends accept your invites they’ll appear here.
+              </p>
+              <div class="party-list" id="partyList">
+                <div class="party-row">
+                  <div class="party-avatar"></div>
+                  <div class="party-name">{{ player.username }}</div>
+                  <div class="party-status">leader</div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- SEARCH OVERLAY (custom IZZA keyboard) -->
+        <div class="overlay" id="searchOverlay">
+          <div class="overlay-card">
+            <div class="overlay-header">
+              <div class="overlay-title">Search players</div>
+              <button class="overlay-close" data-close="searchOverlay">Close</button>
+            </div>
+            <div class="overlay-body">
+              <p>
+                Use the IZZA keyboard to search Pi-authed IZZA WAR ZONE players
+                and send lobby invites.
+              </p>
+              <div class="overlay-input-row">
+                <div id="searchDisplay" class="izzakey-display empty">Search by Pi username…</div>
+                <button type="button" id="searchGo">Go</button>
+              </div>
+              <div class="izzakey-grid" id="izzakeyGrid"></div>
+              <div class="party-list" id="searchResults">
+                Type a name using the IZZA keyboard and tap <b>Go</b>.
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- DEPLOY OVERLAY -->
+        <div class="overlay" id="deployOverlay">
+          <div class="overlay-card">
+            <div class="overlay-header">
+              <div class="overlay-title">Matchmaking</div>
+              <button class="overlay-close" data-close="deployOverlay">Cancel</button>
+            </div>
+            <div class="overlay-body">
+              <p>
+                Connecting to the IZZA WAR ZONE lobby, filling up to 20 players
+                per match and topping up with bots if needed. When the match is
+                ready the FPS client will load.
+              </p>
+            </div>
+          </div>
+        </div>
+
+        <!-- WALLET OVERLAY (S-key save, same flow as IZZA CREATURES) -->
+        <div class="overlay" id="walletOverlay">
+          <div class="overlay-card">
+            <div class="overlay-header">
+              <div class="overlay-title">My IZZA wallet</div>
+              <button class="overlay-close" data-close="walletOverlay">Close</button>
+            </div>
+            <div class="overlay-body">
+              <div style="margin-bottom:8px;font-size:11px;">
+                <div>Signed in as <strong id="mwUser">—</strong></div>
+              </div>
+              <div style="margin-bottom:8px;font-size:11px;">
+                <div>Active wallet (public key)</div>
+                <div id="mwPub" style="font-family:ui-monospace,Menlo,Consolas,monospace;word-break:break-all;">—</div>
+                <div style="margin-top:4px;color:#9fb0d6;">
+                  Need to set or switch your active wallet? Open or create the full wallet once below.
+                  After creation go into your full wallet, reveal your S key once and store it somewhere safe.
+                  Then return here to save your S key locally.
+                </div>
+              </div>
+              <div style="margin-bottom:8px;font-size:11px;">
+                <div>Balances — Testnet</div>
+                <div>Test Pi: <strong id="balPi">—</strong></div>
+                <div>Test IZZA: <strong id="balIzza">—</strong></div>
+              </div>
+              <div style="margin-bottom:8px;font-size:11px;">
+                <div>Local S key status: <span id="mwSStatus">—</span></div>
+                <div class="overlay-input-row" style="margin-top:6px;">
+                  <input
+                    id="mwSInput"
+                    placeholder="S... private key"
+                    autocomplete="off"
+                    spellcheck="false"
+                    autocapitalize="none"
+                    style="flex:1;min-width:0;border-radius:999px;border:1px solid rgba(127,209,255,.6);background:#02061b;color:#edf3ff;font-size:12px;padding:7px 10px;outline:none;">
+                  <button type="button" id="mwSaveBtn">Save</button>
+                  <button type="button" id="mwForgetBtn" style="background:linear-gradient(90deg,#ff3b6b,#ff9c6b);">
+                    Forget
+                  </button>
+                </div>
+                <div style="margin-top:4px;color:#9fb0d6;">
+                  Your S key is stored locally on this device only.
+                </div>
+              </div>
+              <div style="display:flex;justify-content:flex-end;margin-top:10px;">
+                <a
+                  href="/token/auth?next=/token/izza"
+                  style="text-decoration:none;padding:7px 12px;border-radius:999px;border:1px solid rgba(255,207,77,.9);background:linear-gradient(90deg,#ffcf4d,#ff9c3b);color:#1a1200;font-size:11px;text-transform:uppercase;letter-spacing:.16em;">
+                  Open full wallet
+                </a>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- ARMORY: WEAPONS -->
+        <div class="overlay" id="weaponsOverlay">
+          <div class="overlay-card">
+            <div class="overlay-header">
+              <div class="overlay-title">Armory — Weapons</div>
+              <button class="overlay-close" data-close="weaponsOverlay">Close</button>
+            </div>
+            <div class="overlay-body">
+              <p>
+                You always deploy with the free <b>Basic Pistol</b>. Use IZZA tokens
+                to unlock extra weapons and blueprints. Owned weapons stay in
+                your inventory across matches.
+              </p>
+              <div id="weaponsList" class="shop-list">
+                Loading weapons…
+              </div>
+              <div class="shop-note">
+                Purchases are paid with Testnet IZZA from your active IZZA wallet,
+                using the same flow as IZZA CREATURE mints.
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- ARMORY: SKINS -->
+        <div class="overlay" id="skinsOverlay">
+          <div class="overlay-card">
+            <div class="overlay-header">
+              <div class="overlay-title">Armory — Skins</div>
+              <button class="overlay-close" data-close="skinsOverlay">Close</button>
+            </div>
+            <div class="overlay-body">
+              <p>
+                Start with the free <b>Basic IZZA Soldier</b>. Unlock extra operator
+                skins and outfits with IZZA tokens, then equip one as your
+                current look before you drop in.
+              </p>
+              <div id="skinsList" class="shop-list">
+                Loading skins…
+              </div>
+              <div class="shop-note">
+                Skins are pure cosmetics and are <b>not</b> NFTs. They live in
+                your IZZA WAR ZONE inventory, purchased with IZZA like game
+                credits.
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- PURCHASE CONFIRM OVERLAY, replaces confirm() so iOS rotation is correct -->
+        <div class="overlay" id="purchaseOverlay">
+          <div class="overlay-card">
+            <div class="overlay-header">
+              <div class="overlay-title">Approve IZZA payment</div>
+              <button class="overlay-close" data-close="purchaseOverlay">Close</button>
+            </div>
+            <div class="overlay-body">
+              <p>
+                You are about to purchase an in game War Zone item with IZZA.
+                This is not an NFT, it is a game unlock stored in your War Zone inventory.
+              </p>
+
+              <div class="purchase-box">
+                <div class="purchase-line">
+                  <div>Item</div>
+                  <strong id="poItem">—</strong>
+                </div>
+                <div class="purchase-line">
+                  <div>Cost</div>
+                  <strong id="poCost">—</strong>
+                </div>
+                <div class="purchase-line">
+                  <div>From wallet</div>
+                  <div id="poFrom" style="font-family:ui-monospace,Menlo,Consolas,monospace;word-break:break-all;text-align:right;max-width:250px;">—</div>
+                </div>
+                <div class="purchase-line">
+                  <div>To</div>
+                  <div style="color:#9fb0d6;">IZZA distributor</div>
+                </div>
+
+                <div class="purchase-actions">
+                  <button type="button" id="poCancel">Cancel</button>
+                  <button type="button" class="approve" id="poApprove">Approve</button>
+                </div>
+
+                <div class="purchase-msg" id="poMsg"></div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+      </div><!-- /.shell -->
+    </div>
+  </div>
 
   <script>
-    const canvas = document.getElementById("renderCanvas");
-    const msgEl  = document.getElementById("msg");
+    // Pi SDK init (same pattern as creatures page)
+    (function(){
+      const sandbox = {{ 'true' if PI_SANDBOX else 'false' }};
+      try{
+        if(window.Pi && Pi.init){
+          Pi.init({ version:"2.0", sandbox:sandbox });
+        }
+      }catch(e){}
+    })();
 
-    function log(line){
-      msgEl.textContent += "\n" + line;
-    }
+    // Manual landscape: disable rotation when the browser is truly landscape (desktop)
+    (function(){
+      const wrapper = document.getElementById("rotWrapper");
+      function updateLayout(){
+        if (!wrapper) return;
+        const landscape = window.innerWidth >= window.innerHeight;
+        if (landscape){
+          wrapper.style.transform = "none";
+          wrapper.style.width = "100%";
+          wrapper.style.height = "100%";
+        } else {
+          wrapper.style.width = window.innerHeight + "px";
+          wrapper.style.height = window.innerWidth + "px";
+          wrapper.style.transform = "rotate(90deg) translateY(-100%)";
+        }
+      }
+      window.addEventListener("resize", updateLayout);
+      window.addEventListener("orientationchange", updateLayout);
+      updateLayout();
+    })();
 
-    if (!canvas || !window.BABYLON){
-      msgEl.textContent = "Babylon not available";
-    } else {
+    // ---------- IZZA wallet helpers + wallet overlay (mirrors creatures flow) ----------
+    (function(){
+      const SRV_USER = {{ (player.username or '') | tojson }};
+      function stripAt(s){ return (s||"").toString().trim().replace(/^@+/, ""); }
+
+      // NEW: canonical username + a helper that always returns a safe ?u=<username> querystring.
+      function canonU(s){
+        const v = stripAt(s);
+        return v ? v.toLowerCase() : "";
+      }
+      const USER_CANON = (()=>{
+        const fromSrv = stripAt(SRV_USER);
+        if(fromSrv) return fromSrv;
+        try{
+          const raw = localStorage.getItem("piAuthUser");
+          if(raw){
+            const j = JSON.parse(raw);
+            if(j && j.username) return stripAt(j.username);
+          }
+        }catch(e){}
+        try{
+          const uCanon = localStorage.getItem("izzaUserCanon");
+          if(uCanon) return stripAt(uCanon);
+          const u = localStorage.getItem("izzaUserU");
+          if(u) return stripAt(u);
+        }catch(e){}
+        return "";
+      })();
+
+      // NEW: this is what we will use everywhere to guarantee the backend receives ?u=
+      const USER_U = canonU(USER_CANON);
+      function uQS(){
+        return USER_U ? ("?u=" + encodeURIComponent(USER_U)) : "";
+      }
+
+      if(USER_CANON){
+        try{
+          localStorage.setItem("izzaUserCanon", USER_CANON);
+          localStorage.setItem("izzaUserU", USER_U);
+        }catch(e){}
+      }
+
+      function __readVault(){
+        try{
+          const s = localStorage.getItem("izza_test_wallet");
+          return s ? JSON.parse(s) : null;
+        }catch(e){ return null; }
+      }
+      function __writeVault(j){
+        try{ localStorage.setItem("izza_test_wallet", JSON.stringify(j || {})); }catch(e){}
+      }
+      function __forgetSecret(pub){
+        try{
+          const v = __readVault() || {};
+          if(v && v.pub === pub){
+            delete v.sec;
+            __writeVault(v);
+          }
+        }catch(e){}
+      }
+      function isLocalWallet(pub){
+        const v = __readVault();
+        return !!(v && v.pub === pub && /^S[A-Z0-9]{55}$/.test(v.sec || ""));
+      }
+      function getLocalSecret(pub){
+        try{
+          const v = __readVault();
+          if(!v) return "";
+          if(pub && v.pub !== pub) return "";
+          return v.sec || "";
+        }catch(e){ return ""; }
+      }
+
+      async function fetchActiveWallet(username){
+        const qs = username ? ("?u=" + encodeURIComponent(username)) : uQS();
+        const r = await fetch("/api/wallet/active"+qs, { credentials:"include" });
+        if(!r.ok) return null;
+        return r.json().catch(()=>null);
+      }
+      async function linkActiveWallet(username, pub, secret){
+        const qs = username ? ("?u="+encodeURIComponent(username)) : uQS();
+        const body = { pub:String(pub||"").trim().toUpperCase() };
+        if(secret && /^S[A-Z0-9]{55}$/.test(secret)) body.secret = secret.trim();
+        const r = await fetch("/api/wallet/link"+qs, {
+          method:"POST",
+          headers:{ "Content-Type":"application/json" },
+          body: JSON.stringify(body),
+          credentials:"include"
+        });
+        const j = await r.json().catch(()=>null);
+        return { ok:r.ok, status:r.status, json:j };
+      }
+      async function fetchBalances(username){
+        const qs = username ? ("?u="+encodeURIComponent(username)) : uQS();
+        const r = await fetch("/api/wallet/balances"+qs, { credentials:"include" });
+        if(!r.ok) return null;
+        return r.json().catch(()=>null);
+      }
+
+      // Wallet overlay elements
+      const walletOverlay = document.getElementById("walletOverlay");
+      const mwUser   = document.getElementById("mwUser");
+      const mwPub    = document.getElementById("mwPub");
+      const balPi    = document.getElementById("balPi");
+      const balIzza  = document.getElementById("balIzza");
+      const mwSStatus= document.getElementById("mwSStatus");
+      const mwSInput = document.getElementById("mwSInput");
+      const mwSaveBtn= document.getElementById("mwSaveBtn");
+      const mwForgetBtn = document.getElementById("mwForgetBtn");
+
+      async function refreshWalletOverlay(){
+        if(!walletOverlay) return;
+        if(mwUser) mwUser.textContent = USER_CANON ? "@"+USER_CANON : "—";
+
+        const active = await fetchActiveWallet(USER_U);
+        const pub = active && active.pub || "";
+        if(mwPub) mwPub.textContent = pub || "—";
+
+        if(balPi || balIzza){
+          try{
+            const b = await fetchBalances(USER_U);
+            if(balPi)   balPi.textContent   = b && b.pi   || "—";
+            if(balIzza) balIzza.textContent = b && b.izza || "—";
+          }catch(e){
+            if(balPi)   balPi.textContent   = "—";
+            if(balIzza) balIzza.textContent = "—";
+          }
+        }
+
+        const has = pub && isLocalWallet(pub);
+        if(mwSStatus){
+          mwSStatus.innerHTML = has
+            ? '<span style="color:#5ad49e;">Saved locally</span>'
+            : '<span style="color:#ffb86b;">Not saved</span>';
+        }
+      }
+
+      function openWalletOverlay(){
+        if(!walletOverlay) return;
+        walletOverlay.classList.add("visible");
+        refreshWalletOverlay();
+      }
+
+      mwSaveBtn?.addEventListener("click", async function(){
+        const active = await fetchActiveWallet(USER_U);
+        const pub = active && active.pub || "";
+        if(!/^G[A-Z0-9]{55}$/.test(pub)){
+          alert("Open your IZZA wallet once to set an active wallet, then return.");
+          return;
+        }
+        const secret = (mwSInput?.value || "").trim();
+        if(!/^S[A-Z0-9]{55}$/.test(secret)){
+          alert("Enter a valid S key starting with S…");
+          return;
+        }
+
+        const v = __readVault() || {};
+        v.pub = pub;
+        v.sec = secret;
+        __writeVault(v);
+
+        const link = await linkActiveWallet(USER_U, pub, secret);
+        if(!link.ok){
+          alert("Server link failed: " + ((link.json && link.json.error) || link.status));
+        }else{
+          alert("S key saved locally and linked.");
+        }
+
+        if(mwSInput) mwSInput.value = "";
+        refreshWalletOverlay();
+      });
+
+      mwForgetBtn?.addEventListener("click", async function(){
+        const active = await fetchActiveWallet(USER_U);
+        const pub = active && active.pub || "";
+        if(pub) __forgetSecret(pub);
+        refreshWalletOverlay();
+      });
+
+      async function ensureUserAndWalletGate(){
+        const user = USER_U || canonU(USER_CANON);
+        if(!user){
+          alert("Sign in with Pi first, then return to IZZA WAR ZONE.");
+          return null;
+        }
+        const active = await fetchActiveWallet(user);
+        const pub = active && active.pub || "";
+        if(!/^G[A-Z0-9]{55}$/.test(pub)){
+          alert("Open your IZZA wallet once to set an active wallet, then return here.");
+          return null;
+        }
+        if(!isLocalWallet(pub)){
+          openWalletOverlay();
+          alert("Save your IZZA wallet S key locally (same as IZZA CREATURES page) before purchasing.");
+          return null;
+        }
+        return { user, pub, sec:getLocalSecret(pub) };
+      }
+
+      // Expose for shop code + wallet button
+      window.__izzaWalletGate = ensureUserAndWalletGate;
+      window.__izzaOpenWalletOverlay = openWalletOverlay;
+
+      // NEW: expose canonical ?u for Warzone API calls
+      window.__izzaUserU = USER_U;
+      window.__izzaUserQS = uQS;
+    })();
+
+    // ---------- Overlays (friends / search / matchmaking / armory / wallet button hooks) ----------
+    (function(){
+      function show(id){
+        const el = document.getElementById(id);
+        if (el) el.classList.add("visible");
+      }
+      function hide(id){
+        const el = document.getElementById(id);
+        if (el) el.classList.remove("visible");
+      }
+
+      document.getElementById("inviteBtn")?.addEventListener("click", () => show("inviteOverlay"));
+      document.getElementById("searchBtn")?.addEventListener("click", () => show("searchOverlay"));
+      document.getElementById("deployBtn")?.addEventListener("click", () => show("deployOverlay"));
+
+      document.getElementById("weaponsBtn")?.addEventListener("click", () => {
+        show("weaponsOverlay");
+        window.__izzaLoadShop && window.__izzaLoadShop("weapons");
+      });
+
+      document.getElementById("skinsBtn")?.addEventListener("click", () => {
+        show("skinsOverlay");
+        window.__izzaLoadShop && window.__izzaLoadShop("skins");
+      });
+
+      document.querySelectorAll(".overlay-close").forEach(btn => {
+        btn.addEventListener("click", function(){
+          const id = this.getAttribute("data-close");
+          if (id) hide(id);
+        });
+      });
+
+      // Custom IZZA keyboard for player search
+      const searchDisplay = document.getElementById("searchDisplay");
+      const keyGrid = document.getElementById("izzakeyGrid");
+      const searchResults = document.getElementById("searchResults");
+      const searchGo = document.getElementById("searchGo");
+
+      let buffer = "";
+
+      function updateDisplay(){
+        if (!searchDisplay) return;
+        if (!buffer){
+          searchDisplay.textContent = "Search by Pi username…";
+          searchDisplay.classList.add("empty");
+        } else {
+          searchDisplay.textContent = buffer;
+          searchDisplay.classList.remove("empty");
+        }
+      }
+
+      function appendChar(ch){
+        if (buffer.length >= 20) return;
+        buffer += ch;
+        updateDisplay();
+      }
+      function backspace(){
+        buffer = buffer.slice(0,-1);
+        updateDisplay();
+      }
+      function clearAll(){
+        buffer = "";
+        updateDisplay();
+      }
+
+      function buildKeyboard(){
+        if (!keyGrid) return;
+        keyGrid.innerHTML = "";
+
+        const rows = [
+          "QWERTYUIOP",
+          "ASDFGHJKL",
+          "ZXCVBNM",
+          "1234567890"
+        ];
+
+        rows.forEach(row => {
+          row.split("").forEach(ch => {
+            const btn = document.createElement("button");
+            btn.type = "button";
+            btn.className = "izzakey";
+            btn.textContent = ch;
+            btn.addEventListener("click", () => appendChar(ch));
+            keyGrid.appendChild(btn);
+          });
+        });
+
+        const space = document.createElement("button");
+        space.type = "button";
+        space.className = "izzakey wide";
+        space.textContent = "space";
+        space.addEventListener("click", () => appendChar(" "));
+        keyGrid.appendChild(space);
+
+        const back = document.createElement("button");
+        back.type = "button";
+        back.className = "izzakey wide back";
+        back.textContent = "⌫";
+        back.addEventListener("click", backspace);
+        keyGrid.appendChild(back);
+
+        const clear = document.createElement("button");
+        clear.type = "button";
+        clear.className = "izzakey wide clear";
+        clear.textContent = "clear";
+        clear.addEventListener("click", clearAll);
+        keyGrid.appendChild(clear);
+      }
+
+      buildKeyboard();
+      updateDisplay();
+
+      async function doSearch(){
+        const q = (buffer || "").trim();
+        if (!q){
+          searchResults.textContent = "Type a Pi username with the IZZA keyboard and tap Go.";
+          return;
+        }
+        try{
+          const res = await fetch(`/warzone/api/search?q=${encodeURIComponent(q)}`, { credentials:"include" });
+          if (!res.ok){
+            searchResults.textContent = "Search failed. Try again.";
+            return;
+          }
+          const data = await res.json();
+          if (!data.results || !data.results.length){
+            searchResults.textContent = "No players found.";
+            return;
+          }
+          searchResults.innerHTML = "";
+          data.results.forEach(player => {
+            const row = document.createElement("div");
+            row.className = "party-row";
+            row.innerHTML = `
+              <div class="party-avatar"></div>
+              <div class="party-name">${player.username}</div>
+              <div class="party-status">
+                <button class="invite-btn" data-id="${player.id}">Invite</button>
+              </div>
+            `;
+            searchResults.appendChild(row);
+          });
+
+          searchResults.querySelectorAll(".invite-btn").forEach(btn => {
+            btn.addEventListener("click", async function(){
+              const id = this.getAttribute("data-id");
+              try{
+                const res = await fetch("/warzone/api/invite", {
+                  method: "POST",
+                  headers: { "Content-Type": "application/json" },
+                  body: JSON.stringify({ target_id: id }),
+                  credentials:"include"
+                });
+                if (res.ok){
+                  this.textContent = "Invited";
+                  this.disabled = true;
+                } else {
+                  this.textContent = "Error";
+                }
+              } catch(e){
+                console.error(e);
+                this.textContent = "Error";
+              }
+            });
+          });
+
+        } catch(err){
+          console.error(err);
+          searchResults.textContent = "Search error. Try again.";
+        }
+      }
+
+      searchGo?.addEventListener("click", doSearch);
+
+      // IZZA WALLET buttons
+      const walletManageBtn = document.getElementById("walletManageBtn");
+      const walletSyncBtn   = document.getElementById("walletSyncBtn");
+
+      walletManageBtn?.addEventListener("click", () => {
+        if (window.__izzaOpenWalletOverlay){
+          window.__izzaOpenWalletOverlay();
+        }
+      });
+
+      walletSyncBtn?.addEventListener("click", async () => {
+        if (!window.__izzaWalletGate) {
+          alert("Wallet gate not ready yet. Try again in a moment.");
+          return;
+        }
+        const gate = await window.__izzaWalletGate();
+        if (gate) {
+          alert(`IZZA wallet synced for @${gate.user}. You can now buy weapons and skins.`);
+        }
+      });
+
+      // Purchase overlay helpers
+      const po = document.getElementById("purchaseOverlay");
+      const poItem = document.getElementById("poItem");
+      const poCost = document.getElementById("poCost");
+      const poFrom = document.getElementById("poFrom");
+      const poMsg  = document.getElementById("poMsg");
+      const poCancel = document.getElementById("poCancel");
+      const poApprove = document.getElementById("poApprove");
+
+      let __poResolve = null;
+      let __poBusy = false;
+
+      function showPurchaseOverlay(payload){
+        if(!po) return Promise.resolve({ approved:false });
+        po.classList.add("visible");
+        if(poMsg){
+          poMsg.textContent = "";
+          poMsg.className = "purchase-msg";
+        }
+        if(poItem) poItem.textContent = payload.itemName || payload.sku || "Item";
+        if(poCost) poCost.textContent = (payload.price || 0) + " IZZA";
+        if(poFrom) poFrom.textContent = payload.pub || "—";
+
+        return new Promise((resolve) => {
+          __poResolve = resolve;
+        });
+      }
+
+      function closePurchaseOverlay(result){
+        if(!po) return;
+        po.classList.remove("visible");
+        const r = result || { approved:false };
+        if(__poResolve){
+          __poResolve(r);
+          __poResolve = null;
+        }
+      }
+
+      poCancel?.addEventListener("click", () => {
+        if(__poBusy) return;
+        closePurchaseOverlay({ approved:false });
+      });
+
+      // Approve click is handled by purchaseItem so it can show progress, and then close.
+      window.__izzaShowPurchaseOverlay = showPurchaseOverlay;
+      window.__izzaClosePurchaseOverlay = closePurchaseOverlay;
+      window.__izzaPurchaseOverlaySetMsg = function(txt, kind){
+        if(!poMsg) return;
+        poMsg.textContent = txt || "";
+        poMsg.className = "purchase-msg" + (kind ? (" " + kind) : "");
+      };
+      window.__izzaPurchaseOverlaySetBusy = function(b){
+        __poBusy = !!b;
+        if(poApprove) poApprove.disabled = __poBusy;
+        if(poCancel)  poCancel.disabled  = __poBusy;
+      };
+      window.__izzaPurchaseOverlayApproveHook = function(fn){
+        if(!poApprove) return;
+        poApprove.onclick = fn;
+      };
+    })();
+
+    // ---------- Armory load + IZZA purchases + 3D previews ----------
+    (function(){
+      const weaponsList = document.getElementById("weaponsList");
+      const skinsList   = document.getElementById("skinsList");
+
+      function createShopPreview(canvas, slot, sku){
+        if (!canvas || !window.BABYLON) return;
+
+        const engine = new BABYLON.Engine(canvas, true, {
+          preserveDrawingBuffer:true,
+          stencil:false
+        });
+        const scene = new BABYLON.Scene(engine);
+        scene.clearColor = new BABYLON.Color4(0,0,0,0);
+
+        const camera = new BABYLON.ArcRotateCamera(
+          "c",
+          Math.PI * 1.4,
+          Math.PI / 2.4,
+          2.0,
+          new BABYLON.Vector3(0,0.8,0),
+          scene
+        );
+        camera.attachControl(canvas, false);
+        camera.inputs.clear();
+        camera.lowerRadiusLimit = camera.radius;
+        camera.upperRadiusLimit = camera.radius;
+        camera.panningSensibility = 0;
+
+        const light = new BABYLON.HemisphericLight("h", new BABYLON.Vector3(0,1,0), scene);
+        light.intensity = 1.1;
+
+        let base = "/assets/warzone3d/";
+        let url;
+
+        if (slot === "weapons") {
+          base += "weapons/";
+          url = base + sku + ".glb";
+        } else {
+          base += "skins/";
+          url = base + sku + "/scene.gltf";
+        }
+
+        const lastSlash = url.lastIndexOf("/");
+        const rootUrl = url.substring(0, lastSlash + 1);
+        const fileName = url.substring(lastSlash + 1);
+
+        BABYLON.SceneLoader.ImportMesh(
+          "",
+          rootUrl,
+          fileName,
+          scene,
+          function(meshes, ps, skeletons, animGroups){
+            const root = new BABYLON.TransformNode("shopRoot", scene);
+            meshes.forEach(m => { m.parent = root; });
+
+            // Surgical fix for the starter skin preview being too zoomed.
+            // Only affects wz_basic_soldier in skins list.
+            if(slot === "skins" && sku === "wz_basic_soldier"){
+              root.position = new BABYLON.Vector3(0,-0.85,0);
+              root.rotation = new BABYLON.Vector3(0,Math.PI,0);
+              root.scaling  = new BABYLON.Vector3(0.42,0.42,0.42);
+              camera.radius = 3.4;
+              camera.lowerRadiusLimit = camera.radius;
+              camera.upperRadiusLimit = camera.radius;
+              camera.target = new BABYLON.Vector3(0,0.75,0);
+            } else {
+              root.position = new BABYLON.Vector3(0,-0.5,0);
+              root.rotation = new BABYLON.Vector3(0,Math.PI,0);
+              root.scaling  = new BABYLON.Vector3(1.2,1.2,1.2);
+            }
+
+            if (animGroups && animGroups.length){
+              animGroups.forEach(g => g.stop());
+              animGroups[0].start(true);
+            }
+          },
+          null,
+          function(err){
+            console.warn("Preview load failed for", slot, sku, err);
+          }
+        );
+
+        engine.runRenderLoop(function(){ scene.render(); });
+      }
+
+      async function loadShop(slot){
+        const listEl = slot === "weapons" ? weaponsList : skinsList;
+        if(!listEl) return;
+        listEl.textContent = "Loading " + slot + "…";
+        try{
+          // Keep cookies, but purchases will also include ?u=.
+          const res = await fetch(
+            `/warzone/api/shop?slot=${encodeURIComponent(slot)}`,
+            { credentials: "include" }
+          );
+
+          let data = null;
+          try { data = await res.json(); } catch(e) { data = null; }
+
+          if(!res.ok){
+            const msg = data && data.error ? data.error : res.status;
+            listEl.textContent = "Unable to load " + slot + " (" + msg + ").";
+            return;
+          }
+
+          const items = (data && data.items) || [];
+          if(!items.length){
+            listEl.textContent = "No " + slot + " configured yet.";
+            return;
+          }
+
+          listEl.innerHTML = "";
+          items.forEach(it => {
+            const row = document.createElement("div");
+            row.className = "shop-item";
+
+            const preview = document.createElement("div");
+            preview.className = "shop-preview";
+            const previewCanvas = document.createElement("canvas");
+            previewCanvas.className = "shop-preview-canvas";
+            preview.appendChild(previewCanvas);
+
+            const main = document.createElement("div");
+            main.className = "shop-main";
+            const nm = document.createElement("div");
+            nm.className = "shop-name";
+            nm.textContent = it.name || it.sku;
+            const sub = document.createElement("div");
+            sub.className = "shop-sub";
+            sub.textContent = it.description || "";
+            main.appendChild(nm);
+            main.appendChild(sub);
+
+            const side = document.createElement("div");
+            side.className = "shop-side";
+
+            const price = document.createElement("div");
+            price.className = "price-tag" + (it.starting ? " start" : "");
+            price.textContent = it.starting ? "Starter" : (it.price_izza + " IZZA");
+            side.appendChild(price);
+
+            const btn = document.createElement("button");
+            btn.className = "shop-btn";
+            btn.dataset.sku = it.sku;
+            btn.dataset.slot = slot;
+            btn.dataset.price = it.price_izza;
+
+            if(it.equipped){
+              btn.classList.add("equipped","owned");
+              btn.textContent = "Equipped";
+            }else if(it.owned){
+              btn.classList.add("owned");
+              btn.textContent = "Equip";
+            }else if(it.starting){
+              btn.classList.add("equipped","owned");
+              btn.textContent = "Basic";
+            }else{
+              btn.textContent = "Buy";
+            }
+
+            btn.addEventListener("click", async function(){
+              const owned = this.classList.contains("owned") && !this.classList.contains("equipped") && !it.starting;
+              if(owned){
+                await equipItem(slot, it.sku, listEl);
+              }else if(!this.classList.contains("equipped") && !it.starting){
+                const price = Number(this.dataset.price || 0);
+                await purchaseItem(slot, it.sku, it.name || it.sku, price, listEl);
+              }
+            });
+
+            side.appendChild(btn);
+
+            row.appendChild(preview);
+            row.appendChild(main);
+            row.appendChild(side);
+            listEl.appendChild(row);
+
+            createShopPreview(previewCanvas, slot, it.sku);
+          });
+        }catch(e){
+          console.error(e);
+          listEl.textContent = "Error loading " + slot + ".";
+        }
+      }
+
+      async function purchaseItem(slot, sku, itemName, price, listEl){
+        try{
+          const gate = await window.__izzaWalletGate?.();
+          if(!gate) return;
+
+          if(!price || price <= 0){
+            alert("This item is not configured with an IZZA price yet.");
+            return;
+          }
+
+          const showOverlay = window.__izzaShowPurchaseOverlay;
+          const closeOverlay = window.__izzaClosePurchaseOverlay;
+
+          if(showOverlay && closeOverlay){
+            window.__izzaPurchaseOverlaySetBusy?.(false);
+            window.__izzaPurchaseOverlaySetMsg?.("", "");
+            const p = showOverlay({ sku, itemName, price, pub: gate.pub });
+
+            window.__izzaPurchaseOverlayApproveHook?.(() => {
+              closeOverlay({ approved:true });
+            });
+
+            const res = await p;
+            if(!res || !res.approved){
+              closeOverlay({ approved:false });
+              return;
+            }
+          } else {
+            const ok = confirm(`Spend ${price} IZZA to unlock "${sku}"?`);
+            if(!ok) return;
+          }
+
+          if(window.__izzaPurchaseOverlaySetBusy) window.__izzaPurchaseOverlaySetBusy(true);
+          if(window.__izzaPurchaseOverlaySetMsg) window.__izzaPurchaseOverlaySetMsg("Submitting IZZA payment…", "");
+
+          // NEW: always include ?u=<username> on purchase (bulletproof against iOS cookie issues)
+          const qs = (window.__izzaUserQS && window.__izzaUserQS()) || "";
+          const res = await fetch("/warzone/api/purchase" + qs, {
+            method:"POST",
+            headers:{ "Content-Type":"application/json" },
+            body: JSON.stringify({
+              slot,
+              sku,
+              price_izza: price,
+              buyer_pub: gate.pub,
+              buyer_sec: gate.sec
+            }),
+            credentials:"include"
+          });
+
+          const data = await res.json().catch(()=>({}));
+
+          if(!res.ok || !data.ok){
+            const msg = data && (data.error || data.detail) ? (data.error || data.detail) : res.status;
+            if(window.__izzaPurchaseOverlaySetMsg){
+              window.__izzaPurchaseOverlaySetMsg("Purchase failed, " + msg, "error");
+              window.__izzaPurchaseOverlaySetBusy(false);
+              return;
+            }
+            alert("Purchase failed: " + msg);
+            return;
+          }
+
+          if(window.__izzaPurchaseOverlaySetMsg){
+            window.__izzaPurchaseOverlaySetMsg("Purchase complete, added to your inventory.", "ok");
+            window.__izzaPurchaseOverlaySetBusy(false);
+            setTimeout(() => {
+              window.__izzaClosePurchaseOverlay?.({ approved:false });
+            }, 650);
+          } else {
+            alert("Purchase complete. Item added to your inventory.");
+          }
+
+          // Always reload, this is what makes the button switch to Equip
+          await loadShop(slot);
+
+        }catch(e){
+          console.error(e);
+          if(window.__izzaPurchaseOverlaySetMsg){
+            window.__izzaPurchaseOverlaySetMsg("Purchase error, try again.", "error");
+            window.__izzaPurchaseOverlaySetBusy(false);
+            return;
+          }
+          alert("Purchase error. Try again.");
+        }
+      }
+
+      async function equipItem(slot, sku, listEl){
+        try{
+          const res = await fetch("/warzone/api/equip", {
+            method:"POST",
+            headers:{ "Content-Type":"application/json" },
+            body: JSON.stringify({ slot, sku }),
+            credentials:"include"
+          });
+          const data = await res.json().catch(()=>({}));
+          if(!res.ok || !data.ok){
+            alert("Equip failed: " + (data.error || res.status));
+          }else{
+            await loadShop(slot);
+          }
+        }catch(e){
+          console.error(e);
+          alert("Equip error. Try again.");
+        }
+      }
+
+      window.__izzaLoadShop = loadShop;
+    })();
+
+    // ---------- Babylon.js mini-scene for lobby soldier ----------
+    (function(){
+      const canvas = document.getElementById("soldierCanvas");
+      if (!canvas || !window.BABYLON) {
+        console.warn("[WARZONE] soldier canvas or BABYLON missing");
+        return;
+      }
+
       const engine = new BABYLON.Engine(canvas, true, {
         preserveDrawingBuffer:true,
         stencil:true
       });
 
-      const scene  = new BABYLON.Scene(engine);
-      scene.clearColor = new BABYLON.Color4(0,0,0,1);
+      let scene, camera;
+      let currentRoot = null;
 
-      // Camera starts reasonably zoomed out, then we frame after load
-      const camera = new BABYLON.ArcRotateCamera(
-        "cam",
-        Math.PI * 1.2,
-        Math.PI / 2.35,
-        25.0,
-        new BABYLON.Vector3(0, 1.0, 0),
-        scene
-      );
-      camera.attachControl(canvas, true);
-      camera.panningSensibility = 0;
-      camera.wheelPrecision = 60;
+      const SOLDIER_ASSET = "/assets/warzone3d/soldier_gltf_3/scene.gltf";
 
-      const hemi = new BABYLON.HemisphericLight("h", new BABYLON.Vector3(0,1,0), scene);
-      hemi.intensity = 1.1;
+      function createScene(){
+        scene = new BABYLON.Scene(engine);
+        scene.clearColor = new BABYLON.Color4(0,0,0,0);
 
-      const dir = new BABYLON.DirectionalLight("d", new BABYLON.Vector3(-0.3,-1,-0.4), scene);
-      dir.intensity = 1.0;
-
-      // Debug cube
-      const debugBox = BABYLON.MeshBuilder.CreateBox("debugBox", { size:0.6 }, scene);
-      debugBox.position.set(0, 0.3, -6);
-      const debugMat = new BABYLON.StandardMaterial("dbgMat", scene);
-      debugMat.emissiveColor = new BABYLON.Color3(0,1,1);
-      debugBox.material = debugMat;
-
-      engine.runRenderLoop(() => scene.render());
-      window.addEventListener("resize", () => engine.resize());
-
-      async function fetchHeadOrGet(url){
-        try{
-          const r = await fetch(url, { method:"HEAD", cache:"no-store" });
-          if (r && (r.ok || r.status === 404 || r.status === 403)) return r;
-        }catch(e){}
-        return fetch(url, { method:"GET", cache:"no-store" });
-      }
-
-      async function checkUrl(url){
-        try{
-          const r = await fetchHeadOrGet(url);
-          const ct = (r.headers && r.headers.get) ? (r.headers.get("content-type") || "") : "";
-          return { ok: r.ok, status: r.status, ct };
-        }catch(e){
-          return { ok:false, status:0, ct:String(e) };
-        }
-      }
-
-      function joinUrl(rootUrl, rel){
-        if (!rel) return rootUrl;
-        if (/^https?:\/\//i.test(rel)) return rel;
-        if (rel.startsWith("/")) return rel;
-        return rootUrl + rel;
-      }
-
-      async function preflightGltf(label, rootUrl, fileName){
-        const gltfUrl = rootUrl + fileName;
-        log("Preflight " + label + " gltf, " + gltfUrl);
-
-        const gltfCheck = await checkUrl(gltfUrl);
-        if (!gltfCheck.ok){
-          log("Preflight FAIL " + label + ", gltf missing, " + gltfCheck.status);
-          return null;
-        }
-
-        let gltf;
-        try{
-          const r = await fetch(gltfUrl, { cache:"no-store" });
-          gltf = await r.json();
-        }catch(e){
-          log("Preflight FAIL " + label + ", gltf JSON parse error, " + e);
-          return null;
-        }
-
-        const deps = [];
-
-        if (Array.isArray(gltf.buffers)){
-          gltf.buffers.forEach(b => b?.uri && deps.push({ kind:"buffer", uri:b.uri }));
-        }
-        if (Array.isArray(gltf.images)){
-          gltf.images.forEach(img => img?.uri && deps.push({ kind:"image", uri:img.uri }));
-        }
-
-        for (const d of deps){
-          const url = joinUrl(rootUrl, d.uri);
-          const st = await checkUrl(url);
-          if (!st.ok){
-            log("Preflight FAIL " + label + ", missing " + d.kind + ", " + url + ", status " + st.status);
-            return null;
-          }
-          log("Preflight OK " + label + ", " + d.kind + ", " + d.uri + ", status " + st.status + ", type " + (st.ct || "unknown"));
-        }
-
-        log("Preflight OK " + label + ", deps=" + deps.length);
-        return gltf;
-      }
-
-      function getBounds(node){
-        const b = node.getHierarchyBoundingVectors(true);
-        return { min: b.min.clone(), max: b.max.clone() };
-      }
-
-      function normalizeToGroundAndHeight(root, targetHeight = 1.75){
-        // 1) compute bounds in current space
-        const bb1 = getBounds(root);
-        const size1 = bb1.max.subtract(bb1.min);
-        const h1 = Math.max(0.000001, size1.y);
-
-        // 2) uniform scale so model height ~ targetHeight
-        const s = targetHeight / h1;
-        root.scaling = new BABYLON.Vector3(s, s, s);
-
-        // 3) recompute bounds AFTER scaling and move so feet touch y=0
-        const bb2 = getBounds(root);
-        const minY = bb2.min.y;
-        root.position.y -= minY;
-
-        return { scale: s, bounds: bb2 };
-      }
-
-      function frameCameraToRoots(roots){
-        let min = new BABYLON.Vector3( 1e9, 1e9, 1e9);
-        let max = new BABYLON.Vector3(-1e9,-1e9,-1e9);
-        let any = false;
-
-        for (const r of roots){
-          if(!r) continue;
-          const bb = getBounds(r);
-          if(!isFinite(bb.min.x) || !isFinite(bb.max.x)) continue;
-          min = BABYLON.Vector3.Minimize(min, bb.min);
-          max = BABYLON.Vector3.Maximize(max, bb.max);
-          any = true;
-        }
-
-        if(!any){
-          log("Camera frame failed, bounds invalid, fallback");
-          camera.target = new BABYLON.Vector3(0, 1, 0);
-          camera.radius = 25;
-          return;
-        }
-
-        const size = max.subtract(min);
-        const center = min.add(size.scale(0.5));
-        const maxDim = Math.max(size.x, size.y, size.z) || 1;
-
-        camera.target = center;
-        camera.radius = maxDim * 1.9;   // zoomed out enough for full bodies
-        camera.lowerRadiusLimit = camera.radius * 0.5;
-        camera.upperRadiusLimit = camera.radius * 4.0;
-
-        log("Framed camera, size=" + maxDim.toFixed(3) + ", radius=" + camera.radius.toFixed(3));
-      }
-
-      async function importSoldier(label, rootUrl, fileName){
-        log("Loading " + label + " | " + rootUrl + fileName);
-
-        // ImportMeshAsync keeps the GLTF hierarchy intact
-        const result = await BABYLON.SceneLoader.ImportMeshAsync(
-          "",
-          rootUrl,
-          fileName,
+        camera = new BABYLON.ArcRotateCamera(
+          "cam",
+          Math.PI * 1.3,
+          Math.PI / 2.4,
+          3.0,
+          new BABYLON.Vector3(0,1,0),
           scene
         );
+        camera.attachControl(canvas, false);
+        camera.inputs.clear();
+        camera.panningSensibility = 0;
 
-        // Wrapper root we control
-        const wrapper = new BABYLON.TransformNode(label + "Root", scene);
+        const light = new BABYLON.HemisphericLight(
+          "h",
+          new BABYLON.Vector3(0,1,0),
+          scene
+        );
+        light.intensity = 1.2;
 
-        // IMPORTANT: parent the GLTF's own root under wrapper
-        // Usually result.meshes[0] is __root__ for glTF
-        const gltfRoot = result.meshes && result.meshes.length ? result.meshes[0] : null;
-        if (gltfRoot){
-          gltfRoot.parent = wrapper;
-        } else {
-          // fallback: parent everything (rare)
-          result.meshes.forEach(m => { m.parent = wrapper; });
-        }
+        loadSoldier();
 
-        // face the camera
-        wrapper.rotation.y = Math.PI;
+        engine.runRenderLoop(function(){
+          if (scene){ scene.render(); }
+        });
 
-        const geoMeshes = result.meshes.filter(m => m && m.getTotalVertices && m.getTotalVertices() > 0);
-        log(label + " imported OK, geoMeshes=" + geoMeshes.length);
-
-        if (result.animationGroups && result.animationGroups.length){
-          result.animationGroups.forEach(g => g.stop());
-          result.animationGroups[0].start(true);
-          log(label + " anim started, " + (result.animationGroups[0].name || "anim0"));
-        } else {
-          log(label + " no animGroups");
-        }
-
-        return { root: wrapper, result };
+        window.addEventListener("resize", function(){
+          engine.resize();
+        });
       }
 
-      // Paths
-      const BASIC_ROOT  = "/assets/warzone3d/soldier_gltf_3/";
-      const NEON_ROOT   = "/assets/warzone3d/skins/wz_neon_edge/";
-      const FILE_NAME   = "scene.gltf";
-
-      (async () => {
+      function frameCameraFromMeshes(meshes){
         try{
-          msgEl.textContent = "Booting Babylon…";
+          if (!meshes || !meshes.length || !camera) return;
 
-          const basicOk = await preflightGltf("basic", BASIC_ROOT, FILE_NAME);
-          const neonOk  = await preflightGltf("neon",  NEON_ROOT,  FILE_NAME);
+          let min = new BABYLON.Vector3(
+            Number.POSITIVE_INFINITY,
+            Number.POSITIVE_INFINITY,
+            Number.POSITIVE_INFINITY
+          );
+          let max = new BABYLON.Vector3(
+            Number.NEGATIVE_INFINITY,
+            Number.NEGATIVE_INFINITY,
+            Number.NEGATIVE_INFINITY
+          );
 
-          const roots = [];
-          let basic = null;
-          let neon  = null;
+          let any = false;
 
-          if (basicOk){
-            basic = await importSoldier("basic", BASIC_ROOT, FILE_NAME);
-            normalizeToGroundAndHeight(basic.root, 1.75);
-            roots.push(basic.root);
-          } else {
-            log("BASIC blocked by preflight, not importing");
+          for (const m of meshes){
+            if (!m || !m.getBoundingInfo || m.getTotalVertices() === 0) continue;
+            m.computeWorldMatrix(true);
+            const bi   = m.getBoundingInfo();
+            const bmin = bi.boundingBox.minimumWorld;
+            const bmax = bi.boundingBox.maximumWorld;
+
+            if (!isFinite(bmin.x) || !isFinite(bmin.y) || !isFinite(bmin.z)) continue;
+            if (!isFinite(bmax.x) || !isFinite(bmax.y) || !isFinite(bmax.z)) continue;
+
+            min = BABYLON.Vector3.Minimize(min, bmin);
+            max = BABYLON.Vector3.Maximize(max, bmax);
+            any = true;
           }
 
-          if (neonOk){
-            neon = await importSoldier("neon", NEON_ROOT, FILE_NAME);
-            normalizeToGroundAndHeight(neon.root, 1.75);
-            roots.push(neon.root);
-          } else {
-            log("NEON blocked by preflight, not importing");
-          }
+          if (!any) throw new Error("no finite bounds");
 
-          // Put them side-by-side AFTER normalization so spacing is correct
-          if (basic && neon){
-            basic.root.position.x = -1.2;
-            neon.root.position.x  =  1.2;
-          } else if (basic){
-            basic.root.position.x = 0;
-          } else if (neon){
-            neon.root.position.x = 0;
-          }
+          const size = max.subtract(min);
+          const maxDim = Math.max(size.x, size.y, size.z) || 1.0;
+          const center = min.add(size.scale(0.5));
 
-          frameCameraToRoots(roots);
+          const baseRadius = maxDim * 0.9;
+          const radius     = baseRadius * 3.0;
 
-          // Slow spin both
-          scene.onBeforeRenderObservable.clear();
-          scene.onBeforeRenderObservable.add(() => {
-            const dt = scene.getEngine().getDeltaTime() * 0.001;
-            if (basic?.root) basic.root.rotation.y += dt * 0.35;
-            if (neon?.root)  neon.root.rotation.y  += dt * 0.35;
-            debugBox.rotation.y += dt;
-          });
+          const offsetY    = maxDim * 0.50;
+          const finalTarget = new BABYLON.Vector3(center.x, center.y + offsetY, center.z);
 
-          log("Done");
+          camera.target = finalTarget;
+          camera.radius = radius;
+
+          camera.alpha  = Math.PI * 1.3;
+          camera.beta   = Math.PI / 2.4;
+
+          camera.lowerRadiusLimit = radius * 0.8;
+          camera.upperRadiusLimit = radius * 1.3;
         }catch(e){
-          console.warn("Test loader failed", e);
-          log("FAILED, check console log");
+          console.warn("[WARZONE] fallback soldier framing", e);
+          camera.target = new BABYLON.Vector3(0,1,0);
+          camera.radius = 3.0;
+          camera.alpha  = Math.PI * 1.3;
+          camera.beta   = Math.PI / 2.4;
+          camera.lowerRadiusLimit = 2.5;
+          camera.upperRadiusLimit = 3.5;
         }
-      })();
-    }
+      }
+
+      function loadSoldier(){
+        const url = SOLDIER_ASSET;
+        if (!scene || !BABYLON.SceneLoader) return;
+
+        if (currentRoot){
+          currentRoot.dispose(true, false);
+          currentRoot = null;
+        }
+
+        const lastSlash = url.lastIndexOf("/");
+        const rootUrl = url.substring(0,lastSlash+1);
+        const theFileName = url.substring(lastSlash+1);
+
+        BABYLON.SceneLoader.ImportMesh(
+          "",
+          rootUrl,
+          theFileName,
+          scene,
+          function(meshes, ps, skeletons, animGroups){
+            currentRoot = new BABYLON.TransformNode("soldierRoot", scene);
+            meshes.forEach(m => { m.parent = currentRoot; });
+
+            currentRoot.position = new BABYLON.Vector3(0,0,0);
+            currentRoot.rotation = new BABYLON.Vector3(0,Math.PI,0);
+            currentRoot.scaling  = new BABYLON.Vector3(0.6, 0.6, 0.6);
+
+            frameCameraFromMeshes(meshes);
+
+            scene.onBeforeRenderObservable.clear();
+            scene.onBeforeRenderObservable.add(() => {
+              if (currentRoot) {
+                currentRoot.rotation.y += scene.getEngine().getDeltaTime() * 0.0003;
+              }
+            });
+
+            if (animGroups && animGroups.length){
+              animGroups.forEach(g => g.stop());
+              animGroups[0].start(true);
+            }
+          },
+          null,
+          function(scene, message, exception){
+            console.error("[WARZONE] soldier ImportMesh error:", message, exception);
+          }
+        );
+      }
+
+      createScene();
+    })();
   </script>
 </body>
 </html>
