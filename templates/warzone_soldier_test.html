@@ -78,27 +78,17 @@
     const WEAPON_SCALE = 0.07;
     const WEAPON_YAW_FIX = Math.PI * 0.5;
 
-    // Hand-space placement (small changes here move the whole gun relative to the hand bone)
-    // If the gun is still sitting on the back of the hand, usually:
-    // - move slightly "into palm" with X
-    // - drop slightly with Y
-    // - slide back/forward with Z
-    const WEAPON_POS = new BABYLON.Vector3(0.02, -0.01, -0.055);
+    // ✅ FIX 1: Move entire pistol rig in hand-space (push into palm, off back of hand)
+    const WEAPON_POS = new BABYLON.Vector3(0.045, -0.025, -0.020);
 
-    // NEW: Grip alignment inside the weapon itself (this fixes "holding barrel/backhand" issues)
-    // This re-centers the pistol model so the GRIP is what lands in the palm.
-    // Tweak these surgically:
-    // - If hand is too far forward on barrel: make Z more POSITIVE (brings grip toward hand)
-    // - If grip is behind palm: make Z more NEGATIVE
-    // - If gun sits on back of hand: adjust X and Y slightly
-    const WEAPON_GRIP_POS = new BABYLON.Vector3(0.00, 0.00, 0.055);
+    // ✅ FIX 2: Re-center pistol model so GRIP lands in the palm (not the slide/body)
+    const WEAPON_GRIP_POS = new BABYLON.Vector3(0.00, -0.030, 0.120);
 
-    // Optional micro-rotation of the pistol around its own local axes to sit correctly in the palm.
-    // Keep small values. Start with 0s, then adjust one axis at a time.
+    // ✅ FIX 3: Rotate pistol inside the rig so it aligns with palm (roll is the key)
     const WEAPON_GRIP_ROT = new BABYLON.Vector3(
-      0.00,  // pitch
-      0.00,  // yaw
-      0.00   // roll
+      -0.25, // pitch
+       0.00, // yaw
+       0.65  // roll
     );
 
     // Arm correction (unchanged)
@@ -106,8 +96,7 @@
     const qForeArm = BABYLON.Quaternion.FromEulerAngles(-0.25,  0.00,  0.00);
     const qShould  = BABYLON.Quaternion.FromEulerAngles( 0.00,  0.00, -0.05);
 
-    // NEW: Optional wrist twist to make the palm wrap the grip more naturally.
-    // Leave OFF unless you want a bit more “finger-on-trigger” vibe.
+    // Optional wrist twist
     const WRIST_TWIST_ON = false;
     const qWrist = BABYLON.Quaternion.FromEulerAngles(0.00, 0.00, -0.25);
 
@@ -247,7 +236,7 @@
       weaponRoot.rotation.set(0, Math.PI + WEAPON_YAW_FIX, 0);
       weaponRoot.scaling.set(WEAPON_SCALE, WEAPON_SCALE, WEAPON_SCALE);
 
-      // NEW: weaponGrip is a child used to re-center the pistol so the GRIP lands in the palm
+      // weaponGrip is a child used to re-center the pistol so the GRIP lands in the palm
       const weaponGrip = new BABYLON.TransformNode("weaponGrip", scene);
       weaponGrip.parent = weaponRoot;
       weaponGrip.position.copyFrom(WEAPON_GRIP_POS);
