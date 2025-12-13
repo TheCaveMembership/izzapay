@@ -82,7 +82,7 @@
 
     // IMPORTANT, gun orientation, 90 degrees left (yaw), not roll
     // If it turns the wrong way, flip the sign to +Math.PI * 0.5
-    const WEAPON_YAW_FIX = -Math.PI * 0.5;
+    const WEAPON_YAW_FIX = Math.PI * 0.5;
 
     // arm correction, small and safe, tweak later
     const qArm     = BABYLON.Quaternion.FromEulerAngles(-0.10,  0.00,  0.00);
