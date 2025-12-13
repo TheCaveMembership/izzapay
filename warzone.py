@@ -55,18 +55,15 @@ def _resolve_username():
       2) session['pi_username'] (or session fallbacks)
       3) session['user_id'] -> users.pi_username
     """
-    # 1) explicit query
     u = _norm_username(request.args.get("u"))
     if u:
         return u
 
-    # 2) session cache
     for k in ("pi_username", "username", "pi_handle"):
         u = _norm_username(session.get(k))
         if u:
             return u
 
-    # 3) derive from user_id
     uid = session.get("user_id")
     if not uid:
         return None
@@ -127,7 +124,6 @@ def _require_user_id_or_u():
 PI_HORIZON_URL = os.getenv("PI_HORIZON_URL", "https://api.testnet.minepi.com").strip()
 NETWORK_PASSPHRASE = os.getenv("NETWORK_PASSPHRASE", "Pi Testnet").strip()
 
-# Pi Testnet base fee (0.01 Pi = 100,000 stroops)
 PI_BASE_FEE_STROOPS = int(os.getenv("PI_BASE_FEE_STROOPS", "100000"))
 
 _srv = Server(horizon_url=PI_HORIZON_URL)
@@ -150,7 +146,6 @@ def _to_stellar_amount(value) -> str:
 
 
 # ---------- IZZA token + shop payment config ----------
-# Match IZZA BOT naming, but keep old env names as fallbacks.
 
 IZZA_ASSET_CODE = (
     os.getenv("IZZA_ASSET_CODE")
@@ -166,7 +161,6 @@ IZZA_ASSET_ISSUER = (
     or "GDKS3KFAM5RBBTSYTFUEHHN7GYRPHV7A6K2BI44LL3QQKXCA6ODBCS57"
 ).strip()
 
-# Where IZZA payments go for Warzone shop purchases
 WZ_SHOP_DEST = (
     os.getenv("WZ_SHOP_DEST")
     or os.getenv("BOT_WALLET_PUB")
@@ -178,11 +172,7 @@ def _izza_payment_config_ok() -> bool:
     return bool(IZZA_ASSET_CODE and IZZA_ASSET_ISSUER and WZ_SHOP_DEST)
 
 
-def _parse_izza_amount(raw) -> Decimal | None:
-    """
-    Normalize an amount to a Stellar-friendly Decimal with 7 decimals.
-    Returns None if invalid or <= 0.
-    """
+def _parse_izza_amount(raw):
     try:
         d = Decimal(str(raw))
     except (InvalidOperation, TypeError, ValueError):
@@ -193,10 +183,6 @@ def _parse_izza_amount(raw) -> Decimal | None:
 
 
 def _send_izza_payment(from_secret: str, to_pub: str, amount: Decimal, memo_text: str = "") -> str:
-    """
-    Sends IZZA from from_secret -> to_pub on Pi Testnet. Returns tx hash.
-    This mirrors IZZA BOT's direct Horizon payment style.
-    """
     if not from_secret or not to_pub:
         raise ValueError("Missing from_secret or to_pub")
 
@@ -206,7 +192,6 @@ def _send_izza_payment(from_secret: str, to_pub: str, amount: Decimal, memo_text
     from_pub = kp.public_key
 
     account = _srv.load_account(from_pub)
-
     izza_asset = Asset(IZZA_ASSET_CODE, IZZA_ASSET_ISSUER)
 
     builder = TransactionBuilder(
@@ -234,12 +219,12 @@ def _send_izza_payment(from_secret: str, to_pub: str, amount: Decimal, memo_text
 
 
 # ----------------------------------------------------------------------
-# Wallet link helpers (match IZZA BOT behavior)
+# Wallet link helpers
 # ----------------------------------------------------------------------
 
 def _linked_wallet_pub_for_username(uname: str) -> str:
     """
-    EXACT SAME source of truth as IZZA BOT:
+    Source of truth, same as bot bucket:
       user_wallets.pub keyed by username (lowercase)
     """
     if not uname:
@@ -294,8 +279,7 @@ def _ensure_shop_schema(cx):
 
 
 def _seed_shop_if_empty(cx):
-    cur = cx.execute("SELECT COUNT(*) AS c FROM warzone_shop_items")
-    row = cur.fetchone()
+    row = cx.execute("SELECT COUNT(*) AS c FROM warzone_shop_items").fetchone()
     if row and row["c"]:
         return
 
@@ -347,7 +331,7 @@ def _seed_shop_if_empty(cx):
 
 
 # ----------------------------------------------------------------------
-# Auth / lobby
+# Auth / lobby / NEW shop page
 # ----------------------------------------------------------------------
 
 @warzone_bp.get("/auth")
@@ -404,6 +388,66 @@ def warzone_lobby():
         map_image_url=map_image_url,
         PI_SANDBOX=current_app.config.get("PI_SANDBOX", False),
     )
+
+
+@warzone_bp.get("/shop")
+def warzone_shop_page():
+    """
+    New standalone shop page, rotated like lobby.
+    Users only arrive here via lobby, but we still support deep-links with ?u=
+    """
+    uid = _require_user_id_or_u()
+    if not uid:
+        qs = request.query_string.decode("utf-8")
+        base = "/warzone/auth"
+        return redirect(f"{base}?{qs}" if qs else base)
+
+    # Display name
+    with conn() as cx:
+        row = cx.execute(
+            "SELECT COALESCE(username, pi_username, pi_uid) AS name FROM users WHERE id=?",
+            (uid,),
+        ).fetchone()
+    display_name = (row["name"] if row and row["name"] else None) or session.get("pi_username") or session.get("username") or f"User #{uid}"
+
+    # default tab
+    tab = (request.args.get("tab") or "weapons").strip().lower()
+    if tab not in ("weapons", "skins"):
+        tab = "weapons"
+
+    # keep username in the URL if present, so all API calls can include it
+    u = _resolve_username() or ""
+    u_qs = f"u={u}" if u else ""
+    back = "/warzone/"
+    if u_qs:
+        back = f"/warzone/?{u_qs}"
+
+    return render_template(
+        "warzone_shop.html",
+        player={"id": uid, "username": display_name},
+        default_tab=tab,
+        back_url=back,
+        PI_SANDBOX=current_app.config.get("PI_SANDBOX", False),
+    )
+
+
+# ----------------------------------------------------------------------
+# Redirect routes for the old lobby buttons
+# ----------------------------------------------------------------------
+
+@warzone_bp.get("/shop/skins")
+def warzone_shop_skins_redirect():
+    # keep ?u= if present
+    qs = request.query_string.decode("utf-8")
+    join = "&" if qs else ""
+    return redirect(f"/warzone/shop?tab=skins{join}{qs}")
+
+
+@warzone_bp.get("/shop/weapons")
+def warzone_shop_weapons_redirect():
+    qs = request.query_string.decode("utf-8")
+    join = "&" if qs else ""
+    return redirect(f"/warzone/shop?tab=weapons{join}{qs}")
 
 
 # ----------------------------------------------------------------------
@@ -469,7 +513,7 @@ def warzone_invite_player():
 
 
 # ----------------------------------------------------------------------
-# War Zone Armory / Shop (weapons + skins)
+# War Zone Shop API (same as you posted)
 # ----------------------------------------------------------------------
 
 @warzone_bp.get("/api/shop")
@@ -543,7 +587,6 @@ def warzone_purchase():
     slot = (data.get("slot") or "").strip().lower()
     sku = (data.get("sku") or "").strip()
 
-    # keep client price check (anti-tamper)
     try:
         price_izza_client = float(data.get("price_izza") or 0)
     except (TypeError, ValueError):
@@ -555,11 +598,9 @@ def warzone_purchase():
     if slot not in ("weapons", "skins") or not sku:
         return jsonify({"error": "bad_request"}), 400
 
-    # REQUIRED: secret (matches bot bucket behavior)
     if not (buyer_sec and buyer_sec.startswith("S") and len(buyer_sec) == 56):
         return jsonify({"error": "buyer_sec_missing"}), 400
 
-    # Derive pub from secret and (optionally) validate buyer_pub if provided
     try:
         kp = Keypair.from_secret(buyer_sec)
         derived_pub = kp.public_key
@@ -572,19 +613,16 @@ def warzone_purchase():
         if derived_pub != buyer_pub:
             return jsonify({"error": "buyer_key_mismatch"}), 400
 
-    # Resolve username (same system key as wallets)
     uname = _resolve_username()
     if not uname:
         return jsonify({"error": "username_required"}), 401
 
-    # Verify derived_pub matches linked wallet pub in user_wallets (EXACT same as bot bucket)
     linked_pub = _linked_wallet_pub_for_username(uname)
     if not linked_pub:
         return jsonify({"error": "no_linked_wallet"}), 403
     if linked_pub != derived_pub:
         return jsonify({"error": "wallet_not_linked_for_user"}), 403
 
-    # Load item + validate price + not owned
     with conn() as cx:
         _ensure_shop_schema(cx)
         _seed_shop_if_empty(cx)
@@ -622,10 +660,8 @@ def warzone_purchase():
             (uid, slot, sku),
         ).fetchone()
         if owned_row:
-            # Already owned, tell frontend to show Equip
             return jsonify({"ok": True, "already_owned": True, "slot": slot, "sku": sku, "owned": True})
 
-    # Execute IZZA payment (direct Horizon payment, same as bot bucket)
     try:
         tx_hash = _send_izza_payment(
             from_secret=buyer_sec,
@@ -648,7 +684,6 @@ def warzone_purchase():
             (uid, slot, sku, now_ts),
         )
 
-    # Return payload that lets frontend flip Buy -> Equip immediately (no refresh needed)
     return jsonify(
         {
             "ok": True,
@@ -703,7 +738,6 @@ def warzone_equip():
             if not owned:
                 return jsonify({"error": "not_owned"}), 400
 
-        # Unequip all in slot, then equip this one
         cx.execute(
             """
             UPDATE warzone_inventory
@@ -713,7 +747,6 @@ def warzone_equip():
             (uid, slot),
         )
 
-        # Ensure record exists (starter items may not have been inserted)
         cx.execute(
             """
             INSERT OR IGNORE INTO warzone_inventory
