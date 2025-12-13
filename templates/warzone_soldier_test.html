@@ -43,292 +43,193 @@
   <div id="msg">Booting Babylon…</div>
   <canvas id="renderCanvas"></canvas>
 
-  <script>
-    const canvas = document.getElementById("renderCanvas");
-    const msgEl  = document.getElementById("msg");
+<script>
+const canvas = document.getElementById("renderCanvas");
+const msgEl  = document.getElementById("msg");
+function log(line){ msgEl.textContent += "\n" + line; }
 
-    function log(line){
-      msgEl.textContent += "\n" + line;
+const engine = new BABYLON.Engine(canvas, true, { preserveDrawingBuffer:true, stencil:true });
+const scene  = new BABYLON.Scene(engine);
+scene.clearColor = new BABYLON.Color4(0,0,0,1);
+
+const camera = new BABYLON.ArcRotateCamera(
+  "cam",
+  Math.PI * 1.2,
+  Math.PI / 2.35,
+  3.8,
+  new BABYLON.Vector3(0, 1.0, 0),
+  scene
+);
+camera.attachControl(canvas, true);
+camera.panningSensibility = 0;
+camera.wheelPrecision = 60;
+
+const hemi = new BABYLON.HemisphericLight("h", new BABYLON.Vector3(0,1,0), scene);
+hemi.intensity = 1.1;
+
+const dir = new BABYLON.DirectionalLight("d", new BABYLON.Vector3(-0.3,-1,-0.4), scene);
+dir.intensity = 1.0;
+
+engine.runRenderLoop(() => scene.render());
+window.addEventListener("resize", () => engine.resize());
+
+// ---------- paths ----------
+const SOLDIER_ROOT  = "/assets/warzone3d/soldier_gltf_3/";
+const SOLDIER_FILE  = "scene.gltf";
+
+const PISTOL_ROOT   = "/assets/warzone3d/weapons/wz_basic_pistol/";
+const PISTOL_FILE   = "scene.gltf";
+
+// ---------- helpers ----------
+function getBounds(node){
+  const b = node.getHierarchyBoundingVectors(true);
+  return { min: b.min.clone(), max: b.max.clone() };
+}
+function normalizeToGroundAndHeight(root, targetHeight = 1.75){
+  const bb1 = getBounds(root);
+  const size1 = bb1.max.subtract(bb1.min);
+  const h1 = Math.max(0.000001, size1.y);
+  const s = targetHeight / h1;
+  root.scaling = new BABYLON.Vector3(s, s, s);
+  const bb2 = getBounds(root);
+  root.position.y -= bb2.min.y;
+  return s;
+}
+function frameCameraToRoot(root){
+  const bb = getBounds(root);
+  const size = bb.max.subtract(bb.min);
+  const center = bb.min.add(size.scale(0.5));
+  const maxDim = Math.max(size.x, size.y, size.z) || 1;
+  camera.target = center;
+  camera.radius = maxDim * 1.9;
+  camera.lowerRadiusLimit = camera.radius * 0.5;
+  camera.upperRadiusLimit = camera.radius * 4.0;
+  log("Framed camera, size=" + maxDim.toFixed(3) + ", radius=" + camera.radius.toFixed(3));
+}
+function findBoneFuzzy(skel, includesText){
+  if(!skel) return null;
+  const t = includesText.toLowerCase();
+  return skel.bones.find(b => (b.name || "").toLowerCase().includes(t)) || null;
+}
+function importAsWrapper(label, rootUrl, fileName){
+  return BABYLON.SceneLoader.ImportMeshAsync("", rootUrl, fileName, scene).then(result => {
+    const wrapper = new BABYLON.TransformNode(label + "Root", scene);
+
+    const gltfRoot = result.meshes && result.meshes.length ? result.meshes[0] : null;
+    if (gltfRoot){
+      gltfRoot.parent = wrapper;
+    } else {
+      result.meshes.forEach(m => { m.parent = wrapper; });
     }
 
-    const engine = new BABYLON.Engine(canvas, true, {
-      preserveDrawingBuffer:true,
-      stencil:true
+    return { wrapper, result };
+  });
+}
+
+(async () => {
+  try{
+    msgEl.textContent = "War Zone test, soldier + pistol attach";
+    log("Loading soldier, " + SOLDIER_ROOT + SOLDIER_FILE);
+
+    // ---------- load soldier ----------
+    const soldierPack = await importAsWrapper("soldier", SOLDIER_ROOT, SOLDIER_FILE);
+    const soldierRoot = soldierPack.wrapper;
+    soldierRoot.rotation.y = Math.PI;
+
+    normalizeToGroundAndHeight(soldierRoot, 1.75);
+    frameCameraToRoot(soldierRoot);
+
+    const soldierResult = soldierPack.result;
+    const soldierSkeleton = (soldierResult.skeletons && soldierResult.skeletons[0]) ? soldierResult.skeletons[0] : null;
+
+    log("soldier imported OK, geoMeshes=" + soldierResult.meshes.filter(m=>m.getTotalVertices && m.getTotalVertices()>0).length
+      + ", skeletons=" + (soldierResult.skeletons ? soldierResult.skeletons.length : 0)
+      + ", animGroups=" + (soldierResult.animationGroups ? soldierResult.animationGroups.length : 0)
+    );
+
+    let soldierAnim = null;
+    if (soldierResult.animationGroups && soldierResult.animationGroups.length){
+      soldierAnim = soldierResult.animationGroups[0];
+      soldierAnim.start(true);
+
+      // OPTIONAL, slow the rocking a bit
+      // soldierAnim.speedRatio = 0.85;
+
+      log("Soldier anim started, " + (soldierAnim.name || "anim0"));
+    } else {
+      log("Soldier has no animationGroups");
+    }
+
+    // ---------- load pistol ----------
+    log("Loading pistol, " + PISTOL_ROOT + PISTOL_FILE);
+    const pistolPack = await importAsWrapper("pistol", PISTOL_ROOT, PISTOL_FILE);
+    const pistolRoot = pistolPack.wrapper;
+
+    log("pistol imported OK, geoMeshes=" + pistolPack.result.meshes.filter(m=>m.getTotalVertices && m.getTotalVertices()>0).length);
+
+    // BIG FIX, scale pistol down
+    // try 0.08, 0.10, 0.12, your screenshot sounds like 0.10 or smaller
+    pistolRoot.scaling.setAll(0.10);
+
+    // ---------- attach pistol to right hand bone ----------
+    if(!soldierSkeleton){
+      log("No soldier skeleton found, cannot attach to hand");
+      return;
+    }
+
+    // Your log showed something like mixamorig:RightHand..., so use that
+    const rightHand =
+      findBoneFuzzy(soldierSkeleton, "righthand") ||
+      findBoneFuzzy(soldierSkeleton, "right hand");
+
+    if(!rightHand){
+      log("Could not find RightHand bone, list bones in console if needed");
+      console.log("Bones:", soldierSkeleton.bones.map(b=>b.name));
+      return;
+    }
+
+    // Attach weapon wrapper to the bone
+    pistolRoot.parent = soldierRoot; // keep in same space
+    rightHand.linkTransformNode(pistolRoot);
+
+    // After linking, apply local offsets so it sits in the grip correctly
+    // These are guesses, you will tweak numbers on iPhone until perfect
+    pistolRoot.position.set(0.03, 0.02, 0.12);      // forward in hand
+    pistolRoot.rotationQuaternion = BABYLON.Quaternion.FromEulerAngles(
+      Math.PI * 0.5,   // rotate to point forward
+      0,
+      Math.PI * 0.0
+    );
+
+    log("Weapon attached to bone, " + rightHand.name);
+    log("Pistol scale=" + pistolRoot.scaling.x.toFixed(3) + ", pos=" + pistolRoot.position.toString());
+
+    // ---------- runtime pose correction, flatten arms ----------
+    const rArm     = findBoneFuzzy(soldierSkeleton, "rightarm");
+    const rForeArm = findBoneFuzzy(soldierSkeleton, "rightforearm") || findBoneFuzzy(soldierSkeleton, "rightforearm");
+
+    // mild corrections, keep small
+    const aimArmQ     = BABYLON.Quaternion.FromEulerAngles(0.10, 0.00, -0.10);
+    const aimForeArmQ = BABYLON.Quaternion.FromEulerAngles(0.15, 0.00, -0.05);
+
+    scene.onBeforeRenderObservable.add(() => {
+      // apply after animation updates, each frame
+      if (rArm){
+        const q = rArm.getRotationQuaternion(BABYLON.Space.LOCAL, soldierRoot) || BABYLON.Quaternion.Identity();
+        rArm.setRotationQuaternion(q.multiply(aimArmQ), BABYLON.Space.LOCAL, soldierRoot);
+      }
+      if (rForeArm){
+        const q = rForeArm.getRotationQuaternion(BABYLON.Space.LOCAL, soldierRoot) || BABYLON.Quaternion.Identity();
+        rForeArm.setRotationQuaternion(q.multiply(aimForeArmQ), BABYLON.Space.LOCAL, soldierRoot);
+      }
     });
 
-    const scene  = new BABYLON.Scene(engine);
-    scene.clearColor = new BABYLON.Color4(0,0,0,1);
-
-    const camera = new BABYLON.ArcRotateCamera(
-      "cam",
-      Math.PI * 1.2,
-      Math.PI / 2.35,
-      10.0,
-      new BABYLON.Vector3(0, 1.0, 0),
-      scene
-    );
-    camera.attachControl(canvas, true);
-    camera.panningSensibility = 0;
-    camera.wheelPrecision = 60;
-
-    const hemi = new BABYLON.HemisphericLight("h", new BABYLON.Vector3(0,1,0), scene);
-    hemi.intensity = 1.05;
-
-    const dir = new BABYLON.DirectionalLight("d", new BABYLON.Vector3(-0.3,-1,-0.4), scene);
-    dir.intensity = 0.95;
-
-    engine.runRenderLoop(() => scene.render());
-    window.addEventListener("resize", () => engine.resize());
-
-    async function fetchHeadOrGet(url){
-      try{
-        const r = await fetch(url, { method:"HEAD", cache:"no-store" });
-        if (r && (r.ok || r.status === 404 || r.status === 403)) return r;
-      }catch(e){}
-      return fetch(url, { method:"GET", cache:"no-store" });
-    }
-
-    async function checkUrl(url){
-      try{
-        const r = await fetchHeadOrGet(url);
-        const ct = (r.headers && r.headers.get) ? (r.headers.get("content-type") || "") : "";
-        return { ok: r.ok, status: r.status, ct };
-      }catch(e){
-        return { ok:false, status:0, ct:String(e) };
-      }
-    }
-
-    function joinUrl(rootUrl, rel){
-      if (!rel) return rootUrl;
-      if (/^https?:\/\//i.test(rel)) return rel;
-      if (rel.startsWith("/")) return rel;
-      return rootUrl + rel;
-    }
-
-    async function preflightGltf(label, rootUrl, fileName){
-      const gltfUrl = rootUrl + fileName;
-      log("Preflight " + label + ", " + gltfUrl);
-
-      const gltfCheck = await checkUrl(gltfUrl);
-      if (!gltfCheck.ok){
-        log("Preflight FAIL " + label + ", gltf missing, " + gltfCheck.status);
-        return null;
-      }
-
-      let gltf;
-      try{
-        const r = await fetch(gltfUrl, { cache:"no-store" });
-        gltf = await r.json();
-      }catch(e){
-        log("Preflight FAIL " + label + ", gltf JSON parse error, " + e);
-        return null;
-      }
-
-      const deps = [];
-      if (Array.isArray(gltf.buffers)){
-        gltf.buffers.forEach(b => b?.uri && deps.push({ kind:"buffer", uri:b.uri }));
-      }
-      if (Array.isArray(gltf.images)){
-        gltf.images.forEach(img => img?.uri && deps.push({ kind:"image", uri:img.uri }));
-      }
-
-      for (const d of deps){
-        const url = joinUrl(rootUrl, d.uri);
-        const st = await checkUrl(url);
-        if (!st.ok){
-          log("Preflight FAIL " + label + ", missing " + d.kind + ", " + url + ", status " + st.status);
-          return null;
-        }
-      }
-
-      log("Preflight OK " + label + ", deps=" + deps.length);
-      return gltf;
-    }
-
-    function getBounds(node){
-      const b = node.getHierarchyBoundingVectors(true);
-      return { min: b.min.clone(), max: b.max.clone() };
-    }
-
-    function normalizeToGroundAndHeight(root, targetHeight = 1.75){
-      const bb1 = getBounds(root);
-      const size1 = bb1.max.subtract(bb1.min);
-      const h1 = Math.max(0.000001, size1.y);
-
-      const s = targetHeight / h1;
-      root.scaling = new BABYLON.Vector3(s, s, s);
-
-      const bb2 = getBounds(root);
-      const minY = bb2.min.y;
-      root.position.y -= minY;
-
-      return { scale: s, bounds: bb2 };
-    }
-
-    function frameCameraToRoot(root){
-      const bb = getBounds(root);
-      const size = bb.max.subtract(bb.min);
-      const center = bb.min.add(size.scale(0.5));
-      const maxDim = Math.max(size.x, size.y, size.z) || 1;
-
-      camera.target = center;
-      camera.radius = maxDim * 1.9;
-      camera.lowerRadiusLimit = camera.radius * 0.5;
-      camera.upperRadiusLimit = camera.radius * 4.0;
-
-      log("Framed camera, size=" + maxDim.toFixed(3) + ", radius=" + camera.radius.toFixed(3));
-    }
-
-    async function importModel(label, rootUrl, fileName){
-      log("Loading " + label + ", " + rootUrl + fileName);
-
-      const result = await BABYLON.SceneLoader.ImportMeshAsync(
-        "",
-        rootUrl,
-        fileName,
-        scene
-      );
-
-      const wrapper = new BABYLON.TransformNode(label + "Root", scene);
-
-      const gltfRoot = result.meshes && result.meshes.length ? result.meshes[0] : null;
-      if (gltfRoot){
-        gltfRoot.parent = wrapper;
-      } else {
-        result.meshes.forEach(m => { m.parent = wrapper; });
-      }
-
-      const geoMeshes = result.meshes.filter(m => m && m.getTotalVertices && m.getTotalVertices() > 0);
-      log(label + " imported OK, geoMeshes=" + geoMeshes.length + ", skeletons=" + (result.skeletons?.length || 0) + ", animGroups=" + (result.animationGroups?.length || 0));
-
-      return { root: wrapper, result };
-    }
-
-    function findSkinnedMesh(importResult){
-      const meshes = importResult?.meshes || [];
-      return meshes.find(m => m && m.skeleton) || null;
-    }
-
-    function findBoneByNameOrIncludes(skeleton, want){
-      if (!skeleton || !skeleton.bones) return null;
-
-      const exact = skeleton.bones.find(b => (b.name || "") === want);
-      if (exact) return exact;
-
-      const wantLow = (want || "").toLowerCase();
-      return skeleton.bones.find(b => ((b.name || "").toLowerCase().includes(wantLow))) || null;
-    }
-
-    function attachWeaponToRightHand(soldierImport, weaponImport){
-      const skinned = findSkinnedMesh(soldierImport.result);
-      const skeleton = skinned?.skeleton || (soldierImport.result?.skeletons?.[0] || null);
-
-      if (!skinned || !skeleton){
-        log("ATTACH FAIL, soldier skeleton not found");
-        return false;
-      }
-
-      // Your glTF bone name from the file you gave me
-      const boneNameExact = "mixamorig:RightHand.209_221";
-
-      // First try exact, then fallback includes RightHand
-      let bone = findBoneByNameOrIncludes(skeleton, boneNameExact);
-      if (!bone){
-        bone = skeleton.bones.find(b => /RightHand/i.test(b.name || "")) || null;
-      }
-      if (!bone){
-        log("ATTACH FAIL, RightHand bone not found");
-        log("Tip, open console, print skeleton.bones to see names");
-        return false;
-      }
-
-      // Make a clean weapon root that holds all weapon meshes
-      const weaponRoot = new BABYLON.TransformNode("weaponRoot", scene);
-
-      // Parent all loaded weapon meshes under weaponRoot
-      (weaponImport.result?.meshes || []).forEach(m => {
-        if (!m) return;
-        if (m === weaponImport.result.meshes[0]) return; // usually the scene root
-        m.parent = weaponRoot;
-      });
-
-      // Attach weaponRoot to the bone, using the skinned mesh as the bone host
-      weaponRoot.attachToBone(bone, skinned);
-
-      // TUNING, adjust these 3 numbers to align the pistol in hand
-      // Start here, then tweak if needed
-      weaponRoot.position.set(0.02, 0.00, 0.06);
-      weaponRoot.rotation.set(0, Math.PI, 0);
-
-      // Scale is model dependent, tweak if pistol is too big or small
-      weaponRoot.scaling.set(0.25, 0.25, 0.25);
-
-      log("Weapon attached to bone, " + (bone.name || "RightHand"));
-      return true;
-    }
-
-    // Paths
-    const SOLDIER_ROOT = "/assets/warzone3d/soldier_gltf_3/";
-    const SOLDIER_FILE = "scene.gltf";
-
-    const WEAPON_ROOT  = "/assets/warzone3d/weapons/wz_basic_pistol/";
-    const WEAPON_FILE  = "scene.gltf";
-
-    (async () => {
-      try{
-        msgEl.textContent = "War Zone test, soldier + pistol attach";
-
-        const okSoldier = await preflightGltf("soldier", SOLDIER_ROOT, SOLDIER_FILE);
-        if(!okSoldier){
-          log("Stop, soldier preflight failed");
-          return;
-        }
-
-        const okWeapon = await preflightGltf("pistol", WEAPON_ROOT, WEAPON_FILE);
-        if(!okWeapon){
-          log("Stop, pistol preflight failed");
-          return;
-        }
-
-        const soldier = await importModel("soldier", SOLDIER_ROOT, SOLDIER_FILE);
-        soldier.root.rotation.y = Math.PI;
-        normalizeToGroundAndHeight(soldier.root, 1.75);
-
-        // Start first animation group if present
-        const ag = soldier.result?.animationGroups || [];
-        if (ag.length){
-          ag.forEach(g => g.stop());
-          ag[0].start(true);
-          log("Soldier anim started, " + (ag[0].name || "anim0"));
-        } else {
-          log("Soldier has no animationGroups");
-        }
-
-        const pistol = await importModel("pistol", WEAPON_ROOT, WEAPON_FILE);
-
-        // Keep pistol from floating on its own before attach
-        pistol.root.setEnabled(false);
-
-        const attached = attachWeaponToRightHand(soldier, pistol);
-        if (!attached){
-          log("Weapon not attached, check bone name mismatch");
-        }
-
-        frameCameraToRoot(soldier.root);
-
-        // Optional slow spin so you can inspect
-        scene.onBeforeRenderObservable.clear();
-        scene.onBeforeRenderObservable.add(() => {
-          const dt = scene.getEngine().getDeltaTime() * 0.001;
-          soldier.root.rotation.y += dt * 0.25;
-        });
-
-        log("Done, soldier loaded, pistol loaded, attach attempted");
-      }catch(e){
-        console.warn("Test failed", e);
-        log("FAILED, check console, " + (e?.message || e));
-      }
-    })();
-  </script>
+    log("Done, soldier loaded, pistol loaded, attached, scaled, pose correction enabled");
+  }catch(e){
+    console.warn("Test failed", e);
+    log("FAILED, check console");
+  }
+})();
+</script>
 </body>
 </html>
