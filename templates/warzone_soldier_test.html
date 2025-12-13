@@ -11,20 +11,8 @@
       width:100%;
       height:100%;
       background:#000;
-      color:#0f0;
-      font-family:system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;
       overflow:hidden;
-    }
-    #msg{
-      position:fixed;
-      top:8px;
-      left:10px;
-      font-size:14px;
-      z-index:5;
-      white-space:pre;
-      text-shadow:0 1px 0 rgba(0,0,0,.6);
-      max-width:96vw;
-      pointer-events:none;
+      touch-action:none;
     }
     #renderCanvas{
       position:fixed;
@@ -40,16 +28,10 @@
   <script src="https://cdn.babylonjs.com/loaders/babylonjs.loaders.min.js"></script>
 </head>
 <body>
-  <div id="msg">Booting Babylon…</div>
   <canvas id="renderCanvas"></canvas>
 
   <script>
     const canvas = document.getElementById("renderCanvas");
-    const msgEl  = document.getElementById("msg");
-
-    function log(line){
-      msgEl.textContent += "\n" + line;
-    }
 
     const engine = new BABYLON.Engine(canvas, true, {
       preserveDrawingBuffer:true,
@@ -80,6 +62,34 @@
     engine.runRenderLoop(() => scene.render());
     window.addEventListener("resize", () => engine.resize());
 
+    // ---------- config ----------
+    const SOLDIER_ROOT = "/assets/warzone3d/soldier_gltf_3/";
+    const SOLDIER_FILE = "scene.gltf";
+
+    const WEAPON_ROOT  = "/assets/warzone3d/weapons/wz_basic_pistol/";
+    const WEAPON_FILE  = "scene.gltf";
+
+    // animation speed
+    const SOLDIER_ANIM_SPEED = 0.65;
+
+    // auto rotate: front to side, then back
+    const AUTO_OSC_SPEED = 0.35;
+    const AUTO_MAX_YAW   = Math.PI * 0.45;  // about 81 degrees
+
+    // weapon placement
+    const WEAPON_POS = new BABYLON.Vector3(0.02, 0.00, 0.06);
+    const WEAPON_SCALE = 0.07;
+
+    // IMPORTANT, gun orientation, 90 degrees left (yaw), not roll
+    // If it turns the wrong way, flip the sign to +Math.PI * 0.5
+    const WEAPON_YAW_FIX = -Math.PI * 0.5;
+
+    // arm correction, small and safe, tweak later
+    const qArm     = BABYLON.Quaternion.FromEulerAngles(-0.10,  0.00,  0.00);
+    const qForeArm = BABYLON.Quaternion.FromEulerAngles(-0.25,  0.00,  0.00);
+    const qShould  = BABYLON.Quaternion.FromEulerAngles( 0.00,  0.00, -0.05);
+
+    // ---------- helpers ----------
     async function fetchHeadOrGet(url){
       try{
         const r = await fetch(url, { method:"HEAD", cache:"no-store" });
@@ -105,44 +115,34 @@
       return rootUrl + rel;
     }
 
-    async function preflightGltf(label, rootUrl, fileName){
+    async function preflightGltf(rootUrl, fileName){
       const gltfUrl = rootUrl + fileName;
-      log("Preflight " + label + ", " + gltfUrl);
 
       const gltfCheck = await checkUrl(gltfUrl);
-      if (!gltfCheck.ok){
-        log("Preflight FAIL " + label + ", gltf missing, " + gltfCheck.status);
-        return null;
-      }
+      if (!gltfCheck.ok) return false;
 
       let gltf;
       try{
         const r = await fetch(gltfUrl, { cache:"no-store" });
         gltf = await r.json();
       }catch(e){
-        log("Preflight FAIL " + label + ", gltf JSON parse error, " + e);
-        return null;
+        return false;
       }
 
       const deps = [];
       if (Array.isArray(gltf.buffers)){
-        gltf.buffers.forEach(b => b?.uri && deps.push({ kind:"buffer", uri:b.uri }));
+        gltf.buffers.forEach(b => b?.uri && deps.push(b.uri));
       }
       if (Array.isArray(gltf.images)){
-        gltf.images.forEach(img => img?.uri && deps.push({ kind:"image", uri:img.uri }));
+        gltf.images.forEach(img => img?.uri && deps.push(img.uri));
       }
 
-      for (const d of deps){
-        const url = joinUrl(rootUrl, d.uri);
+      for (const uri of deps){
+        const url = joinUrl(rootUrl, uri);
         const st = await checkUrl(url);
-        if (!st.ok){
-          log("Preflight FAIL " + label + ", missing " + d.kind + ", " + url + ", status " + st.status);
-          return null;
-        }
+        if (!st.ok) return false;
       }
-
-      log("Preflight OK " + label + ", deps=" + deps.length);
-      return gltf;
+      return true;
     }
 
     function getBounds(node){
@@ -159,10 +159,8 @@
       root.scaling = new BABYLON.Vector3(s, s, s);
 
       const bb2 = getBounds(root);
-      const minY = bb2.min.y;
-      root.position.y -= minY;
-
-      return { scale: s, bounds: bb2 };
+      root.position.y -= bb2.min.y;
+      return s;
     }
 
     function frameCameraToRoot(root){
@@ -175,19 +173,10 @@
       camera.radius = maxDim * 1.9;
       camera.lowerRadiusLimit = camera.radius * 0.5;
       camera.upperRadiusLimit = camera.radius * 4.0;
-
-      log("Framed camera, size=" + maxDim.toFixed(3) + ", radius=" + camera.radius.toFixed(3));
     }
 
     async function importModel(label, rootUrl, fileName){
-      log("Loading " + label + ", " + rootUrl + fileName);
-
-      const result = await BABYLON.SceneLoader.ImportMeshAsync(
-        "",
-        rootUrl,
-        fileName,
-        scene
-      );
+      const result = await BABYLON.SceneLoader.ImportMeshAsync("", rootUrl, fileName, scene);
 
       const wrapper = new BABYLON.TransformNode(label + "Root", scene);
 
@@ -197,9 +186,6 @@
       } else {
         result.meshes.forEach(m => { m.parent = wrapper; });
       }
-
-      const geoMeshes = result.meshes.filter(m => m && m.getTotalVertices && m.getTotalVertices() > 0);
-      log(label + " imported OK, geoMeshes=" + geoMeshes.length + ", skeletons=" + (result.skeletons?.length || 0) + ", animGroups=" + (result.animationGroups?.length || 0));
 
       return { root: wrapper, result };
     }
@@ -219,78 +205,17 @@
       return skeleton.bones.find(b => ((b.name || "").toLowerCase().includes(wantLow))) || null;
     }
 
-    function listBoneMap(skeleton){
-      if(!skeleton || !skeleton.bones) return;
-
-      const names = skeleton.bones.map(b => b?.name || "").filter(Boolean);
-      const pick = (patterns) => {
-        for (const p of patterns){
-          const b = findBoneByNameOrIncludes(skeleton, p);
-          if (b) return b;
-        }
-        for (const p of patterns){
-          const re = new RegExp(p, "i");
-          const b = skeleton.bones.find(x => re.test(x?.name || ""));
-          if (b) return b;
-        }
-        return null;
-      };
-
-      const rightHand = pick(["mixamorig:RightHand", "RightHand", "hand_r"]);
-      const rightArm  = pick(["mixamorig:RightArm", "RightArm", "upperarm_r", "arm_r"]);
-      const rightFore = pick(["mixamorig:RightForeArm", "RightForeArm", "lowerarm_r", "forearm_r"]);
-      const rightShoulder = pick(["mixamorig:RightShoulder", "RightShoulder", "shoulder_r"]);
-      const spine = pick(["mixamorig:Spine", "Spine"]);
-      const spine1 = pick(["mixamorig:Spine1", "Spine1", "Chest"]);
-      const hips = pick(["mixamorig:Hips", "Hips", "Pelvis"]);
-
-      log("");
-      log("Bones needed to make this perfect,");
-      log("Skeleton name, " + (skeleton.name || "(unnamed)") + ", bones=" + names.length);
-      log("RightHand attach, " + (rightHand ? rightHand.name : "NOT FOUND"));
-      log("RightArm aim, " + (rightArm ? rightArm.name : "NOT FOUND"));
-      log("RightForeArm aim, " + (rightFore ? rightFore.name : "NOT FOUND"));
-      log("RightShoulder optional, " + (rightShoulder ? rightShoulder.name : "NOT FOUND"));
-      log("Spine optional, " + (spine ? spine.name : "NOT FOUND"));
-      log("Spine1 or Chest optional, " + (spine1 ? spine1.name : "NOT FOUND"));
-      log("Hips optional, " + (hips ? hips.name : "NOT FOUND"));
-
-      const keyWords = ["hand","arm","forearm","shoulder","spine","chest","hips","pelvis","wrist","elbow","clav","neck","head"];
-      const relevant = names
-        .filter(n => keyWords.some(k => n.toLowerCase().includes(k)))
-        .slice(0, 40);
-
-      log("");
-      log("Top relevant bones, " + relevant.length);
-      relevant.forEach(n => log(" , " + n));
-      log("");
-    }
-
-    function quatFromEuler(x,y,z){
-      return BABYLON.Quaternion.FromEulerAngles(x,y,z);
-    }
-
     function attachWeaponToRightHand(soldierImport, weaponImport){
       const skinned = findSkinnedMesh(soldierImport.result);
       const skeleton = skinned?.skeleton || (soldierImport.result?.skeletons?.[0] || null);
-
-      if (!skinned || !skeleton){
-        log("ATTACH FAIL, soldier skeleton not found");
-        return { ok:false };
-      }
-
-      listBoneMap(skeleton);
+      if (!skinned || !skeleton) return { ok:false };
 
       const boneNameExact = "mixamorig:RightHand.209_221";
-
-      let bone = findBoneByNameOrIncludes(skeleton, boneNameExact);
-      if (!bone){
-        bone = skeleton.bones.find(b => /RightHand/i.test(b.name || "")) || null;
+      let rightHand = findBoneByNameOrIncludes(skeleton, boneNameExact);
+      if (!rightHand){
+        rightHand = skeleton.bones.find(b => /RightHand/i.test(b.name || "")) || null;
       }
-      if (!bone){
-        log("ATTACH FAIL, RightHand bone not found");
-        return { ok:false };
-      }
+      if (!rightHand) return { ok:false };
 
       const weaponRoot = new BABYLON.TransformNode("weaponRoot", scene);
 
@@ -300,83 +225,47 @@
         m.parent = weaponRoot;
       });
 
-      weaponRoot.attachToBone(bone, skinned);
+      weaponRoot.attachToBone(rightHand, skinned);
 
-      weaponRoot.position.set(0.02, 0.00, 0.06);
+      weaponRoot.position.copyFrom(WEAPON_POS);
 
-      // IMPORTANT, gun orientation fix
-      // If the pistol is sideways, it needs a roll around local Z
-      // 90 degrees is the common fix, flip sign if it rolls the wrong way
-      weaponRoot.rotation.set(0, Math.PI, -Math.PI * 0.5);
+      // Base yaw (180) plus your 90 degree left fix
+      weaponRoot.rotation.set(0, Math.PI + WEAPON_YAW_FIX, 0);
 
-      weaponRoot.scaling.set(0.07, 0.07, 0.07);
+      weaponRoot.scaling.set(WEAPON_SCALE, WEAPON_SCALE, WEAPON_SCALE);
 
-      log("Weapon attached to bone, " + (bone.name || "RightHand"));
-      log("Weapon scale, " + weaponRoot.scaling.x.toFixed(5));
-      log("Weapon pos, X " + weaponRoot.position.x.toFixed(3) + " Y " + weaponRoot.position.y.toFixed(3) + " Z " + weaponRoot.position.z.toFixed(3));
-      log("Weapon rot, X " + weaponRoot.rotation.x.toFixed(3) + " Y " + weaponRoot.rotation.y.toFixed(3) + " Z " + weaponRoot.rotation.z.toFixed(3));
-
-      const rightHand    = bone;
-      const rightArm     = findBoneByNameOrIncludes(skeleton, "mixamorig:RightArm.207_219") || findBoneByNameOrIncludes(skeleton, "RightArm");
-      const rightForeArm = findBoneByNameOrIncludes(skeleton, "mixamorig:RightForeArm.208_220") || findBoneByNameOrIncludes(skeleton, "RightForeArm");
-      const rightShoulder= findBoneByNameOrIncludes(skeleton, "mixamorig:RightShoulder.206_218") || findBoneByNameOrIncludes(skeleton, "RightShoulder");
+      const rightArm      = findBoneByNameOrIncludes(skeleton, "mixamorig:RightArm.207_219") || findBoneByNameOrIncludes(skeleton, "RightArm");
+      const rightForeArm  = findBoneByNameOrIncludes(skeleton, "mixamorig:RightForeArm.208_220") || findBoneByNameOrIncludes(skeleton, "RightForeArm");
+      const rightShoulder = findBoneByNameOrIncludes(skeleton, "mixamorig:RightShoulder.206_218") || findBoneByNameOrIncludes(skeleton, "RightShoulder");
 
       return {
         ok:true,
-        skeleton,
         skinned,
-        weaponRoot,
-        bones: { rightHand, rightArm, rightForeArm, rightShoulder }
+        bones: { rightArm, rightForeArm, rightShoulder }
       };
     }
 
-    const SOLDIER_ROOT = "/assets/warzone3d/soldier_gltf_3/";
-    const SOLDIER_FILE = "scene.gltf";
-
-    const WEAPON_ROOT  = "/assets/warzone3d/weapons/wz_basic_pistol/";
-    const WEAPON_FILE  = "scene.gltf";
-
     (async () => {
       try{
-        msgEl.textContent = "War Zone test, soldier + pistol attach";
-
-        const okSoldier = await preflightGltf("soldier", SOLDIER_ROOT, SOLDIER_FILE);
-        if(!okSoldier){
-          log("Stop, soldier preflight failed");
-          return;
-        }
-
-        const okWeapon = await preflightGltf("pistol", WEAPON_ROOT, WEAPON_FILE);
-        if(!okWeapon){
-          log("Stop, pistol preflight failed");
-          return;
-        }
+        const okSoldier = await preflightGltf(SOLDIER_ROOT, SOLDIER_FILE);
+        const okWeapon  = await preflightGltf(WEAPON_ROOT,  WEAPON_FILE);
+        if (!okSoldier || !okWeapon) return;
 
         const soldier = await importModel("soldier", SOLDIER_ROOT, SOLDIER_FILE);
         soldier.root.rotation.y = Math.PI;
         normalizeToGroundAndHeight(soldier.root, 1.75);
 
         const ag = soldier.result?.animationGroups || [];
-        let anim0 = null;
         if (ag.length){
           ag.forEach(g => g.stop());
-          anim0 = ag[0];
-          anim0.start(true);
-
-          anim0.speedRatio = 0.65;
-
-          log("Soldier anim started, " + (anim0.name || "anim0") + ", speedRatio=" + anim0.speedRatio);
-        } else {
-          log("Soldier has no animationGroups");
+          ag[0].start(true);
+          ag[0].speedRatio = SOLDIER_ANIM_SPEED;
         }
 
         const pistol = await importModel("pistol", WEAPON_ROOT, WEAPON_FILE);
         pistol.root.setEnabled(false);
 
         const attachInfo = attachWeaponToRightHand(soldier, pistol);
-        if (!attachInfo.ok){
-          log("Weapon not attached, check bone name mismatch");
-        }
 
         frameCameraToRoot(soldier.root);
 
@@ -384,53 +273,37 @@
 
         let t = 0;
         const baseY = soldier.root.rotation.y;
-        const maxYaw = Math.PI * 0.45;
-        const autoSpeed = 0.35;
-
-        const qArm     = quatFromEuler(-0.10,  0.00,  0.00);
-        const qForeArm = quatFromEuler(-0.25,  0.00,  0.00);
-        const qShould  = quatFromEuler( 0.00,  0.00, -0.05);
-
-        // Optional wrist twist, OFF by default
-        // If you want to use it, set WRIST_TWIST_ON = true and tweak qWrist
-        const WRIST_TWIST_ON = false;
-        const qWrist = quatFromEuler(0.00, 0.00, -0.35);
 
         scene.onBeforeRenderObservable.add(() => {
           const dt = scene.getEngine().getDeltaTime() * 0.001;
 
-          t += dt * autoSpeed;
-          const yaw = Math.sin(t) * maxYaw;
+          // auto oscillate yaw, front to side, then back
+          t += dt * AUTO_OSC_SPEED;
+          const yaw = Math.sin(t) * AUTO_MAX_YAW;
           soldier.root.rotation.y = baseY + yaw;
 
-          const bones = attachInfo?.bones;
-          const skinned = attachInfo?.skinned;
+          // arm pose correction after animation
+          if (attachInfo?.ok && attachInfo?.bones && attachInfo?.skinned){
+            const skinned = attachInfo.skinned;
+            const b = attachInfo.bones;
 
-          if (bones && skinned){
-            if (bones.rightShoulder && bones.rightShoulder.getRotationQuaternion){
-              const cur = bones.rightShoulder.getRotationQuaternion(BABYLON.Space.LOCAL, skinned) || BABYLON.Quaternion.Identity();
-              bones.rightShoulder.setRotationQuaternion(cur.multiply(qShould), BABYLON.Space.LOCAL, skinned);
+            if (b.rightShoulder && b.rightShoulder.getRotationQuaternion){
+              const cur = b.rightShoulder.getRotationQuaternion(BABYLON.Space.LOCAL, skinned) || BABYLON.Quaternion.Identity();
+              b.rightShoulder.setRotationQuaternion(cur.multiply(qShould), BABYLON.Space.LOCAL, skinned);
             }
-            if (bones.rightArm && bones.rightArm.getRotationQuaternion){
-              const cur = bones.rightArm.getRotationQuaternion(BABYLON.Space.LOCAL, skinned) || BABYLON.Quaternion.Identity();
-              bones.rightArm.setRotationQuaternion(cur.multiply(qArm), BABYLON.Space.LOCAL, skinned);
+            if (b.rightArm && b.rightArm.getRotationQuaternion){
+              const cur = b.rightArm.getRotationQuaternion(BABYLON.Space.LOCAL, skinned) || BABYLON.Quaternion.Identity();
+              b.rightArm.setRotationQuaternion(cur.multiply(qArm), BABYLON.Space.LOCAL, skinned);
             }
-            if (bones.rightForeArm && bones.rightForeArm.getRotationQuaternion){
-              const cur = bones.rightForeArm.getRotationQuaternion(BABYLON.Space.LOCAL, skinned) || BABYLON.Quaternion.Identity();
-              bones.rightForeArm.setRotationQuaternion(cur.multiply(qForeArm), BABYLON.Space.LOCAL, skinned);
-            }
-
-            if (WRIST_TWIST_ON && bones.rightHand && bones.rightHand.getRotationQuaternion){
-              const cur = bones.rightHand.getRotationQuaternion(BABYLON.Space.LOCAL, skinned) || BABYLON.Quaternion.Identity();
-              bones.rightHand.setRotationQuaternion(cur.multiply(qWrist), BABYLON.Space.LOCAL, skinned);
+            if (b.rightForeArm && b.rightForeArm.getRotationQuaternion){
+              const cur = b.rightForeArm.getRotationQuaternion(BABYLON.Space.LOCAL, skinned) || BABYLON.Quaternion.Identity();
+              b.rightForeArm.setRotationQuaternion(cur.multiply(qForeArm), BABYLON.Space.LOCAL, skinned);
             }
           }
         });
 
-        log("Done, soldier loaded, pistol loaded, attach attempted");
       }catch(e){
         console.warn("Test failed", e);
-        log("FAILED, check console, " + (e?.message || e));
       }
     })();
   </script>
