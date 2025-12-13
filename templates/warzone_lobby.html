@@ -652,9 +652,9 @@
 
       // Shop button (wallet + purchases handled on shop page)
       document.getElementById("warzoneShopBtn")?.addEventListener("click", () => {
-        // If you have a dedicated shop route, keep it here
-        window.location.href = "/warzone/shop";
-      });
+  const qs = window.location.search || "";
+  window.location.href = "/warzone/shop" + qs;
+});
 
       // Custom IZZA keyboard for player search
       const searchDisplay = document.getElementById("searchDisplay");
