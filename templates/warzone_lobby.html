@@ -62,10 +62,7 @@
       overflow:auto;
       -webkit-overflow-scrolling:touch;
     }
-    .shell::-webkit-scrollbar{
-      width:0;
-      height:0;
-    }
+    .shell::-webkit-scrollbar{ width:0;height:0; }
 
     .top-row{
       display:flex;
@@ -209,51 +206,7 @@
       display:block;
     }
 
-    /* Loadout / wallet bar */
-    .loadout-bar{
-      margin-top:4px;
-      padding:6px 10px;
-      border-radius:10px;
-      border:1px solid rgba(66,91,168,.8);
-      background:linear-gradient(145deg,#050815,#030616);
-      display:flex;
-      align-items:center;
-      justify-content:space-between;
-      gap:10px;
-      font-size:11px;
-    }
-    .loadout-label{
-      font-size:10px;
-      text-transform:uppercase;
-      letter-spacing:.18em;
-      color:#7fd1ff;
-      white-space:nowrap;
-    }
-    .loadout-actions{
-      display:flex;
-      flex-wrap:wrap;
-      gap:6px;
-      justify-content:flex-end;
-    }
-    .btn-loadout{
-      padding:6px 10px;
-      border-radius:999px;
-      border:1px solid rgba(127,209,255,.7);
-      background:linear-gradient(90deg,rgba(3,12,38,.9),rgba(4,27,61,.95));
-      color:#e7f0ff;
-      font-size:10px;
-      text-transform:uppercase;
-      letter-spacing:.16em;
-      cursor:pointer;
-      white-space:nowrap;
-    }
-    .btn-loadout.secondary{
-      border-color:rgba(255,207,77,.7);
-      background:linear-gradient(90deg,#312008,#4a3410);
-      color:#ffefc6;
-    }
-
-    /* Right side: friends + armory */
+    /* Right side: friends + character */
     .side-panel{
       display:flex;
       flex-direction:column;
@@ -332,6 +285,24 @@
       flex-wrap:wrap;
     }
 
+    .btn-loadout{
+      padding:6px 10px;
+      border-radius:999px;
+      border:1px solid rgba(127,209,255,.7);
+      background:linear-gradient(90deg,rgba(3,12,38,.9),rgba(4,27,61,.95));
+      color:#e7f0ff;
+      font-size:10px;
+      text-transform:uppercase;
+      letter-spacing:.16em;
+      cursor:pointer;
+      white-space:nowrap;
+    }
+    .btn-loadout.secondary{
+      border-color:rgba(255,207,77,.7);
+      background:linear-gradient(90deg,#312008,#4a3410);
+      color:#ffefc6;
+    }
+
     /* Overlays */
     .overlay{
       position:absolute;
@@ -403,9 +374,7 @@
       white-space:nowrap;
       text-overflow:ellipsis;
     }
-    .izzakey-display.empty{
-      color:#5d6aa0;
-    }
+    .izzakey-display.empty{ color:#5d6aa0; }
 
     .overlay-input-row button{
       padding:6px 10px;
@@ -437,9 +406,7 @@
       cursor:pointer;
       user-select:none;
     }
-    .izzakey.wide{
-      grid-column:span 2;
-    }
+    .izzakey.wide{ grid-column:span 2; }
     .izzakey.back{
       background:#25112a;
       border-color:rgba(255,59,107,.7);
@@ -493,173 +460,11 @@
       cursor:pointer;
     }
 
-    /* Shop / armory lists */
-    .shop-list{
-      margin-top:8px;
-      max-height:260px;
-      overflow:auto;
-      padding:4px;
-      border-radius:10px;
-      border:1px solid rgba(66,91,168,.7);
-      background:radial-gradient(circle at top,#050919,#010308);
-    }
-    .shop-item{
-      display:flex;
-      align-items:flex-start;
-      justify-content:space-between;
-      gap:8px;
-      padding:6px 6px 6px 2px;
-      border-bottom:1px solid rgba(44,64,122,.65);
-    }
-    .shop-item:last-child{border-bottom:none;}
-    .shop-preview{
-      width:80px;
-      height:64px;
-      border-radius:8px;
-      border:1px solid rgba(66,91,168,.8);
-      background:radial-gradient(circle at top,#060c20,#02030a);
-      overflow:hidden;
-      flex-shrink:0;
-    }
-    .shop-preview-canvas{
-      width:100%;
-      height:100%;
-      display:block;
-    }
-    .shop-main{
-      flex:1;
-      min-width:0;
-    }
-    .shop-name{
-      font-size:12px;
-      font-weight:600;
-      margin-bottom:2px;
-    }
-    .shop-sub{
-      font-size:11px;
-      color:#9fb0d6;
-    }
-    .shop-side{
-      display:flex;
-      flex-direction:column;
-      gap:4px;
-      align-items:flex-end;
-      justify-content:center;
-      min-width:92px;
-    }
-    .price-tag{
-      font-size:11px;
-      padding:2px 8px;
-      border-radius:999px;
-      border:1px solid rgba(255,207,77,.8);
-      background:linear-gradient(90deg,#3b2b0b,#5a3f10);
-      color:#ffe8a6;
-      white-space:nowrap;
-    }
-    .price-tag.start{
-      border-color:rgba(127,209,255,.8);
-      background:linear-gradient(90deg,#041626,#04384d);
-      color:#cfe9ff;
-    }
-    .shop-btn{
-      padding:5px 8px;
-      border-radius:999px;
-      border:1px solid rgba(127,209,255,.8);
-      background:linear-gradient(90deg,#021021,#03253b);
-      color:#e7f0ff;
-      font-size:10px;
-      text-transform:uppercase;
-      letter-spacing:.14em;
-      cursor:pointer;
-      white-space:nowrap;
-    }
-    .shop-btn.owned{
-      border-color:rgba(159,176,214,.8);
-      background:#111826;
-      color:#9fb0d6;
-    }
-    .shop-btn.equipped{
-      border-color:rgba(0,255,170,.9);
-      background:linear-gradient(90deg,#00e5b0,#62ffd5);
-      color:#001b11;
-      font-weight:700;
-    }
-    .shop-note{
-      margin-top:6px;
-      font-size:11px;
-      color:#9fb0d6;
-    }
-
-    /* Purchase confirm overlay */
-    .purchase-box{
-      border-radius:14px;
-      border:1px solid rgba(66,91,168,.85);
-      background:linear-gradient(145deg,#060a1b,#02030c);
-      padding:10px;
-      margin-top:8px;
-    }
-    .purchase-line{
-      display:flex;
-      justify-content:space-between;
-      gap:8px;
-      font-size:11px;
-      color:#c3cff5;
-      margin-top:6px;
-      align-items:center;
-    }
-    .purchase-line strong{
-      color:#e7f0ff;
-      font-size:12px;
-    }
-    .purchase-actions{
-      display:flex;
-      gap:8px;
-      margin-top:10px;
-      justify-content:flex-end;
-      flex-wrap:wrap;
-    }
-    .purchase-actions button{
-      padding:7px 12px;
-      border-radius:999px;
-      border:1px solid rgba(127,209,255,.8);
-      background:linear-gradient(90deg,#021021,#03253b);
-      color:#e7f0ff;
-      font-size:11px;
-      text-transform:uppercase;
-      letter-spacing:.14em;
-      cursor:pointer;
-      white-space:nowrap;
-    }
-    .purchase-actions button.approve{
-      border:none;
-      background:linear-gradient(90deg,#0ff,#ff3b6b);
-      color:#001520;
-      font-weight:800;
-      box-shadow:
-        0 0 18px rgba(0,255,255,.35),
-        0 0 18px rgba(255,59,107,.25);
-    }
-    .purchase-actions button.closeonly{
-      border:none;
-      background:linear-gradient(90deg,#00e5b0,#62ffd5);
-      color:#001b11;
-      font-weight:900;
-    }
-    .purchase-msg{
-      margin-top:8px;
-      font-size:11px;
-      color:#9fb0d6;
-      min-height:16px;
-    }
-    .purchase-msg.error{ color:#ffb86b; }
-    .purchase-msg.ok{ color:#5ad49e; }
-
     @media (max-height:620px){
       .main-row{ grid-template-columns:1fr; }
     }
   </style>
 
-  <!-- Pi SDK REMOVED, Warzone purchases use IZZA token transfers, same as bot buckets -->
   <script src="https://cdn.babylonjs.com/babylon.js"></script>
   <script src="https://cdn.babylonjs.com/loaders/babylonjs.loaders.min.js"></script>
 </head>
@@ -700,18 +505,6 @@
               style="background-image:url('{{ map_image_url or "/assets/warzone-map-izzacity.jpg" }}');">
               <canvas id="soldierCanvas" class="zone-soldier-canvas"></canvas>
             </div>
-
-            <div class="loadout-bar">
-              <div class="loadout-label">IZZA wallet</div>
-              <div class="loadout-actions">
-                <button class="btn-loadout secondary" id="walletManageBtn">
-                  IZZA WALLET
-                </button>
-                <button class="btn-loadout" id="walletSyncBtn">
-                  Sync wallet
-                </button>
-              </div>
-            </div>
           </section>
 
           <aside class="side-panel">
@@ -728,24 +521,21 @@
             </div>
 
             <div class="character-card">
-              <div class="card-title">IZZA soldier and armory</div>
+              <div class="card-title">IZZA soldier and loadout</div>
               <div class="character-body">
                 <div class="character-info">
-                  <div class="char-name" id="charName">
-                    IZZA Soldier
-                  </div>
+                  <div class="char-name" id="charName">IZZA Soldier</div>
                   <div class="char-sub">
-                    All players start as the basic IZZA Soldier. Unlock extra weapons
-                    and operator skins in the Armory, then equip your favorites
-                    before dropping into IZZA WAR ZONE.
+                    Your current skin and loadout are applied automatically in the lobby.
+                    Manage purchases and equipment in the IZZA WARZONE SHOP.
                   </div>
                   <div class="char-toggle">
-                    <button class="btn-loadout secondary" id="weaponsBtn">Weapons</button>
-                    <button class="btn-loadout" id="skinsBtn">Skins</button>
+                    <button class="btn-loadout secondary" id="warzoneShopBtn">IZZA WARZONE SHOP</button>
                   </div>
                 </div>
               </div>
             </div>
+
           </aside>
         </div>
 
@@ -812,152 +602,6 @@
           </div>
         </div>
 
-        <!-- WALLET OVERLAY -->
-        <div class="overlay" id="walletOverlay">
-          <div class="overlay-card">
-            <div class="overlay-header">
-              <div class="overlay-title">My IZZA wallet</div>
-              <button class="overlay-close" data-close="walletOverlay">Close</button>
-            </div>
-            <div class="overlay-body">
-              <div style="margin-bottom:8px;font-size:11px;">
-                <div>Signed in as <strong id="mwUser">—</strong></div>
-              </div>
-              <div style="margin-bottom:8px;font-size:11px;">
-                <div>Active wallet (public key)</div>
-                <div id="mwPub" style="font-family:ui-monospace,Menlo,Consolas,monospace;word-break:break-all;">—</div>
-                <div style="margin-top:4px;color:#9fb0d6;">
-                  Need to set or switch your active wallet? Open or create the full wallet once below.
-                  After creation go into your full wallet, reveal your S key once and store it somewhere safe.
-                  Then return here to save your S key locally.
-                </div>
-              </div>
-              <div style="margin-bottom:8px;font-size:11px;">
-                <div>Balances, Testnet</div>
-                <div>Test Pi: <strong id="balPi">—</strong></div>
-                <div>Test IZZA: <strong id="balIzza">—</strong></div>
-              </div>
-              <div style="margin-bottom:8px;font-size:11px;">
-                <div>Local S key status: <span id="mwSStatus">—</span></div>
-                <div class="overlay-input-row" style="margin-top:6px;">
-                  <input
-                    id="mwSInput"
-                    placeholder="S... private key"
-                    autocomplete="off"
-                    spellcheck="false"
-                    autocapitalize="none"
-                    style="flex:1;min-width:0;border-radius:999px;border:1px solid rgba(127,209,255,.6);background:#02061b;color:#edf3ff;font-size:12px;padding:7px 10px;outline:none;">
-                  <button type="button" id="mwSaveBtn">Save</button>
-                  <button type="button" id="mwForgetBtn" style="background:linear-gradient(90deg,#ff3b6b,#ff9c6b);">
-                    Forget
-                  </button>
-                </div>
-                <div style="margin-top:4px;color:#9fb0d6;">
-                  Your S key is stored locally on this device only.
-                </div>
-              </div>
-              <div style="display:flex;justify-content:flex-end;margin-top:10px;">
-                <a
-                  href="/token/auth?next=/token/izza"
-                  style="text-decoration:none;padding:7px 12px;border-radius:999px;border:1px solid rgba(255,207,77,.9);background:linear-gradient(90deg,#ffcf4d,#ff9c3b);color:#1a1200;font-size:11px;text-transform:uppercase;letter-spacing:.16em;">
-                  Open full wallet
-                </a>
-              </div>
-            </div>
-          </div>
-        </div>
-
-        <!-- ARMORY: WEAPONS -->
-        <div class="overlay" id="weaponsOverlay">
-          <div class="overlay-card">
-            <div class="overlay-header">
-              <div class="overlay-title">Armory, Weapons</div>
-              <button class="overlay-close" data-close="weaponsOverlay">Close</button>
-            </div>
-            <div class="overlay-body">
-              <p>
-                You always deploy with the free <b>Basic Pistol</b>. Use IZZA tokens
-                to unlock extra weapons and blueprints. Owned weapons stay in
-                your inventory across matches.
-              </p>
-              <div id="weaponsList" class="shop-list">
-                Loading weapons…
-              </div>
-              <div class="shop-note">
-                Purchases are paid with Testnet IZZA tokens from your active IZZA wallet,
-                using the same IZZA asset transfer flow as bot buckets.
-              </div>
-            </div>
-          </div>
-        </div>
-
-        <!-- ARMORY: SKINS -->
-        <div class="overlay" id="skinsOverlay">
-          <div class="overlay-card">
-            <div class="overlay-header">
-              <div class="overlay-title">Armory, Skins</div>
-              <button class="overlay-close" data-close="skinsOverlay">Close</button>
-            </div>
-            <div class="overlay-body">
-              <p>
-                Start with the free <b>Basic IZZA Soldier</b>. Unlock extra operator
-                skins and outfits with IZZA tokens, then equip one as your
-                current look before you drop in.
-              </p>
-              <div id="skinsList" class="shop-list">
-                Loading skins…
-              </div>
-              <div class="shop-note">
-                Skins are in game unlocks stored in your IZZA WAR ZONE inventory,
-                paid with real Testnet IZZA tokens using the same flow as bot buckets.
-              </div>
-            </div>
-          </div>
-        </div>
-
-        <!-- PURCHASE CONFIRM OVERLAY -->
-        <div class="overlay" id="purchaseOverlay">
-          <div class="overlay-card">
-            <div class="overlay-header">
-              <div class="overlay-title">Approve IZZA payment</div>
-              <button class="overlay-close" data-close="purchaseOverlay">Close</button>
-            </div>
-            <div class="overlay-body">
-              <p>
-                You are about to spend Testnet IZZA tokens from your IZZA wallet to unlock a War Zone item.
-                After the transfer succeeds, the item becomes equipable and the Buy button turns into Equip.
-              </p>
-
-              <div class="purchase-box">
-                <div class="purchase-line">
-                  <div>Item</div>
-                  <strong id="poItem">—</strong>
-                </div>
-                <div class="purchase-line">
-                  <div>Cost</div>
-                  <strong id="poCost">—</strong>
-                </div>
-                <div class="purchase-line">
-                  <div>From wallet</div>
-                  <div id="poFrom" style="font-family:ui-monospace,Menlo,Consolas,monospace;word-break:break-all;text-align:right;max-width:250px;">—</div>
-                </div>
-                <div class="purchase-line">
-                  <div>To</div>
-                  <div style="color:#9fb0d6;">IZZA distributor</div>
-                </div>
-
-                <div class="purchase-actions">
-                  <button type="button" id="poCancel">Cancel</button>
-                  <button type="button" class="approve" id="poApprove">Approve</button>
-                  <button type="button" class="closeonly" id="poClose" style="display:none;">Close</button>
-                </div>
-
-                <div class="purchase-msg" id="poMsg"></div>
-              </div>
-            </div>
-          </div>
-        </div>
-
       </div><!-- /.shell -->
     </div>
   </div>
@@ -984,210 +628,7 @@
       updateLayout();
     })();
 
-    // ---------- IZZA wallet helpers ----------
-    (function(){
-      const SRV_USER = {{ (player.username or '') | tojson }};
-      function stripAt(s){ return (s||"").toString().trim().replace(/^@+/, ""); }
-      function canonU(s){
-        const v = stripAt(s);
-        return v ? v.toLowerCase() : "";
-      }
-
-      const USER_CANON = (()=>{
-        const fromSrv = stripAt(SRV_USER);
-        if(fromSrv) return fromSrv;
-        try{
-          const raw = localStorage.getItem("piAuthUser");
-          if(raw){
-            const j = JSON.parse(raw);
-            if(j && j.username) return stripAt(j.username);
-          }
-        }catch(e){}
-        try{
-          const uCanon = localStorage.getItem("izzaUserCanon");
-          if(uCanon) return stripAt(uCanon);
-          const u = localStorage.getItem("izzaUserU");
-          if(u) return stripAt(u);
-        }catch(e){}
-        return "";
-      })();
-
-      const USER_U = canonU(USER_CANON);
-      function uQS(){
-        return USER_U ? ("?u=" + encodeURIComponent(USER_U)) : "";
-      }
-
-      if(USER_CANON){
-        try{
-          localStorage.setItem("izzaUserCanon", USER_CANON);
-          localStorage.setItem("izzaUserU", USER_U);
-        }catch(e){}
-      }
-
-      function __readVault(){
-        try{
-          const s = localStorage.getItem("izza_test_wallet");
-          return s ? JSON.parse(s) : null;
-        }catch(e){ return null; }
-      }
-      function __writeVault(j){
-        try{ localStorage.setItem("izza_test_wallet", JSON.stringify(j || {})); }catch(e){}
-      }
-      function __forgetSecret(pub){
-        try{
-          const v = __readVault() || {};
-          if(v && v.pub === pub){
-            delete v.sec;
-            __writeVault(v);
-          }
-        }catch(e){}
-      }
-      function isLocalWallet(pub){
-        const v = __readVault();
-        return !!(v && v.pub === pub && /^S[A-Z0-9]{55}$/.test(v.sec || ""));
-      }
-      function getLocalSecret(pub){
-        try{
-          const v = __readVault();
-          if(!v) return "";
-          if(pub && v.pub !== pub) return "";
-          return v.sec || "";
-        }catch(e){ return ""; }
-      }
-
-      async function fetchActiveWallet(username){
-        const qs = username ? ("?u=" + encodeURIComponent(username)) : uQS();
-        const r = await fetch("/api/wallet/active"+qs, { credentials:"include" });
-        if(!r.ok) return null;
-        return r.json().catch(()=>null);
-      }
-      async function linkActiveWallet(username, pub, secret){
-        const qs = username ? ("?u="+encodeURIComponent(username)) : uQS();
-        const body = { pub:String(pub||"").trim().toUpperCase() };
-        if(secret && /^S[A-Z0-9]{55}$/.test(secret)) body.secret = secret.trim();
-        const r = await fetch("/api/wallet/link"+qs, {
-          method:"POST",
-          headers:{ "Content-Type":"application/json" },
-          body: JSON.stringify(body),
-          credentials:"include"
-        });
-        const j = await r.json().catch(()=>null);
-        return { ok:r.ok, status:r.status, json:j };
-      }
-      async function fetchBalances(username){
-        const qs = username ? ("?u="+encodeURIComponent(username)) : uQS();
-        const r = await fetch("/api/wallet/balances"+qs, { credentials:"include" });
-        if(!r.ok) return null;
-        return r.json().catch(()=>null);
-      }
-
-      const walletOverlay = document.getElementById("walletOverlay");
-      const mwUser   = document.getElementById("mwUser");
-      const mwPub    = document.getElementById("mwPub");
-      const balPi    = document.getElementById("balPi");
-      const balIzza  = document.getElementById("balIzza");
-      const mwSStatus= document.getElementById("mwSStatus");
-      const mwSInput = document.getElementById("mwSInput");
-      const mwSaveBtn= document.getElementById("mwSaveBtn");
-      const mwForgetBtn = document.getElementById("mwForgetBtn");
-
-      async function refreshWalletOverlay(){
-        if(!walletOverlay) return;
-        if(mwUser) mwUser.textContent = USER_CANON ? "@"+USER_CANON : "—";
-
-        const active = await fetchActiveWallet(USER_U);
-        const pub = active && active.pub || "";
-        if(mwPub) mwPub.textContent = pub || "—";
-
-        if(balPi || balIzza){
-          try{
-            const b = await fetchBalances(USER_U);
-            if(balPi)   balPi.textContent   = b && b.pi   || "—";
-            if(balIzza) balIzza.textContent = b && b.izza || "—";
-          }catch(e){
-            if(balPi)   balPi.textContent   = "—";
-            if(balIzza) balIzza.textContent = "—";
-          }
-        }
-
-        const has = pub && isLocalWallet(pub);
-        if(mwSStatus){
-          mwSStatus.innerHTML = has
-            ? '<span style="color:#5ad49e;">Saved locally</span>'
-            : '<span style="color:#ffb86b;">Not saved</span>';
-        }
-      }
-
-      function openWalletOverlay(){
-        if(!walletOverlay) return;
-        walletOverlay.classList.add("visible");
-        refreshWalletOverlay();
-      }
-
-      mwSaveBtn?.addEventListener("click", async function(){
-        const active = await fetchActiveWallet(USER_U);
-        const pub = active && active.pub || "";
-        if(!/^G[A-Z0-9]{55}$/.test(pub)){
-          alert("Open your IZZA wallet once to set an active wallet, then return.");
-          return;
-        }
-        const secret = (mwSInput?.value || "").trim();
-        if(!/^S[A-Z0-9]{55}$/.test(secret)){
-          alert("Enter a valid S key starting with S…");
-          return;
-        }
-
-        const v = __readVault() || {};
-        v.pub = pub;
-        v.sec = secret;
-        __writeVault(v);
-
-        const link = await linkActiveWallet(USER_U, pub, secret);
-        if(!link.ok){
-          alert("Server link failed: " + ((link.json && link.json.error) || link.status));
-        }else{
-          alert("S key saved locally and linked.");
-        }
-
-        if(mwSInput) mwSInput.value = "";
-        refreshWalletOverlay();
-      });
-
-      mwForgetBtn?.addEventListener("click", async function(){
-        const active = await fetchActiveWallet(USER_U);
-        const pub = active && active.pub || "";
-        if(pub) __forgetSecret(pub);
-        refreshWalletOverlay();
-      });
-
-      async function ensureUserAndWalletGate(){
-        const user = USER_U || canonU(USER_CANON);
-        if(!user){
-          alert("Sign in with Pi first, then return to IZZA WAR ZONE.");
-          return null;
-        }
-        const active = await fetchActiveWallet(user);
-        const pub = active && active.pub || "";
-        if(!/^G[A-Z0-9]{55}$/.test(pub)){
-          alert("Open your IZZA wallet once to set an active wallet, then return here.");
-          return null;
-        }
-        if(!isLocalWallet(pub)){
-          openWalletOverlay();
-          alert("Save your IZZA wallet S key locally (same as other IZZA pages) before purchasing.");
-          return null;
-        }
-        return { user, pub, sec:getLocalSecret(pub) };
-      }
-
-      window.__izzaWalletGate = ensureUserAndWalletGate;
-      window.__izzaOpenWalletOverlay = openWalletOverlay;
-
-      window.__izzaUserU = USER_U;
-      window.__izzaUserQS = uQS;
-    })();
-
-    // ---------- Overlays ----------
+    // ---------- Overlays + Search + Shop button ----------
     (function(){
       function show(id){
         const el = document.getElementById(id);
@@ -1202,21 +643,17 @@
       document.getElementById("searchBtn")?.addEventListener("click", () => show("searchOverlay"));
       document.getElementById("deployBtn")?.addEventListener("click", () => show("deployOverlay"));
 
-      document.getElementById("weaponsBtn")?.addEventListener("click", () => {
-        show("weaponsOverlay");
-        window.__izzaLoadShop && window.__izzaLoadShop("weapons");
-      });
-
-      document.getElementById("skinsBtn")?.addEventListener("click", () => {
-        show("skinsOverlay");
-        window.__izzaLoadShop && window.__izzaLoadShop("skins");
-      });
-
       document.querySelectorAll(".overlay-close").forEach(btn => {
         btn.addEventListener("click", function(){
           const id = this.getAttribute("data-close");
           if (id) hide(id);
         });
+      });
+
+      // Shop button (wallet + purchases handled on shop page)
+      document.getElementById("warzoneShopBtn")?.addEventListener("click", () => {
+        // If you have a dedicated shop route, keep it here
+        window.location.href = "/warzone/shop";
       });
 
       // Custom IZZA keyboard for player search
@@ -1360,110 +797,9 @@
       }
 
       searchGo?.addEventListener("click", doSearch);
-
-      // IZZA WALLET buttons
-      const walletManageBtn = document.getElementById("walletManageBtn");
-      const walletSyncBtn   = document.getElementById("walletSyncBtn");
-
-      walletManageBtn?.addEventListener("click", () => {
-        if (window.__izzaOpenWalletOverlay){
-          window.__izzaOpenWalletOverlay();
-        }
-      });
-
-      walletSyncBtn?.addEventListener("click", async () => {
-        if (!window.__izzaWalletGate) {
-          alert("Wallet gate not ready yet. Try again in a moment.");
-          return;
-        }
-        const gate = await window.__izzaWalletGate();
-        if (gate) {
-          alert(`IZZA wallet synced for @${gate.user}. You can now buy weapons and skins.`);
-        }
-      });
-
-      // Purchase overlay helpers
-      const po = document.getElementById("purchaseOverlay");
-      const poItem = document.getElementById("poItem");
-      const poCost = document.getElementById("poCost");
-      const poFrom = document.getElementById("poFrom");
-      const poMsg  = document.getElementById("poMsg");
-      const poCancel = document.getElementById("poCancel");
-      const poApprove = document.getElementById("poApprove");
-      const poClose = document.getElementById("poClose");
-
-      let __poResolve = null;
-      let __poBusy = false;
-
-      function setButtonsMode(mode){
-        if(!poCancel || !poApprove || !poClose) return;
-        if(mode === "close"){
-          poCancel.style.display = "none";
-          poApprove.style.display = "none";
-          poClose.style.display = "inline-block";
-        } else {
-          poCancel.style.display = "inline-block";
-          poApprove.style.display = "inline-block";
-          poClose.style.display = "none";
-        }
-      }
-
-      function showPurchaseOverlay(payload){
-        if(!po) return Promise.resolve({ approved:false });
-        po.classList.add("visible");
-        setButtonsMode("approve");
-        if(poMsg){
-          poMsg.textContent = "";
-          poMsg.className = "purchase-msg";
-        }
-        if(poItem) poItem.textContent = payload.itemName || payload.sku || "Item";
-        if(poCost) poCost.textContent = (payload.price || 0) + " IZZA";
-        if(poFrom) poFrom.textContent = payload.pub || "—";
-
-        return new Promise((resolve) => { __poResolve = resolve; });
-      }
-
-      function closePurchaseOverlay(result){
-        if(!po) return;
-        po.classList.remove("visible");
-        const r = result || { approved:false };
-        if(__poResolve){
-          __poResolve(r);
-          __poResolve = null;
-        }
-      }
-
-      poCancel?.addEventListener("click", () => {
-        if(__poBusy) return;
-        closePurchaseOverlay({ approved:false });
-      });
-
-      poClose?.addEventListener("click", () => {
-        if(__poBusy) return;
-        closePurchaseOverlay({ approved:false });
-      });
-
-      window.__izzaShowPurchaseOverlay = showPurchaseOverlay;
-      window.__izzaClosePurchaseOverlay = closePurchaseOverlay;
-      window.__izzaPurchaseOverlaySetMsg = function(txt, kind){
-        if(!poMsg) return;
-        poMsg.textContent = txt || "";
-        poMsg.className = "purchase-msg" + (kind ? (" " + kind) : "");
-      };
-      window.__izzaPurchaseOverlaySetBusy = function(b){
-        __poBusy = !!b;
-        if(poApprove) poApprove.disabled = __poBusy;
-        if(poCancel)  poCancel.disabled  = __poBusy;
-        if(poClose)   poClose.disabled   = __poBusy;
-      };
-      window.__izzaPurchaseOverlayApproveHook = function(fn){
-        if(!poApprove) return;
-        poApprove.onclick = fn;
-      };
-      window.__izzaPurchaseOverlaySetButtonsMode = setButtonsMode;
     })();
 
-    // ---------- War Zone skin styling ----------
+    // ---------- War Zone skin styling (kept for lobby soldier rendering) ----------
     (function(){
       if(!window.BABYLON) return;
 
@@ -1621,368 +957,6 @@
       window.__warzoneSkinStyleForSku = styleForSku;
     })();
 
-    // ---------- Armory load + purchases + 3D previews ----------
-    (function(){
-      const weaponsList = document.getElementById("weaponsList");
-      const skinsList   = document.getElementById("skinsList");
-
-      const SKIN_DESCRIPTIONS = {
-        wz_neon_edge: "Neon Edge, black armor with cyan edge lights and subtle neon trims.",
-        wz_gold_glow: "Gold Glow, warm gold plating with bright emissive highlights.",
-        wz_purple_edge: "Purple Edge, dark tech armor with violet edge lighting and visor glow.",
-        wz_crimson_core: "Crimson Core, red energy lines and aggressive core glow.",
-        wz_obsidian_violet: "Obsidian Violet, near black armor with deep violet emissive accents."
-      };
-
-      function normSku(s){ return (s || "").toString().trim().toLowerCase(); }
-
-      function guessSkinDescBySku(sku){
-        const s = normSku(sku);
-        if(!s) return "";
-        if(SKIN_DESCRIPTIONS[s]) return SKIN_DESCRIPTIONS[s];
-        if(s.includes("neon") || s.includes("cyan")) return SKIN_DESCRIPTIONS.wz_neon_edge;
-        if(s.includes("gold")) return SKIN_DESCRIPTIONS.wz_gold_glow;
-        if(s.includes("crimson") || s.includes("red")) return SKIN_DESCRIPTIONS.wz_crimson_core;
-        if(s.includes("obsidian") || s.includes("shadow") || s.includes("black")) return SKIN_DESCRIPTIONS.wz_obsidian_violet;
-        if(s.includes("purple") || s.includes("edge")) return SKIN_DESCRIPTIONS.wz_purple_edge;
-        return "Premium operator skin, unique armor tint and emissive edge lighting.";
-      }
-
-      function getSkinAsset(sku){
-        return { rootUrl:"/assets/warzone3d/soldier_gltf_3/", fileName:"scene.gltf" };
-      }
-
-      function getWeaponAsset(sku){
-        return { rootUrl:"/assets/warzone3d/weapons/", fileName: sku + ".glb" };
-      }
-
-      function getBounds(node){
-        const b = node.getHierarchyBoundingVectors(true);
-        return { min: b.min.clone(), max: b.max.clone() };
-      }
-      function normalizeToGroundAndHeight(root, targetHeight){
-        const bb1 = getBounds(root);
-        const h1 = Math.max(0.000001, (bb1.max.y - bb1.min.y));
-        const s = (targetHeight || 1.75) / h1;
-        root.scaling = new BABYLON.Vector3(s,s,s);
-
-        const bb2 = getBounds(root);
-        root.position.y -= bb2.min.y;
-
-        return s;
-      }
-      function frameCameraToRoot(camera, root){
-        try{
-          const bb = getBounds(root);
-          const size = bb.max.subtract(bb.min);
-          const maxDim = Math.max(size.x, size.y, size.z) || 1.0;
-          const center = bb.min.add(size.scale(0.5));
-
-          camera.target = new BABYLON.Vector3(center.x, center.y + (maxDim * 0.25), center.z);
-          camera.radius = Math.max(2.2, maxDim * 2.1);
-          camera.lowerRadiusLimit = camera.radius;
-          camera.upperRadiusLimit = camera.radius;
-        }catch(e){}
-      }
-
-      function createShopPreview(canvas, slot, sku){
-        if (!canvas || !window.BABYLON) return;
-
-        const engine = new BABYLON.Engine(canvas, true, {
-          preserveDrawingBuffer:true,
-          stencil:false
-        });
-
-        const scene = new BABYLON.Scene(engine);
-        scene.clearColor = new BABYLON.Color4(0,0,0,0);
-
-        const camera = new BABYLON.ArcRotateCamera(
-          "c",
-          Math.PI * 1.35,
-          Math.PI / 2.35,
-          3.0,
-          new BABYLON.Vector3(0,0.9,0),
-          scene
-        );
-        camera.attachControl(canvas, false);
-        camera.inputs.clear();
-        camera.panningSensibility = 0;
-
-        const light = new BABYLON.HemisphericLight("h", new BABYLON.Vector3(0,1,0), scene);
-        light.intensity = 1.15;
-
-        let asset;
-        if(slot === "weapons"){
-          asset = getWeaponAsset(sku);
-        } else {
-          asset = getSkinAsset(sku);
-        }
-
-        (async () => {
-          try{
-            const container = await BABYLON.SceneLoader.LoadAssetContainerAsync(asset.rootUrl, asset.fileName, scene);
-            container.addAllToScene();
-
-            const wrapper = new BABYLON.TransformNode("shopWrap_" + slot + "_" + sku, scene);
-
-            container.meshes.forEach(m => { if(m && !m.parent) m.parent = wrapper; });
-            container.transformNodes.forEach(n => { if(n && !n.parent) n.parent = wrapper; });
-
-            wrapper.rotation.y = Math.PI;
-
-            if(slot === "skins"){
-              normalizeToGroundAndHeight(wrapper, 1.75);
-              wrapper.position.y += 0.05;
-
-              if(window.__warzoneApplySkinStyle){
-                window.__warzoneApplySkinStyle(scene, wrapper, sku);
-              }
-            } else {
-              wrapper.position.y = 0;
-            }
-
-            frameCameraToRoot(camera, wrapper);
-
-            if(container.animationGroups && container.animationGroups.length){
-              container.animationGroups.forEach(g => g.stop());
-              container.animationGroups[0].start(true);
-            }
-
-            scene.onBeforeRenderObservable.add(() => {
-              wrapper.rotation.y += engine.getDeltaTime() * 0.00035;
-            });
-
-          }catch(e){
-            console.warn("Preview load failed for", slot, sku, e);
-          }
-        })();
-
-        engine.runRenderLoop(() => scene.render());
-
-        window.addEventListener("beforeunload", () => {
-          try{ engine.stopRenderLoop(); }catch(e){}
-          try{ scene.dispose(); }catch(e){}
-          try{ engine.dispose(); }catch(e){}
-        });
-      }
-
-      async function loadShop(slot){
-        const listEl = slot === "weapons" ? weaponsList : skinsList;
-        if(!listEl) return;
-        listEl.textContent = "Loading " + slot + "…";
-        try{
-          const res = await fetch(
-            `/warzone/api/shop?slot=${encodeURIComponent(slot)}`,
-            { credentials: "include" }
-          );
-
-          let data = null;
-          try { data = await res.json(); } catch(e) { data = null; }
-
-          if(!res.ok){
-            const msg = data && data.error ? data.error : res.status;
-            listEl.textContent = "Unable to load " + slot + " (" + msg + ").";
-            return;
-          }
-
-          const items = (data && data.items) || [];
-          if(!items.length){
-            listEl.textContent = "No " + slot + " configured yet.";
-            return;
-          }
-
-          listEl.innerHTML = "";
-          items.forEach(it => {
-            const row = document.createElement("div");
-            row.className = "shop-item";
-
-            const preview = document.createElement("div");
-            preview.className = "shop-preview";
-            const previewCanvas = document.createElement("canvas");
-            previewCanvas.className = "shop-preview-canvas";
-            preview.appendChild(previewCanvas);
-
-            const main = document.createElement("div");
-            main.className = "shop-main";
-
-            const nm = document.createElement("div");
-            nm.className = "shop-name";
-            nm.textContent = it.name || it.sku;
-
-            const sub = document.createElement("div");
-            sub.className = "shop-sub";
-
-            let desc = it.description || "";
-            if(slot === "skins"){
-              if(!desc || !desc.trim()){
-                desc = guessSkinDescBySku(it.sku);
-              }
-            }
-            sub.textContent = desc;
-
-            main.appendChild(nm);
-            main.appendChild(sub);
-
-            const side = document.createElement("div");
-            side.className = "shop-side";
-
-            const price = document.createElement("div");
-            price.className = "price-tag" + (it.starting ? " start" : "");
-            price.textContent = it.starting ? "Starter" : (it.price_izza + " IZZA");
-            side.appendChild(price);
-
-            const btn = document.createElement("button");
-            btn.className = "shop-btn";
-            btn.dataset.sku = it.sku;
-            btn.dataset.slot = slot;
-            btn.dataset.price = it.price_izza;
-
-            if(it.equipped){
-              btn.classList.add("equipped","owned");
-              btn.textContent = "Equipped";
-            }else if(it.owned){
-              btn.classList.add("owned");
-              btn.textContent = "Equip";
-            }else if(it.starting){
-              btn.classList.add("equipped","owned");
-              btn.textContent = "Basic";
-            }else{
-              btn.textContent = "Buy";
-            }
-
-            btn.addEventListener("click", async function(){
-              const canEquip = this.classList.contains("owned") && !this.classList.contains("equipped") && !it.starting;
-              if(canEquip){
-                await equipItem(slot, it.sku);
-              }else if(!this.classList.contains("equipped") && !it.starting){
-                const price = Number(this.dataset.price || 0);
-                await purchaseItem(slot, it.sku, it.name || it.sku, price);
-              }
-            });
-
-            side.appendChild(btn);
-
-            row.appendChild(preview);
-            row.appendChild(main);
-            row.appendChild(side);
-            listEl.appendChild(row);
-
-            createShopPreview(previewCanvas, slot, it.sku);
-          });
-        }catch(e){
-          console.error(e);
-          listEl.textContent = "Error loading " + slot + ".";
-        }
-      }
-
-      async function directSecretPurchase(slot, sku, itemName, price, gate){
-        const qs = (window.__izzaUserQS && window.__izzaUserQS()) || "";
-        const res = await fetch("/warzone/api/purchase" + qs, {
-          method:"POST",
-          headers:{ "Content-Type":"application/json" },
-          body: JSON.stringify({
-            slot,
-            sku,
-            price_izza: price,
-            buyer_pub: gate.pub,
-            buyer_sec: gate.sec
-          }),
-          credentials:"include"
-        });
-        const data = await res.json().catch(()=>({}));
-        if(!res.ok || !data.ok){
-          const msg = data && (data.error || data.detail) ? (data.error || data.detail) : res.status;
-          const err = new Error(String(msg || "purchase failed"));
-          err.__detail = msg;
-          throw err;
-        }
-        return data;
-      }
-
-      async function purchaseItem(slot, sku, itemName, price){
-        try{
-          const gate = await window.__izzaWalletGate?.();
-          if(!gate) return;
-
-          if(!price || price <= 0){
-            alert("This item is not configured with an IZZA price yet.");
-            return;
-          }
-
-          const showOverlay = window.__izzaShowPurchaseOverlay;
-          const closeOverlay = window.__izzaClosePurchaseOverlay;
-
-          if(showOverlay && closeOverlay){
-            window.__izzaPurchaseOverlaySetBusy?.(false);
-            window.__izzaPurchaseOverlaySetMsg?.("", "");
-            window.__izzaPurchaseOverlaySetButtonsMode?.("approve");
-
-            const p = showOverlay({ sku, itemName, price, pub: gate.pub });
-
-            window.__izzaPurchaseOverlayApproveHook?.(() => {
-              closeOverlay({ approved:true });
-            });
-
-            const res = await p;
-            if(!res || !res.approved){
-              closeOverlay({ approved:false });
-              return;
-            }
-          } else {
-            const ok = confirm(`Spend ${price} IZZA to unlock "${itemName || sku}"?`);
-            if(!ok) return;
-          }
-
-          window.__izzaPurchaseOverlaySetBusy?.(true);
-          window.__izzaPurchaseOverlaySetMsg?.("Submitting IZZA transfer…", "");
-
-          await directSecretPurchase(slot, sku, itemName, price, gate);
-
-          window.__izzaPurchaseOverlaySetMsg?.("Success, you can now equip this item.", "ok");
-          window.__izzaPurchaseOverlaySetBusy?.(false);
-          window.__izzaPurchaseOverlaySetButtonsMode?.("close");
-
-          await loadShop(slot);
-
-        }catch(e){
-          console.error(e);
-          const em = String((e && e.__detail) || (e && e.message) || e || "Unknown error");
-          window.__izzaPurchaseOverlaySetMsg?.("Purchase failed, " + em, "error");
-          window.__izzaPurchaseOverlaySetBusy?.(false);
-          window.__izzaPurchaseOverlaySetButtonsMode?.("close");
-          if(!window.__izzaPurchaseOverlaySetMsg) alert("Purchase failed. " + em);
-        }
-      }
-
-      async function equipItem(slot, sku){
-        try{
-          const qs = (window.__izzaUserQS && window.__izzaUserQS()) || "";
-          const res = await fetch("/warzone/api/equip" + qs, {
-            method:"POST",
-            headers:{ "Content-Type":"application/json" },
-            body: JSON.stringify({ slot, sku }),
-            credentials:"include"
-          });
-          const data = await res.json().catch(()=>({}));
-          if(!res.ok || !data.ok){
-            alert("Equip failed: " + (data.error || res.status));
-            return;
-          }
-
-          await loadShop(slot);
-
-          if(slot === "skins" && window.__warzoneSetLobbySkin){
-            window.__warzoneSetLobbySkin(sku);
-          }
-        }catch(e){
-          console.error(e);
-          alert("Equip error. Try again.");
-        }
-      }
-
-      window.__izzaLoadShop = loadShop;
-    })();
-
     // ---------- Babylon.js lobby soldier ----------
     (function(){
       const canvas = document.getElementById("soldierCanvas");
@@ -2090,7 +1064,19 @@
         }
       }
 
+      // New: lobby reads equipped skin from backend loadout first, then falls back safely
       async function fetchEquippedSkinSku(){
+        // Preferred: new unified loadout endpoint
+        try{
+          const r = await fetch("/warzone/api/loadout", { credentials:"include" });
+          if(r.ok){
+            const j = await r.json().catch(()=>null);
+            const sku = j && (j.skin_sku || j.equipped_skin || j.skin);
+            if(sku) return String(sku);
+          }
+        }catch(e){}
+
+        // Fallback: legacy shop endpoint (if still present)
         try{
           const res = await fetch("/warzone/api/shop?slot=skins", { credentials:"include" });
           if(!res.ok) return "wz_basic_soldier";
