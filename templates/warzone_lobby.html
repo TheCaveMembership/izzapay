@@ -842,88 +842,96 @@
     // --------------------------------------------------------
 
     // ---------- Babylon.js lobby soldier ----------
-    (function(){
-      const canvas = document.getElementById("soldierCanvas");
-      if (!canvas || !window.BABYLON) {
-        console.warn("[WARZONE] soldier canvas or BABYLON missing");
-        return;
+(function(){
+  const canvas = document.getElementById("soldierCanvas");
+  if (!canvas || !window.BABYLON) {
+    console.warn("[WARZONE] soldier canvas or BABYLON missing");
+    return;
+  }
+
+  const engine = new BABYLON.Engine(canvas, true, {
+    preserveDrawingBuffer:true,
+    stencil:true
+  });
+
+  let scene, camera;
+  let currentWrapper = null;
+  let currentContainer = null;
+
+  /* SHADOW ANCHOR (NEW) */
+  let shadowPlane = null;
+  let shadowMat = null;
+  const SHADOW_WORLD_Y = 0.005;
+
+  function ensureShadowMaterial(){
+    if(shadowMat) return shadowMat;
+
+    const dt = new BABYLON.DynamicTexture("shadowDT", { width:256, height:256 }, scene, true);
+    dt.hasAlpha = true;
+
+    const ctx = dt.getContext();
+    ctx.clearRect(0,0,256,256);
+
+    // 3x darker feel: stronger alpha stops + tighter falloff
+    const g = ctx.createRadialGradient(128,128,8,128,128,125);
+    g.addColorStop(0.00, "rgba(0,0,0,0.95)");
+    g.addColorStop(0.28, "rgba(0,0,0,0.78)");
+    g.addColorStop(0.55, "rgba(0,0,0,0.45)");
+    g.addColorStop(0.80, "rgba(0,0,0,0.18)");
+    g.addColorStop(1.00, "rgba(0,0,0,0.00)");
+
+    ctx.fillStyle = g;
+    ctx.beginPath();
+
+    // larger, flatter contact patch (still soft)
+    ctx.ellipse(128, 150, 120, 70, 0, 0, Math.PI * 2);
+    ctx.fill();
+
+    dt.update(false);
+
+    shadowMat = new BABYLON.StandardMaterial("shadowMat", scene);
+    shadowMat.diffuseColor = new BABYLON.Color3(0,0,0);
+    shadowMat.emissiveColor = new BABYLON.Color3(0,0,0);
+    shadowMat.specularColor = new BABYLON.Color3(0,0,0);
+    shadowMat.opacityTexture = dt;
+
+    // 3x darker overall multiplier
+    shadowMat.alpha = 0.98;
+
+    shadowMat.disableLighting = true;
+
+    return shadowMat;
+  }
+
+  function attachShadowToWrapper(wrapper){
+    try{
+      if(shadowPlane){
+        shadowPlane.dispose(false, true);
+        shadowPlane = null;
       }
+    }catch(e){}
 
-      const engine = new BABYLON.Engine(canvas, true, {
-        preserveDrawingBuffer:true,
-        stencil:true
-      });
+    const mat = ensureShadowMaterial();
 
-      let scene, camera;
-      let currentWrapper = null;
-      let currentContainer = null;
+    // 3x larger footprint
+    shadowPlane = BABYLON.MeshBuilder.CreateGround(
+      "shadowPlane",
+      { width: 4.65, height: 4.65 },
+      scene
+    );
+    shadowPlane.material = mat;
+    shadowPlane.isPickable = false;
+    shadowPlane.renderingGroupId = 0;
 
-      /* SHADOW ANCHOR (NEW) */
-      let shadowPlane = null;
-      let shadowMat = null;
-      const SHADOW_WORLD_Y = 0.005;
+    shadowPlane.parent = wrapper;
 
-      function ensureShadowMaterial(){
-        if(shadowMat) return shadowMat;
+    const localY = SHADOW_WORLD_Y - (wrapper.position.y || 0);
+    shadowPlane.position.y = localY;
 
-        const dt = new BABYLON.DynamicTexture("shadowDT", { width:256, height:256 }, scene, true);
-        dt.hasAlpha = true;
-
-        const ctx = dt.getContext();
-        ctx.clearRect(0,0,256,256);
-
-        const g = ctx.createRadialGradient(128,128,10,128,128,120);
-        g.addColorStop(0.00, "rgba(0,0,0,0.55)");
-        g.addColorStop(0.40, "rgba(0,0,0,0.30)");
-        g.addColorStop(0.75, "rgba(0,0,0,0.12)");
-        g.addColorStop(1.00, "rgba(0,0,0,0.00)");
-
-        ctx.fillStyle = g;
-        ctx.beginPath();
-        ctx.ellipse(128, 140, 92, 60, 0, 0, Math.PI * 2);
-        ctx.fill();
-
-        dt.update(false);
-
-        shadowMat = new BABYLON.StandardMaterial("shadowMat", scene);
-        shadowMat.diffuseColor = new BABYLON.Color3(0,0,0);
-        shadowMat.emissiveColor = new BABYLON.Color3(0,0,0);
-        shadowMat.specularColor = new BABYLON.Color3(0,0,0);
-        shadowMat.opacityTexture = dt;
-        shadowMat.alpha = 0.75;
-        shadowMat.disableLighting = true;
-
-        return shadowMat;
-      }
-
-      function attachShadowToWrapper(wrapper){
-        try{
-          if(shadowPlane){
-            shadowPlane.dispose(false, true);
-            shadowPlane = null;
-          }
-        }catch(e){}
-
-        const mat = ensureShadowMaterial();
-
-        shadowPlane = BABYLON.MeshBuilder.CreateGround(
-          "shadowPlane",
-          { width: 1.55, height: 1.55 },
-          scene
-        );
-        shadowPlane.material = mat;
-        shadowPlane.isPickable = false;
-        shadowPlane.renderingGroupId = 0;
-
-        shadowPlane.parent = wrapper;
-
-        const localY = SHADOW_WORLD_Y - (wrapper.position.y || 0);
-        shadowPlane.position.y = localY;
-
-        shadowPlane.position.x = 0;
-        shadowPlane.position.z = 0;
-      }
-      /* END SHADOW ANCHOR (NEW) */
+    shadowPlane.position.x = 0;
+    shadowPlane.position.z = 0;
+  }
+  /* END SHADOW ANCHOR (NEW) */
 
       function getSkinAsset(){
         return { rootUrl:"/assets/warzone3d/soldier_gltf_3/", fileName:"scene.gltf" };
