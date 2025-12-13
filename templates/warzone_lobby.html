@@ -856,7 +856,8 @@
   let scene, camera;
   let currentWrapper = null;
   let currentContainer = null;
-      /* SHADOW ANCHOR (NEW) */
+
+  /* SHADOW ANCHOR (NEW) */
   let shadowPlane = null;
   let shadowMat = null;
   const SHADOW_WORLD_Y = 0.005;
@@ -920,8 +921,14 @@
     const localY = SHADOW_WORLD_Y - (wrapper.position.y || 0);
     shadowPlane.position.y = localY;
 
-    shadowPlane.position.x = -0.35; // centered under both feet
-    shadowPlane.position.z = 0;
+    // ROTATE shadow 90 degrees in the ground plane (your “shifted 90 degrees”)
+    shadowPlane.rotation.y = Math.PI / 2;
+
+    // re-center under both feet (tune if needed: -0.95, -1.05, etc)
+    shadowPlane.position.x = -0.85;
+
+    // keep centered front/back unless you need a tiny nudge
+    shadowPlane.position.z = 0.00;
   }
   /* END SHADOW ANCHOR (NEW) */
 
