@@ -650,7 +650,6 @@
         });
       });
 
-      // Shop button (wallet + purchases handled on shop page)
       document.getElementById("warzoneShopBtn")?.addEventListener("click", () => {
         const qs = window.location.search || "";
         window.location.href = "/warzone/shop" + qs;
@@ -799,164 +798,6 @@
       searchGo?.addEventListener("click", doSearch);
     })();
 
-    // ---------- War Zone skin styling (kept for lobby soldier rendering) ----------
-    (function(){
-      if(!window.BABYLON) return;
-
-      function styleForSku(sku){
-        const s = (sku || "").toString().trim().toLowerCase();
-        if(!s || s === "wz_basic_soldier") return "basic";
-        if(s === "wz_neon_edge") return "neon_edge_black_cyan";
-        if(s.includes("gold")) return "gold_glow";
-        if(s.includes("neon") || s.includes("cyan")) return "neon_edge_black_cyan";
-        if(s.includes("purple") || s.includes("edge")) return "purple_edge";
-        if(s.includes("crimson") || s.includes("red")) return "crimson_core";
-        if(s.includes("obsidian") || s.includes("shadow") || s.includes("black")) return "obsidian_violet";
-        return "purple_edge";
-      }
-
-      function ensureGlowLayer(scene){
-        if(!scene) return null;
-        if(scene.__izzaGlowLayer) return scene.__izzaGlowLayer;
-        try{
-          const glow = new BABYLON.GlowLayer("izzaGlow", scene);
-          glow.intensity = 0.95;
-          scene.__izzaGlowLayer = glow;
-          return glow;
-        }catch(e){
-          return null;
-        }
-      }
-
-      function safeColor3(r,g,b){
-        return new BABYLON.Color3(r,g,b);
-      }
-
-      function setMatColor(mat, key, c3){
-        try{
-          if(!mat) return;
-          if(key === "albedo"){
-            if(mat.albedoColor) mat.albedoColor.copyFrom(c3);
-          } else if(key === "diffuse"){
-            if(mat.diffuseColor) mat.diffuseColor.copyFrom(c3);
-          } else if(key === "emissive"){
-            if(mat.emissiveColor) mat.emissiveColor.copyFrom(c3);
-            else mat.emissiveColor = c3;
-          }
-        }catch(e){}
-      }
-
-      function applyToAllMats(wrapper, fn){
-        if(!wrapper || !wrapper.getChildMeshes) return;
-        const meshes = wrapper.getChildMeshes(true);
-        meshes.forEach(m => {
-          const mat = m && m.material;
-          if(!mat) return;
-          fn(m, mat);
-        });
-      }
-
-      function isGlowPart(mesh, mat){
-        const n = (((mesh && mesh.name) || "") + " " + ((mat && mat.name) || "")).toLowerCase();
-        return (
-          n.includes("visor") ||
-          n.includes("eye") ||
-          n.includes("light") ||
-          n.includes("led") ||
-          n.includes("emiss") ||
-          n.includes("stripe") ||
-          n.includes("trim") ||
-          n.includes("edge")
-        );
-      }
-
-      function applySkinStyle(scene, wrapper, sku){
-        const style = styleForSku(sku);
-        ensureGlowLayer(scene);
-
-        applyToAllMats(wrapper, (mesh, mat) => {
-          if(mat.albedoColor) setMatColor(mat, "albedo", safeColor3(0.92, 0.95, 1.0));
-          if(mat.diffuseColor) setMatColor(mat, "diffuse", safeColor3(0.92, 0.95, 1.0));
-          if(mat.emissiveColor) setMatColor(mat, "emissive", safeColor3(0,0,0));
-        });
-
-        if(style === "basic"){
-          applyToAllMats(wrapper, (mesh, mat) => {
-            if(isGlowPart(mesh, mat)){
-              setMatColor(mat, "emissive", safeColor3(0.0, 0.28, 0.32));
-            }
-          });
-          return;
-        }
-
-        if(style === "gold_glow"){
-          applyToAllMats(wrapper, (mesh, mat) => {
-            if(mat.albedoColor) setMatColor(mat, "albedo", safeColor3(1.0, 0.84, 0.32));
-            if(mat.diffuseColor) setMatColor(mat, "diffuse", safeColor3(1.0, 0.84, 0.32));
-            if(isGlowPart(mesh, mat)){
-              setMatColor(mat, "emissive", safeColor3(1.0, 0.55, 0.10));
-            }
-          });
-          return;
-        }
-
-        if(style === "neon_edge_black_cyan"){
-          applyToAllMats(wrapper, (mesh, mat) => {
-            if(mat.albedoColor) setMatColor(mat, "albedo", safeColor3(0.12, 0.13, 0.16));
-            if(mat.diffuseColor) setMatColor(mat, "diffuse", safeColor3(0.12, 0.13, 0.16));
-            if(isGlowPart(mesh, mat)){
-              setMatColor(mat, "emissive", safeColor3(0.0, 1.0, 1.0));
-            } else {
-              setMatColor(mat, "emissive", safeColor3(0.0, 0.03, 0.035));
-            }
-          });
-          return;
-        }
-
-        if(style === "purple_edge"){
-          applyToAllMats(wrapper, (mesh, mat) => {
-            if(mat.albedoColor) setMatColor(mat, "albedo", safeColor3(0.28, 0.30, 0.42));
-            if(mat.diffuseColor) setMatColor(mat, "diffuse", safeColor3(0.28, 0.30, 0.42));
-            if(isGlowPart(mesh, mat)){
-              setMatColor(mat, "emissive", safeColor3(0.78, 0.22, 1.0));
-            }
-          });
-          return;
-        }
-
-        if(style === "crimson_core"){
-          applyToAllMats(wrapper, (mesh, mat) => {
-            if(mat.albedoColor) setMatColor(mat, "albedo", safeColor3(0.46, 0.26, 0.28));
-            if(mat.diffuseColor) setMatColor(mat, "diffuse", safeColor3(0.46, 0.26, 0.28));
-            if(isGlowPart(mesh, mat)){
-              setMatColor(mat, "emissive", safeColor3(1.0, 0.15, 0.25));
-            }
-          });
-          return;
-        }
-
-        if(style === "obsidian_violet"){
-          applyToAllMats(wrapper, (mesh, mat) => {
-            if(mat.albedoColor) setMatColor(mat, "albedo", safeColor3(0.18, 0.19, 0.23));
-            if(mat.diffuseColor) setMatColor(mat, "diffuse", safeColor3(0.18, 0.19, 0.23));
-            if(isGlowPart(mesh, mat)){
-              setMatColor(mat, "emissive", safeColor3(0.55, 0.25, 1.0));
-            }
-          });
-          return;
-        }
-
-        applyToAllMats(wrapper, (mesh, mat) => {
-          if(isGlowPart(mesh, mat)){
-            setMatColor(mat, "emissive", safeColor3(0.0, 1.0, 1.0));
-          }
-        });
-      }
-
-      window.__warzoneApplySkinStyle = applySkinStyle;
-      window.__warzoneSkinStyleForSku = styleForSku;
-    })();
-
     // ---------- Babylon.js lobby soldier ----------
     (function(){
       const canvas = document.getElementById("soldierCanvas");
@@ -974,7 +815,8 @@
       let currentWrapper = null;
       let currentContainer = null;
 
-      function getSkinAsset(sku){
+      function getSkinAsset(){
+        // soldier model is always the same, textures are swapped based on equipped skin
         return { rootUrl:"/assets/warzone3d/soldier_gltf_3/", fileName:"scene.gltf" };
       }
 
@@ -1012,42 +854,21 @@
         }
       }
 
-      // ---------- THEME TEXTURE OVERRIDES ----------
-      const THEME_BASE = "/assets/warzone3d/soldier_gltf_3/textures/";
+      // ---------- TEXTURE OVERRIDES (ONLY) ----------
+      const TEXTURE_BASE = "/assets/warzone3d/soldier_gltf_3/textures/";
 
-      // these are the ONLY 4 files you showed, we override only these to stay safe
-      const THEME_FILES = [
+      const OVERRIDE_FILES = [
         "material_8_diffuse.png",
         "material_9_diffuse.png",
         "material_10_diffuse.png",
         "material_11_diffuse.png"
       ];
 
-      // Folder names you will create, same method, same 4 file names
-      const THEME_FOLDERS = {
-        neon_edge: "neon_edge",
-        gold_glow: "gold_glow",
-        purple_edge: "purple_edge",
-        crimson_core: "crimson_core",
-        obsidian_violet: "obsidian_violet"
+      // Map your BACKEND skin SKUs -> an existing folder under /textures/
+      // Add more lines ONLY when you actually create those folders.
+      const SKU_TO_TEXTURE_FOLDER = {
+        "wz_neon_edge": "neon_edge"
       };
-
-      function themeFromSku(sku){
-        const s = (sku || "").toString().trim().toLowerCase();
-        if(!s) return null;
-
-        // exact skus first
-        if(s === "wz_neon_edge") return THEME_FOLDERS.neon_edge;
-
-        // keyword skus (lets you add more skins without code changes)
-        if(s.includes("gold")) return THEME_FOLDERS.gold_glow;
-        if(s.includes("crimson") || s.includes("red")) return THEME_FOLDERS.crimson_core;
-        if(s.includes("obsidian") || s.includes("shadow") || s.includes("violet") || s.includes("black")) return THEME_FOLDERS.obsidian_violet;
-        if(s.includes("purple")) return THEME_FOLDERS.purple_edge;
-        if(s.includes("neon") || s.includes("cyan") || s.includes("edge")) return THEME_FOLDERS.neon_edge;
-
-        return null;
-      }
 
       function fileFromAnyUrl(u){
         try{
@@ -1060,21 +881,18 @@
         }
       }
 
-      function overrideTextureOnMaterial(mat, texProp, themeFolder){
+      function overrideTextureOnMaterial(mat, texProp, folder){
         try{
           const tex = mat && mat[texProp];
           if(!tex) return false;
 
-          // Babylon texture may have url or name depending on loader
           const urlOrName = (tex.url || tex.name || "");
           const file = fileFromAnyUrl(urlOrName);
           if(!file) return false;
 
-          if(!THEME_FILES.includes(file)) return false;
+          if(!OVERRIDE_FILES.includes(file)) return false;
 
-          const newUrl = `${THEME_BASE}${themeFolder}/${file}`;
-
-          // Replace with a fresh texture, safest across loaders
+          const newUrl = `${TEXTURE_BASE}${folder}/${file}`;
           const newTex = new BABYLON.Texture(newUrl, scene, true, false);
           newTex.hasAlpha = tex.hasAlpha || false;
           newTex.level = (typeof tex.level === "number") ? tex.level : 1.0;
@@ -1086,26 +904,24 @@
         }
       }
 
-      function applyThemeOverrides(container, sku){
-        const themeFolder = themeFromSku(sku);
-        if(!themeFolder) return;
+      function applyTextureOverrides(container, skinSku){
+        const sku = (skinSku || "").toString().trim();
+        if(!sku) return;
 
-        // touch only materials that exist in this container
+        const folder = SKU_TO_TEXTURE_FOLDER[sku];
+        if(!folder) return;
+
         const mats = (container && container.materials) ? container.materials : [];
         mats.forEach(mat => {
           if(!mat) return;
-
-          // glTF is usually PBRMaterial, but we also cover StandardMaterial safely
-          overrideTextureOnMaterial(mat, "albedoTexture", themeFolder);
-          overrideTextureOnMaterial(mat, "diffuseTexture", themeFolder);
+          overrideTextureOnMaterial(mat, "albedoTexture", folder);
+          overrideTextureOnMaterial(mat, "diffuseTexture", folder);
         });
       }
-      // ---------- END THEME OVERRIDES ----------
+      // ---------- END TEXTURE OVERRIDES ----------
 
-      async function setLobbySkin(sku){
+      async function setLobbySkin(skinSku){
         if(!scene) return;
-
-        const asset = getSkinAsset(sku || "wz_basic_soldier");
 
         try{
           if(currentContainer){
@@ -1122,10 +938,11 @@
         }catch(e){}
 
         try{
+          const asset = getSkinAsset();
           const container = await BABYLON.SceneLoader.LoadAssetContainerAsync(asset.rootUrl, asset.fileName, scene);
 
-          // Apply texture overrides BEFORE adding to scene, keeps it clean
-          applyThemeOverrides(container, sku || "wz_basic_soldier");
+          // Only swap textures, no color hacks
+          applyTextureOverrides(container, skinSku);
 
           container.addAllToScene();
           currentContainer = container;
@@ -1142,10 +959,6 @@
           wrapper.scaling.scaleInPlace(0.72);
           wrapper.position.y += 0.02;
 
-          if(window.__warzoneApplySkinStyle){
-            window.__warzoneApplySkinStyle(scene, wrapper, sku || "wz_basic_soldier");
-          }
-
           frameCameraToRoot(wrapper);
 
           if(container.animationGroups && container.animationGroups.length){
@@ -1154,30 +967,18 @@
           }
 
         }catch(e){
-          console.error("[WARZONE] setLobbySkin failed", sku, e);
+          console.error("[WARZONE] setLobbySkin failed", skinSku, e);
         }
       }
 
-      // New: lobby reads equipped skin from backend loadout first, then falls back safely
       async function fetchEquippedSkinSku(){
-        // Preferred: new unified loadout endpoint
-        try{
-          const r = await fetch("/warzone/api/loadout", { credentials:"include" });
-          if(r.ok){
-            const j = await r.json().catch(()=>null);
-            const sku = j && (j.skin_sku || j.equipped_skin || j.skin);
-            if(sku) return String(sku);
-          }
-        }catch(e){}
-
-        // Fallback: legacy shop endpoint (if still present)
         try{
           const res = await fetch("/warzone/api/shop?slot=skins", { credentials:"include" });
           if(!res.ok) return "wz_basic_soldier";
           const data = await res.json().catch(()=>null);
           const items = (data && data.items) || [];
           const eq = items.find(x => x && x.equipped);
-          if(eq && eq.sku) return eq.sku;
+          if(eq && eq.sku) return String(eq.sku);
         }catch(e){}
         return "wz_basic_soldier";
       }
