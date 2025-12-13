@@ -659,9 +659,7 @@
     }
   </style>
 
-  <!-- Keep Pi SDK only for Pi auth context inside Pi Browser, NOT for payments -->
-  <script src="https://sdk.minepi.com/pi-sdk.js"></script>
-
+  <!-- Pi SDK REMOVED, Warzone purchases use IZZA token transfers, same as bot buckets -->
   <script src="https://cdn.babylonjs.com/babylon.js"></script>
   <script src="https://cdn.babylonjs.com/loaders/babylonjs.loaders.min.js"></script>
 </head>
@@ -886,8 +884,8 @@
                 Loading weapons…
               </div>
               <div class="shop-note">
-                Purchases are paid with Testnet IZZA from your active IZZA wallet,
-                using the same server-signed transfer flow as bot bucket purchases.
+                Purchases are paid with Testnet IZZA tokens from your active IZZA wallet,
+                using the same IZZA asset transfer flow as bot buckets.
               </div>
             </div>
           </div>
@@ -910,8 +908,8 @@
                 Loading skins…
               </div>
               <div class="shop-note">
-                Skins are stored in your IZZA WAR ZONE inventory,
-                paid with real Testnet IZZA from your IZZA wallet.
+                Skins are in game unlocks stored in your IZZA WAR ZONE inventory,
+                paid with real Testnet IZZA tokens using the same flow as bot buckets.
               </div>
             </div>
           </div>
@@ -921,13 +919,13 @@
         <div class="overlay" id="purchaseOverlay">
           <div class="overlay-card">
             <div class="overlay-header">
-              <div class="overlay-title">Confirm IZZA purchase</div>
+              <div class="overlay-title">Approve IZZA payment</div>
               <button class="overlay-close" data-close="purchaseOverlay">Close</button>
             </div>
             <div class="overlay-body">
               <p>
-                You are about to spend Testnet IZZA from your active IZZA wallet to unlock a War Zone item.
-                This uses the exact same IZZA transfer flow as bot bucket purchases.
+                You are about to spend Testnet IZZA tokens from your IZZA wallet to unlock a War Zone item.
+                After the transfer succeeds, the item becomes equipable and the Buy button turns into Equip.
               </p>
 
               <div class="purchase-box">
@@ -950,7 +948,7 @@
 
                 <div class="purchase-actions">
                   <button type="button" id="poCancel">Cancel</button>
-                  <button type="button" class="approve" id="poApprove">Confirm</button>
+                  <button type="button" class="approve" id="poApprove">Approve</button>
                   <button type="button" class="closeonly" id="poClose" style="display:none;">Close</button>
                 </div>
 
@@ -965,16 +963,6 @@
   </div>
 
   <script>
-    // Pi SDK init (auth context only)
-    (function(){
-      const sandbox = {{ 'true' if PI_SANDBOX else 'false' }};
-      try{
-        if(window.Pi && Pi.init){
-          Pi.init({ version:"2.0", sandbox:sandbox });
-        }
-      }catch(e){}
-    })();
-
     // Manual landscape
     (function(){
       const wrapper = document.getElementById("rotWrapper");
@@ -1186,7 +1174,7 @@
         }
         if(!isLocalWallet(pub)){
           openWalletOverlay();
-          alert("Save your IZZA wallet S key locally (same as bot buckets) before purchasing.");
+          alert("Save your IZZA wallet S key locally (same as other IZZA pages) before purchasing.");
           return null;
         }
         return { user, pub, sec:getLocalSecret(pub) };
@@ -1408,7 +1396,6 @@
       let __poBusy = false;
 
       function setButtonsMode(mode){
-        // mode: "approve" or "close"
         if(!poCancel || !poApprove || !poClose) return;
         if(mode === "close"){
           poCancel.style.display = "none";
@@ -1476,23 +1463,19 @@
       window.__izzaPurchaseOverlaySetButtonsMode = setButtonsMode;
     })();
 
-    // ---------- War Zone skin styling, same base soldier, different premium looks ----------
+    // ---------- War Zone skin styling ----------
     (function(){
       if(!window.BABYLON) return;
 
       function styleForSku(sku){
         const s = (sku || "").toString().trim().toLowerCase();
-
         if(!s || s === "wz_basic_soldier") return "basic";
-
         if(s === "wz_neon_edge") return "neon_edge_black_cyan";
-
         if(s.includes("gold")) return "gold_glow";
         if(s.includes("neon") || s.includes("cyan")) return "neon_edge_black_cyan";
         if(s.includes("purple") || s.includes("edge")) return "purple_edge";
         if(s.includes("crimson") || s.includes("red")) return "crimson_core";
         if(s.includes("obsidian") || s.includes("shadow") || s.includes("black")) return "obsidian_violet";
-
         return "purple_edge";
       }
 
@@ -1555,7 +1538,6 @@
         const style = styleForSku(sku);
         ensureGlowLayer(scene);
 
-        // Reset defaults
         applyToAllMats(wrapper, (mesh, mat) => {
           if(mat.albedoColor) setMatColor(mat, "albedo", safeColor3(0.92, 0.95, 1.0));
           if(mat.diffuseColor) setMatColor(mat, "diffuse", safeColor3(0.92, 0.95, 1.0));
@@ -1586,7 +1568,6 @@
           applyToAllMats(wrapper, (mesh, mat) => {
             if(mat.albedoColor) setMatColor(mat, "albedo", safeColor3(0.12, 0.13, 0.16));
             if(mat.diffuseColor) setMatColor(mat, "diffuse", safeColor3(0.12, 0.13, 0.16));
-
             if(isGlowPart(mesh, mat)){
               setMatColor(mat, "emissive", safeColor3(0.0, 1.0, 1.0));
             } else {
@@ -1667,7 +1648,6 @@
         return "Premium operator skin, unique armor tint and emissive edge lighting.";
       }
 
-      // OPTION A, Always use the working basic soldier asset for all skins
       function getSkinAsset(sku){
         return { rootUrl:"/assets/warzone3d/soldier_gltf_3/", fileName:"scene.gltf" };
       }
@@ -1896,7 +1876,6 @@
       }
 
       async function directSecretPurchase(slot, sku, itemName, price, gate){
-        // THIS is the bot-bucket style flow: server builds/signs/submits the IZZA asset transfer using buyer S key
         const qs = (window.__izzaUserQS && window.__izzaUserQS()) || "";
         const res = await fetch("/warzone/api/purchase" + qs, {
           method:"POST",
@@ -1957,24 +1936,7 @@
           window.__izzaPurchaseOverlaySetBusy?.(true);
           window.__izzaPurchaseOverlaySetMsg?.("Submitting IZZA transfer…", "");
 
-          let purchaseOk = false;
-          let lastErr = null;
-
-          try{
-            await directSecretPurchase(slot, sku, itemName, price, gate);
-            purchaseOk = true;
-          }catch(e){
-            lastErr = e;
-            purchaseOk = false;
-          }
-
-          if(!purchaseOk){
-            const em = String((lastErr && lastErr.__detail) || (lastErr && lastErr.message) || lastErr || "Unknown error");
-            window.__izzaPurchaseOverlaySetMsg?.("Purchase failed, " + em, "error");
-            window.__izzaPurchaseOverlaySetBusy?.(false);
-            window.__izzaPurchaseOverlaySetButtonsMode?.("close");
-            return;
-          }
+          await directSecretPurchase(slot, sku, itemName, price, gate);
 
           window.__izzaPurchaseOverlaySetMsg?.("Success, you can now equip this item.", "ok");
           window.__izzaPurchaseOverlaySetBusy?.(false);
@@ -1984,10 +1946,11 @@
 
         }catch(e){
           console.error(e);
-          window.__izzaPurchaseOverlaySetMsg?.("Purchase error, try again.", "error");
+          const em = String((e && e.__detail) || (e && e.message) || e || "Unknown error");
+          window.__izzaPurchaseOverlaySetMsg?.("Purchase failed, " + em, "error");
           window.__izzaPurchaseOverlaySetBusy?.(false);
           window.__izzaPurchaseOverlaySetButtonsMode?.("close");
-          if(!window.__izzaPurchaseOverlaySetMsg) alert("Purchase error. Try again.");
+          if(!window.__izzaPurchaseOverlaySetMsg) alert("Purchase failed. " + em);
         }
       }
 
