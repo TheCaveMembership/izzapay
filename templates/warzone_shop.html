@@ -229,6 +229,39 @@
       border-bottom:1px solid rgba(44,64,122,.65);
     }
     .shop-item:last-child{border-bottom:none;}
+
+    /* NEW: skin preview slot */
+    .shop-preview{
+      width:54px;
+      height:54px;
+      border-radius:12px;
+      border:1px solid rgba(127,209,255,.35);
+      background:radial-gradient(circle at top,#06102a,#02030a);
+      box-shadow:
+        0 0 14px rgba(0,255,255,.06),
+        inset 0 0 18px rgba(0,0,0,.55);
+      overflow:hidden;
+      flex:0 0 auto;
+      display:flex;
+      align-items:center;
+      justify-content:center;
+    }
+    .shop-preview canvas{
+      width:100%;
+      height:100%;
+      display:block;
+      pointer-events:none;
+    }
+    .shop-preview .ph{
+      font-size:9px;
+      color:#6f86c2;
+      text-transform:uppercase;
+      letter-spacing:.12em;
+      text-align:center;
+      padding:6px;
+      line-height:1.2;
+    }
+
     .shop-main{flex:1;min-width:0;}
     .shop-name{font-size:12px;font-weight:700;margin-bottom:2px;}
     .shop-sub{font-size:11px;color:#9fb0d6;}
@@ -304,6 +337,10 @@
       color:#c3cff5;
     }
   </style>
+
+  <!-- NEW: Babylon only used for small skin previews on shop page -->
+  <script src="https://cdn.babylonjs.com/babylon.js"></script>
+  <script src="https://cdn.babylonjs.com/loaders/babylonjs.loaders.min.js"></script>
 </head>
 <body>
   <div class="rot-wrapper" id="rotWrapper">
@@ -583,6 +620,290 @@
       }
     });
 
+    // ------------------------------------------------------------
+    // NEW: small soldier preview renderer for skins list items
+    // Keeps same base soldier asset as lobby, just smaller canvas per row.
+    // ------------------------------------------------------------
+    const __thumbState = new WeakMap();
+
+    function getSkinAsset(sku){
+      return { rootUrl:"/assets/warzone3d/soldier_gltf_3/", fileName:"scene.gltf" };
+    }
+
+    function styleForSku(sku){
+      const s = (sku || "").toString().trim().toLowerCase();
+      if(!s || s === "wz_basic_soldier") return "basic";
+      if(s === "wz_neon_edge") return "neon_edge_black_cyan";
+      if(s.includes("gold")) return "gold_glow";
+      if(s.includes("neon") || s.includes("cyan")) return "neon_edge_black_cyan";
+      if(s.includes("purple") || s.includes("edge")) return "purple_edge";
+      if(s.includes("crimson") || s.includes("red")) return "crimson_core";
+      if(s.includes("obsidian") || s.includes("shadow") || s.includes("black")) return "obsidian_violet";
+      return "purple_edge";
+    }
+
+    function ensureGlowLayer(scene){
+      if(!scene) return null;
+      if(scene.__izzaGlowLayer) return scene.__izzaGlowLayer;
+      try{
+        const glow = new BABYLON.GlowLayer("izzaGlowThumb", scene);
+        glow.intensity = 0.85;
+        scene.__izzaGlowLayer = glow;
+        return glow;
+      }catch(e){
+        return null;
+      }
+    }
+
+    function safeColor3(r,g,b){
+      return new BABYLON.Color3(r,g,b);
+    }
+
+    function setMatColor(mat, key, c3){
+      try{
+        if(!mat) return;
+        if(key === "albedo"){
+          if(mat.albedoColor) mat.albedoColor.copyFrom(c3);
+        } else if(key === "diffuse"){
+          if(mat.diffuseColor) mat.diffuseColor.copyFrom(c3);
+        } else if(key === "emissive"){
+          if(mat.emissiveColor) mat.emissiveColor.copyFrom(c3);
+          else mat.emissiveColor = c3;
+        }
+      }catch(e){}
+    }
+
+    function applyToAllMats(wrapper, fn){
+      if(!wrapper || !wrapper.getChildMeshes) return;
+      const meshes = wrapper.getChildMeshes(true);
+      meshes.forEach(m => {
+        const mat = m && m.material;
+        if(!mat) return;
+        fn(m, mat);
+      });
+    }
+
+    function isGlowPart(mesh, mat){
+      const n = (((mesh && mesh.name) || "") + " " + ((mat && mat.name) || "")).toLowerCase();
+      return (
+        n.includes("visor") ||
+        n.includes("eye") ||
+        n.includes("light") ||
+        n.includes("led") ||
+        n.includes("emiss") ||
+        n.includes("stripe") ||
+        n.includes("trim") ||
+        n.includes("edge")
+      );
+    }
+
+    function applySkinStyle(scene, wrapper, sku){
+      const style = styleForSku(sku);
+      ensureGlowLayer(scene);
+
+      applyToAllMats(wrapper, (mesh, mat) => {
+        if(mat.albedoColor) setMatColor(mat, "albedo", safeColor3(0.92, 0.95, 1.0));
+        if(mat.diffuseColor) setMatColor(mat, "diffuse", safeColor3(0.92, 0.95, 1.0));
+        if(mat.emissiveColor) setMatColor(mat, "emissive", safeColor3(0,0,0));
+      });
+
+      if(style === "basic"){
+        applyToAllMats(wrapper, (mesh, mat) => {
+          if(isGlowPart(mesh, mat)){
+            setMatColor(mat, "emissive", safeColor3(0.0, 0.28, 0.32));
+          }
+        });
+        return;
+      }
+
+      if(style === "gold_glow"){
+        applyToAllMats(wrapper, (mesh, mat) => {
+          if(mat.albedoColor) setMatColor(mat, "albedo", safeColor3(1.0, 0.84, 0.32));
+          if(mat.diffuseColor) setMatColor(mat, "diffuse", safeColor3(1.0, 0.84, 0.32));
+          if(isGlowPart(mesh, mat)){
+            setMatColor(mat, "emissive", safeColor3(1.0, 0.55, 0.10));
+          }
+        });
+        return;
+      }
+
+      if(style === "neon_edge_black_cyan"){
+        applyToAllMats(wrapper, (mesh, mat) => {
+          if(mat.albedoColor) setMatColor(mat, "albedo", safeColor3(0.12, 0.13, 0.16));
+          if(mat.diffuseColor) setMatColor(mat, "diffuse", safeColor3(0.12, 0.13, 0.16));
+          if(isGlowPart(mesh, mat)){
+            setMatColor(mat, "emissive", safeColor3(0.0, 1.0, 1.0));
+          } else {
+            setMatColor(mat, "emissive", safeColor3(0.0, 0.03, 0.035));
+          }
+        });
+        return;
+      }
+
+      if(style === "purple_edge"){
+        applyToAllMats(wrapper, (mesh, mat) => {
+          if(mat.albedoColor) setMatColor(mat, "albedo", safeColor3(0.28, 0.30, 0.42));
+          if(mat.diffuseColor) setMatColor(mat, "diffuse", safeColor3(0.28, 0.30, 0.42));
+          if(isGlowPart(mesh, mat)){
+            setMatColor(mat, "emissive", safeColor3(0.78, 0.22, 1.0));
+          }
+        });
+        return;
+      }
+
+      if(style === "crimson_core"){
+        applyToAllMats(wrapper, (mesh, mat) => {
+          if(mat.albedoColor) setMatColor(mat, "albedo", safeColor3(0.46, 0.26, 0.28));
+          if(mat.diffuseColor) setMatColor(mat, "diffuse", safeColor3(0.46, 0.26, 0.28));
+          if(isGlowPart(mesh, mat)){
+            setMatColor(mat, "emissive", safeColor3(1.0, 0.15, 0.25));
+          }
+        });
+        return;
+      }
+
+      if(style === "obsidian_violet"){
+        applyToAllMats(wrapper, (mesh, mat) => {
+          if(mat.albedoColor) setMatColor(mat, "albedo", safeColor3(0.18, 0.19, 0.23));
+          if(mat.diffuseColor) setMatColor(mat, "diffuse", safeColor3(0.18, 0.19, 0.23));
+          if(isGlowPart(mesh, mat)){
+            setMatColor(mat, "emissive", safeColor3(0.55, 0.25, 1.0));
+          }
+        });
+        return;
+      }
+
+      applyToAllMats(wrapper, (mesh, mat) => {
+        if(isGlowPart(mesh, mat)){
+          setMatColor(mat, "emissive", safeColor3(0.0, 1.0, 1.0));
+        }
+      });
+    }
+
+    function getBounds(node){
+      const b = node.getHierarchyBoundingVectors(true);
+      return { min: b.min.clone(), max: b.max.clone() };
+    }
+
+    function normalizeToGroundAndHeight(root, targetHeight){
+      const bb1 = getBounds(root);
+      const h1 = Math.max(0.000001, (bb1.max.y - bb1.min.y));
+      const s = (targetHeight || 1.75) / h1;
+      root.scaling = new BABYLON.Vector3(s,s,s);
+      const bb2 = getBounds(root);
+      root.position.y -= bb2.min.y;
+      return s;
+    }
+
+    function frameCameraToRoot(camera, root){
+      try{
+        const bb = getBounds(root);
+        const size = bb.max.subtract(bb.min);
+        const maxDim = Math.max(size.x, size.y, size.z) || 1.0;
+        const center = bb.min.add(size.scale(0.5));
+        const radius = Math.max(2.1, maxDim * 2.1);
+
+        camera.target = new BABYLON.Vector3(center.x, center.y + (maxDim * 0.42), center.z);
+        camera.radius = radius;
+        camera.alpha  = Math.PI * 1.28;
+        camera.beta   = Math.PI / 2.25;
+        camera.lowerRadiusLimit = radius;
+        camera.upperRadiusLimit = radius;
+      }catch(e){}
+    }
+
+    function destroyThumb(canvas){
+      try{
+        const st = __thumbState.get(canvas);
+        if(!st) return;
+        if(st.scene){
+          st.scene.onBeforeRenderObservable.clear();
+          st.scene.dispose();
+        }
+        if(st.engine) st.engine.dispose();
+      }catch(e){}
+      try{ __thumbState.delete(canvas); }catch(e){}
+    }
+
+    async function renderSkinThumb(canvas, sku){
+      if(!canvas || !window.BABYLON) return;
+      destroyThumb(canvas);
+
+      const engine = new BABYLON.Engine(canvas, true, { preserveDrawingBuffer:true, stencil:true });
+      const scene = new BABYLON.Scene(engine);
+      scene.clearColor = new BABYLON.Color4(0,0,0,0);
+
+      const camera = new BABYLON.ArcRotateCamera(
+        "camThumb",
+        Math.PI * 1.28,
+        Math.PI / 2.25,
+        2.6,
+        new BABYLON.Vector3(0,1,0),
+        scene
+      );
+      camera.attachControl(canvas, false);
+      camera.inputs.clear();
+      camera.panningSensibility = 0;
+
+      const light = new BABYLON.HemisphericLight("hThumb", new BABYLON.Vector3(0,1,0), scene);
+      light.intensity = 1.15;
+
+      const st = { engine, scene, camera, wrapper:null, container:null };
+      __thumbState.set(canvas, st);
+
+      engine.runRenderLoop(() => { if(scene) scene.render(); });
+
+      scene.onBeforeRenderObservable.add(() => {
+        if(st.wrapper){
+          st.wrapper.rotation.y += scene.getEngine().getDeltaTime() * 0.00028;
+        }
+      });
+
+      const asset = getSkinAsset(sku || "wz_basic_soldier");
+      try{
+        const container = await BABYLON.SceneLoader.LoadAssetContainerAsync(asset.rootUrl, asset.fileName, scene);
+        container.addAllToScene();
+        st.container = container;
+
+        const wrapper = new BABYLON.TransformNode("thumbWrap", scene);
+        st.wrapper = wrapper;
+
+        container.meshes.forEach(m => { if(m && !m.parent) m.parent = wrapper; });
+        container.transformNodes.forEach(n => { if(n && !n.parent) n.parent = wrapper; });
+
+        wrapper.rotation.y = Math.PI;
+
+        normalizeToGroundAndHeight(wrapper, 1.75);
+        wrapper.scaling.scaleInPlace(0.75);
+        wrapper.position.y += 0.02;
+
+        applySkinStyle(scene, wrapper, sku || "wz_basic_soldier");
+        frameCameraToRoot(camera, wrapper);
+
+        if(container.animationGroups && container.animationGroups.length){
+          container.animationGroups.forEach(g => g.stop());
+          container.animationGroups[0].start(true);
+        }
+
+      }catch(e){
+        console.error("[WARZONE SHOP] thumb load failed", sku, e);
+      }
+    }
+
+    function hydrateSkinThumbs(){
+      if(CURRENT_TAB !== "skins") return;
+      if(!elShopList) return;
+      if(!window.BABYLON) return;
+
+      const canvases = elShopList.querySelectorAll("canvas[data-sku]");
+      canvases.forEach(c => {
+        const sku = c.getAttribute("data-sku") || "";
+        if(!sku) return;
+        if(__thumbState.get(c)) return;
+        renderSkinThumb(c, sku);
+      });
+    }
+
     // Shop logic
     let CURRENT_TAB = "{{ default_tab }}";
     const tabWeapons = document.getElementById("tabWeapons");
@@ -625,6 +946,27 @@
         items.forEach(it => {
           const row = document.createElement("div");
           row.className = "shop-item";
+
+          // NEW: preview for skins tab only, does not affect any existing logic
+          if(CURRENT_TAB === "skins"){
+            const prev = document.createElement("div");
+            prev.className = "shop-preview";
+
+            if(window.BABYLON){
+              const c = document.createElement("canvas");
+              c.setAttribute("data-sku", it.sku || "");
+              c.width = 96;
+              c.height = 96;
+              prev.appendChild(c);
+            }else{
+              const ph = document.createElement("div");
+              ph.className = "ph";
+              ph.textContent = "Skin";
+              prev.appendChild(ph);
+            }
+
+            row.appendChild(prev);
+          }
 
           const main = document.createElement("div");
           main.className = "shop-main";
@@ -686,6 +1028,9 @@
           row.appendChild(side);
           elShopList.appendChild(row);
         });
+
+        // NEW: after DOM is filled, hydrate the small 3D previews for skins
+        hydrateSkinThumbs();
 
       }catch(e){
         console.error(e);
