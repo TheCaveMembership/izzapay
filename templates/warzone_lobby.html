@@ -1445,30 +1445,198 @@
       };
     })();
 
+    // ---------- War Zone skin styling (Option A, same base soldier, different premium looks) ----------
+    (function(){
+      if(!window.BABYLON) return;
+
+      function styleForSku(sku){
+        const s = (sku || "").toString().trim().toLowerCase();
+
+        if(!s || s === "wz_basic_soldier") return "basic";
+
+        // Backward compatibility, if your shop still returns old sku names
+        if(s === "wz_neon_edge") return "neon_cyan";
+
+        // Common premium names you can use in your shop config
+        if(s.includes("gold")) return "gold_glow";
+        if(s.includes("cyan") || s.includes("neon")) return "neon_cyan";
+        if(s.includes("purple") || s.includes("edge")) return "purple_edge";
+        if(s.includes("crimson") || s.includes("red")) return "crimson_core";
+        if(s.includes("obsidian") || s.includes("shadow") || s.includes("black")) return "obsidian_violet";
+
+        // default premium style
+        return "purple_edge";
+      }
+
+      function ensureGlowLayer(scene){
+        if(!scene) return null;
+        if(scene.__izzaGlowLayer) return scene.__izzaGlowLayer;
+        try{
+          const glow = new BABYLON.GlowLayer("izzaGlow", scene);
+          glow.intensity = 0.85;
+          scene.__izzaGlowLayer = glow;
+          return glow;
+        }catch(e){
+          return null;
+        }
+      }
+
+      function safeColor3(r,g,b){
+        return new BABYLON.Color3(r,g,b);
+      }
+
+      function setMatColor(mat, key, c3){
+        try{
+          if(!mat) return;
+          if(key === "albedo"){
+            if(mat.albedoColor) mat.albedoColor.copyFrom(c3);
+          } else if(key === "diffuse"){
+            if(mat.diffuseColor) mat.diffuseColor.copyFrom(c3);
+          } else if(key === "emissive"){
+            if(mat.emissiveColor) mat.emissiveColor.copyFrom(c3);
+            else mat.emissiveColor = c3;
+          }
+        }catch(e){}
+      }
+
+      function applyToAllMats(wrapper, fn){
+        if(!wrapper || !wrapper.getChildMeshes) return;
+        const meshes = wrapper.getChildMeshes(true);
+        meshes.forEach(m => {
+          const mat = m && m.material;
+          if(!mat) return;
+          fn(m, mat);
+        });
+      }
+
+      function isGlowPart(mesh, mat){
+        const n = (((mesh && mesh.name) || "") + " " + ((mat && mat.name) || "")).toLowerCase();
+        return (
+          n.includes("visor") ||
+          n.includes("eye") ||
+          n.includes("light") ||
+          n.includes("led") ||
+          n.includes("emiss") ||
+          n.includes("stripe") ||
+          n.includes("trim") ||
+          n.includes("edge")
+        );
+      }
+
+      function applySkinStyle(scene, wrapper, sku){
+        const style = styleForSku(sku);
+        ensureGlowLayer(scene);
+
+        // Reset-ish defaults, keep it simple and consistent
+        applyToAllMats(wrapper, (mesh, mat) => {
+          // If PBR material has metallic/roughness, leave it, only tint and emissive
+          // If StandardMaterial, also tint diffuse
+          if(mat.albedoColor) setMatColor(mat, "albedo", safeColor3(0.92, 0.95, 1.0));
+          if(mat.diffuseColor) setMatColor(mat, "diffuse", safeColor3(0.92, 0.95, 1.0));
+          if(mat.emissiveColor) setMatColor(mat, "emissive", safeColor3(0,0,0));
+        });
+
+        // Premium variants, same base soldier
+        if(style === "basic"){
+          // small subtle glow so it still feels alive
+          applyToAllMats(wrapper, (mesh, mat) => {
+            if(isGlowPart(mesh, mat)){
+              setMatColor(mat, "emissive", safeColor3(0.0, 0.35, 0.4));
+            }
+          });
+          return;
+        }
+
+        if(style === "gold_glow"){
+          applyToAllMats(wrapper, (mesh, mat) => {
+            // warm gold tint
+            if(mat.albedoColor) setMatColor(mat, "albedo", safeColor3(1.0, 0.84, 0.32));
+            if(mat.diffuseColor) setMatColor(mat, "diffuse", safeColor3(1.0, 0.84, 0.32));
+
+            // highlight parts, strong emissive
+            if(isGlowPart(mesh, mat)){
+              setMatColor(mat, "emissive", safeColor3(1.0, 0.55, 0.10));
+            }
+          });
+          return;
+        }
+
+        if(style === "neon_cyan"){
+          applyToAllMats(wrapper, (mesh, mat) => {
+            // cooler steel base
+            if(mat.albedoColor) setMatColor(mat, "albedo", safeColor3(0.70, 0.85, 1.0));
+            if(mat.diffuseColor) setMatColor(mat, "diffuse", safeColor3(0.70, 0.85, 1.0));
+
+            if(isGlowPart(mesh, mat)){
+              setMatColor(mat, "emissive", safeColor3(0.0, 1.0, 1.0));
+            }
+          });
+          return;
+        }
+
+        if(style === "purple_edge"){
+          applyToAllMats(wrapper, (mesh, mat) => {
+            // dark tech base
+            if(mat.albedoColor) setMatColor(mat, "albedo", safeColor3(0.35, 0.38, 0.55));
+            if(mat.diffuseColor) setMatColor(mat, "diffuse", safeColor3(0.35, 0.38, 0.55));
+
+            if(isGlowPart(mesh, mat)){
+              setMatColor(mat, "emissive", safeColor3(0.78, 0.22, 1.0));
+            }
+          });
+          return;
+        }
+
+        if(style === "crimson_core"){
+          applyToAllMats(wrapper, (mesh, mat) => {
+            if(mat.albedoColor) setMatColor(mat, "albedo", safeColor3(0.55, 0.32, 0.35));
+            if(mat.diffuseColor) setMatColor(mat, "diffuse", safeColor3(0.55, 0.32, 0.35));
+
+            if(isGlowPart(mesh, mat)){
+              setMatColor(mat, "emissive", safeColor3(1.0, 0.15, 0.25));
+            }
+          });
+          return;
+        }
+
+        if(style === "obsidian_violet"){
+          applyToAllMats(wrapper, (mesh, mat) => {
+            if(mat.albedoColor) setMatColor(mat, "albedo", safeColor3(0.20, 0.22, 0.28));
+            if(mat.diffuseColor) setMatColor(mat, "diffuse", safeColor3(0.20, 0.22, 0.28));
+
+            if(isGlowPart(mesh, mat)){
+              setMatColor(mat, "emissive", safeColor3(0.55, 0.25, 1.0));
+            }
+          });
+          return;
+        }
+
+        // fallback
+        applyToAllMats(wrapper, (mesh, mat) => {
+          if(isGlowPart(mesh, mat)){
+            setMatColor(mat, "emissive", safeColor3(0.0, 1.0, 1.0));
+          }
+        });
+      }
+
+      window.__warzoneApplySkinStyle = applySkinStyle;
+      window.__warzoneSkinStyleForSku = styleForSku;
+    })();
+
     // ---------- Armory load + purchases + 3D previews ----------
     (function(){
       const weaponsList = document.getElementById("weaponsList");
       const skinsList   = document.getElementById("skinsList");
 
-      // IMPORTANT: skin asset routing, matches your working test page
+      // OPTION A, Always use the working basic soldier asset for all skins
       function getSkinAsset(sku){
-        // your two known working skins
-        if(sku === "wz_basic_soldier"){
-          return { rootUrl:"/assets/warzone3d/soldier_gltf_3/", fileName:"scene.gltf" };
-        }
-        if(sku === "wz_neon_edge"){
-          return { rootUrl:"/assets/warzone3d/skins/wz_neon_edge/", fileName:"scene.gltf" };
-        }
-        // future default convention
-        return { rootUrl:"/assets/warzone3d/skins/" + sku + "/", fileName:"scene.gltf" };
+        return { rootUrl:"/assets/warzone3d/soldier_gltf_3/", fileName:"scene.gltf" };
       }
 
       function getWeaponAsset(sku){
-        // you can change this later when you add real weapon assets
         return { rootUrl:"/assets/warzone3d/weapons/", fileName: sku + ".glb" };
       }
 
-      // shared normalization helpers (same idea as your working test page)
       function getBounds(node){
         const b = node.getHierarchyBoundingVectors(true);
         return { min: b.min.clone(), max: b.max.clone() };
@@ -1531,7 +1699,6 @@
           asset = getSkinAsset(sku);
         }
 
-        // KEY FIX: preserve GLTF hierarchy, do NOT reparent every mesh
         (async () => {
           try{
             const container = await BABYLON.SceneLoader.LoadAssetContainerAsync(asset.rootUrl, asset.fileName, scene);
@@ -1539,20 +1706,20 @@
 
             const wrapper = new BABYLON.TransformNode("shopWrap_" + slot + "_" + sku, scene);
 
-            // Only parent top-level nodes/meshes (no parent) to wrapper
             container.meshes.forEach(m => { if(m && !m.parent) m.parent = wrapper; });
             container.transformNodes.forEach(n => { if(n && !n.parent) n.parent = wrapper; });
 
             wrapper.rotation.y = Math.PI;
 
-            // normalize and frame
             if(slot === "skins"){
               normalizeToGroundAndHeight(wrapper, 1.75);
-
-              // Small “looks nice” nudge for tiny preview boxes
               wrapper.position.y += 0.05;
+
+              // APPLY premium style for this sku, still using the base soldier model
+              if(window.__warzoneApplySkinStyle){
+                window.__warzoneApplySkinStyle(scene, wrapper, sku);
+              }
             } else {
-              // weapons: keep simple for now, you can upgrade later
               wrapper.position.y = 0;
             }
 
@@ -1574,7 +1741,6 @@
 
         engine.runRenderLoop(() => scene.render());
 
-        // avoid leaks when overlay closes later
         window.addEventListener("beforeunload", () => {
           try{ engine.stopRenderLoop(); }catch(e){}
           try{ scene.dispose(); }catch(e){}
@@ -1747,7 +1913,8 @@
             window.__izzaClosePurchaseOverlay?.({ approved:false });
           }, 650);
 
-          // reload to flip Buy -> Equip
+          // THIS IS THE SIMPLE FIX YOU WANT,
+          // purchase succeeds, reload shop so button flips Buy -> Equip immediately
           await loadShop(slot);
 
         }catch(e){
@@ -1773,10 +1940,9 @@
             return;
           }
 
-          // Reload list so Equipped badge updates
           await loadShop(slot);
 
-          // ALSO update the lobby soldier immediately when a skin is equipped
+          // Update lobby soldier instantly, same base model, premium style applied by sku
           if(slot === "skins" && window.__warzoneSetLobbySkin){
             window.__warzoneSetLobbySkin(sku);
           }
@@ -1787,8 +1953,6 @@
       }
 
       window.__izzaLoadShop = loadShop;
-
-      // Optional: auto refresh shop button states after purchase overlay closes
     })();
 
     // ---------- Babylon.js lobby soldier ----------
@@ -1805,17 +1969,11 @@
       });
 
       let scene, camera;
-
-      // current container/wrapper for lobby soldier
       let currentWrapper = null;
       let currentContainer = null;
 
-      // Same routing as shop previews
+      // OPTION A, Always use the working basic soldier for lobby
       function getSkinAsset(sku){
-        if(sku === "wz_neon_edge"){
-          return { rootUrl:"/assets/warzone3d/skins/wz_neon_edge/", fileName:"scene.gltf" };
-        }
-        // default + starter
         return { rootUrl:"/assets/warzone3d/soldier_gltf_3/", fileName:"scene.gltf" };
       }
 
@@ -1881,22 +2039,22 @@
           const wrapper = new BABYLON.TransformNode("lobbySkinWrap", scene);
           currentWrapper = wrapper;
 
-          // parent only top-level nodes/meshes (preserve hierarchy)
           container.meshes.forEach(m => { if(m && !m.parent) m.parent = wrapper; });
           container.transformNodes.forEach(n => { if(n && !n.parent) n.parent = wrapper; });
 
           wrapper.rotation.y = Math.PI;
 
-          // Keep your current lobby look: slightly smaller and centered
           normalizeToGroundAndHeight(wrapper, 1.75);
           wrapper.scaling.scaleInPlace(0.72);
-
-          // small position tweak so boots sit nicely in the map window
           wrapper.position.y += 0.02;
+
+          // APPLY premium skin visuals based on sku
+          if(window.__warzoneApplySkinStyle){
+            window.__warzoneApplySkinStyle(scene, wrapper, sku || "wz_basic_soldier");
+          }
 
           frameCameraToRoot(wrapper);
 
-          // animation if exists
           if(container.animationGroups && container.animationGroups.length){
             container.animationGroups.forEach(g => g.stop());
             container.animationGroups[0].start(true);
@@ -1908,8 +2066,6 @@
       }
 
       async function fetchEquippedSkinSku(){
-        // If your backend already returns equipped inside /warzone/api/shop?slot=skins,
-        // we can reuse that without adding a new endpoint.
         try{
           const res = await fetch("/warzone/api/shop?slot=skins", { credentials:"include" });
           if(!res.ok) return "wz_basic_soldier";
@@ -1943,7 +2099,6 @@
         engine.runRenderLoop(() => { if(scene) scene.render(); });
         window.addEventListener("resize", () => engine.resize());
 
-        // Spin (keeps your existing lobby vibe)
         scene.onBeforeRenderObservable.add(() => {
           if(currentWrapper){
             currentWrapper.rotation.y += scene.getEngine().getDeltaTime() * 0.0003;
