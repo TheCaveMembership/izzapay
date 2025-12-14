@@ -873,6 +873,19 @@
       const AUTO_OSC_SPEED = 0.35;
       const AUTO_MAX_YAW   = Math.PI * 0.45;
 
+      // ---- NEW: normalize weapon SKU so lobby works like test page ----
+      function normalizeWeaponSku(s){
+        const sku = (s || "").toString().trim();
+        if (!sku) return "wz_basic_pistol";
+
+        // if API returns non-prefixed keys, map to the actual weapon sku
+        if (sku === "basic_pistol") return "wz_basic_pistol";
+        if (sku === "cityrunner_smg") return "wz_cityrunner_smg";
+
+        // already prefixed or unknown, pass through
+        return sku;
+      }
+
       // ✅ PER WEAPON TUNING, pistol stays unchanged, SMG is your locked-in perfect values
       const WEAPON_TUNING = {
         wz_basic_pistol: {
@@ -886,18 +899,18 @@
         },
 
         wz_cityrunner_smg: {
-          WEAPON_SCALE: 0.11,
-          WEAPON_YAW_FIX: 1.6308,
-          WEAPON_PITCH_FIX: -1.84,
+          WEAPON_SCALE: 0.11000,
+          WEAPON_YAW_FIX: 1.63080,
+          WEAPON_PITCH_FIX: -1.84000,
 
-          WEAPON_POS:      new BABYLON.Vector3(0.7110, 1.2070, -0.0580),
-          WEAPON_GRIP_POS: new BABYLON.Vector3(2.1040, 2.2100, -11.2720),
-          WEAPON_GRIP_ROT: new BABYLON.Vector3(-0.1100, -0.1800, 0.0100),
+          WEAPON_POS:      new BABYLON.Vector3(0.71100, 1.20700, -0.05800),
+          WEAPON_GRIP_POS: new BABYLON.Vector3(2.10400, 2.21000, -11.27200),
+          WEAPON_GRIP_ROT: new BABYLON.Vector3(-0.11000, -0.18000, 0.01000),
         }
       };
 
       function getWeaponTune(weaponSku){
-        const sku = (weaponSku || "").toString().trim();
+        const sku = normalizeWeaponSku(weaponSku);
         return WEAPON_TUNING[sku] || WEAPON_TUNING.wz_basic_pistol;
       }
 
@@ -978,7 +991,7 @@
       }
 
       function getWeaponAsset(weaponSku){
-        const sku = (weaponSku || "").toString().trim();
+        const sku = normalizeWeaponSku(weaponSku);
 
         if(sku === "wz_basic_pistol"){
           return { rootUrl:"/assets/warzone3d/weapons/wz_basic_pistol/", fileName:"scene.gltf" };
@@ -1155,7 +1168,8 @@
 
         if(!scene || !currentWrapper || !currentContainer) return;
 
-        const asset = getWeaponAsset(weaponSku);
+        const normSku = normalizeWeaponSku(weaponSku);
+        const asset = getWeaponAsset(normSku);
         if(!asset) return;
 
         const skinned = findSkinnedMeshFromContainer(currentContainer);
@@ -1173,14 +1187,13 @@
         w.addAllToScene();
         currentWeaponContainer = w;
 
-        const T = getWeaponTune(weaponSku);
+        const T = getWeaponTune(normSku);
 
         const weaponRoot = new BABYLON.TransformNode("weaponRoot", scene);
         weaponRoot.attachToBone(rightHand, skinned);
 
         weaponRoot.position.copyFrom(T.WEAPON_POS);
 
-        // ✅ pitch fix makes SMG point straight, yaw fix keeps it aligned
         weaponRoot.rotation.set(
           (T.WEAPON_PITCH_FIX || 0.0),
           Math.PI + (T.WEAPON_YAW_FIX || 0.0),
@@ -1283,7 +1296,7 @@
           const data = await res.json().catch(()=>null);
           const items = (data && data.items) || [];
           const eq = items.find(x => x && x.equipped);
-          if(eq && eq.sku) return String(eq.sku);
+          if(eq && eq.sku) return normalizeWeaponSku(String(eq.sku));
         }catch(e){}
         return "wz_basic_pistol";
       }
