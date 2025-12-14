@@ -2,8 +2,8 @@
 <html lang="en">
 <head>
   <meta charset="utf-8">
-  <title>War Zone test, soldier + weapon attach</title>
-  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>War Zone test, soldier + weapon attach, iPhone tuner</title>
+  <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
   <style>
     html,body{
       margin:0;
@@ -25,16 +25,270 @@
       touch-action:none;
       outline:none;
     }
+
+    /* ---- iPhone tuning HUD ---- */
+    .hud{
+      position:fixed;
+      left:10px;
+      right:10px;
+      bottom:10px;
+      z-index:9999;
+      pointer-events:none;
+    }
+    .panel{
+      pointer-events:auto;
+      background:rgba(0,0,0,.72);
+      border:1px solid rgba(127,209,255,.35);
+      border-radius:14px;
+      padding:10px;
+      backdrop-filter: blur(10px);
+      -webkit-backdrop-filter: blur(10px);
+      box-shadow: 0 0 24px rgba(0,0,0,.6);
+    }
+    .row{
+      display:flex;
+      gap:8px;
+      align-items:center;
+      flex-wrap:wrap;
+      margin-bottom:8px;
+    }
+    .row:last-child{ margin-bottom:0; }
+
+    .pill{
+      display:inline-flex;
+      align-items:center;
+      gap:8px;
+      padding:8px 10px;
+      border-radius:999px;
+      border:1px solid rgba(127,209,255,.35);
+      background:rgba(10,14,28,.75);
+      color:#e7f0ff;
+      font-size:12px;
+      letter-spacing:.02em;
+      user-select:none;
+      -webkit-user-select:none;
+    }
+    .btn{
+      border:none;
+      border-radius:999px;
+      padding:8px 10px;
+      background:linear-gradient(90deg,#0ff,#7fd1ff);
+      color:#001520;
+      font-weight:800;
+      font-size:12px;
+      letter-spacing:.08em;
+      text-transform:uppercase;
+      cursor:pointer;
+      user-select:none;
+      -webkit-user-select:none;
+    }
+    .btn.secondary{
+      background:linear-gradient(90deg,#ff3b6b,#ffcf4d);
+      color:#1b0a10;
+    }
+    .btn.ghost{
+      background:transparent;
+      border:1px solid rgba(127,209,255,.35);
+      color:#e7f0ff;
+      font-weight:700;
+      letter-spacing:.08em;
+    }
+    .small{
+      font-size:11px;
+      color:#9fb0d6;
+      margin-left:auto;
+    }
+
+    .grid{
+      display:grid;
+      grid-template-columns: 1fr 1fr 1fr;
+      gap:6px;
+      margin-top:6px;
+    }
+    .axis{
+      border:1px solid rgba(127,209,255,.25);
+      border-radius:12px;
+      padding:8px;
+      background:rgba(5,8,18,.72);
+    }
+    .axis h4{
+      margin:0 0 6px 0;
+      font-size:11px;
+      color:#cfe2ff;
+      letter-spacing:.14em;
+      text-transform:uppercase;
+    }
+    .axis .mini{
+      display:flex;
+      gap:6px;
+      align-items:center;
+      margin-bottom:6px;
+    }
+    .axis .mini:last-child{ margin-bottom:0; }
+
+    .mini .label{
+      width:18px;
+      text-align:center;
+      font-weight:800;
+      color:#7fd1ff;
+      font-size:12px;
+    }
+    .mini .val{
+      flex:1;
+      color:#e7f0ff;
+      font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
+      font-size:12px;
+      opacity:.95;
+      overflow:hidden;
+      text-overflow:ellipsis;
+      white-space:nowrap;
+    }
+    .mini .b{
+      width:44px;
+      padding:7px 0;
+      border-radius:10px;
+      border:1px solid rgba(127,209,255,.35);
+      background:rgba(2,6,14,.7);
+      color:#e7f0ff;
+      font-weight:900;
+      font-size:14px;
+      cursor:pointer;
+    }
+
+    .copybox{
+      margin-top:8px;
+      padding:8px;
+      border-radius:12px;
+      border:1px dashed rgba(127,209,255,.35);
+      background:rgba(2,6,14,.55);
+      color:#cfe2ff;
+      font-size:11px;
+      line-height:1.35;
+      font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
+      white-space:pre;
+      overflow:auto;
+      max-height:160px;
+    }
+
+    @media (max-height: 700px){
+      .copybox{ max-height:120px; }
+    }
   </style>
+
   <script src="https://cdn.babylonjs.com/babylon.js"></script>
   <script src="https://cdn.babylonjs.com/loaders/babylonjs.loaders.min.js"></script>
 </head>
 <body>
   <canvas id="renderCanvas"></canvas>
 
+  <!-- iPhone tuning HUD -->
+  <div class="hud">
+    <div class="panel">
+      <div class="row">
+        <div class="pill" id="weaponLabel">Weapon, cityrunner_smg</div>
+
+        <button class="btn ghost" id="weaponToggle">Switch weapon</button>
+
+        <button class="btn ghost" id="resetBtn">Reset</button>
+
+        <button class="btn secondary" id="copyBtn">Copy</button>
+
+        <div class="small">
+          Step, <span id="stepLabel">0.01</span>
+        </div>
+      </div>
+
+      <div class="row">
+        <button class="btn ghost" data-step="0.001">0.001</button>
+        <button class="btn ghost" data-step="0.005">0.005</button>
+        <button class="btn ghost" data-step="0.01">0.01</button>
+        <button class="btn ghost" data-step="0.05">0.05</button>
+      </div>
+
+      <div class="grid">
+        <div class="axis">
+          <h4>WEAPON_POS</h4>
+          <div class="mini">
+            <div class="label">X</div>
+            <div class="val" id="wpX"></div>
+            <button class="b" data-k="WEAPON_POS.x" data-d="-">-</button>
+            <button class="b" data-k="WEAPON_POS.x" data-d="+">+</button>
+          </div>
+          <div class="mini">
+            <div class="label">Y</div>
+            <div class="val" id="wpY"></div>
+            <button class="b" data-k="WEAPON_POS.y" data-d="-">-</button>
+            <button class="b" data-k="WEAPON_POS.y" data-d="+">+</button>
+          </div>
+          <div class="mini">
+            <div class="label">Z</div>
+            <div class="val" id="wpZ"></div>
+            <button class="b" data-k="WEAPON_POS.z" data-d="-">-</button>
+            <button class="b" data-k="WEAPON_POS.z" data-d="+">+</button>
+          </div>
+        </div>
+
+        <div class="axis">
+          <h4>GRIP_POS</h4>
+          <div class="mini">
+            <div class="label">X</div>
+            <div class="val" id="gpX"></div>
+            <button class="b" data-k="WEAPON_GRIP_POS.x" data-d="-">-</button>
+            <button class="b" data-k="WEAPON_GRIP_POS.x" data-d="+">+</button>
+          </div>
+          <div class="mini">
+            <div class="label">Y</div>
+            <div class="val" id="gpY"></div>
+            <button class="b" data-k="WEAPON_GRIP_POS.y" data-d="-">-</button>
+            <button class="b" data-k="WEAPON_GRIP_POS.y" data-d="+">+</button>
+          </div>
+          <div class="mini">
+            <div class="label">Z</div>
+            <div class="val" id="gpZ"></div>
+            <button class="b" data-k="WEAPON_GRIP_POS.z" data-d="-">-</button>
+            <button class="b" data-k="WEAPON_GRIP_POS.z" data-d="+">+</button>
+          </div>
+        </div>
+
+        <div class="axis">
+          <h4>GRIP_ROT</h4>
+          <div class="mini">
+            <div class="label">X</div>
+            <div class="val" id="grX"></div>
+            <button class="b" data-k="WEAPON_GRIP_ROT.x" data-d="-">-</button>
+            <button class="b" data-k="WEAPON_GRIP_ROT.x" data-d="+">+</button>
+          </div>
+          <div class="mini">
+            <div class="label">Y</div>
+            <div class="val" id="grY"></div>
+            <button class="b" data-k="WEAPON_GRIP_ROT.y" data-d="-">-</button>
+            <button class="b" data-k="WEAPON_GRIP_ROT.y" data-d="+">+</button>
+          </div>
+          <div class="mini">
+            <div class="label">Z</div>
+            <div class="val" id="grZ"></div>
+            <button class="b" data-k="WEAPON_GRIP_ROT.z" data-d="-">-</button>
+            <button class="b" data-k="WEAPON_GRIP_ROT.z" data-d="+">+</button>
+          </div>
+        </div>
+      </div>
+
+      <div class="row" style="margin-top:8px;">
+        <div class="pill">Scale, <span id="scaleVal" style="font-family:ui-monospace;"></span></div>
+        <button class="btn ghost" data-k="WEAPON_SCALE" data-d="-">Scale -</button>
+        <button class="btn ghost" data-k="WEAPON_SCALE" data-d="+">Scale +</button>
+
+        <div class="pill">YawFix, <span id="yawVal" style="font-family:ui-monospace;"></span></div>
+        <button class="btn ghost" data-k="WEAPON_YAW_FIX" data-d="-">Yaw -</button>
+        <button class="btn ghost" data-k="WEAPON_YAW_FIX" data-d="+">Yaw +</button>
+      </div>
+
+      <div class="copybox" id="copyBox"></div>
+    </div>
+  </div>
+
   <script>
     const canvas = document.getElementById("renderCanvas");
-
     canvas.tabIndex = 1;
     canvas.addEventListener("pointerdown", () => canvas.focus());
 
@@ -59,7 +313,6 @@
     camera.panningSensibility = 0;
     camera.wheelPrecision = 60;
 
-    // Stop camera from ever hijacking arrow keys
     camera.inputs.removeByType("ArcRotateCameraKeyboardMoveInput");
     if (camera.inputs && camera.inputs.attached && camera.inputs.attached.keyboard) {
       camera.inputs.attached.keyboard.keysUp = [];
@@ -81,33 +334,41 @@
     const SOLDIER_ROOT = "/assets/warzone3d/soldier_gltf_3/";
     const SOLDIER_FILE = "scene.gltf";
 
-    // Weapons
     const BASIC_PISTOL_ROOT = "/assets/warzone3d/weapons/wz_basic_pistol/";
     const CITYRUNNER_SMG_ROOT = "/assets/warzone3d/weapons/wz_cityrunner_smg/";
     const WEAPON_FILE = "scene.gltf";
-
-    // Switch this to test positioning per weapon
-    const ACTIVE_WEAPON_KEY = "cityrunner_smg"; // "basic_pistol" | "cityrunner_smg"
 
     const WEAPON_MAP = {
       basic_pistol:   { root: BASIC_PISTOL_ROOT,   file: WEAPON_FILE },
       cityrunner_smg: { root: CITYRUNNER_SMG_ROOT, file: WEAPON_FILE }
     };
 
+    // Start on SMG
+    let ACTIVE_WEAPON_KEY = "cityrunner_smg";
+
     const SOLDIER_ANIM_SPEED = 0.65;
 
     const AUTO_OSC_SPEED = 0.35;
     const AUTO_MAX_YAW   = Math.PI * 0.45;
 
-    const WEAPON_SCALE = 0.07;
-    const WEAPON_YAW_FIX = Math.PI * 0.5;
+    // --- Tunables (defaults = your pistol lock-in) ---
+    const DEFAULTS = {
+      WEAPON_SCALE: 0.07,
+      WEAPON_YAW_FIX: Math.PI * 0.5,
 
-    // ✅ LOCKED IN, from your final tuning screenshot
-    // NOTE: these values were tuned for the pistol.
-    // Use this test page to retune for the SMG if it sits wrong.
-    const WEAPON_POS      = new BABYLON.Vector3(-1.069,  0.327, -0.058);
-    const WEAPON_GRIP_POS = new BABYLON.Vector3( 3.634, -0.030, -11.272);
-    const WEAPON_GRIP_ROT = new BABYLON.Vector3(-0.260, -0.040,  0.010);
+      WEAPON_POS:      new BABYLON.Vector3(-1.069,  0.327, -0.058),
+      WEAPON_GRIP_POS: new BABYLON.Vector3( 3.634, -0.030, -11.272),
+      WEAPON_GRIP_ROT: new BABYLON.Vector3(-0.260, -0.040,  0.010)
+    };
+
+    const TUNE = {
+      WEAPON_SCALE: DEFAULTS.WEAPON_SCALE,
+      WEAPON_YAW_FIX: DEFAULTS.WEAPON_YAW_FIX,
+
+      WEAPON_POS: DEFAULTS.WEAPON_POS.clone(),
+      WEAPON_GRIP_POS: DEFAULTS.WEAPON_GRIP_POS.clone(),
+      WEAPON_GRIP_ROT: DEFAULTS.WEAPON_GRIP_ROT.clone()
+    };
 
     // Arm correction
     const qArm     = BABYLON.Quaternion.FromEulerAngles(-0.10,  0.00,  0.00);
@@ -233,7 +494,16 @@
       return skeleton.bones.find(b => ((b.name || "").toLowerCase().includes(wantLow))) || null;
     }
 
-    function attachWeaponToRightHand(soldierImport, weaponImport){
+    // ---- live refs so we can retune without reload ----
+    let soldier = null;
+    let weapon = null;
+    let attachInfo = null;
+
+    let weaponRoot = null;
+    let weaponGrip = null;
+    let weaponMeshes = [];
+
+    function attachWeaponToRightHandLive(soldierImport, weaponImport){
       const skinned = findSkinnedMesh(soldierImport.result);
       const skeleton = skinned?.skeleton || (soldierImport.result?.skeletons?.[0] || null);
       if (!skinned || !skeleton) return { ok:false };
@@ -246,24 +516,20 @@
       if (!rightHand) return { ok:false };
 
       // weaponRoot attaches to the hand bone
-      const weaponRoot = new BABYLON.TransformNode("weaponRoot", scene);
+      weaponRoot = new BABYLON.TransformNode("weaponRoot", scene);
       weaponRoot.attachToBone(rightHand, skinned);
 
-      weaponRoot.position.copyFrom(WEAPON_POS);
-      weaponRoot.rotation.set(0, Math.PI + WEAPON_YAW_FIX, 0);
-      weaponRoot.scaling.set(WEAPON_SCALE, WEAPON_SCALE, WEAPON_SCALE);
-
-      // weaponGrip re-centers the model to land in the palm
-      const weaponGrip = new BABYLON.TransformNode("weaponGrip", scene);
+      // weaponGrip re-centers model to land in palm
+      weaponGrip = new BABYLON.TransformNode("weaponGrip", scene);
       weaponGrip.parent = weaponRoot;
-      weaponGrip.position.copyFrom(WEAPON_GRIP_POS);
-      weaponGrip.rotation.copyFrom(WEAPON_GRIP_ROT);
 
       // Parent weapon meshes under weaponGrip
+      weaponMeshes = [];
       (weaponImport.result?.meshes || []).forEach(m => {
         if (!m) return;
-        if (m === weaponImport.result.meshes[0]) return; // skip gltf root
+        if (m === weaponImport.result.meshes[0]) return;
         m.parent = weaponGrip;
+        weaponMeshes.push(m);
       });
 
       const rightArm      = findBoneByNameOrIncludes(skeleton, "mixamorig:RightArm.207_219") || findBoneByNameOrIncludes(skeleton, "RightArm");
@@ -273,15 +539,166 @@
       return { ok:true, skinned, bones: { rightHand, rightArm, rightForeArm, rightShoulder } };
     }
 
+    function applyTuneToWeapon(){
+      if (!weaponRoot || !weaponGrip) return;
+
+      weaponRoot.position.copyFrom(TUNE.WEAPON_POS);
+      weaponRoot.rotation.set(0, Math.PI + TUNE.WEAPON_YAW_FIX, 0);
+      weaponRoot.scaling.set(TUNE.WEAPON_SCALE, TUNE.WEAPON_SCALE, TUNE.WEAPON_SCALE);
+
+      weaponGrip.position.copyFrom(TUNE.WEAPON_GRIP_POS);
+      weaponGrip.rotation.copyFrom(TUNE.WEAPON_GRIP_ROT);
+    }
+
+    function clearWeaponModel(){
+      try{
+        if (weapon && weapon.root){
+          weapon.root.dispose(false, true);
+        }
+      }catch(e){}
+      try{
+        if (weaponRoot){
+          weaponRoot.dispose(false, true);
+          weaponRoot = null;
+        }
+      }catch(e){}
+      try{
+        if (weaponGrip){
+          weaponGrip.dispose(false, true);
+          weaponGrip = null;
+        }
+      }catch(e){}
+      weaponMeshes = [];
+      weapon = null;
+      attachInfo = null;
+    }
+
+    async function loadWeapon(key){
+      clearWeaponModel();
+
+      const cfg = WEAPON_MAP[key] || WEAPON_MAP.basic_pistol;
+
+      const okWeapon = await preflightGltf(cfg.root, cfg.file);
+      if (!okWeapon) return;
+
+      weapon = await importModel("weapon", cfg.root, cfg.file);
+      weapon.root.setEnabled(false);
+
+      attachInfo = attachWeaponToRightHandLive(soldier, weapon);
+      applyTuneToWeapon();
+    }
+
+    // ---- HUD wiring ----
+    let STEP = 0.01;
+
+    function fmt(n){
+      const v = (typeof n === "number") ? n : 0;
+      return (Math.round(v * 100000) / 100000).toFixed(5);
+    }
+
+    function updateHud(){
+      document.getElementById("weaponLabel").textContent = "Weapon, " + ACTIVE_WEAPON_KEY;
+      document.getElementById("stepLabel").textContent = STEP.toString();
+
+      document.getElementById("wpX").textContent = fmt(TUNE.WEAPON_POS.x);
+      document.getElementById("wpY").textContent = fmt(TUNE.WEAPON_POS.y);
+      document.getElementById("wpZ").textContent = fmt(TUNE.WEAPON_POS.z);
+
+      document.getElementById("gpX").textContent = fmt(TUNE.WEAPON_GRIP_POS.x);
+      document.getElementById("gpY").textContent = fmt(TUNE.WEAPON_GRIP_POS.y);
+      document.getElementById("gpZ").textContent = fmt(TUNE.WEAPON_GRIP_POS.z);
+
+      document.getElementById("grX").textContent = fmt(TUNE.WEAPON_GRIP_ROT.x);
+      document.getElementById("grY").textContent = fmt(TUNE.WEAPON_GRIP_ROT.y);
+      document.getElementById("grZ").textContent = fmt(TUNE.WEAPON_GRIP_ROT.z);
+
+      document.getElementById("scaleVal").textContent = fmt(TUNE.WEAPON_SCALE);
+      document.getElementById("yawVal").textContent = fmt(TUNE.WEAPON_YAW_FIX);
+
+      const txt =
+`// LOCK THESE IN (screenshot this)
+const WEAPON_SCALE = ${fmt(TUNE.WEAPON_SCALE)};
+const WEAPON_YAW_FIX = ${fmt(TUNE.WEAPON_YAW_FIX)};
+
+const WEAPON_POS      = new BABYLON.Vector3(${fmt(TUNE.WEAPON_POS.x)}, ${fmt(TUNE.WEAPON_POS.y)}, ${fmt(TUNE.WEAPON_POS.z)});
+const WEAPON_GRIP_POS = new BABYLON.Vector3(${fmt(TUNE.WEAPON_GRIP_POS.x)}, ${fmt(TUNE.WEAPON_GRIP_POS.y)}, ${fmt(TUNE.WEAPON_GRIP_POS.z)});
+const WEAPON_GRIP_ROT = new BABYLON.Vector3(${fmt(TUNE.WEAPON_GRIP_ROT.x)}, ${fmt(TUNE.WEAPON_GRIP_ROT.y)}, ${fmt(TUNE.WEAPON_GRIP_ROT.z)});`;
+
+      document.getElementById("copyBox").textContent = txt;
+    }
+
+    function bump(path, dir){
+      const sign = (dir === "+") ? 1 : -1;
+
+      if (path === "WEAPON_SCALE"){
+        TUNE.WEAPON_SCALE = Math.max(0.0001, TUNE.WEAPON_SCALE + sign * STEP);
+      } else if (path === "WEAPON_YAW_FIX"){
+        TUNE.WEAPON_YAW_FIX = TUNE.WEAPON_YAW_FIX + sign * STEP;
+      } else {
+        // Vector path: "WEAPON_POS.x"
+        const [obj, axis] = path.split(".");
+        if (!obj || !axis) return;
+        const v = TUNE[obj];
+        if (!v) return;
+        v[axis] = v[axis] + sign * STEP;
+      }
+
+      applyTuneToWeapon();
+      updateHud();
+    }
+
+    function resetTune(){
+      TUNE.WEAPON_SCALE = DEFAULTS.WEAPON_SCALE;
+      TUNE.WEAPON_YAW_FIX = DEFAULTS.WEAPON_YAW_FIX;
+
+      TUNE.WEAPON_POS.copyFrom(DEFAULTS.WEAPON_POS);
+      TUNE.WEAPON_GRIP_POS.copyFrom(DEFAULTS.WEAPON_GRIP_POS);
+      TUNE.WEAPON_GRIP_ROT.copyFrom(DEFAULTS.WEAPON_GRIP_ROT);
+
+      applyTuneToWeapon();
+      updateHud();
+    }
+
+    async function toggleWeapon(){
+      ACTIVE_WEAPON_KEY = (ACTIVE_WEAPON_KEY === "cityrunner_smg") ? "basic_pistol" : "cityrunner_smg";
+      updateHud();
+      await loadWeapon(ACTIVE_WEAPON_KEY);
+    }
+
+    async function copyToClipboard(){
+      const text = document.getElementById("copyBox").textContent || "";
+      try{
+        await navigator.clipboard.writeText(text);
+      }catch(e){
+        // fallback: select via prompt
+        window.prompt("Copy these constants", text);
+      }
+    }
+
+    // step buttons
+    document.querySelectorAll("[data-step]").forEach(b => {
+      b.addEventListener("click", () => {
+        STEP = parseFloat(b.getAttribute("data-step") || "0.01") || 0.01;
+        updateHud();
+      });
+    });
+
+    // +/- buttons
+    document.querySelectorAll("[data-k][data-d]").forEach(b => {
+      b.addEventListener("click", () => bump(b.getAttribute("data-k"), b.getAttribute("data-d")));
+    });
+
+    document.getElementById("weaponToggle").addEventListener("click", toggleWeapon);
+    document.getElementById("resetBtn").addEventListener("click", resetTune);
+    document.getElementById("copyBtn").addEventListener("click", copyToClipboard);
+
+    // ---------- main ----------
     (async () => {
       try{
-        const weaponCfg = WEAPON_MAP[ACTIVE_WEAPON_KEY] || WEAPON_MAP.basic_pistol;
-
         const okSoldier = await preflightGltf(SOLDIER_ROOT, SOLDIER_FILE);
-        const okWeapon  = await preflightGltf(weaponCfg.root, weaponCfg.file);
-        if (!okSoldier || !okWeapon) return;
+        if (!okSoldier) return;
 
-        const soldier = await importModel("soldier", SOLDIER_ROOT, SOLDIER_FILE);
+        soldier = await importModel("soldier", SOLDIER_ROOT, SOLDIER_FILE);
         soldier.root.rotation.y = Math.PI;
         normalizeToGroundAndHeight(soldier.root, 1.75);
 
@@ -292,12 +709,9 @@
           ag[0].speedRatio = SOLDIER_ANIM_SPEED;
         }
 
-        const weapon = await importModel("weapon", weaponCfg.root, weaponCfg.file);
-        weapon.root.setEnabled(false);
-
-        const attachInfo = attachWeaponToRightHand(soldier, weapon);
-
         frameCameraToRoot(soldier.root);
+
+        await loadWeapon(ACTIVE_WEAPON_KEY);
 
         scene.onBeforeRenderObservable.clear();
 
@@ -333,6 +747,8 @@
             }
           }
         });
+
+        updateHud();
 
       }catch(e){
         console.warn("Test failed", e);
