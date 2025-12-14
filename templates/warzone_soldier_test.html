@@ -2,8 +2,8 @@
 <html lang="en">
 <head>
   <meta charset="utf-8">
-  <title>War Zone test, soldier + weapon attach, iPhone tuner</title>
-  <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+  <title>War Zone test, soldier + weapon attach, keyboard tuner</title>
+  <meta name="viewport" content="width=device-width,initial-scale=1">
   <style>
     html,body{
       margin:0;
@@ -25,284 +25,49 @@
       touch-action:none;
       outline:none;
     }
-
-    .hud{
+    /* debug text */
+    #hud{
       position:fixed;
       left:10px;
-      right:10px;
-      bottom:10px;
+      top:10px;
       z-index:9999;
+      color:#35ff6b;
+      font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
+      font-size:12px;
+      line-height:1.35;
+      text-shadow: 0 0 10px rgba(0,0,0,.85);
+      white-space:pre;
       pointer-events:none;
     }
-    .panel{
-      pointer-events:auto;
-      background:rgba(0,0,0,.72);
-      border:1px solid rgba(127,209,255,.35);
-      border-radius:14px;
-      padding:10px;
-      backdrop-filter: blur(10px);
-      -webkit-backdrop-filter: blur(10px);
-      box-shadow: 0 0 24px rgba(0,0,0,.6);
-    }
-    .row{
-      display:flex;
-      gap:8px;
-      align-items:center;
-      flex-wrap:wrap;
-      margin-bottom:8px;
-    }
-    .row:last-child{ margin-bottom:0; }
-
-    .pill{
-      display:inline-flex;
-      align-items:center;
-      gap:8px;
-      padding:8px 10px;
-      border-radius:999px;
-      border:1px solid rgba(127,209,255,.35);
-      background:rgba(10,14,28,.75);
-      color:#e7f0ff;
-      font-size:12px;
-      letter-spacing:.02em;
-      user-select:none;
-      -webkit-user-select:none;
-    }
-    .btn{
-      border:none;
-      border-radius:999px;
-      padding:8px 10px;
-      background:linear-gradient(90deg,#0ff,#7fd1ff);
-      color:#001520;
-      font-weight:800;
-      font-size:12px;
-      letter-spacing:.08em;
-      text-transform:uppercase;
-      cursor:pointer;
-      user-select:none;
-      -webkit-user-select:none;
-    }
-    .btn.secondary{
-      background:linear-gradient(90deg,#ff3b6b,#ffcf4d);
-      color:#1b0a10;
-    }
-    .btn.ghost{
-      background:transparent;
-      border:1px solid rgba(127,209,255,.35);
-      color:#e7f0ff;
-      font-weight:700;
-      letter-spacing:.08em;
-    }
-    .small{
-      font-size:11px;
-      color:#9fb0d6;
-      margin-left:auto;
-    }
-
-    .grid{
-      display:grid;
-      grid-template-columns: 1fr 1fr 1fr;
-      gap:6px;
-      margin-top:6px;
-    }
-    .axis{
-      border:1px solid rgba(127,209,255,.25);
-      border-radius:12px;
-      padding:8px;
-      background:rgba(5,8,18,.72);
-    }
-    .axis h4{
-      margin:0 0 6px 0;
-      font-size:11px;
-      color:#cfe2ff;
-      letter-spacing:.14em;
-      text-transform:uppercase;
-    }
-    .axis .mini{
-      display:flex;
-      gap:6px;
-      align-items:center;
-      margin-bottom:6px;
-    }
-    .axis .mini:last-child{ margin-bottom:0; }
-
-    .mini .label{
-      width:18px;
-      text-align:center;
-      font-weight:800;
-      color:#7fd1ff;
-      font-size:12px;
-    }
-    .mini .val{
-      flex:1;
-      color:#e7f0ff;
-      font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
-      font-size:12px;
-      opacity:.95;
-      overflow:hidden;
-      text-overflow:ellipsis;
-      white-space:nowrap;
-    }
-    .mini .b{
-      width:44px;
-      padding:7px 0;
-      border-radius:10px;
-      border:1px solid rgba(127,209,255,.35);
-      background:rgba(2,6,14,.7);
-      color:#e7f0ff;
-      font-weight:900;
-      font-size:14px;
-      cursor:pointer;
-    }
-
-    .copybox{
-      margin-top:8px;
-      padding:8px;
-      border-radius:12px;
-      border:1px dashed rgba(127,209,255,.35);
-      background:rgba(2,6,14,.55);
-      color:#cfe2ff;
-      font-size:11px;
-      line-height:1.35;
-      font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
-      white-space:pre;
-      overflow:auto;
-      max-height:170px;
-    }
-    @media (max-height: 700px){
-      .copybox{ max-height:120px; }
-    }
   </style>
-
   <script src="https://cdn.babylonjs.com/babylon.js"></script>
   <script src="https://cdn.babylonjs.com/loaders/babylonjs.loaders.min.js"></script>
 </head>
 <body>
   <canvas id="renderCanvas"></canvas>
-
-  <div class="hud">
-    <div class="panel">
-      <div class="row">
-        <div class="pill" id="weaponLabel">Weapon, cityrunner_smg</div>
-
-        <button class="btn ghost" id="weaponToggle">Switch weapon</button>
-        <button class="btn ghost" id="resetBtn">Reset</button>
-        <button class="btn secondary" id="copyBtn">Copy</button>
-
-        <div class="small">
-          Step, <span id="stepLabel">0.01</span>
-        </div>
-      </div>
-
-      <div class="row">
-        <button class="btn ghost" data-step="0.001">0.001</button>
-        <button class="btn ghost" data-step="0.005">0.005</button>
-        <button class="btn ghost" data-step="0.01">0.01</button>
-        <button class="btn ghost" data-step="0.05">0.05</button>
-      </div>
-
-      <div class="grid">
-        <div class="axis">
-          <h4>WEAPON_POS</h4>
-          <div class="mini">
-            <div class="label">X</div><div class="val" id="wpX"></div>
-            <button class="b" data-k="WEAPON_POS.x" data-d="-">-</button>
-            <button class="b" data-k="WEAPON_POS.x" data-d="+">+</button>
-          </div>
-          <div class="mini">
-            <div class="label">Y</div><div class="val" id="wpY"></div>
-            <button class="b" data-k="WEAPON_POS.y" data-d="-">-</button>
-            <button class="b" data-k="WEAPON_POS.y" data-d="+">+</button>
-          </div>
-          <div class="mini">
-            <div class="label">Z</div><div class="val" id="wpZ"></div>
-            <button class="b" data-k="WEAPON_POS.z" data-d="-">-</button>
-            <button class="b" data-k="WEAPON_POS.z" data-d="+">+</button>
-          </div>
-        </div>
-
-        <div class="axis">
-          <h4>GRIP_POS</h4>
-          <div class="mini">
-            <div class="label">X</div><div class="val" id="gpX"></div>
-            <button class="b" data-k="WEAPON_GRIP_POS.x" data-d="-">-</button>
-            <button class="b" data-k="WEAPON_GRIP_POS.x" data-d="+">+</button>
-          </div>
-          <div class="mini">
-            <div class="label">Y</div><div class="val" id="gpY"></div>
-            <button class="b" data-k="WEAPON_GRIP_POS.y" data-d="-">-</button>
-            <button class="b" data-k="WEAPON_GRIP_POS.y" data-d="+">+</button>
-          </div>
-          <div class="mini">
-            <div class="label">Z</div><div class="val" id="gpZ"></div>
-            <button class="b" data-k="WEAPON_GRIP_POS.z" data-d="-">-</button>
-            <button class="b" data-k="WEAPON_GRIP_POS.z" data-d="+">+</button>
-          </div>
-        </div>
-
-        <div class="axis">
-          <h4>GRIP_ROT</h4>
-          <div class="mini">
-            <div class="label">X</div><div class="val" id="grX"></div>
-            <button class="b" data-k="WEAPON_GRIP_ROT.x" data-d="-">-</button>
-            <button class="b" data-k="WEAPON_GRIP_ROT.x" data-d="+">+</button>
-          </div>
-          <div class="mini">
-            <div class="label">Y</div><div class="val" id="grY"></div>
-            <button class="b" data-k="WEAPON_GRIP_ROT.y" data-d="-">-</button>
-            <button class="b" data-k="WEAPON_GRIP_ROT.y" data-d="+">+</button>
-          </div>
-          <div class="mini">
-            <div class="label">Z</div><div class="val" id="grZ"></div>
-            <button class="b" data-k="WEAPON_GRIP_ROT.z" data-d="-">-</button>
-            <button class="b" data-k="WEAPON_GRIP_ROT.z" data-d="+">+</button>
-          </div>
-        </div>
-      </div>
-
-      <div class="row" style="margin-top:8px;">
-        <div class="pill">Scale, <span id="scaleVal" style="font-family:ui-monospace;"></span></div>
-        <button class="btn ghost" data-k="WEAPON_SCALE" data-d="-">Scale -</button>
-        <button class="btn ghost" data-k="WEAPON_SCALE" data-d="+">Scale +</button>
-
-        <div class="pill">YawFix, <span id="yawVal" style="font-family:ui-monospace;"></span></div>
-        <button class="btn ghost" data-k="WEAPON_YAW_FIX" data-d="-">Yaw -</button>
-        <button class="btn ghost" data-k="WEAPON_YAW_FIX" data-d="+">Yaw +</button>
-
-        <div class="pill">PitchFix, <span id="pitchVal" style="font-family:ui-monospace;"></span></div>
-        <button class="btn ghost" data-k="WEAPON_PITCH_FIX" data-d="-">Pitch -</button>
-        <button class="btn ghost" data-k="WEAPON_PITCH_FIX" data-d="+">Pitch +</button>
-      </div>
-
-      <div class="copybox" id="copyBox"></div>
-    </div>
-  </div>
+  <div id="hud">Loading...</div>
 
   <script>
     const canvas = document.getElementById("renderCanvas");
+    const hud = document.getElementById("hud");
+
     canvas.tabIndex = 1;
     canvas.addEventListener("pointerdown", () => canvas.focus());
+    window.addEventListener("keydown", () => canvas.focus());
 
-    const engine = new BABYLON.Engine(canvas, true, {
-      preserveDrawingBuffer:true,
-      stencil:true
-    });
-
+    const engine = new BABYLON.Engine(canvas, true, { preserveDrawingBuffer:true, stencil:true });
     const scene  = new BABYLON.Scene(engine);
     scene.clearColor = new BABYLON.Color4(0,0,0,1);
 
     const camera = new BABYLON.ArcRotateCamera(
-      "cam",
-      Math.PI * 1.2,
-      Math.PI / 2.35,
-      10.0,
-      new BABYLON.Vector3(0, 1.0, 0),
-      scene
+      "cam", Math.PI * 1.2, Math.PI / 2.35, 10.0,
+      new BABYLON.Vector3(0, 1.0, 0), scene
     );
-
     camera.attachControl(canvas, true);
     camera.panningSensibility = 0;
     camera.wheelPrecision = 60;
 
+    // allow arrow keys for our tuner, kill camera keyboard
     camera.inputs.removeByType("ArcRotateCameraKeyboardMoveInput");
     if (camera.inputs && camera.inputs.attached && camera.inputs.attached.keyboard) {
       camera.inputs.attached.keyboard.keysUp = [];
@@ -324,7 +89,7 @@
     const SOLDIER_ROOT = "/assets/warzone3d/soldier_gltf_3/";
     const SOLDIER_FILE = "scene.gltf";
 
-    const BASIC_PISTOL_ROOT = "/assets/warzone3d/weapons/wz_basic_pistol/";
+    const BASIC_PISTOL_ROOT   = "/assets/warzone3d/weapons/wz_basic_pistol/";
     const CITYRUNNER_SMG_ROOT = "/assets/warzone3d/weapons/wz_cityrunner_smg/";
     const WEAPON_FILE = "scene.gltf";
 
@@ -333,15 +98,14 @@
       cityrunner_smg: { root: CITYRUNNER_SMG_ROOT, file: WEAPON_FILE }
     };
 
-    // Start on SMG
+    // Start on SMG (with fixes)
     let ACTIVE_WEAPON_KEY = "cityrunner_smg";
 
     const SOLDIER_ANIM_SPEED = 0.65;
-
     const AUTO_OSC_SPEED = 0.35;
     const AUTO_MAX_YAW   = Math.PI * 0.45;
 
-    // ---- Per-weapon presets, pistol unchanged, SMG scale 0.11, plus pitch fix to point straight ----
+    // ----- Per-weapon defaults -----
     const PRESETS = {
       basic_pistol: {
         WEAPON_SCALE: 0.07,
@@ -352,28 +116,21 @@
         WEAPON_GRIP_POS: new BABYLON.Vector3( 3.634, -0.030, -11.272),
         WEAPON_GRIP_ROT: new BABYLON.Vector3(-0.260, -0.040,  0.010)
       },
-
       cityrunner_smg: {
-        // requested
         WEAPON_SCALE: 0.11,
-
-        // keep same yaw as base to start
         WEAPON_YAW_FIX: Math.PI * 0.5,
 
-        // FIX: pitch up so it does not point down
-        // if you still see a tiny downward angle, nudge this more negative in 0.01 steps
+        // points up to counter "downward barrel"
         WEAPON_PITCH_FIX: -0.55,
 
-        // start from pistol attach so it sits in the hand, you can fine tune these after
         WEAPON_POS:      new BABYLON.Vector3(-1.069,  0.327, -0.058),
         WEAPON_GRIP_POS: new BABYLON.Vector3( 3.634, -0.030, -11.272),
 
-        // slight extra grip pitch correction for SMG, paired with pitch fix
+        // less downward tilt than pistol, as a starting point
         WEAPON_GRIP_ROT: new BABYLON.Vector3(-0.120, -0.040,  0.010)
       }
     };
 
-    // Live tunables, cloned from current weapon preset
     const TUNE = {
       WEAPON_SCALE: 0.07,
       WEAPON_YAW_FIX: Math.PI * 0.5,
@@ -385,11 +142,9 @@
 
     function loadPresetIntoTune(key){
       const p = PRESETS[key] || PRESETS.basic_pistol;
-
       TUNE.WEAPON_SCALE = p.WEAPON_SCALE;
       TUNE.WEAPON_YAW_FIX = p.WEAPON_YAW_FIX;
       TUNE.WEAPON_PITCH_FIX = p.WEAPON_PITCH_FIX;
-
       TUNE.WEAPON_POS.copyFrom(p.WEAPON_POS);
       TUNE.WEAPON_GRIP_POS.copyFrom(p.WEAPON_GRIP_POS);
       TUNE.WEAPON_GRIP_ROT.copyFrom(p.WEAPON_GRIP_ROT);
@@ -397,17 +152,15 @@
 
     function saveTuneBackToPreset(key){
       const p = PRESETS[key] || PRESETS.basic_pistol;
-
       p.WEAPON_SCALE = TUNE.WEAPON_SCALE;
       p.WEAPON_YAW_FIX = TUNE.WEAPON_YAW_FIX;
       p.WEAPON_PITCH_FIX = TUNE.WEAPON_PITCH_FIX;
-
       p.WEAPON_POS.copyFrom(TUNE.WEAPON_POS);
       p.WEAPON_GRIP_POS.copyFrom(TUNE.WEAPON_GRIP_POS);
       p.WEAPON_GRIP_ROT.copyFrom(TUNE.WEAPON_GRIP_ROT);
     }
 
-    // Arm correction
+    // Arm correction (same as before)
     const qArm     = BABYLON.Quaternion.FromEulerAngles(-0.10,  0.00,  0.00);
     const qForeArm = BABYLON.Quaternion.FromEulerAngles(-0.25,  0.00,  0.00);
     const qShould  = BABYLON.Quaternion.FromEulerAngles( 0.00,  0.00, -0.05);
@@ -415,6 +168,7 @@
     const WRIST_TWIST_ON = false;
     const qWrist = BABYLON.Quaternion.FromEulerAngles(0.00, 0.00, -0.25);
 
+    // ---------- helpers ----------
     async function fetchHeadOrGet(url){
       try{
         const r = await fetch(url, { method:"HEAD", cache:"no-store" });
@@ -440,10 +194,12 @@
       return rootUrl + rel;
     }
 
-    async function preflightGltf(rootUrl, fileName){
+    async function preflightGltf(rootUrl, fileName, label){
       const gltfUrl = rootUrl + fileName;
+      hud.textContent += `\n[check] ${label} gltf: ${gltfUrl}`;
 
       const gltfCheck = await checkUrl(gltfUrl);
+      hud.textContent += `\n       status: ${gltfCheck.status} ok:${gltfCheck.ok}`;
       if (!gltfCheck.ok) return false;
 
       let gltf;
@@ -451,20 +207,18 @@
         const r = await fetch(gltfUrl, { cache:"no-store" });
         gltf = await r.json();
       }catch(e){
+        hud.textContent += `\n       json read failed`;
         return false;
       }
 
       const deps = [];
-      if (Array.isArray(gltf.buffers)){
-        gltf.buffers.forEach(b => b?.uri && deps.push(b.uri));
-      }
-      if (Array.isArray(gltf.images)){
-        gltf.images.forEach(img => img?.uri && deps.push(img.uri));
-      }
+      if (Array.isArray(gltf.buffers)) gltf.buffers.forEach(b => b?.uri && deps.push(b.uri));
+      if (Array.isArray(gltf.images))  gltf.images.forEach(i => i?.uri && deps.push(i.uri));
 
       for (const uri of deps){
         const url = joinUrl(rootUrl, uri);
         const st = await checkUrl(url);
+        hud.textContent += `\n       dep: ${uri} -> ${st.status} ok:${st.ok}`;
         if (!st.ok) return false;
       }
       return true;
@@ -501,17 +255,16 @@
     }
 
     async function importModel(label, rootUrl, fileName){
+      hud.textContent += `\n[load] ${label}: ${rootUrl}${fileName}`;
       const result = await BABYLON.SceneLoader.ImportMeshAsync("", rootUrl, fileName, scene);
 
       const wrapper = new BABYLON.TransformNode(label + "Root", scene);
 
       const gltfRoot = result.meshes && result.meshes.length ? result.meshes[0] : null;
-      if (gltfRoot){
-        gltfRoot.parent = wrapper;
-      } else {
-        result.meshes.forEach(m => { m.parent = wrapper; });
-      }
+      if (gltfRoot) gltfRoot.parent = wrapper;
+      else result.meshes.forEach(m => { m.parent = wrapper; });
 
+      hud.textContent += `\n       meshes:${(result.meshes||[]).length} skeletons:${(result.skeletons||[]).length} animGroups:${(result.animationGroups||[]).length}`;
       return { root: wrapper, result };
     }
 
@@ -522,14 +275,13 @@
 
     function findBoneByNameOrIncludes(skeleton, want){
       if (!skeleton || !skeleton.bones) return null;
-
       const exact = skeleton.bones.find(b => (b.name || "") === want);
       if (exact) return exact;
-
       const wantLow = (want || "").toLowerCase();
       return skeleton.bones.find(b => ((b.name || "").toLowerCase().includes(wantLow))) || null;
     }
 
+    // ---- live refs ----
     let soldier = null;
     let weapon = null;
     let attachInfo = null;
@@ -572,14 +324,11 @@
       if (!weaponRoot || !weaponGrip) return;
 
       weaponRoot.position.copyFrom(TUNE.WEAPON_POS);
-
-      // IMPORTANT: we now include pitch fix here, so SMG can point straight
       weaponRoot.rotation.set(
         TUNE.WEAPON_PITCH_FIX,
         Math.PI + TUNE.WEAPON_YAW_FIX,
         0
       );
-
       weaponRoot.scaling.set(TUNE.WEAPON_SCALE, TUNE.WEAPON_SCALE, TUNE.WEAPON_SCALE);
 
       weaponGrip.position.copyFrom(TUNE.WEAPON_GRIP_POS);
@@ -600,125 +349,165 @@
       clearWeaponModel();
 
       const cfg = WEAPON_MAP[key] || WEAPON_MAP.basic_pistol;
-      const okWeapon = await preflightGltf(cfg.root, cfg.file);
-      if (!okWeapon) return;
+      const okWeapon = await preflightGltf(cfg.root, cfg.file, `weapon:${key}`);
+      if (!okWeapon){
+        hud.textContent += `\n[FAIL] weapon preflight`;
+        return;
+      }
 
       weapon = await importModel("weapon", cfg.root, cfg.file);
       weapon.root.setEnabled(false);
 
       attachInfo = attachWeaponToRightHandLive(soldier, weapon);
-      applyTuneToWeapon();
-    }
-
-    // ---- HUD ----
-    let STEP = 0.01;
-
-    function fmt(n){
-      const v = (typeof n === "number") ? n : 0;
-      return (Math.round(v * 100000) / 100000).toFixed(5);
-    }
-
-    function updateHud(){
-      document.getElementById("weaponLabel").textContent = "Weapon, " + ACTIVE_WEAPON_KEY;
-      document.getElementById("stepLabel").textContent = STEP.toString();
-
-      document.getElementById("wpX").textContent = fmt(TUNE.WEAPON_POS.x);
-      document.getElementById("wpY").textContent = fmt(TUNE.WEAPON_POS.y);
-      document.getElementById("wpZ").textContent = fmt(TUNE.WEAPON_POS.z);
-
-      document.getElementById("gpX").textContent = fmt(TUNE.WEAPON_GRIP_POS.x);
-      document.getElementById("gpY").textContent = fmt(TUNE.WEAPON_GRIP_POS.y);
-      document.getElementById("gpZ").textContent = fmt(TUNE.WEAPON_GRIP_POS.z);
-
-      document.getElementById("grX").textContent = fmt(TUNE.WEAPON_GRIP_ROT.x);
-      document.getElementById("grY").textContent = fmt(TUNE.WEAPON_GRIP_ROT.y);
-      document.getElementById("grZ").textContent = fmt(TUNE.WEAPON_GRIP_ROT.z);
-
-      document.getElementById("scaleVal").textContent = fmt(TUNE.WEAPON_SCALE);
-      document.getElementById("yawVal").textContent = fmt(TUNE.WEAPON_YAW_FIX);
-      document.getElementById("pitchVal").textContent = fmt(TUNE.WEAPON_PITCH_FIX);
-
-      const txt =
-`// LOCK THESE IN, ${ACTIVE_WEAPON_KEY}
-const WEAPON_SCALE = ${fmt(TUNE.WEAPON_SCALE)};
-const WEAPON_YAW_FIX = ${fmt(TUNE.WEAPON_YAW_FIX)};
-const WEAPON_PITCH_FIX = ${fmt(TUNE.WEAPON_PITCH_FIX)};
-
-const WEAPON_POS      = new BABYLON.Vector3(${fmt(TUNE.WEAPON_POS.x)}, ${fmt(TUNE.WEAPON_POS.y)}, ${fmt(TUNE.WEAPON_POS.z)});
-const WEAPON_GRIP_POS = new BABYLON.Vector3(${fmt(TUNE.WEAPON_GRIP_POS.x)}, ${fmt(TUNE.WEAPON_GRIP_POS.y)}, ${fmt(TUNE.WEAPON_GRIP_POS.z)});
-const WEAPON_GRIP_ROT = new BABYLON.Vector3(${fmt(TUNE.WEAPON_GRIP_ROT.x)}, ${fmt(TUNE.WEAPON_GRIP_ROT.y)}, ${fmt(TUNE.WEAPON_GRIP_ROT.z)});`;
-
-      document.getElementById("copyBox").textContent = txt;
-    }
-
-    function bump(path, dir){
-      const sign = (dir === "+") ? 1 : -1;
-
-      if (path === "WEAPON_SCALE"){
-        TUNE.WEAPON_SCALE = Math.max(0.0001, TUNE.WEAPON_SCALE + sign * STEP);
-      } else if (path === "WEAPON_YAW_FIX"){
-        TUNE.WEAPON_YAW_FIX = TUNE.WEAPON_YAW_FIX + sign * STEP;
-      } else if (path === "WEAPON_PITCH_FIX"){
-        TUNE.WEAPON_PITCH_FIX = TUNE.WEAPON_PITCH_FIX + sign * STEP;
-      } else {
-        const [obj, axis] = path.split(".");
-        if (!obj || !axis) return;
-        const v = TUNE[obj];
-        if (!v) return;
-        v[axis] = v[axis] + sign * STEP;
+      if (!attachInfo?.ok){
+        hud.textContent += `\n[FAIL] attachWeaponToRightHand`;
+        return;
       }
 
       applyTuneToWeapon();
-      saveTuneBackToPreset(ACTIVE_WEAPON_KEY);
-      updateHud();
+      hud.textContent += `\n[OK] weapon attached`;
     }
 
-    function resetTune(){
-      loadPresetIntoTune(ACTIVE_WEAPON_KEY);
-      applyTuneToWeapon();
-      updateHud();
+    // ---------- Keyboard tuner ----------
+    // Keys:
+    //   1-6 select what to edit
+    //   arrows = adjust axis (X/Y), Q/E = Z
+    //   Shift = faster, Alt = slower
+    //   Tab = cycle weapons
+    //   C = copy constants to clipboard
+    //   R = reset current weapon to its preset
+    //
+    // Modes:
+    //   1: WEAPON_POS
+    //   2: WEAPON_GRIP_POS
+    //   3: WEAPON_GRIP_ROT
+    //   4: YAW_FIX
+    //   5: PITCH_FIX
+    //   6: SCALE
+    let MODE = 1;
+
+    function stepForEvent(ev){
+      let s = 0.01;
+      if (ev.shiftKey) s = 0.05;
+      if (ev.altKey)   s = 0.001;
+      return s;
     }
 
-    async function toggleWeapon(){
-      saveTuneBackToPreset(ACTIVE_WEAPON_KEY);
+    function lockText(){
+      return `// LOCK THESE IN, ${ACTIVE_WEAPON_KEY}
+const WEAPON_SCALE = ${TUNE.WEAPON_SCALE.toFixed(5)};
+const WEAPON_YAW_FIX = ${TUNE.WEAPON_YAW_FIX.toFixed(5)};
+const WEAPON_PITCH_FIX = ${TUNE.WEAPON_PITCH_FIX.toFixed(5)};
 
-      ACTIVE_WEAPON_KEY = (ACTIVE_WEAPON_KEY === "cityrunner_smg") ? "basic_pistol" : "cityrunner_smg";
-
-      loadPresetIntoTune(ACTIVE_WEAPON_KEY);
-      updateHud();
-
-      await loadWeapon(ACTIVE_WEAPON_KEY);
+const WEAPON_POS      = new BABYLON.Vector3(${TUNE.WEAPON_POS.x.toFixed(5)}, ${TUNE.WEAPON_POS.y.toFixed(5)}, ${TUNE.WEAPON_POS.z.toFixed(5)});
+const WEAPON_GRIP_POS = new BABYLON.Vector3(${TUNE.WEAPON_GRIP_POS.x.toFixed(5)}, ${TUNE.WEAPON_GRIP_POS.y.toFixed(5)}, ${TUNE.WEAPON_GRIP_POS.z.toFixed(5)});
+const WEAPON_GRIP_ROT = new BABYLON.Vector3(${TUNE.WEAPON_GRIP_ROT.x.toFixed(5)}, ${TUNE.WEAPON_GRIP_ROT.y.toFixed(5)}, ${TUNE.WEAPON_GRIP_ROT.z.toFixed(5)});`;
     }
 
-    async function copyToClipboard(){
-      const text = document.getElementById("copyBox").textContent || "";
+    async function copyLock(){
+      const txt = lockText();
       try{
-        await navigator.clipboard.writeText(text);
+        await navigator.clipboard.writeText(txt);
+        hud.textContent += `\n[COPIED]`;
       }catch(e){
-        window.prompt("Copy these constants", text);
+        prompt("Copy these constants", txt);
       }
     }
 
-    document.querySelectorAll("[data-step]").forEach(b => {
-      b.addEventListener("click", () => {
-        STEP = parseFloat(b.getAttribute("data-step") || "0.01") || 0.01;
-        updateHud();
-      });
-    });
+    function printHud(){
+      const modeName =
+        MODE===1 ? "WEAPON_POS" :
+        MODE===2 ? "GRIP_POS" :
+        MODE===3 ? "GRIP_ROT" :
+        MODE===4 ? "YAW_FIX" :
+        MODE===5 ? "PITCH_FIX" :
+        MODE===6 ? "SCALE" : "???";
 
-    document.querySelectorAll("[data-k][data-d]").forEach(b => {
-      b.addEventListener("click", () => bump(b.getAttribute("data-k"), b.getAttribute("data-d")));
-    });
+      hud.textContent =
+`Weapon: ${ACTIVE_WEAPON_KEY}   Mode: ${MODE} (${modeName})
+Keys: 1-6 mode, arrows XY, Q/E Z, Shift fast, Alt slow, Tab switch weapon, R reset, C copy
 
-    document.getElementById("weaponToggle").addEventListener("click", toggleWeapon);
-    document.getElementById("resetBtn").addEventListener("click", resetTune);
-    document.getElementById("copyBtn").addEventListener("click", copyToClipboard);
+WEAPON_POS     : ${TUNE.WEAPON_POS.x.toFixed(5)}, ${TUNE.WEAPON_POS.y.toFixed(5)}, ${TUNE.WEAPON_POS.z.toFixed(5)}
+GRIP_POS       : ${TUNE.WEAPON_GRIP_POS.x.toFixed(5)}, ${TUNE.WEAPON_GRIP_POS.y.toFixed(5)}, ${TUNE.WEAPON_GRIP_POS.z.toFixed(5)}
+GRIP_ROT       : ${TUNE.WEAPON_GRIP_ROT.x.toFixed(5)}, ${TUNE.WEAPON_GRIP_ROT.y.toFixed(5)}, ${TUNE.WEAPON_GRIP_ROT.z.toFixed(5)}
+YAW_FIX        : ${TUNE.WEAPON_YAW_FIX.toFixed(5)}
+PITCH_FIX      : ${TUNE.WEAPON_PITCH_FIX.toFixed(5)}
+SCALE          : ${TUNE.WEAPON_SCALE.toFixed(5)}
+
+${lockText()}`;
+    }
+
+    function adjust(ev, dx, dy, dz){
+      const s = stepForEvent(ev);
+      if (MODE === 1){
+        TUNE.WEAPON_POS.x += dx*s; TUNE.WEAPON_POS.y += dy*s; TUNE.WEAPON_POS.z += dz*s;
+      } else if (MODE === 2){
+        TUNE.WEAPON_GRIP_POS.x += dx*s; TUNE.WEAPON_GRIP_POS.y += dy*s; TUNE.WEAPON_GRIP_POS.z += dz*s;
+      } else if (MODE === 3){
+        TUNE.WEAPON_GRIP_ROT.x += dx*s; TUNE.WEAPON_GRIP_ROT.y += dy*s; TUNE.WEAPON_GRIP_ROT.z += dz*s;
+      } else if (MODE === 4){
+        TUNE.WEAPON_YAW_FIX += dx*s; // use left/right
+      } else if (MODE === 5){
+        TUNE.WEAPON_PITCH_FIX += dy*s; // use up/down
+      } else if (MODE === 6){
+        TUNE.WEAPON_SCALE = Math.max(0.0001, TUNE.WEAPON_SCALE + dy*s); // up/down
+      }
+      applyTuneToWeapon();
+      saveTuneBackToPreset(ACTIVE_WEAPON_KEY);
+      printHud();
+    }
+
+    window.addEventListener("keydown", async (ev) => {
+      // prevent scrolling
+      if (["ArrowUp","ArrowDown","ArrowLeft","ArrowRight","Tab"," "].includes(ev.key)) ev.preventDefault();
+
+      if (ev.key >= "1" && ev.key <= "6"){
+        MODE = parseInt(ev.key, 10);
+        printHud();
+        return;
+      }
+
+      if (ev.key === "Tab"){
+        ev.preventDefault();
+        saveTuneBackToPreset(ACTIVE_WEAPON_KEY);
+        ACTIVE_WEAPON_KEY = (ACTIVE_WEAPON_KEY === "cityrunner_smg") ? "basic_pistol" : "cityrunner_smg";
+        loadPresetIntoTune(ACTIVE_WEAPON_KEY);
+        await loadWeapon(ACTIVE_WEAPON_KEY);
+        printHud();
+        return;
+      }
+
+      if (ev.key.toLowerCase() === "r"){
+        loadPresetIntoTune(ACTIVE_WEAPON_KEY);
+        applyTuneToWeapon();
+        printHud();
+        return;
+      }
+
+      if (ev.key.toLowerCase() === "c"){
+        await copyLock();
+        printHud();
+        return;
+      }
+
+      // Arrow/QE adjustments
+      if (ev.key === "ArrowLeft")  return adjust(ev, -1,  0,  0);
+      if (ev.key === "ArrowRight") return adjust(ev,  1,  0,  0);
+      if (ev.key === "ArrowUp")    return adjust(ev,  0,  1,  0);
+      if (ev.key === "ArrowDown")  return adjust(ev,  0, -1,  0);
+      if (ev.key.toLowerCase() === "q") return adjust(ev, 0, 0, -1);
+      if (ev.key.toLowerCase() === "e") return adjust(ev, 0, 0,  1);
+    }, { passive:false });
 
     // ---------- main ----------
     (async () => {
       try{
-        const okSoldier = await preflightGltf(SOLDIER_ROOT, SOLDIER_FILE);
-        if (!okSoldier) return;
+        hud.textContent = "Loading, preflight soldier...";
+        const okSoldier = await preflightGltf(SOLDIER_ROOT, SOLDIER_FILE, "soldier");
+        if (!okSoldier){
+          hud.textContent += "\n[FAIL] soldier preflight";
+          return;
+        }
 
         soldier = await importModel("soldier", SOLDIER_ROOT, SOLDIER_FILE);
         soldier.root.rotation.y = Math.PI;
@@ -733,7 +522,7 @@ const WEAPON_GRIP_ROT = new BABYLON.Vector3(${fmt(TUNE.WEAPON_GRIP_ROT.x)}, ${fm
 
         frameCameraToRoot(soldier.root);
 
-        // load preset, then weapon
+        // start on SMG preset
         loadPresetIntoTune(ACTIVE_WEAPON_KEY);
         await loadWeapon(ACTIVE_WEAPON_KEY);
 
@@ -772,9 +561,10 @@ const WEAPON_GRIP_ROT = new BABYLON.Vector3(${fmt(TUNE.WEAPON_GRIP_ROT.x)}, ${fm
           }
         });
 
-        updateHud();
+        printHud();
 
       }catch(e){
+        hud.textContent += "\n[EXCEPTION] " + (e?.message || e);
         console.warn("Test failed", e);
       }
     })();
