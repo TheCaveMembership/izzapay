@@ -26,6 +26,7 @@
       overflow:hidden;
     }
 
+    /* Manual landscape for Pi Browser */
     .rot-wrapper{
       position:fixed;
       top:0;
@@ -144,6 +145,7 @@
       gap:10px;
     }
 
+    /* Left side: map / drop zone preview */
     .zone-panel{
       border-radius:14px;
       background:linear-gradient(145deg,#050815,#02030c);
@@ -170,6 +172,7 @@
       font-size:12px;
     }
 
+    /* Map box expands down */
     .zone-canvas-shell{
       border-radius:10px;
       border:1px solid rgba(39,62,130,.9);
@@ -193,6 +196,7 @@
       z-index:1;
     }
 
+    /* Soldier canvas */
     .zone-soldier-canvas{
       position:absolute;
       left:50%;
@@ -206,6 +210,7 @@
       touch-action:none;
     }
 
+    /* Right side: friends + character */
     .side-panel{
       display:flex;
       flex-direction:column;
@@ -302,6 +307,7 @@
       color:#ffefc6;
     }
 
+    /* Overlays */
     .overlay{
       position:absolute;
       inset:0;
@@ -356,6 +362,7 @@
       align-items:center;
     }
 
+    /* Custom IZZA keyboard display */
     .izzakey-display{
       flex:1;
       min-height:30px;
@@ -536,6 +543,7 @@
           </aside>
         </div>
 
+        <!-- INVITE OVERLAY -->
         <div class="overlay" id="inviteOverlay">
           <div class="overlay-card">
             <div class="overlay-header">
@@ -557,6 +565,7 @@
           </div>
         </div>
 
+        <!-- SEARCH OVERLAY -->
         <div class="overlay" id="searchOverlay">
           <div class="overlay-card">
             <div class="overlay-header">
@@ -580,6 +589,7 @@
           </div>
         </div>
 
+        <!-- DEPLOY OVERLAY -->
         <div class="overlay" id="deployOverlay">
           <div class="overlay-card">
             <div class="overlay-header">
@@ -596,11 +606,12 @@
           </div>
         </div>
 
-      </div>
+      </div><!-- /.shell -->
     </div>
   </div>
 
   <script>
+    // Manual landscape
     (function(){
       const wrapper = document.getElementById("rotWrapper");
       function updateLayout(){
@@ -621,6 +632,7 @@
       updateLayout();
     })();
 
+    // ---------- Overlays + Search + Shop button ----------
     (function(){
       function show(id){
         const el = document.getElementById(id);
@@ -647,6 +659,7 @@
         window.location.href = "/warzone/shop" + qs;
       });
 
+      // Custom IZZA keyboard for player search
       const searchDisplay = document.getElementById("searchDisplay");
       const keyGrid = document.getElementById("izzakeyGrid");
       const searchResults = document.getElementById("searchResults");
@@ -789,6 +802,7 @@
       searchGo?.addEventListener("click", doSearch);
     })();
 
+    // ---------- USER QS HELPERS (matches shop) ----------
     const SRV_USER = {{ (player.username or '') | tojson }};
     function stripAt(s){ return (s||"").toString().trim().replace(/^@+/, ""); }
     function canonU(s){
@@ -825,7 +839,9 @@
         localStorage.setItem("izzaUserU", USER_U);
       }catch(e){}
     }
+    // --------------------------------------------------------
 
+    // ---------- Babylon.js lobby soldier ----------
     (function(){
       const canvas = document.getElementById("soldierCanvas");
       if (!canvas || !window.BABYLON) {
@@ -842,36 +858,41 @@
       let currentWrapper = null;
       let currentContainer = null;
 
+      // weapon state
       let currentWeaponContainer = null;
       let currentWeaponRoot = null;
       let currentWeaponGrip = null;
 
+      /* SHADOW ANCHOR */
       let shadowPlane = null;
       let shadowMat = null;
       const SHADOW_WORLD_Y = 0.005;
 
       const SOLDIER_ANIM_SPEED = 0.65;
+
       const AUTO_OSC_SPEED = 0.35;
       const AUTO_MAX_YAW   = Math.PI * 0.45;
 
+      // ✅ PER WEAPON TUNING, pistol stays unchanged, SMG is your locked-in perfect values
       const WEAPON_TUNING = {
         wz_basic_pistol: {
           WEAPON_SCALE: 0.07,
-          YAW_BASE: Math.PI,
           WEAPON_YAW_FIX: Math.PI * 0.5,
           WEAPON_PITCH_FIX: 0.0,
+
           WEAPON_POS:      new BABYLON.Vector3(-1.069,  0.327, -0.058),
           WEAPON_GRIP_POS: new BABYLON.Vector3( 3.634, -0.030, -11.272),
           WEAPON_GRIP_ROT: new BABYLON.Vector3(-0.260, -0.040,  0.010),
         },
+
         wz_cityrunner_smg: {
-          WEAPON_SCALE: 0.11000,
-          YAW_BASE: 0.0,
-          WEAPON_YAW_FIX: 1.63080,
-          WEAPON_PITCH_FIX: -1.84000,
-          WEAPON_POS:      new BABYLON.Vector3(0.71100, 1.20700, -0.05800),
-          WEAPON_GRIP_POS: new BABYLON.Vector3(2.10400, 2.21000, -11.27200),
-          WEAPON_GRIP_ROT: new BABYLON.Vector3(-0.11000, -0.18000, 0.01000),
+          WEAPON_SCALE: 0.11,
+          WEAPON_YAW_FIX: 1.6308,
+          WEAPON_PITCH_FIX: -1.84,
+
+          WEAPON_POS:      new BABYLON.Vector3(0.7110, 1.2070, -0.0580),
+          WEAPON_GRIP_POS: new BABYLON.Vector3(2.1040, 2.2100, -11.2720),
+          WEAPON_GRIP_ROT: new BABYLON.Vector3(-0.1100, -0.1800, 0.0100),
         }
       };
 
@@ -880,6 +901,7 @@
         return WEAPON_TUNING[sku] || WEAPON_TUNING.wz_basic_pistol;
       }
 
+      // Arm correction, same pattern you used in test soldier
       const qArm     = BABYLON.Quaternion.FromEulerAngles(-0.10,  0.00,  0.00);
       const qForeArm = BABYLON.Quaternion.FromEulerAngles(-0.25,  0.00,  0.00);
       const qShould  = BABYLON.Quaternion.FromEulerAngles( 0.00,  0.00, -0.05);
@@ -949,6 +971,7 @@
         shadowPlane.position.x = -0.85;
         shadowPlane.position.z = 0.00;
       }
+      /* END SHADOW ANCHOR */
 
       function getSkinAsset(){
         return { rootUrl:"/assets/warzone3d/soldier_gltf_3/", fileName:"scene.gltf" };
@@ -956,12 +979,15 @@
 
       function getWeaponAsset(weaponSku){
         const sku = (weaponSku || "").toString().trim();
+
         if(sku === "wz_basic_pistol"){
           return { rootUrl:"/assets/warzone3d/weapons/wz_basic_pistol/", fileName:"scene.gltf" };
         }
+
         if(sku === "wz_cityrunner_smg"){
           return { rootUrl:"/assets/warzone3d/weapons/wz_cityrunner_smg/", fileName:"scene.gltf" };
         }
+
         return null;
       }
 
@@ -1004,15 +1030,19 @@
         }
       }
 
+      // ---------- TEXTURE OVERRIDES ----------
       const TEXTURE_BASE = "/assets/warzone3d/soldier_gltf_3/textures/";
+
       const OVERRIDE_FILES = [
         "material_8_diffuse.png",
         "material_9_diffuse.png",
         "material_10_diffuse.png",
         "material_11_diffuse.png"
       ];
+
       const SKU_TO_TEXTURE_FOLDER = {
         "wz_neon_edge": "neon_edge",
+
         "wz_urban_shadow": "urban_shadow",
         "wz_cinder_camo": "cinder_camo",
         "wz_glow_legend": "glow_legend"
@@ -1064,6 +1094,7 @@
           overrideTextureOnMaterial(mat, "diffuseTexture", folder);
         });
       }
+      // ---------- END TEXTURE OVERRIDES ----------
 
       function buildWrapperFromContainer(container){
         const wrapper = new BABYLON.TransformNode("lobbySkinWrap", scene);
@@ -1149,9 +1180,10 @@
 
         weaponRoot.position.copyFrom(T.WEAPON_POS);
 
+        // ✅ pitch fix makes SMG point straight, yaw fix keeps it aligned
         weaponRoot.rotation.set(
           (T.WEAPON_PITCH_FIX || 0.0),
-          (T.YAW_BASE || 0.0) + (T.WEAPON_YAW_FIX || 0.0),
+          Math.PI + (T.WEAPON_YAW_FIX || 0.0),
           0
         );
 
@@ -1165,20 +1197,10 @@
         currentWeaponGrip = weaponGrip;
 
         const wMeshes = (w.meshes || []);
-        const wNodes  = (w.transformNodes || []);
-
-        const rootMesh = wMeshes[0] || null;
-        const rootNode = wNodes[0]  || null;
-
         wMeshes.forEach(m => {
           if(!m) return;
-          if(m === rootMesh) return;
+          if(m === wMeshes[0]) return;
           try{ m.parent = weaponGrip; }catch(e){}
-        });
-        wNodes.forEach(n => {
-          if(!n) return;
-          if(n === rootNode) return;
-          try{ n.parent = weaponGrip; }catch(e){}
         });
       }
 
@@ -1221,9 +1243,11 @@
 
           normalizeToGroundAndHeight(wrapper, 1.75);
           wrapper.scaling.scaleInPlace(0.72);
+
           wrapper.position.y += 0.06;
 
           frameCameraToRoot(wrapper);
+
           attachShadowToWrapper(wrapper);
 
           if(container.animationGroups && container.animationGroups.length){
