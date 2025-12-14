@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="utf-8">
-  <title>War Zone test, soldier + pistol attach</title>
+  <title>War Zone test, soldier + weapon attach</title>
   <meta name="viewport" content="width=device-width,initial-scale=1">
   <style>
     html,body{
@@ -81,8 +81,18 @@
     const SOLDIER_ROOT = "/assets/warzone3d/soldier_gltf_3/";
     const SOLDIER_FILE = "scene.gltf";
 
-    const WEAPON_ROOT  = "/assets/warzone3d/weapons/wz_basic_pistol/";
-    const WEAPON_FILE  = "scene.gltf";
+    // Weapons
+    const BASIC_PISTOL_ROOT = "/assets/warzone3d/weapons/wz_basic_pistol/";
+    const CITYRUNNER_SMG_ROOT = "/assets/warzone3d/weapons/wz_cityrunner_smg/";
+    const WEAPON_FILE = "scene.gltf";
+
+    // Switch this to test positioning per weapon
+    const ACTIVE_WEAPON_KEY = "cityrunner_smg"; // "basic_pistol" | "cityrunner_smg"
+
+    const WEAPON_MAP = {
+      basic_pistol:   { root: BASIC_PISTOL_ROOT,   file: WEAPON_FILE },
+      cityrunner_smg: { root: CITYRUNNER_SMG_ROOT, file: WEAPON_FILE }
+    };
 
     const SOLDIER_ANIM_SPEED = 0.65;
 
@@ -93,6 +103,8 @@
     const WEAPON_YAW_FIX = Math.PI * 0.5;
 
     // ✅ LOCKED IN, from your final tuning screenshot
+    // NOTE: these values were tuned for the pistol.
+    // Use this test page to retune for the SMG if it sits wrong.
     const WEAPON_POS      = new BABYLON.Vector3(-1.069,  0.327, -0.058);
     const WEAPON_GRIP_POS = new BABYLON.Vector3( 3.634, -0.030, -11.272);
     const WEAPON_GRIP_ROT = new BABYLON.Vector3(-0.260, -0.040,  0.010);
@@ -241,13 +253,13 @@
       weaponRoot.rotation.set(0, Math.PI + WEAPON_YAW_FIX, 0);
       weaponRoot.scaling.set(WEAPON_SCALE, WEAPON_SCALE, WEAPON_SCALE);
 
-      // weaponGrip re-centers the pistol model to land in the palm
+      // weaponGrip re-centers the model to land in the palm
       const weaponGrip = new BABYLON.TransformNode("weaponGrip", scene);
       weaponGrip.parent = weaponRoot;
       weaponGrip.position.copyFrom(WEAPON_GRIP_POS);
       weaponGrip.rotation.copyFrom(WEAPON_GRIP_ROT);
 
-      // Parent pistol meshes under weaponGrip
+      // Parent weapon meshes under weaponGrip
       (weaponImport.result?.meshes || []).forEach(m => {
         if (!m) return;
         if (m === weaponImport.result.meshes[0]) return; // skip gltf root
@@ -263,8 +275,10 @@
 
     (async () => {
       try{
+        const weaponCfg = WEAPON_MAP[ACTIVE_WEAPON_KEY] || WEAPON_MAP.basic_pistol;
+
         const okSoldier = await preflightGltf(SOLDIER_ROOT, SOLDIER_FILE);
-        const okWeapon  = await preflightGltf(WEAPON_ROOT,  WEAPON_FILE);
+        const okWeapon  = await preflightGltf(weaponCfg.root, weaponCfg.file);
         if (!okSoldier || !okWeapon) return;
 
         const soldier = await importModel("soldier", SOLDIER_ROOT, SOLDIER_FILE);
@@ -278,10 +292,10 @@
           ag[0].speedRatio = SOLDIER_ANIM_SPEED;
         }
 
-        const pistol = await importModel("pistol", WEAPON_ROOT, WEAPON_FILE);
-        pistol.root.setEnabled(false);
+        const weapon = await importModel("weapon", weaponCfg.root, weaponCfg.file);
+        weapon.root.setEnabled(false);
 
-        const attachInfo = attachWeaponToRightHand(soldier, pistol);
+        const attachInfo = attachWeaponToRightHand(soldier, weapon);
 
         frameCameraToRoot(soldier.root);
 
