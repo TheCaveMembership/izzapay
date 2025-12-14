@@ -35,6 +35,17 @@
       z-index:9999;
       pointer-events:none;
     }
+
+    /* collapsed state, only show mini toggle */
+    .hud.collapsed .panel{ display:none; }
+    .hud.collapsed .hudMini{ display:flex; }
+
+    .hudMini{
+      display:none;
+      pointer-events:auto;
+      justify-content:flex-end;
+    }
+
     .panel{
       pointer-events:auto;
       background:rgba(0,0,0,.72);
@@ -67,6 +78,7 @@
       letter-spacing:.02em;
       user-select:none;
       -webkit-user-select:none;
+      white-space:nowrap;
     }
     .btn{
       border:none;
@@ -169,7 +181,6 @@
       overflow:auto;
       max-height:160px;
     }
-
     @media (max-height: 700px){
       .copybox{ max-height:120px; }
     }
@@ -182,8 +193,13 @@
   <canvas id="renderCanvas"></canvas>
 
   <!-- iPhone tuning HUD -->
-  <div class="hud">
-    <div class="panel">
+  <div class="hud" id="hud">
+    <!-- mini show pill when hidden -->
+    <div class="hudMini">
+      <button class="btn ghost" id="showUiBtn">Show UI</button>
+    </div>
+
+    <div class="panel" id="panel">
       <div class="row">
         <div class="pill" id="weaponLabel">Weapon, cityrunner_smg</div>
 
@@ -192,6 +208,8 @@
         <button class="btn ghost" id="resetBtn">Reset</button>
 
         <button class="btn secondary" id="copyBtn">Copy</button>
+
+        <button class="btn ghost" id="hideUiBtn">Hide UI</button>
 
         <div class="small">
           Step, <span id="stepLabel">0.01</span>
@@ -289,6 +307,32 @@
 
   <script>
     const canvas = document.getElementById("renderCanvas");
+
+    // ---- UI hide show ----
+    const hudEl = document.getElementById("hud");
+    const hideUiBtn = document.getElementById("hideUiBtn");
+    const showUiBtn = document.getElementById("showUiBtn");
+
+    function setHudCollapsed(collapsed){
+      if (collapsed) hudEl.classList.add("collapsed");
+      else hudEl.classList.remove("collapsed");
+    }
+
+    hideUiBtn.addEventListener("click", () => setHudCollapsed(true));
+    showUiBtn.addEventListener("click", () => setHudCollapsed(false));
+
+    // Double tap anywhere toggles UI
+    let lastTap = 0;
+    window.addEventListener("touchend", (e) => {
+      const now = Date.now();
+      if (now - lastTap < 280){
+        setHudCollapsed(!hudEl.classList.contains("collapsed"));
+        lastTap = 0;
+      } else {
+        lastTap = now;
+      }
+    }, { passive:true });
+
     canvas.tabIndex = 1;
     canvas.addEventListener("pointerdown", () => canvas.focus());
 
@@ -343,7 +387,6 @@
       cityrunner_smg: { root: CITYRUNNER_SMG_ROOT, file: WEAPON_FILE }
     };
 
-    // Start on SMG
     let ACTIVE_WEAPON_KEY = "cityrunner_smg";
 
     const SOLDIER_ANIM_SPEED = 0.65;
@@ -351,7 +394,6 @@
     const AUTO_OSC_SPEED = 0.35;
     const AUTO_MAX_YAW   = Math.PI * 0.45;
 
-    // --- Tunables (defaults = your pistol lock-in) ---
     const DEFAULTS = {
       WEAPON_SCALE: 0.07,
       WEAPON_YAW_FIX: Math.PI * 0.5,
@@ -370,7 +412,6 @@
       WEAPON_GRIP_ROT: DEFAULTS.WEAPON_GRIP_ROT.clone()
     };
 
-    // Arm correction
     const qArm     = BABYLON.Quaternion.FromEulerAngles(-0.10,  0.00,  0.00);
     const qForeArm = BABYLON.Quaternion.FromEulerAngles(-0.25,  0.00,  0.00);
     const qShould  = BABYLON.Quaternion.FromEulerAngles( 0.00,  0.00, -0.05);
@@ -378,7 +419,6 @@
     const WRIST_TWIST_ON = false;
     const qWrist = BABYLON.Quaternion.FromEulerAngles(0.00, 0.00, -0.25);
 
-    // ---------- helpers ----------
     async function fetchHeadOrGet(url){
       try{
         const r = await fetch(url, { method:"HEAD", cache:"no-store" });
@@ -494,14 +534,12 @@
       return skeleton.bones.find(b => ((b.name || "").toLowerCase().includes(wantLow))) || null;
     }
 
-    // ---- live refs so we can retune without reload ----
     let soldier = null;
     let weapon = null;
     let attachInfo = null;
 
     let weaponRoot = null;
     let weaponGrip = null;
-    let weaponMeshes = [];
 
     function attachWeaponToRightHandLive(soldierImport, weaponImport){
       const skinned = findSkinnedMesh(soldierImport.result);
@@ -515,21 +553,16 @@
       }
       if (!rightHand) return { ok:false };
 
-      // weaponRoot attaches to the hand bone
       weaponRoot = new BABYLON.TransformNode("weaponRoot", scene);
       weaponRoot.attachToBone(rightHand, skinned);
 
-      // weaponGrip re-centers model to land in palm
       weaponGrip = new BABYLON.TransformNode("weaponGrip", scene);
       weaponGrip.parent = weaponRoot;
 
-      // Parent weapon meshes under weaponGrip
-      weaponMeshes = [];
       (weaponImport.result?.meshes || []).forEach(m => {
         if (!m) return;
         if (m === weaponImport.result.meshes[0]) return;
         m.parent = weaponGrip;
-        weaponMeshes.push(m);
       });
 
       const rightArm      = findBoneByNameOrIncludes(skeleton, "mixamorig:RightArm.207_219") || findBoneByNameOrIncludes(skeleton, "RightArm");
@@ -551,24 +584,9 @@
     }
 
     function clearWeaponModel(){
-      try{
-        if (weapon && weapon.root){
-          weapon.root.dispose(false, true);
-        }
-      }catch(e){}
-      try{
-        if (weaponRoot){
-          weaponRoot.dispose(false, true);
-          weaponRoot = null;
-        }
-      }catch(e){}
-      try{
-        if (weaponGrip){
-          weaponGrip.dispose(false, true);
-          weaponGrip = null;
-        }
-      }catch(e){}
-      weaponMeshes = [];
+      try{ if (weapon && weapon.root) weapon.root.dispose(false, true); }catch(e){}
+      try{ if (weaponRoot){ weaponRoot.dispose(false, true); weaponRoot = null; } }catch(e){}
+      try{ if (weaponGrip){ weaponGrip.dispose(false, true); weaponGrip = null; } }catch(e){}
       weapon = null;
       attachInfo = null;
     }
@@ -588,7 +606,6 @@
       applyTuneToWeapon();
     }
 
-    // ---- HUD wiring ----
     let STEP = 0.01;
 
     function fmt(n){
@@ -635,7 +652,6 @@ const WEAPON_GRIP_ROT = new BABYLON.Vector3(${fmt(TUNE.WEAPON_GRIP_ROT.x)}, ${fm
       } else if (path === "WEAPON_YAW_FIX"){
         TUNE.WEAPON_YAW_FIX = TUNE.WEAPON_YAW_FIX + sign * STEP;
       } else {
-        // Vector path: "WEAPON_POS.x"
         const [obj, axis] = path.split(".");
         if (!obj || !axis) return;
         const v = TUNE[obj];
@@ -670,12 +686,10 @@ const WEAPON_GRIP_ROT = new BABYLON.Vector3(${fmt(TUNE.WEAPON_GRIP_ROT.x)}, ${fm
       try{
         await navigator.clipboard.writeText(text);
       }catch(e){
-        // fallback: select via prompt
         window.prompt("Copy these constants", text);
       }
     }
 
-    // step buttons
     document.querySelectorAll("[data-step]").forEach(b => {
       b.addEventListener("click", () => {
         STEP = parseFloat(b.getAttribute("data-step") || "0.01") || 0.01;
@@ -683,7 +697,6 @@ const WEAPON_GRIP_ROT = new BABYLON.Vector3(${fmt(TUNE.WEAPON_GRIP_ROT.x)}, ${fm
       });
     });
 
-    // +/- buttons
     document.querySelectorAll("[data-k][data-d]").forEach(b => {
       b.addEventListener("click", () => bump(b.getAttribute("data-k"), b.getAttribute("data-d")));
     });
@@ -692,7 +705,6 @@ const WEAPON_GRIP_ROT = new BABYLON.Vector3(${fmt(TUNE.WEAPON_GRIP_ROT.x)}, ${fm
     document.getElementById("resetBtn").addEventListener("click", resetTune);
     document.getElementById("copyBtn").addEventListener("click", copyToClipboard);
 
-    // ---------- main ----------
     (async () => {
       try{
         const okSoldier = await preflightGltf(SOLDIER_ROOT, SOLDIER_FILE);
@@ -710,7 +722,6 @@ const WEAPON_GRIP_ROT = new BABYLON.Vector3(${fmt(TUNE.WEAPON_GRIP_ROT.x)}, ${fm
         }
 
         frameCameraToRoot(soldier.root);
-
         await loadWeapon(ACTIVE_WEAPON_KEY);
 
         scene.onBeforeRenderObservable.clear();
