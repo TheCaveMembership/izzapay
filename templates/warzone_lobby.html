@@ -868,6 +868,9 @@
       let shadowMat = null;
       const SHADOW_WORLD_Y = 0.005;
 
+      // ✅ SAME slowdown value as test soldier
+      const SOLDIER_ANIM_SPEED = 0.65;
+
       // UPDATED: match test soldier auto rotation style
       const AUTO_OSC_SPEED = 0.35;
       const AUTO_MAX_YAW   = Math.PI * 0.45;
@@ -886,9 +889,6 @@
       const qShould  = BABYLON.Quaternion.FromEulerAngles( 0.00,  0.00, -0.05);
       const WRIST_TWIST_ON = false;
       const qWrist = BABYLON.Quaternion.FromEulerAngles(0.00, 0.00, -0.25);
-
-      // ✅ MATCH TEST SOLDIER: slow the actual GLTF animation speed
-      const SOLDIER_ANIM_SPEED = 0.65;
 
       function ensureShadowMaterial(){
         if(shadowMat) return shadowMat;
@@ -963,13 +963,15 @@
       function getWeaponAsset(weaponSku){
         const sku = (weaponSku || "").toString().trim();
 
-        // For now only pistol is hooked up, add more SKUs here later
+        // Pistol
         if(sku === "wz_basic_pistol"){
           return { rootUrl:"/assets/warzone3d/weapons/wz_basic_pistol/", fileName:"scene.gltf" };
         }
 
-        // Future examples (leave commented until assets exist)
-        // if(sku === "wz_cityrunner_smg") return { rootUrl:"/assets/warzone3d/weapons/wz_cityrunner_smg/", fileName:"scene.gltf" };
+        // Cityrunner SMG
+        if(sku === "wz_cityrunner_smg"){
+          return { rootUrl:"/assets/warzone3d/weapons/wz_cityrunner_smg/", fileName:"scene.gltf" };
+        }
 
         return null;
       }
@@ -1232,7 +1234,6 @@
 
           attachShadowToWrapper(wrapper);
 
-          // ✅ MATCH TEST SOLDIER EXACTLY: start anim, then set speedRatio
           if(container.animationGroups && container.animationGroups.length){
             container.animationGroups.forEach(g => g.stop());
             container.animationGroups[0].start(true);
