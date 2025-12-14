@@ -858,7 +858,7 @@
       let currentWrapper = null;
       let currentContainer = null;
 
-      // NEW: weapon state
+      // weapon state
       let currentWeaponContainer = null;
       let currentWeaponRoot = null;
       let currentWeaponGrip = null;
@@ -868,20 +868,38 @@
       let shadowMat = null;
       const SHADOW_WORLD_Y = 0.005;
 
-      // ✅ SAME slowdown value as test soldier
       const SOLDIER_ANIM_SPEED = 0.65;
 
-      // UPDATED: match test soldier auto rotation style
       const AUTO_OSC_SPEED = 0.35;
       const AUTO_MAX_YAW   = Math.PI * 0.45;
 
-      // ✅ LOCKED IN pistol attachment (same as your test soldier)
-      const WEAPON_SCALE = 0.07;
-      const WEAPON_YAW_FIX = Math.PI * 0.5;
+      // ✅ PER WEAPON TUNING, pistol stays unchanged, SMG is your locked-in perfect values
+      const WEAPON_TUNING = {
+        wz_basic_pistol: {
+          WEAPON_SCALE: 0.07,
+          WEAPON_YAW_FIX: Math.PI * 0.5,
+          WEAPON_PITCH_FIX: 0.0,
 
-      const WEAPON_POS      = new BABYLON.Vector3(-1.069,  0.327, -0.058);
-      const WEAPON_GRIP_POS = new BABYLON.Vector3( 3.634, -0.030, -11.272);
-      const WEAPON_GRIP_ROT = new BABYLON.Vector3(-0.260, -0.040,  0.010);
+          WEAPON_POS:      new BABYLON.Vector3(-1.069,  0.327, -0.058),
+          WEAPON_GRIP_POS: new BABYLON.Vector3( 3.634, -0.030, -11.272),
+          WEAPON_GRIP_ROT: new BABYLON.Vector3(-0.260, -0.040,  0.010),
+        },
+
+        wz_cityrunner_smg: {
+          WEAPON_SCALE: 0.11,
+          WEAPON_YAW_FIX: 1.6308,
+          WEAPON_PITCH_FIX: -1.84,
+
+          WEAPON_POS:      new BABYLON.Vector3(0.7110, 1.2070, -0.0580),
+          WEAPON_GRIP_POS: new BABYLON.Vector3(2.1040, 2.2100, -11.2720),
+          WEAPON_GRIP_ROT: new BABYLON.Vector3(-0.1100, -0.1800, 0.0100),
+        }
+      };
+
+      function getWeaponTune(weaponSku){
+        const sku = (weaponSku || "").toString().trim();
+        return WEAPON_TUNING[sku] || WEAPON_TUNING.wz_basic_pistol;
+      }
 
       // Arm correction, same pattern you used in test soldier
       const qArm     = BABYLON.Quaternion.FromEulerAngles(-0.10,  0.00,  0.00);
@@ -959,16 +977,13 @@
         return { rootUrl:"/assets/warzone3d/soldier_gltf_3/", fileName:"scene.gltf" };
       }
 
-      // NEW: weapon assets mapping
       function getWeaponAsset(weaponSku){
         const sku = (weaponSku || "").toString().trim();
 
-        // Pistol
         if(sku === "wz_basic_pistol"){
           return { rootUrl:"/assets/warzone3d/weapons/wz_basic_pistol/", fileName:"scene.gltf" };
         }
 
-        // Cityrunner SMG
         if(sku === "wz_cityrunner_smg"){
           return { rootUrl:"/assets/warzone3d/weapons/wz_cityrunner_smg/", fileName:"scene.gltf" };
         }
@@ -1094,7 +1109,6 @@
         return wrapper;
       }
 
-      // NEW: skeleton helpers for weapon attach
       function findSkinnedMeshFromContainer(container){
         try{
           const meshes = (container && container.meshes) ? container.meshes : [];
@@ -1114,7 +1128,6 @@
         return skeleton.bones.find(b => ((b.name || "").toLowerCase().includes(wantLow))) || null;
       }
 
-      // NEW: clear current weapon safely
       function clearWeapon(){
         try{
           if(currentWeaponRoot){
@@ -1137,7 +1150,6 @@
         }catch(e){}
       }
 
-      // NEW: attach equipped weapon to current soldier wrapper
       async function setLobbyWeapon(weaponSku){
         clearWeapon();
 
@@ -1157,27 +1169,33 @@
         }
         if(!rightHand) return;
 
-        // Load weapon model
         const w = await BABYLON.SceneLoader.LoadAssetContainerAsync(asset.rootUrl, asset.fileName, scene);
         w.addAllToScene();
         currentWeaponContainer = w;
 
-        // weaponRoot attaches to bone, matches test soldier
+        const T = getWeaponTune(weaponSku);
+
         const weaponRoot = new BABYLON.TransformNode("weaponRoot", scene);
         weaponRoot.attachToBone(rightHand, skinned);
-        weaponRoot.position.copyFrom(WEAPON_POS);
-        weaponRoot.rotation.set(0, Math.PI + WEAPON_YAW_FIX, 0);
-        weaponRoot.scaling.set(WEAPON_SCALE, WEAPON_SCALE, WEAPON_SCALE);
+
+        weaponRoot.position.copyFrom(T.WEAPON_POS);
+
+        // ✅ pitch fix makes SMG point straight, yaw fix keeps it aligned
+        weaponRoot.rotation.set(
+          (T.WEAPON_PITCH_FIX || 0.0),
+          Math.PI + (T.WEAPON_YAW_FIX || 0.0),
+          0
+        );
+
+        weaponRoot.scaling.set(T.WEAPON_SCALE, T.WEAPON_SCALE, T.WEAPON_SCALE);
         currentWeaponRoot = weaponRoot;
 
-        // weaponGrip
         const weaponGrip = new BABYLON.TransformNode("weaponGrip", scene);
         weaponGrip.parent = weaponRoot;
-        weaponGrip.position.copyFrom(WEAPON_GRIP_POS);
-        weaponGrip.rotation.copyFrom(WEAPON_GRIP_ROT);
+        weaponGrip.position.copyFrom(T.WEAPON_GRIP_POS);
+        weaponGrip.rotation.copyFrom(T.WEAPON_GRIP_ROT);
         currentWeaponGrip = weaponGrip;
 
-        // Parent weapon meshes under grip (skip gltf root)
         const wMeshes = (w.meshes || []);
         wMeshes.forEach(m => {
           if(!m) return;
@@ -1189,7 +1207,6 @@
       async function setLobbySkin(skinSku){
         if(!scene) return;
 
-        // Keep old behavior
         try{
           if(currentContainer){
             currentContainer.removeAllFromScene();
@@ -1210,7 +1227,6 @@
           }
         }catch(e){}
 
-        // NEW: also clear weapon when skin reloads
         clearWeapon();
 
         try{
@@ -1240,7 +1256,6 @@
             container.animationGroups[0].speedRatio = SOLDIER_ANIM_SPEED;
           }
 
-          // NEW: after skin is loaded, apply equipped weapon
           const weaponSku = await fetchEquippedWeaponSku();
           await setLobbyWeapon(weaponSku);
 
@@ -1261,7 +1276,6 @@
         return "wz_basic_soldier";
       }
 
-      // NEW: read equipped weapon SKU from same API (no backend changes needed)
       async function fetchEquippedWeaponSku(){
         try{
           const res = await fetch("/warzone/api/shop?slot=weapons" + uQS(), { credentials:"include" });
@@ -1306,14 +1320,12 @@
         canvas.addEventListener("pointercancel", () => { userInteracting = false; }, { passive:true });
         canvas.addEventListener("pointerleave", () => { userInteracting = false; }, { passive:true });
 
-        // UPDATED: oscillation rotation, same as test soldier
         let t = 0;
         const baseY = Math.PI;
 
         scene.onBeforeRenderObservable.add(() => {
           if(!currentWrapper) return;
 
-          // Apply arm correction so weapon stays clean in palm like test soldier
           try{
             const skinned = currentContainer ? findSkinnedMeshFromContainer(currentContainer) : null;
             const skeleton = skinned?.skeleton || null;
@@ -1342,7 +1354,6 @@
             }
           }catch(e){}
 
-          // Oscillation only when not interacting
           if(!userInteracting){
             const dt = scene.getEngine().getDeltaTime() * 0.001;
             t += dt * AUTO_OSC_SPEED;
@@ -1357,7 +1368,6 @@
         })();
       }
 
-      // Expose for future uses (kept)
       window.__warzoneSetLobbySkin = setLobbySkin;
 
       createScene();
