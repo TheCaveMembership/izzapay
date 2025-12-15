@@ -1,9 +1,9 @@
 <!doctype html>
 <html lang="en">
 <head>
-  <meta charset="utf-8">
-  <title>War Zone Test, Lobby Accurate Soldier + Weapon Tuner (Neon Marksman)</title>
-  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <meta charset="utf-8" />
+  <title>War Zone Test, Weapon Only Diagnostics (Neon Marksman)</title>
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
   <style>
     html,body{
       margin:0;
@@ -35,6 +35,250 @@
       font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
       font-size:12px;
       line-height:1.35;
+      text-shadow: 0 0 10px rgba(0,0,0,.85);
+      white-space:pre;
+      pointer-events:none;
+      max-width: calc(100vw - 20px);
+      overflow:hidden;
+    }
+  </style>
+  <script src="https://cdn.babylonjs.com/babylon.js"></script>
+  <script src="https://cdn.babylonjs.com/loaders/babylonjs.loaders.min.js"></script>
+</head>
+<body>
+  <canvas id="renderCanvas"></canvas>
+  <div id="hud">Loading...</div>
+
+  <script>
+    const canvas = document.getElementById("renderCanvas");
+    const hud = document.getElementById("hud");
+
+    canvas.tabIndex = 1;
+    canvas.addEventListener("pointerdown", () => canvas.focus(), { passive:true });
+    window.addEventListener("keydown", () => canvas.focus());
+
+    const engine = new BABYLON.Engine(canvas, true, { preserveDrawingBuffer:true, stencil:true });
+    const scene  = new BABYLON.Scene(engine);
+    scene.clearColor = new BABYLON.Color4(0,0,0,0);
+
+    const camera = new BABYLON.ArcRotateCamera(
+      "cam",
+      Math.PI * 1.3,
+      Math.PI / 2.08,
+      2.8,
+      new BABYLON.Vector3(0, 1.1, 0),
+      scene
+    );
+    camera.attachControl(canvas, true);
+    camera.panningSensibility = 0;
+    camera.wheelPrecision = 60;
+    camera.pinchPrecision = 200;
+    camera.angularSensibilityX = 2200;
+    camera.angularSensibilityY = 2200;
+
+    const hemi = new BABYLON.HemisphericLight("h", new BABYLON.Vector3(0,1,0), scene);
+    hemi.intensity = 1.1;
+
+    engine.runRenderLoop(() => scene.render());
+    window.addEventListener("resize", () => engine.resize());
+
+    // ----------------------------
+    // Weapon under test
+    // ----------------------------
+    const NEON_MARKSMAN_ROOT = "/assets/warzone3d/weapons/wz_neon_marksman/";
+    const WEAPON_FILE = "scene.gltf";
+
+    // This page assumes soldier is already known good, so we only show gun diagnostics in HUD.
+
+    // ----------------------------
+    // Diagnostics helpers
+    // ----------------------------
+    function fmtBytes(bytes){
+      if (!Number.isFinite(bytes) || bytes < 0) return "unknown";
+      const units = ["B","KB","MB","GB"];
+      let i = 0, v = bytes;
+      while (v >= 1024 && i < units.length-1){ v /= 1024; i++; }
+      return `${v.toFixed(i === 0 ? 0 : 2)} ${units[i]}`;
+    }
+
+    async function headOrGet(url){
+      try{
+        const r = await fetch(url, { method:"HEAD", cache:"no-store" });
+        if (r && (r.ok || r.status === 404 || r.status === 403)) return r;
+      }catch(e){}
+      return fetch(url, { method:"GET", cache:"no-store" });
+    }
+
+    async function probe(url){
+      try{
+        const r = await headOrGet(url);
+        const ct = (r.headers && r.headers.get) ? (r.headers.get("content-type") || "") : "";
+        const cl = (r.headers && r.headers.get) ? (r.headers.get("content-length") || "") : "";
+        const bytes = cl ? parseInt(cl, 10) : NaN;
+        return { ok:r.ok, status:r.status, ct, bytes };
+      }catch(e){
+        return { ok:false, status:0, ct:String(e), bytes:NaN };
+      }
+    }
+
+    function joinUrl(root, rel){
+      if (!rel) return root;
+      if (/^https?:\/\//i.test(rel)) return rel;
+      if (rel.startsWith("/")) return rel;
+      return root + rel;
+    }
+
+    function safeLine(s){
+      hud.textContent += `\n${s}`;
+    }
+
+    // ----------------------------
+    // Gun preflight that also prints file sizes
+    // ----------------------------
+    async function preflightWeaponWithSizes(rootUrl, fileName){
+      const gltfUrl = rootUrl + fileName;
+
+      safeLine(`[gun] gltf: ${gltfUrl}`);
+
+      const gltfProbe = await probe(gltfUrl);
+      safeLine(`      status: ${gltfProbe.status} ok:${gltfProbe.ok} type:${gltfProbe.ct || "?"} size:${fmtBytes(gltfProbe.bytes)}`);
+
+      if (!gltfProbe.ok){
+        safeLine(`      FAIL, gun gltf not reachable`);
+        return { ok:false, reason:"gltf-not-reachable", deps:[] };
+      }
+
+      let gltfJson;
+      try{
+        const r = await fetch(gltfUrl, { cache:"no-store" });
+        gltfJson = await r.json();
+      }catch(e){
+        safeLine(`      FAIL, gun gltf json parse error`);
+        return { ok:false, reason:"gltf-json-parse", deps:[] };
+      }
+
+      const deps = [];
+      if (Array.isArray(gltfJson.buffers)) gltfJson.buffers.forEach(b => b?.uri && deps.push({ kind:"buffer", uri:b.uri }));
+      if (Array.isArray(gltfJson.images))  gltfJson.images.forEach(i => i?.uri && deps.push({ kind:"image",  uri:i.uri }));
+
+      // check + sum sizes (best effort, depends on content-length header)
+      let totalBytes = 0;
+      let unknownCount = 0;
+
+      for (const dep of deps){
+        const url = joinUrl(rootUrl, dep.uri);
+        const st = await probe(url);
+        const sizeStr = fmtBytes(st.bytes);
+        safeLine(`      dep ${dep.kind}: ${dep.uri} -> ${st.status} ok:${st.ok} type:${st.ct || "?"} size:${sizeStr}`);
+
+        if (!st.ok) {
+          safeLine(`      FAIL, missing dep: ${dep.uri}`);
+          return { ok:false, reason:"missing-dep", deps };
+        }
+
+        if (Number.isFinite(st.bytes)) totalBytes += st.bytes;
+        else unknownCount += 1;
+      }
+
+      safeLine(`      deps: ${deps.length}, size sum: ${fmtBytes(totalBytes)}${unknownCount ? `, unknown sizes: ${unknownCount}` : ""}`);
+
+      // Why it might crash, based on what we can infer
+      safeLine(``);
+      safeLine(`[why crash] common causes when weapon loads but page dies, especially on mobile`);
+      safeLine(`- Huge textures, many 4K PNGs, or uncompressed normal maps, can spike GPU memory and crash the webview`);
+      safeLine(`- Large .bin buffer, high poly count, or many skinned meshes, can stall parsing and trigger watchdog kills`);
+      safeLine(`- Missing content-length headers show as "unknown", but the real payload may still be very large`);
+      safeLine(`- If the gun uses KTX2, Draco, or meshopt and the loader path is wrong, it can throw during decode`);
+      safeLine(`- If any texture is not power-of-two and set to generate mipmaps, some devices can choke hard`);
+      safeLine(``);
+      safeLine(`[next step] if the size sum looks big, we should`);
+      safeLine(`- downscale weapon textures (2K or 1K), convert PNG to KTX2 (BasisU), or WebP where possible`);
+      safeLine(`- reduce mesh complexity, remove unused meshes, bake normals, merge materials`);
+      safeLine(`- confirm if the weapon is using .glb instead of .gltf + deps, and whether deps are duplicated`);
+      safeLine(``);
+
+      return { ok:true, reason:"ok", deps };
+    }
+
+    // ----------------------------
+    // Load weapon alone into scene
+    // ----------------------------
+    async function loadWeaponStandalone(rootUrl, fileName){
+      // tiny wrapper so camera has something to target even without soldier
+      const wrap = new BABYLON.TransformNode("wrap", scene);
+
+      // IMPORTANT: if crash happens here, it is likely inside Babylon loader or GPU memory
+      const container = await BABYLON.SceneLoader.LoadAssetContainerAsync(rootUrl, fileName, scene);
+      container.addAllToScene();
+
+      // parent everything to wrapper
+      const nodes = []
+        .concat(container.meshes || [])
+        .concat(container.transformNodes || []);
+      nodes.forEach(n => {
+        if(!n) return;
+        try{ n.parent = wrap; }catch(e){}
+      });
+
+      // normalize to view
+      try{
+        const b = wrap.getHierarchyBoundingVectors(true);
+        const size = b.max.subtract(b.min);
+        const maxDim = Math.max(size.x, size.y, size.z) || 1.0;
+        const center = b.min.add(size.scale(0.5));
+        camera.target = new BABYLON.Vector3(center.x, center.y, center.z);
+        camera.radius = Math.max(2.0, maxDim * 2.2);
+      }catch(e){}
+
+      safeLine(`[gun] loaded into scene`);
+      return { wrap, container };
+    }
+
+    // ----------------------------
+    // Catch and report errors instead of silent crash where possible
+    // ----------------------------
+    window.addEventListener("error", (e) => {
+      try{
+        safeLine(`[JS ERROR] ${e.message || e}`);
+      }catch(_){}
+    });
+    window.addEventListener("unhandledrejection", (e) => {
+      try{
+        safeLine(`[PROMISE ERROR] ${(e.reason && e.reason.message) ? e.reason.message : (e.reason || e)}`);
+      }catch(_){}
+    });
+
+    // ----------------------------
+    // Boot
+    // ----------------------------
+    (async () => {
+      try{
+        hud.textContent = "Weapon diagnostics starting...";
+        safeLine(`(Soldier HUD removed, soldier assumed good)`);
+        safeLine(``);
+
+        const pf = await preflightWeaponWithSizes(NEON_MARKSMAN_ROOT, WEAPON_FILE);
+        if (!pf.ok){
+          safeLine(`[STOP] preflight failed: ${pf.reason}`);
+          return;
+        }
+
+        safeLine(`[load] attempting to load gun model now...`);
+        await loadWeaponStandalone(NEON_MARKSMAN_ROOT, WEAPON_FILE);
+
+        safeLine(``);
+        safeLine(`[note] if it still crashes before showing this line, the crash is likely`);
+        safeLine(`- GPU memory spike from textures, or`);
+        safeLine(`- Babylon decode path issue (KTX2, Draco, meshopt), or`);
+        safeLine(`- the Pi Browser webview killing the tab due to resource usage`);
+      }catch(e){
+        safeLine(`[EXCEPTION] ${e?.message || e}`);
+        console.warn("Weapon test failed", e);
+      }
+    })();
+  </script>
+</body>
+</html>      line-height:1.35;
       text-shadow: 0 0 10px rgba(0,0,0,.85);
       white-space:pre;
       pointer-events:none;
