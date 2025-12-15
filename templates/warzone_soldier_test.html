@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="utf-8">
-  <title>War Zone test, soldier + neon marksman attach</title>
+  <title>War Zone Test, Lobby Accurate Soldier + Weapon Tuner (Neon Marksman)</title>
   <meta name="viewport" content="width=device-width,initial-scale=1">
   <style>
     html,body{
@@ -12,7 +12,8 @@
       height:100%;
       background:#000;
       overflow:hidden;
-      font-family:system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;
+      touch-action:none;
+      font-family: system-ui, -apple-system, Segoe UI, Roboto, Arial;
     }
     #renderCanvas{
       position:fixed;
@@ -23,228 +24,285 @@
       display:block;
       touch-action:none;
       outline:none;
+      background:transparent;
     }
     #hud{
       position:fixed;
-      top:8px;
       left:10px;
-      z-index:5;
-      white-space:pre;
-      max-width:96vw;
-      pointer-events:none;
-
-      color:#d7e7ff;
+      top:10px;
+      z-index:9999;
+      color:#35ff6b;
+      font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
       font-size:12px;
       line-height:1.35;
-      text-shadow:0 1px 0 rgba(0,0,0,.75);
-      font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
+      text-shadow: 0 0 10px rgba(0,0,0,.85);
+      white-space:pre;
+      pointer-events:none;
+      max-width: calc(100vw - 20px);
+      overflow:hidden;
     }
   </style>
-
   <script src="https://cdn.babylonjs.com/babylon.js"></script>
   <script src="https://cdn.babylonjs.com/loaders/babylonjs.loaders.min.js"></script>
 </head>
 <body>
-  <div id="hud">Booting Babylon…</div>
   <canvas id="renderCanvas"></canvas>
+  <div id="hud">Loading...</div>
 
   <script>
     const canvas = document.getElementById("renderCanvas");
-    const hudEl  = document.getElementById("hud");
-    function setHudText(t){ hudEl.textContent = t; }
+    const hud = document.getElementById("hud");
 
-    // --------- stop Babylon "loading spinner" completely ----------
-    try{
-      BABYLON.SceneLoader.ShowLoadingScreen = false;
-    }catch(e){}
+    canvas.tabIndex = 1;
+    canvas.addEventListener("pointerdown", () => canvas.focus(), { passive:true });
+    window.addEventListener("keydown", () => canvas.focus());
 
-    // --------- WebGL context loss handling (prevents silent white screen) ----------
-    canvas.addEventListener("webglcontextlost", (e) => {
-      e.preventDefault();
-      setHudText(
-`WEBGL CONTEXT LOST (your laptop GPU/VRAM got overwhelmed)
-Fix:
-  1) Refresh
-  2) Close extra tabs
-  3) If still happens, weapon assets are too heavy
-
-This page is now paused.`
-      );
-    }, false);
-
-    // ---------- keyboard tuning ----------
-    let MODE = 1; // 1 pos, 2 rot, 3 scale
-    let STEP = 0.01;
-
-    // Default fix for "gun points upward":
-    // most rifle models need a -90deg X rotation when attached to a hand bone.
-    const TUNE = {
-      pos:   new BABYLON.Vector3(0.02, 0.00, 0.06),
-      rot:   new BABYLON.Vector3(-Math.PI * 0.5, Math.PI, 0.00),
-      scale: 0.25
-    };
-
-    const DEFAULTS = {
-      pos: TUNE.pos.clone(),
-      rot: TUNE.rot.clone(),
-      scale: TUNE.scale
-    };
-
-    function fmt3(v){
-      return `${v.x.toFixed(5)}, ${v.y.toFixed(5)}, ${v.z.toFixed(5)}`;
-    }
-
-    function hud(){
-      const modeName = MODE===1 ? "POS" : MODE===2 ? "ROT" : "SCALE";
-      setHudText(
-`Soldier + Neon Marksman (Laptop Keyboard Tuner)
-Mode: ${MODE} (${modeName})   Step: ${STEP}
-
-Keys:
-  1 POS, 2 ROT, 3 SCALE
-  Arrows = X/Y, Q/E = Z
-  [ ] step down/up, Shift fast, Alt slow
-  R reset, C copy
-
-POS   : ${fmt3(TUNE.pos)}
-ROT   : ${fmt3(TUNE.rot)}
-SCALE : ${TUNE.scale.toFixed(5)}`
-      );
-    }
-
-    async function copyToClipboard(text){
-      try{ await navigator.clipboard.writeText(text); }
-      catch(e){ window.prompt("Copy:", text); }
-    }
-
-    function stepForEvent(ev){
-      if (ev.altKey) return Math.max(0.0005, STEP * 0.1);
-      if (ev.shiftKey) return STEP * 5.0;
-      return STEP;
-    }
-
-    // This is the node we tune (the thing attached to the bone)
-    let weaponBoneNode = null;
-
-    function applyTune(){
-      if(!weaponBoneNode) return;
-      weaponBoneNode.position.copyFrom(TUNE.pos);
-      weaponBoneNode.rotation.copyFrom(TUNE.rot);
-      weaponBoneNode.scaling.set(TUNE.scale, TUNE.scale, TUNE.scale);
-    }
-
-    window.addEventListener("keydown", async (ev) => {
-      const k = ev.key;
-
-      if (k === "1"){ MODE = 1; hud(); return; }
-      if (k === "2"){ MODE = 2; hud(); return; }
-      if (k === "3"){ MODE = 3; hud(); return; }
-
-      if (k === "["){ STEP = Math.max(0.0005, STEP * 0.5); hud(); return; }
-      if (k === "]"){ STEP = Math.min(0.5, STEP * 2.0); hud(); return; }
-
-      if (k.toLowerCase() === "r"){
-        TUNE.pos.copyFrom(DEFAULTS.pos);
-        TUNE.rot.copyFrom(DEFAULTS.rot);
-        TUNE.scale = DEFAULTS.scale;
-        applyTune();
-        hud();
-        return;
-      }
-
-      if (k.toLowerCase() === "c"){
-        const txt =
-`// Neon Marksman tuning
-const WEAPON_POS   = new BABYLON.Vector3(${TUNE.pos.x.toFixed(5)}, ${TUNE.pos.y.toFixed(5)}, ${TUNE.pos.z.toFixed(5)});
-const WEAPON_ROT   = new BABYLON.Vector3(${TUNE.rot.x.toFixed(5)}, ${TUNE.rot.y.toFixed(5)}, ${TUNE.rot.z.toFixed(5)});
-const WEAPON_SCALE = ${TUNE.scale.toFixed(5)};`;
-        await copyToClipboard(txt);
-        hud();
-        return;
-      }
-
-      const s = stepForEvent(ev);
-
-      const dx = (k === "ArrowRight") ? 1 : (k === "ArrowLeft") ? -1 : 0;
-      const dy = (k === "ArrowUp") ? 1 : (k === "ArrowDown") ? -1 : 0;
-      const dz = (k.toLowerCase() === "e") ? 1 : (k.toLowerCase() === "q") ? -1 : 0;
-
-      if (!dx && !dy && !dz) return;
-
-      if (MODE === 1){
-        TUNE.pos.x += dx*s; TUNE.pos.y += dy*s; TUNE.pos.z += dz*s;
-      } else if (MODE === 2){
-        TUNE.rot.x += dx*s; TUNE.rot.y += dy*s; TUNE.rot.z += dz*s;
-      } else {
-        if (dy !== 0) TUNE.scale = Math.max(0.0001, TUNE.scale + dy*s);
-      }
-
-      applyTune();
-      hud();
-    }, { passive:true });
-
-    // ---------- low-end safety settings (targets your Chromebook style laptop) ----------
-    const devMem = navigator.deviceMemory || 0;            // may be undefined
-    const cores  = navigator.hardwareConcurrency || 0;     // may be undefined
-    const LOW_END = (devMem && devMem <= 4) || (cores && cores <= 4);
-
-    // Cap texture size for weak GPUs (big win vs context loss)
-    try{
-      BABYLON.Engine.MaxTextureSize = LOW_END ? 512 : 1024;
-    }catch(e){}
-
-    function makeEngine(){
-      // Prefer WebGL1 on weak laptops to reduce crashes
-      try{
-        return new BABYLON.Engine(canvas, true, {
-          stencil:false,
-          preserveDrawingBuffer:false,
-          disableWebGL2Support: LOW_END
-        });
-      }catch(e){
-        try{
-          return new BABYLON.Engine(canvas, true, { disableWebGL2Support:true });
-        }catch(e2){
-          return null;
-        }
-      }
-    }
-
-    const engine = makeEngine();
-    if (!engine){
-      setHudText("FAILED: WebGL could not start on this laptop.");
-      throw new Error("Engine init failed");
-    }
-
-    // Lower render resolution (massive stability boost)
-    // Bigger number = lower resolution = less VRAM use
-    engine.setHardwareScalingLevel(LOW_END ? 2.5 : 1.5);
-
+    const engine = new BABYLON.Engine(canvas, true, { preserveDrawingBuffer:true, stencil:true });
     const scene  = new BABYLON.Scene(engine);
-    scene.clearColor = new BABYLON.Color4(0,0,0,1);
 
+    // MATCH LOBBY: transparent clearColor
+    scene.clearColor = new BABYLON.Color4(0,0,0,0);
+
+    // MATCH LOBBY: camera defaults + sensitivities
     const camera = new BABYLON.ArcRotateCamera(
       "cam",
-      Math.PI * 1.2,
-      Math.PI / 2.35,
-      10.0,
-      new BABYLON.Vector3(0, 1.0, 0),
+      Math.PI * 1.3,
+      Math.PI / 2.08,
+      3.15,
+      new BABYLON.Vector3(0,1,0),
       scene
     );
     camera.attachControl(canvas, true);
     camera.panningSensibility = 0;
     camera.wheelPrecision = 60;
+    camera.pinchPrecision = 200;
+    camera.angularSensibilityX = 2200;
+    camera.angularSensibilityY = 2200;
 
+    // allow arrow keys for our tuner, kill camera keyboard
+    camera.inputs.removeByType("ArcRotateCameraKeyboardMoveInput");
+    if (camera.inputs && camera.inputs.attached && camera.inputs.attached.keyboard) {
+      camera.inputs.attached.keyboard.keysUp = [];
+      camera.inputs.attached.keyboard.keysDown = [];
+      camera.inputs.attached.keyboard.keysLeft = [];
+      camera.inputs.attached.keyboard.keysRight = [];
+    }
+
+    // MATCH LOBBY: hemispheric light only
     const hemi = new BABYLON.HemisphericLight("h", new BABYLON.Vector3(0,1,0), scene);
-    hemi.intensity = 1.05;
+    hemi.intensity = 1.2;
 
-    const dir = new BABYLON.DirectionalLight("d", new BABYLON.Vector3(-0.3,-1,-0.4), scene);
-    dir.intensity = 0.95;
-
-    engine.runRenderLoop(() => {
-      if (!scene.isDisposed()) scene.render();
-    });
+    engine.runRenderLoop(() => scene.render());
     window.addEventListener("resize", () => engine.resize());
+
+    // ---------- config ----------
+    const SOLDIER_ROOT = "/assets/warzone3d/soldier_gltf_3/";
+    const SOLDIER_FILE = "scene.gltf";
+
+    // ✅ ONLY weapon under test (removes switch-crash path)
+    const NEON_MARKSMAN_ROOT = "/assets/warzone3d/weapons/wz_neon_marksman/";
+    const WEAPON_FILE = "scene.gltf";
+
+    const WEAPON_MAP = {
+      neon_marksman: { root: NEON_MARKSMAN_ROOT, file: WEAPON_FILE }
+    };
+
+    // Skin tuning, same pipeline as lobby, but local keys you can extend
+    let ACTIVE_SKIN_SKU = "wz_basic_soldier";
+
+    // ✅ Start on Neon Marksman (only weapon in this test page)
+    let ACTIVE_WEAPON_KEY = "neon_marksman";
+
+    const SOLDIER_ANIM_SPEED = 0.65;
+    const AUTO_OSC_SPEED = 0.35;
+    const AUTO_MAX_YAW   = Math.PI * 0.45;
+
+    // MATCH LOBBY: extra scale and Y offset after normalize
+    const LOBBY_EXTRA_SCALE = 0.72;
+    const LOBBY_EXTRA_Y     = 0.06;
+
+    // ---------- LOBBY SHADOW ANCHOR ----------
+    let shadowPlane = null;
+    let shadowMat = null;
+    const SHADOW_WORLD_Y = 0.005;
+
+    function ensureShadowMaterial(){
+      if(shadowMat) return shadowMat;
+
+      const dt = new BABYLON.DynamicTexture("shadowDT", { width:512, height:512 }, scene, true);
+      dt.hasAlpha = true;
+
+      const ctx = dt.getContext();
+      ctx.clearRect(0,0,512,512);
+
+      const g = ctx.createRadialGradient(256,256,6,256,256,220);
+      g.addColorStop(0.00, "rgba(0,0,0,1.00)");
+      g.addColorStop(0.20, "rgba(0,0,0,0.98)");
+      g.addColorStop(0.40, "rgba(0,0,0,0.82)");
+      g.addColorStop(0.62, "rgba(0,0,0,0.45)");
+      g.addColorStop(0.80, "rgba(0,0,0,0.14)");
+      g.addColorStop(1.00, "rgba(0,0,0,0.00)");
+
+      ctx.fillStyle = g;
+      ctx.beginPath();
+      ctx.ellipse(256, 305, 200, 120, 0, 0, Math.PI * 2);
+      ctx.fill();
+
+      dt.update(false);
+
+      shadowMat = new BABYLON.StandardMaterial("shadowMat", scene);
+      shadowMat.diffuseColor = new BABYLON.Color3(0,0,0);
+      shadowMat.emissiveColor = new BABYLON.Color3(0,0,0);
+      shadowMat.specularColor = new BABYLON.Color3(0,0,0);
+      shadowMat.opacityTexture = dt;
+      shadowMat.alpha = 1.0;
+      shadowMat.disableLighting = true;
+
+      return shadowMat;
+    }
+
+    function attachShadowToWrapper(wrapper){
+      try{
+        if(shadowPlane){
+          shadowPlane.dispose(false, true);
+          shadowPlane = null;
+        }
+      }catch(e){}
+
+      const mat = ensureShadowMaterial();
+
+      shadowPlane = BABYLON.MeshBuilder.CreateGround(
+        "shadowPlane",
+        { width: 9.30, height: 9.30 },
+        scene
+      );
+      shadowPlane.material = mat;
+      shadowPlane.isPickable = false;
+      shadowPlane.renderingGroupId = 0;
+
+      shadowPlane.parent = wrapper;
+
+      const localY = SHADOW_WORLD_Y - (wrapper.position.y || 0);
+      shadowPlane.position.y = localY;
+
+      shadowPlane.rotation.y = Math.PI / 2;
+      shadowPlane.position.x = -0.85;
+      shadowPlane.position.z = 0.00;
+    }
+    // ----------------------------------------
+
+    // ----- Per-weapon defaults -----
+    // ✅ Match Neon Marksman to Lobby Pistol tuning FOR NOW (exact lobby constants)
+    const PRESETS = {
+      neon_marksman: {
+        WEAPON_SCALE: 0.06000,
+        WEAPON_YAW_FIX: 1.52080,
+        WEAPON_PITCH_FIX: -0.03000,
+
+        WEAPON_POS:      new BABYLON.Vector3(-1.06900,  0.32700, -0.05800),
+        WEAPON_GRIP_POS: new BABYLON.Vector3( 2.98400,  1.23000, -11.27200),
+        WEAPON_GRIP_ROT: new BABYLON.Vector3(-0.23000,  0.00000,  0.01000),
+      }
+    };
+
+    const TUNE = {
+      WEAPON_SCALE: 0.06000,
+      WEAPON_YAW_FIX: 1.52080,
+      WEAPON_PITCH_FIX: -0.03000,
+      WEAPON_POS: new BABYLON.Vector3(0,0,0),
+      WEAPON_GRIP_POS: new BABYLON.Vector3(0,0,0),
+      WEAPON_GRIP_ROT: new BABYLON.Vector3(0,0,0)
+    };
+
+    function loadPresetIntoTune(key){
+      const p = PRESETS[key] || PRESETS.neon_marksman;
+      TUNE.WEAPON_SCALE = p.WEAPON_SCALE;
+      TUNE.WEAPON_YAW_FIX = p.WEAPON_YAW_FIX;
+      TUNE.WEAPON_PITCH_FIX = p.WEAPON_PITCH_FIX;
+      TUNE.WEAPON_POS.copyFrom(p.WEAPON_POS);
+      TUNE.WEAPON_GRIP_POS.copyFrom(p.WEAPON_GRIP_POS);
+      TUNE.WEAPON_GRIP_ROT.copyFrom(p.WEAPON_GRIP_ROT);
+    }
+
+    function saveTuneBackToPreset(key){
+      const p = PRESETS[key] || PRESETS.neon_marksman;
+      p.WEAPON_SCALE = TUNE.WEAPON_SCALE;
+      p.WEAPON_YAW_FIX = TUNE.WEAPON_YAW_FIX;
+      p.WEAPON_PITCH_FIX = TUNE.WEAPON_PITCH_FIX;
+      p.WEAPON_POS.copyFrom(TUNE.WEAPON_POS);
+      p.WEAPON_GRIP_POS.copyFrom(TUNE.WEAPON_GRIP_POS);
+      p.WEAPON_GRIP_ROT.copyFrom(TUNE.WEAPON_GRIP_ROT);
+    }
+
+    // Arm correction (match lobby)
+    const qArm     = BABYLON.Quaternion.FromEulerAngles(-0.10,  0.00,  0.00);
+    const qForeArm = BABYLON.Quaternion.FromEulerAngles(-0.25,  0.00,  0.00);
+    const qShould  = BABYLON.Quaternion.FromEulerAngles( 0.00,  0.00, -0.05);
+
+    const WRIST_TWIST_ON = false;
+    const qWrist = BABYLON.Quaternion.FromEulerAngles(0.00, 0.00, -0.25);
+
+    // ---------- Texture overrides (same as lobby, safe if you extend skins) ----------
+    const TEXTURE_BASE = "/assets/warzone3d/soldier_gltf_3/textures/";
+    const OVERRIDE_FILES = [
+      "material_8_diffuse.png",
+      "material_9_diffuse.png",
+      "material_10_diffuse.png",
+      "material_11_diffuse.png"
+    ];
+    const SKU_TO_TEXTURE_FOLDER = {
+      "wz_neon_edge": "neon_edge",
+      "wz_urban_shadow": "urban_shadow",
+      "wz_cinder_camo": "cinder_camo",
+      "wz_glow_legend": "glow_legend"
+    };
+
+    function fileFromAnyUrl(u){
+      try{
+        const s = (u || "").toString();
+        const q = s.split("?")[0];
+        const parts = q.split("/");
+        return parts[parts.length - 1] || "";
+      }catch(e){
+        return "";
+      }
+    }
+
+    function overrideTextureOnMaterial(mat, texProp, folder){
+      try{
+        const tex = mat && mat[texProp];
+        if(!tex) return false;
+
+        const urlOrName = (tex.url || tex.name || "");
+        const file = fileFromAnyUrl(urlOrName);
+        if(!file) return false;
+
+        if(!OVERRIDE_FILES.includes(file)) return false;
+
+        const newUrl = `${TEXTURE_BASE}${folder}/${file}`;
+        const newTex = new BABYLON.Texture(newUrl, scene, true, false);
+        newTex.hasAlpha = tex.hasAlpha || false;
+        newTex.level = (typeof tex.level === "number") ? tex.level : 1.0;
+
+        mat[texProp] = newTex;
+        return true;
+      }catch(e){
+        return false;
+      }
+    }
+
+    function applyTextureOverrides(container, skinSku){
+      const sku = (skinSku || "").toString().trim();
+      const folder = SKU_TO_TEXTURE_FOLDER[sku];
+      if(!folder) return;
+
+      const mats = (container && container.materials) ? container.materials : [];
+      mats.forEach(mat => {
+        if(!mat) return;
+        overrideTextureOnMaterial(mat, "albedoTexture", folder);
+        overrideTextureOnMaterial(mat, "diffuseTexture", folder);
+      });
+    }
 
     // ---------- helpers ----------
     async function fetchHeadOrGet(url){
@@ -258,9 +316,10 @@ const WEAPON_SCALE = ${TUNE.scale.toFixed(5)};`;
     async function checkUrl(url){
       try{
         const r = await fetchHeadOrGet(url);
-        return { ok: r.ok, status: r.status };
+        const ct = (r.headers && r.headers.get) ? (r.headers.get("content-type") || "") : "";
+        return { ok: r.ok, status: r.status, ct };
       }catch(e){
-        return { ok:false, status:0 };
+        return { ok:false, status:0, ct:String(e) };
       }
     }
 
@@ -271,9 +330,12 @@ const WEAPON_SCALE = ${TUNE.scale.toFixed(5)};`;
       return rootUrl + rel;
     }
 
-    async function preflightGltf(rootUrl, fileName){
+    async function preflightGltf(rootUrl, fileName, label){
       const gltfUrl = rootUrl + fileName;
+      hud.textContent += `\n[check] ${label} gltf: ${gltfUrl}`;
+
       const gltfCheck = await checkUrl(gltfUrl);
+      hud.textContent += `\n       status: ${gltfCheck.status} ok:${gltfCheck.ok}`;
       if (!gltfCheck.ok) return false;
 
       let gltf;
@@ -281,20 +343,18 @@ const WEAPON_SCALE = ${TUNE.scale.toFixed(5)};`;
         const r = await fetch(gltfUrl, { cache:"no-store" });
         gltf = await r.json();
       }catch(e){
+        hud.textContent += `\n       json read failed`;
         return false;
       }
 
       const deps = [];
       if (Array.isArray(gltf.buffers)) gltf.buffers.forEach(b => b?.uri && deps.push(b.uri));
-      if (Array.isArray(gltf.images))  gltf.images.forEach(img => img?.uri && deps.push(img.uri));
-
-      // On weak laptops, do NOT preflight every texture (extra memory + time).
-      // Only verify the gltf exists.
-      if (LOW_END) return true;
+      if (Array.isArray(gltf.images))  gltf.images.forEach(i => i?.uri && deps.push(i.uri));
 
       for (const uri of deps){
         const url = joinUrl(rootUrl, uri);
         const st = await checkUrl(url);
+        hud.textContent += `\n       dep: ${uri} -> ${st.status} ok:${st.ok}`;
         if (!st.ok) return false;
       }
       return true;
@@ -305,132 +365,438 @@ const WEAPON_SCALE = ${TUNE.scale.toFixed(5)};`;
       return { min: b.min.clone(), max: b.max.clone() };
     }
 
-    function normalizeToGroundAndHeight(root, targetHeight = 1.75){
+    function normalizeToGroundAndHeight(root, targetHeight){
       const bb1 = getBounds(root);
-      const size1 = bb1.max.subtract(bb1.min);
-      const h1 = Math.max(0.000001, size1.y);
-
-      const s = targetHeight / h1;
-      root.scaling = new BABYLON.Vector3(s, s, s);
-
+      const h1 = Math.max(0.000001, (bb1.max.y - bb1.min.y));
+      const s = (targetHeight || 1.75) / h1;
+      root.scaling = new BABYLON.Vector3(s,s,s);
       const bb2 = getBounds(root);
       root.position.y -= bb2.min.y;
       return s;
     }
 
+    // MATCH LOBBY framing exactly
     function frameCameraToRoot(root){
-      const bb = getBounds(root);
-      const size = bb.max.subtract(bb.min);
-      const center = bb.min.add(size.scale(0.5));
-      const maxDim = Math.max(size.x, size.y, size.z) || 1;
+      try{
+        const bb = getBounds(root);
+        const size = bb.max.subtract(bb.min);
+        const maxDim = Math.max(size.x, size.y, size.z) || 1.0;
+        const center = bb.min.add(size.scale(0.5));
 
-      camera.target = center;
-      camera.radius = maxDim * 1.9;
-      camera.lowerRadiusLimit = camera.radius * 0.5;
-      camera.upperRadiusLimit = camera.radius * 4.0;
+        const radius = Math.max(2.6, maxDim * 2.4) * 1.05;
+
+        camera.target = new BABYLON.Vector3(center.x, center.y + (maxDim * 0.50), center.z);
+        camera.radius = radius;
+        camera.alpha  = Math.PI * 1.3;
+        camera.beta   = Math.PI / 2.08;
+
+        camera.lowerRadiusLimit = radius * 0.65;
+        camera.upperRadiusLimit = radius * 1.25;
+      }catch(e){
+        camera.target = new BABYLON.Vector3(0,1,0);
+        camera.radius = 3.0;
+        camera.lowerRadiusLimit = 2.0;
+        camera.upperRadiusLimit = 4.0;
+      }
     }
 
-    async function importModel(label, rootUrl, fileName){
-      const result = await BABYLON.SceneLoader.ImportMeshAsync("", rootUrl, fileName, scene);
-      const wrapper = new BABYLON.TransformNode(label + "Root", scene);
+    // ---------- live refs ----------
+    let currentWrapper = null;
+    let currentContainer = null;
 
-      const gltfRoot = result.meshes && result.meshes.length ? result.meshes[0] : null;
-      if (gltfRoot) gltfRoot.parent = wrapper;
-      else (result.meshes || []).forEach(m => { if(m) m.parent = wrapper; });
+    let weaponContainer = null;
+    let weaponRoot = null;
+    let weaponGrip = null;
 
-      // Keep everything enabled (some browsers behave weird if parents are disabled)
-      wrapper.setEnabled(true);
-      return { root: wrapper, result };
+    let skinnedMesh = null;
+    let skeleton = null;
+
+    // User interacting flag, match lobby behavior
+    let userInteracting = false;
+    canvas.addEventListener("pointerdown", () => { userInteracting = true; }, { passive:true });
+    canvas.addEventListener("pointerup", () => { userInteracting = false; }, { passive:true });
+    canvas.addEventListener("pointercancel", () => { userInteracting = false; }, { passive:true });
+    canvas.addEventListener("pointerleave", () => { userInteracting = false; }, { passive:true });
+
+    function findSkinnedMeshFromContainer(container){
+      try{
+        const meshes = (container && container.meshes) ? container.meshes : [];
+        return meshes.find(m => m && m.skeleton) || null;
+      }catch(e){
+        return null;
+      }
     }
 
-    function findSkinnedMesh(importResult){
-      const meshes = importResult?.meshes || [];
-      return meshes.find(m => m && m.skeleton) || null;
-    }
-
-    function findBoneByNameOrIncludes(skeleton, want){
-      if (!skeleton || !skeleton.bones) return null;
-      const exact = skeleton.bones.find(b => (b.name || "") === want);
+    function findBoneByNameOrIncludes(skel, want){
+      if (!skel || !skel.bones) return null;
+      const exact = skel.bones.find(b => (b.name || "") === want);
       if (exact) return exact;
       const wantLow = (want || "").toLowerCase();
-      return skeleton.bones.find(b => ((b.name || "").toLowerCase().includes(wantLow))) || null;
+      return skel.bones.find(b => ((b.name || "").toLowerCase().includes(wantLow))) || null;
     }
 
-    // ---------- attach (keeps GLTF hierarchy intact, fixes "3 pieces") ----------
-    function attachWeaponToRightHand(soldierImport, weaponImport){
-      const skinned = findSkinnedMesh(soldierImport.result);
-      const skeleton = skinned?.skeleton || (soldierImport.result?.skeletons?.[0] || null);
-      if (!skinned || !skeleton) return false;
+    function clearSoldier(){
+      try{
+        if(currentContainer){
+          currentContainer.removeAllFromScene();
+          currentContainer.dispose();
+          currentContainer = null;
+        }
+      }catch(e){}
+      try{
+        if(currentWrapper){
+          currentWrapper.dispose(true, false);
+          currentWrapper = null;
+        }
+      }catch(e){}
+      try{
+        if(shadowPlane){
+          shadowPlane.dispose(false, true);
+          shadowPlane = null;
+        }
+      }catch(e){}
+      skinnedMesh = null;
+      skeleton = null;
+    }
 
-      const boneNameExact = "mixamorig:RightHand.209_221";
-      let bone = findBoneByNameOrIncludes(skeleton, boneNameExact);
-      if (!bone) bone = skeleton.bones.find(b => /RightHand/i.test(b.name || "")) || null;
-      if (!bone) return false;
+    function clearWeapon(){
+      try{
+        if(weaponRoot){
+          weaponRoot.dispose(true, false);
+          weaponRoot = null;
+        }
+      }catch(e){}
+      try{
+        if(weaponGrip){
+          weaponGrip.dispose(true, false);
+          weaponGrip = null;
+        }
+      }catch(e){}
+      try{
+        if(weaponContainer){
+          weaponContainer.removeAllFromScene();
+          weaponContainer.dispose();
+          weaponContainer = null;
+        }
+      }catch(e){}
+    }
 
-      // This node is attached to the bone, and we tune THIS
-      const boneNode = new BABYLON.TransformNode("weaponBoneNode", scene);
-      boneNode.attachToBone(bone, skinned);
+    function buildWrapperFromContainer(container){
+      const wrapper = new BABYLON.TransformNode("testSkinWrap", scene);
+      const nodes = []
+        .concat(container.meshes || [])
+        .concat(container.transformNodes || []);
+      nodes.forEach(n => {
+        if(!n) return;
+        try{ n.parent = wrapper; }catch(e){}
+      });
+      wrapper.rotation.y = Math.PI;
+      return wrapper;
+    }
 
-      // Parent the imported weapon ROOT under the bone node
-      // This preserves the weapon's original hierarchy and relative transforms.
-      weaponImport.root.parent = boneNode;
-      weaponImport.root.setEnabled(true);
+    async function loadSoldierSkin(skinSku){
+      clearWeapon();
+      clearSoldier();
 
-      weaponBoneNode = boneNode;
-      applyTune();
-      hud();
+      const okSoldier = await preflightGltf(SOLDIER_ROOT, SOLDIER_FILE, "soldier");
+      if (!okSoldier){
+        hud.textContent += "\n[FAIL] soldier preflight";
+        return false;
+      }
+
+      const container = await BABYLON.SceneLoader.LoadAssetContainerAsync(SOLDIER_ROOT, SOLDIER_FILE, scene);
+
+      applyTextureOverrides(container, skinSku);
+
+      container.addAllToScene();
+      currentContainer = container;
+
+      const wrapper = buildWrapperFromContainer(container);
+      currentWrapper = wrapper;
+
+      normalizeToGroundAndHeight(wrapper, 1.75);
+
+      // MATCH LOBBY: extra scale and lift
+      wrapper.scaling.scaleInPlace(LOBBY_EXTRA_SCALE);
+      wrapper.position.y += LOBBY_EXTRA_Y;
+
+      frameCameraToRoot(wrapper);
+      attachShadowToWrapper(wrapper);
+
+      if(container.animationGroups && container.animationGroups.length){
+        container.animationGroups.forEach(g => g.stop());
+        container.animationGroups[0].start(true);
+        container.animationGroups[0].speedRatio = SOLDIER_ANIM_SPEED;
+      }
+
+      skinnedMesh = findSkinnedMeshFromContainer(container);
+      skeleton = skinnedMesh?.skeleton || null;
+
+      hud.textContent += `\n[OK] soldier loaded, skinned:${!!skinnedMesh} bones:${skeleton?.bones?.length || 0}`;
       return true;
     }
 
-    // ---------- Paths ----------
-    const SOLDIER_ROOT = "/assets/warzone3d/soldier_gltf_3/";
-    const SOLDIER_FILE = "scene.gltf";
+    function attachWeaponToRightHand(){
+      if(!skinnedMesh || !skeleton) return { ok:false };
 
-    const WEAPON_ROOT  = "/assets/warzone3d/weapons/wz_neon_marksman/";
-    const WEAPON_FILE  = "scene.gltf";
+      const boneNameExact = "mixamorig:RightHand.209_221";
+      let rightHand = findBoneByNameOrIncludes(skeleton, boneNameExact);
+      if(!rightHand){
+        rightHand = skeleton.bones.find(b => /RightHand/i.test(b.name || "")) || null;
+      }
+      if(!rightHand) return { ok:false };
 
+      weaponRoot = new BABYLON.TransformNode("weaponRoot", scene);
+      weaponRoot.attachToBone(rightHand, skinnedMesh);
+
+      weaponGrip = new BABYLON.TransformNode("weaponGrip", scene);
+      weaponGrip.parent = weaponRoot;
+
+      return {
+        ok:true,
+        bones:{
+          rightHand,
+          rightShoulder: findBoneByNameOrIncludes(skeleton, "mixamorig:RightShoulder.206_218") || findBoneByNameOrIncludes(skeleton, "RightShoulder"),
+          rightArm:      findBoneByNameOrIncludes(skeleton, "mixamorig:RightArm.207_219")      || findBoneByNameOrIncludes(skeleton, "RightArm"),
+          rightForeArm:  findBoneByNameOrIncludes(skeleton, "mixamorig:RightForeArm.208_220")  || findBoneByNameOrIncludes(skeleton, "RightForeArm")
+        }
+      };
+    }
+
+    function applyTuneToWeapon(){
+      if (!weaponRoot || !weaponGrip) return;
+
+      weaponRoot.position.copyFrom(TUNE.WEAPON_POS);
+
+      // MATCH LOBBY: rotation formula
+      weaponRoot.rotation.set(
+        (TUNE.WEAPON_PITCH_FIX || 0.0),
+        Math.PI + (TUNE.WEAPON_YAW_FIX || 0.0),
+        0
+      );
+
+      weaponRoot.scaling.set(TUNE.WEAPON_SCALE, TUNE.WEAPON_SCALE, TUNE.WEAPON_SCALE);
+
+      weaponGrip.position.copyFrom(TUNE.WEAPON_GRIP_POS);
+      weaponGrip.rotation.copyFrom(TUNE.WEAPON_GRIP_ROT);
+    }
+
+    async function loadWeapon(key){
+      clearWeapon();
+
+      const cfg = WEAPON_MAP[key];
+      if(!cfg){
+        hud.textContent += `\n[FAIL] weapon key not mapped: ${key}`;
+        return false;
+      }
+
+      const okWeapon = await preflightGltf(cfg.root, cfg.file, `weapon:${key}`);
+      if (!okWeapon){
+        hud.textContent += `\n[FAIL] weapon preflight`;
+        return false;
+      }
+
+      if(!currentWrapper || !currentContainer || !skinnedMesh || !skeleton){
+        hud.textContent += `\n[FAIL] soldier not ready`;
+        return false;
+      }
+
+      // Lobby loads weapons as asset containers
+      const w = await BABYLON.SceneLoader.LoadAssetContainerAsync(cfg.root, cfg.file, scene);
+      w.addAllToScene();
+      weaponContainer = w;
+
+      const attach = attachWeaponToRightHand();
+      if(!attach?.ok){
+        hud.textContent += `\n[FAIL] attachWeaponToRightHand`;
+        return false;
+      }
+
+      // Parent weapon meshes to weaponGrip (skip container root mesh)
+      const wMeshes = (w.meshes || []);
+      wMeshes.forEach(m => {
+        if(!m) return;
+        if(m === wMeshes[0]) return;
+        try{ m.parent = weaponGrip; }catch(e){}
+      });
+
+      applyTuneToWeapon();
+      hud.textContent += `\n[OK] weapon attached`;
+      return true;
+    }
+
+    // ---------- Keyboard tuner ----------
+    // Modes:
+    //   1: WEAPON_POS
+    //   2: WEAPON_GRIP_POS
+    //   3: WEAPON_GRIP_ROT
+    //   4: YAW_FIX
+    //   5: PITCH_FIX
+    //   6: SCALE
+    // Extra:
+    //   R = reset
+    //   C = copy constants
+    let MODE = 1;
+
+    function stepForEvent(ev){
+      let s = 0.01;
+      if (ev.shiftKey) s = 0.05;
+      if (ev.altKey)   s = 0.001;
+      return s;
+    }
+
+    function lockText(){
+      return `// LOCK THESE IN, ${ACTIVE_WEAPON_KEY}
+const WEAPON_SCALE = ${TUNE.WEAPON_SCALE.toFixed(5)};
+const WEAPON_YAW_FIX = ${TUNE.WEAPON_YAW_FIX.toFixed(5)};
+const WEAPON_PITCH_FIX = ${TUNE.WEAPON_PITCH_FIX.toFixed(5)};
+
+const WEAPON_POS      = new BABYLON.Vector3(${TUNE.WEAPON_POS.x.toFixed(5)}, ${TUNE.WEAPON_POS.y.toFixed(5)}, ${TUNE.WEAPON_POS.z.toFixed(5)});
+const WEAPON_GRIP_POS = new BABYLON.Vector3(${TUNE.WEAPON_GRIP_POS.x.toFixed(5)}, ${TUNE.WEAPON_GRIP_POS.y.toFixed(5)}, ${TUNE.WEAPON_GRIP_POS.z.toFixed(5)});
+const WEAPON_GRIP_ROT = new BABYLON.Vector3(${TUNE.WEAPON_GRIP_ROT.x.toFixed(5)}, ${TUNE.WEAPON_GRIP_ROT.y.toFixed(5)}, ${TUNE.WEAPON_GRIP_ROT.z.toFixed(5)});`;
+    }
+
+    async function copyLock(){
+      const txt = lockText();
+      try{
+        await navigator.clipboard.writeText(txt);
+        hud.textContent += `\n[COPIED]`;
+      }catch(e){
+        prompt("Copy these constants", txt);
+      }
+    }
+
+    function printHud(){
+      const modeName =
+        MODE===1 ? "WEAPON_POS" :
+        MODE===2 ? "GRIP_POS" :
+        MODE===3 ? "GRIP_ROT" :
+        MODE===4 ? "YAW_FIX" :
+        MODE===5 ? "PITCH_FIX" :
+        MODE===6 ? "SCALE" : "???";
+
+      hud.textContent =
+`Skin: ${ACTIVE_SKIN_SKU}
+Weapon: ${ACTIVE_WEAPON_KEY}   Mode: ${MODE} (${modeName})
+Keys: 1-6 mode, arrows XY, Q/E Z, Shift fast, Alt slow, R reset, C copy
+
+WEAPON_POS     : ${TUNE.WEAPON_POS.x.toFixed(5)}, ${TUNE.WEAPON_POS.y.toFixed(5)}, ${TUNE.WEAPON_POS.z.toFixed(5)}
+GRIP_POS       : ${TUNE.WEAPON_GRIP_POS.x.toFixed(5)}, ${TUNE.WEAPON_GRIP_POS.y.toFixed(5)}, ${TUNE.WEAPON_GRIP_POS.z.toFixed(5)}
+GRIP_ROT       : ${TUNE.WEAPON_GRIP_ROT.x.toFixed(5)}, ${TUNE.WEAPON_GRIP_ROT.y.toFixed(5)}, ${TUNE.WEAPON_GRIP_ROT.z.toFixed(5)}
+YAW_FIX        : ${TUNE.WEAPON_YAW_FIX.toFixed(5)}
+PITCH_FIX      : ${TUNE.WEAPON_PITCH_FIX.toFixed(5)}
+SCALE          : ${TUNE.WEAPON_SCALE.toFixed(5)}
+
+${lockText()}`;
+    }
+
+    function adjust(ev, dx, dy, dz){
+      const s = stepForEvent(ev);
+      if (MODE === 1){
+        TUNE.WEAPON_POS.x += dx*s; TUNE.WEAPON_POS.y += dy*s; TUNE.WEAPON_POS.z += dz*s;
+      } else if (MODE === 2){
+        TUNE.WEAPON_GRIP_POS.x += dx*s; TUNE.WEAPON_GRIP_POS.y += dy*s; TUNE.WEAPON_GRIP_POS.z += dz*s;
+      } else if (MODE === 3){
+        TUNE.WEAPON_GRIP_ROT.x += dx*s; TUNE.WEAPON_GRIP_ROT.y += dy*s; TUNE.WEAPON_GRIP_ROT.z += dz*s;
+      } else if (MODE === 4){
+        TUNE.WEAPON_YAW_FIX += dx*s;
+      } else if (MODE === 5){
+        TUNE.WEAPON_PITCH_FIX += dy*s;
+      } else if (MODE === 6){
+        TUNE.WEAPON_SCALE = Math.max(0.0001, TUNE.WEAPON_SCALE + dy*s);
+      }
+      applyTuneToWeapon();
+      saveTuneBackToPreset(ACTIVE_WEAPON_KEY);
+      printHud();
+    }
+
+    window.addEventListener("keydown", async (ev) => {
+      if (["ArrowUp","ArrowDown","ArrowLeft","ArrowRight"," "].includes(ev.key)) ev.preventDefault();
+
+      if (ev.key >= "1" && ev.key <= "6"){
+        MODE = parseInt(ev.key, 10);
+        printHud();
+        return;
+      }
+
+      if (ev.key.toLowerCase() === "r"){
+        loadPresetIntoTune(ACTIVE_WEAPON_KEY);
+        applyTuneToWeapon();
+        printHud();
+        return;
+      }
+
+      if (ev.key.toLowerCase() === "c"){
+        await copyLock();
+        printHud();
+        return;
+      }
+
+      if (ev.key === "ArrowLeft")  return adjust(ev, -1,  0,  0);
+      if (ev.key === "ArrowRight") return adjust(ev,  1,  0,  0);
+      if (ev.key === "ArrowUp")    return adjust(ev,  0,  1,  0);
+      if (ev.key === "ArrowDown")  return adjust(ev,  0, -1,  0);
+      if (ev.key.toLowerCase() === "q") return adjust(ev, 0, 0, -1);
+      if (ev.key.toLowerCase() === "e") return adjust(ev, 0, 0,  1);
+    }, { passive:false });
+
+    // ---------- main loop (match lobby osc + arm correction) ----------
+    let tOsc = 0;
+    const baseY = Math.PI;
+
+    scene.onBeforeRenderObservable.add(() => {
+      if(!currentWrapper) return;
+
+      // arm correction (same math as lobby)
+      try{
+        if(skinnedMesh && skeleton){
+          const rightShoulder = findBoneByNameOrIncludes(skeleton, "mixamorig:RightShoulder.206_218") || findBoneByNameOrIncludes(skeleton, "RightShoulder");
+          const rightArm      = findBoneByNameOrIncludes(skeleton, "mixamorig:RightArm.207_219")      || findBoneByNameOrIncludes(skeleton, "RightArm");
+          const rightForeArm  = findBoneByNameOrIncludes(skeleton, "mixamorig:RightForeArm.208_220")  || findBoneByNameOrIncludes(skeleton, "RightForeArm");
+          const rightHand     = skeleton.bones.find(b => /RightHand/i.test(b.name || "")) || null;
+
+          if (rightShoulder && rightShoulder.getRotationQuaternion){
+            const cur = rightShoulder.getRotationQuaternion(BABYLON.Space.LOCAL, skinnedMesh) || BABYLON.Quaternion.Identity();
+            rightShoulder.setRotationQuaternion(cur.multiply(qShould), BABYLON.Space.LOCAL, skinnedMesh);
+          }
+          if (rightArm && rightArm.getRotationQuaternion){
+            const cur = rightArm.getRotationQuaternion(BABYLON.Space.LOCAL, skinnedMesh) || BABYLON.Quaternion.Identity();
+            rightArm.setRotationQuaternion(cur.multiply(qArm), BABYLON.Space.LOCAL, skinnedMesh);
+          }
+          if (rightForeArm && rightForeArm.getRotationQuaternion){
+            const cur = rightForeArm.getRotationQuaternion(BABYLON.Space.LOCAL, skinnedMesh) || BABYLON.Quaternion.Identity();
+            rightForeArm.setRotationQuaternion(cur.multiply(qForeArm), BABYLON.Space.LOCAL, skinnedMesh);
+          }
+          if (WRIST_TWIST_ON && rightHand && rightHand.getRotationQuaternion){
+            const cur = rightHand.getRotationQuaternion(BABYLON.Space.LOCAL, skinnedMesh) || BABYLON.Quaternion.Identity();
+            rightHand.setRotationQuaternion(cur.multiply(qWrist), BABYLON.Space.LOCAL, skinnedMesh);
+          }
+        }
+      }catch(e){}
+
+      // MATCH LOBBY: oscillation pauses while interacting
+      if(!userInteracting){
+        const dt = scene.getEngine().getDeltaTime() * 0.001;
+        tOsc += dt * AUTO_OSC_SPEED;
+        const yaw = Math.sin(tOsc) * AUTO_MAX_YAW;
+        currentWrapper.rotation.y = baseY + yaw;
+      }
+    });
+
+    // ---------- boot ----------
     (async () => {
       try{
-        setHudText(`Loading soldier + neon marksman... (lowEnd=${LOW_END})`);
+        hud.textContent = "Loading, soldier (lobby accurate)...";
+        const ok = await loadSoldierSkin(ACTIVE_SKIN_SKU);
+        if(!ok) return;
 
-        const okSoldier = await preflightGltf(SOLDIER_ROOT, SOLDIER_FILE);
-        if(!okSoldier){ setHudText("Stop: soldier preflight failed"); return; }
+        loadPresetIntoTune(ACTIVE_WEAPON_KEY);
+        await loadWeapon(ACTIVE_WEAPON_KEY);
 
-        const okWeapon = await preflightGltf(WEAPON_ROOT, WEAPON_FILE);
-        if(!okWeapon){ setHudText("Stop: neon marksman preflight failed"); return; }
-
-        const soldier = await importModel("soldier", SOLDIER_ROOT, SOLDIER_FILE);
-        soldier.root.rotation.y = Math.PI;
-        normalizeToGroundAndHeight(soldier.root, 1.75);
-
-        const ag = soldier.result?.animationGroups || [];
-        if (ag.length){
-          ag.forEach(g => g.stop());
-          ag[0].start(true);
-          ag[0].speedRatio = 0.65;
-        }
-
-        const gun = await importModel("neon_marksman", WEAPON_ROOT, WEAPON_FILE);
-
-        const attached = attachWeaponToRightHand(soldier, gun);
-        if (!attached){
-          setHudText("Attach FAIL: RightHand bone not found");
-          return;
-        }
-
-        frameCameraToRoot(soldier.root);
-
-        // slow spin (inspection)
-        scene.onBeforeRenderObservable.clear();
-        scene.onBeforeRenderObservable.add(() => {
-          const dt = scene.getEngine().getDeltaTime() * 0.001;
-          soldier.root.rotation.y += dt * 0.25;
-        });
-
-        hud();
+        printHud();
       }catch(e){
+        hud.textContent += "\n[EXCEPTION] " + (e?.message || e);
         console.warn("Test failed", e);
-        setHudText("FAILED: check console: " + (e?.message || e));
       }
     })();
   </script>
