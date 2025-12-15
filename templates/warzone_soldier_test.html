@@ -1,9 +1,9 @@
 <!doctype html>
 <html lang="en">
 <head>
-  <meta charset="utf-8" />
-  <title>War Zone Test, Weapon Only Diagnostics (Neon Marksman)</title>
-  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <meta charset="utf-8">
+  <title>War Zone Test, Soldier + Weapon Tuner, Neon Marksman</title>
+  <meta name="viewport" content="width=device-width,initial-scale=1">
   <style>
     html,body{
       margin:0;
@@ -59,255 +59,10 @@
 
     const engine = new BABYLON.Engine(canvas, true, { preserveDrawingBuffer:true, stencil:true });
     const scene  = new BABYLON.Scene(engine);
+
+    // transparent clearColor
     scene.clearColor = new BABYLON.Color4(0,0,0,0);
 
-    const camera = new BABYLON.ArcRotateCamera(
-      "cam",
-      Math.PI * 1.3,
-      Math.PI / 2.08,
-      2.8,
-      new BABYLON.Vector3(0, 1.1, 0),
-      scene
-    );
-    camera.attachControl(canvas, true);
-    camera.panningSensibility = 0;
-    camera.wheelPrecision = 60;
-    camera.pinchPrecision = 200;
-    camera.angularSensibilityX = 2200;
-    camera.angularSensibilityY = 2200;
-
-    const hemi = new BABYLON.HemisphericLight("h", new BABYLON.Vector3(0,1,0), scene);
-    hemi.intensity = 1.1;
-
-    engine.runRenderLoop(() => scene.render());
-    window.addEventListener("resize", () => engine.resize());
-
-    // ----------------------------
-    // Weapon under test
-    // ----------------------------
-    const NEON_MARKSMAN_ROOT = "/assets/warzone3d/weapons/wz_neon_marksman/";
-    const WEAPON_FILE = "scene.gltf";
-
-    // This page assumes soldier is already known good, so we only show gun diagnostics in HUD.
-
-    // ----------------------------
-    // Diagnostics helpers
-    // ----------------------------
-    function fmtBytes(bytes){
-      if (!Number.isFinite(bytes) || bytes < 0) return "unknown";
-      const units = ["B","KB","MB","GB"];
-      let i = 0, v = bytes;
-      while (v >= 1024 && i < units.length-1){ v /= 1024; i++; }
-      return `${v.toFixed(i === 0 ? 0 : 2)} ${units[i]}`;
-    }
-
-    async function headOrGet(url){
-      try{
-        const r = await fetch(url, { method:"HEAD", cache:"no-store" });
-        if (r && (r.ok || r.status === 404 || r.status === 403)) return r;
-      }catch(e){}
-      return fetch(url, { method:"GET", cache:"no-store" });
-    }
-
-    async function probe(url){
-      try{
-        const r = await headOrGet(url);
-        const ct = (r.headers && r.headers.get) ? (r.headers.get("content-type") || "") : "";
-        const cl = (r.headers && r.headers.get) ? (r.headers.get("content-length") || "") : "";
-        const bytes = cl ? parseInt(cl, 10) : NaN;
-        return { ok:r.ok, status:r.status, ct, bytes };
-      }catch(e){
-        return { ok:false, status:0, ct:String(e), bytes:NaN };
-      }
-    }
-
-    function joinUrl(root, rel){
-      if (!rel) return root;
-      if (/^https?:\/\//i.test(rel)) return rel;
-      if (rel.startsWith("/")) return rel;
-      return root + rel;
-    }
-
-    function safeLine(s){
-      hud.textContent += `\n${s}`;
-    }
-
-    // ----------------------------
-    // Gun preflight that also prints file sizes
-    // ----------------------------
-    async function preflightWeaponWithSizes(rootUrl, fileName){
-      const gltfUrl = rootUrl + fileName;
-
-      safeLine(`[gun] gltf: ${gltfUrl}`);
-
-      const gltfProbe = await probe(gltfUrl);
-      safeLine(`      status: ${gltfProbe.status} ok:${gltfProbe.ok} type:${gltfProbe.ct || "?"} size:${fmtBytes(gltfProbe.bytes)}`);
-
-      if (!gltfProbe.ok){
-        safeLine(`      FAIL, gun gltf not reachable`);
-        return { ok:false, reason:"gltf-not-reachable", deps:[] };
-      }
-
-      let gltfJson;
-      try{
-        const r = await fetch(gltfUrl, { cache:"no-store" });
-        gltfJson = await r.json();
-      }catch(e){
-        safeLine(`      FAIL, gun gltf json parse error`);
-        return { ok:false, reason:"gltf-json-parse", deps:[] };
-      }
-
-      const deps = [];
-      if (Array.isArray(gltfJson.buffers)) gltfJson.buffers.forEach(b => b?.uri && deps.push({ kind:"buffer", uri:b.uri }));
-      if (Array.isArray(gltfJson.images))  gltfJson.images.forEach(i => i?.uri && deps.push({ kind:"image",  uri:i.uri }));
-
-      // check + sum sizes (best effort, depends on content-length header)
-      let totalBytes = 0;
-      let unknownCount = 0;
-
-      for (const dep of deps){
-        const url = joinUrl(rootUrl, dep.uri);
-        const st = await probe(url);
-        const sizeStr = fmtBytes(st.bytes);
-        safeLine(`      dep ${dep.kind}: ${dep.uri} -> ${st.status} ok:${st.ok} type:${st.ct || "?"} size:${sizeStr}`);
-
-        if (!st.ok) {
-          safeLine(`      FAIL, missing dep: ${dep.uri}`);
-          return { ok:false, reason:"missing-dep", deps };
-        }
-
-        if (Number.isFinite(st.bytes)) totalBytes += st.bytes;
-        else unknownCount += 1;
-      }
-
-      safeLine(`      deps: ${deps.length}, size sum: ${fmtBytes(totalBytes)}${unknownCount ? `, unknown sizes: ${unknownCount}` : ""}`);
-
-      // Why it might crash, based on what we can infer
-      safeLine(``);
-      safeLine(`[why crash] common causes when weapon loads but page dies, especially on mobile`);
-      safeLine(`- Huge textures, many 4K PNGs, or uncompressed normal maps, can spike GPU memory and crash the webview`);
-      safeLine(`- Large .bin buffer, high poly count, or many skinned meshes, can stall parsing and trigger watchdog kills`);
-      safeLine(`- Missing content-length headers show as "unknown", but the real payload may still be very large`);
-      safeLine(`- If the gun uses KTX2, Draco, or meshopt and the loader path is wrong, it can throw during decode`);
-      safeLine(`- If any texture is not power-of-two and set to generate mipmaps, some devices can choke hard`);
-      safeLine(``);
-      safeLine(`[next step] if the size sum looks big, we should`);
-      safeLine(`- downscale weapon textures (2K or 1K), convert PNG to KTX2 (BasisU), or WebP where possible`);
-      safeLine(`- reduce mesh complexity, remove unused meshes, bake normals, merge materials`);
-      safeLine(`- confirm if the weapon is using .glb instead of .gltf + deps, and whether deps are duplicated`);
-      safeLine(``);
-
-      return { ok:true, reason:"ok", deps };
-    }
-
-    // ----------------------------
-    // Load weapon alone into scene
-    // ----------------------------
-    async function loadWeaponStandalone(rootUrl, fileName){
-      // tiny wrapper so camera has something to target even without soldier
-      const wrap = new BABYLON.TransformNode("wrap", scene);
-
-      // IMPORTANT: if crash happens here, it is likely inside Babylon loader or GPU memory
-      const container = await BABYLON.SceneLoader.LoadAssetContainerAsync(rootUrl, fileName, scene);
-      container.addAllToScene();
-
-      // parent everything to wrapper
-      const nodes = []
-        .concat(container.meshes || [])
-        .concat(container.transformNodes || []);
-      nodes.forEach(n => {
-        if(!n) return;
-        try{ n.parent = wrap; }catch(e){}
-      });
-
-      // normalize to view
-      try{
-        const b = wrap.getHierarchyBoundingVectors(true);
-        const size = b.max.subtract(b.min);
-        const maxDim = Math.max(size.x, size.y, size.z) || 1.0;
-        const center = b.min.add(size.scale(0.5));
-        camera.target = new BABYLON.Vector3(center.x, center.y, center.z);
-        camera.radius = Math.max(2.0, maxDim * 2.2);
-      }catch(e){}
-
-      safeLine(`[gun] loaded into scene`);
-      return { wrap, container };
-    }
-
-    // ----------------------------
-    // Catch and report errors instead of silent crash where possible
-    // ----------------------------
-    window.addEventListener("error", (e) => {
-      try{
-        safeLine(`[JS ERROR] ${e.message || e}`);
-      }catch(_){}
-    });
-    window.addEventListener("unhandledrejection", (e) => {
-      try{
-        safeLine(`[PROMISE ERROR] ${(e.reason && e.reason.message) ? e.reason.message : (e.reason || e)}`);
-      }catch(_){}
-    });
-
-    // ----------------------------
-    // Boot
-    // ----------------------------
-    (async () => {
-      try{
-        hud.textContent = "Weapon diagnostics starting...";
-        safeLine(`(Soldier HUD removed, soldier assumed good)`);
-        safeLine(``);
-
-        const pf = await preflightWeaponWithSizes(NEON_MARKSMAN_ROOT, WEAPON_FILE);
-        if (!pf.ok){
-          safeLine(`[STOP] preflight failed: ${pf.reason}`);
-          return;
-        }
-
-        safeLine(`[load] attempting to load gun model now...`);
-        await loadWeaponStandalone(NEON_MARKSMAN_ROOT, WEAPON_FILE);
-
-        safeLine(``);
-        safeLine(`[note] if it still crashes before showing this line, the crash is likely`);
-        safeLine(`- GPU memory spike from textures, or`);
-        safeLine(`- Babylon decode path issue (KTX2, Draco, meshopt), or`);
-        safeLine(`- the Pi Browser webview killing the tab due to resource usage`);
-      }catch(e){
-        safeLine(`[EXCEPTION] ${e?.message || e}`);
-        console.warn("Weapon test failed", e);
-      }
-    })();
-  </script>
-</body>
-</html>      line-height:1.35;
-      text-shadow: 0 0 10px rgba(0,0,0,.85);
-      white-space:pre;
-      pointer-events:none;
-      max-width: calc(100vw - 20px);
-      overflow:hidden;
-    }
-  </style>
-  <script src="https://cdn.babylonjs.com/babylon.js"></script>
-  <script src="https://cdn.babylonjs.com/loaders/babylonjs.loaders.min.js"></script>
-</head>
-<body>
-  <canvas id="renderCanvas"></canvas>
-  <div id="hud">Loading...</div>
-
-  <script>
-    const canvas = document.getElementById("renderCanvas");
-    const hud = document.getElementById("hud");
-
-    canvas.tabIndex = 1;
-    canvas.addEventListener("pointerdown", () => canvas.focus(), { passive:true });
-    window.addEventListener("keydown", () => canvas.focus());
-
-    const engine = new BABYLON.Engine(canvas, true, { preserveDrawingBuffer:true, stencil:true });
-    const scene  = new BABYLON.Scene(engine);
-
-    // MATCH LOBBY: transparent clearColor
-    scene.clearColor = new BABYLON.Color4(0,0,0,0);
-
-    // MATCH LOBBY: camera defaults + sensitivities
     const camera = new BABYLON.ArcRotateCamera(
       "cam",
       Math.PI * 1.3,
@@ -323,7 +78,7 @@
     camera.angularSensibilityX = 2200;
     camera.angularSensibilityY = 2200;
 
-    // allow arrow keys for our tuner, kill camera keyboard
+    // allow arrow keys for tuner, kill camera keyboard
     camera.inputs.removeByType("ArcRotateCameraKeyboardMoveInput");
     if (camera.inputs && camera.inputs.attached && camera.inputs.attached.keyboard) {
       camera.inputs.attached.keyboard.keysUp = [];
@@ -332,7 +87,6 @@
       camera.inputs.attached.keyboard.keysRight = [];
     }
 
-    // MATCH LOBBY: hemispheric light only
     const hemi = new BABYLON.HemisphericLight("h", new BABYLON.Vector3(0,1,0), scene);
     hemi.intensity = 1.2;
 
@@ -343,7 +97,6 @@
     const SOLDIER_ROOT = "/assets/warzone3d/soldier_gltf_3/";
     const SOLDIER_FILE = "scene.gltf";
 
-    // ✅ ONLY weapon under test (removes switch-crash path)
     const NEON_MARKSMAN_ROOT = "/assets/warzone3d/weapons/wz_neon_marksman/";
     const WEAPON_FILE = "scene.gltf";
 
@@ -351,21 +104,53 @@
       neon_marksman: { root: NEON_MARKSMAN_ROOT, file: WEAPON_FILE }
     };
 
-    // Skin tuning, same pipeline as lobby, but local keys you can extend
-    let ACTIVE_SKIN_SKU = "wz_basic_soldier";
+    // Only show weapon diagnostics text, soldier assumed good
+    hud.textContent =
+`Weapon diagnostics starting...
+(Soldier diagnostics hidden, soldier assumed good)
+`;
 
-    // ✅ Start on Neon Marksman (only weapon in this test page)
+    // IMPORTANT: crash workaround while tuning
+    // true = replaces weapon textures with tiny placeholder data, prevents 150 MB decode spikes
+    const LIGHTWEIGHT_WEAPON_TEXTURES = true;
+
+    // This is a 1x1 transparent PNG data url
+    const ONE_BY_ONE_PNG =
+      "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR4nGNgYAAAAAMAASsJTYQAAAAASUVORK5CYII=";
+
+    // Hook glTF loader to optionally redirect huge textures to 1x1 placeholder
+    BABYLON.SceneLoader.OnPluginActivatedObservable.add((plugin) => {
+      try{
+        if (!plugin || plugin.name !== "gltf") return;
+
+        // Keep this hook very narrow, only affects the gun, not the soldier
+        const original = plugin.preprocessUrlAsync;
+        plugin.preprocessUrlAsync = (url) => {
+          try{
+            const s = (url || "").toString();
+            const isWeapon = s.includes("/weapons/wz_neon_marksman/");
+            if (LIGHTWEIGHT_WEAPON_TEXTURES && isWeapon){
+              // Redirect common texture formats only
+              if (/\.(png|jpg|jpeg|webp|ktx2)$/i.test(s)) return Promise.resolve(ONE_BY_ONE_PNG);
+            }
+          }catch(e){}
+          if (typeof original === "function") return original(url);
+          return Promise.resolve(url);
+        };
+      }catch(e){}
+    });
+
+    let ACTIVE_SKIN_SKU = "wz_basic_soldier";
     let ACTIVE_WEAPON_KEY = "neon_marksman";
 
     const SOLDIER_ANIM_SPEED = 0.65;
     const AUTO_OSC_SPEED = 0.35;
     const AUTO_MAX_YAW   = Math.PI * 0.45;
 
-    // MATCH LOBBY: extra scale and Y offset after normalize
     const LOBBY_EXTRA_SCALE = 0.72;
     const LOBBY_EXTRA_Y     = 0.06;
 
-    // ---------- LOBBY SHADOW ANCHOR ----------
+    // ---------- shadow anchor ----------
     let shadowPlane = null;
     let shadowMat = null;
     const SHADOW_WORLD_Y = 0.005;
@@ -423,7 +208,6 @@
       shadowPlane.material = mat;
       shadowPlane.isPickable = false;
       shadowPlane.renderingGroupId = 0;
-
       shadowPlane.parent = wrapper;
 
       const localY = SHADOW_WORLD_Y - (wrapper.position.y || 0);
@@ -433,10 +217,9 @@
       shadowPlane.position.x = -0.85;
       shadowPlane.position.z = 0.00;
     }
-    // ----------------------------------------
 
     // ----- Per-weapon defaults -----
-    // ✅ Match Neon Marksman to Lobby Pistol tuning FOR NOW (exact lobby constants)
+    // Neon Marksman matches pistol tuning for now
     const PRESETS = {
       neon_marksman: {
         WEAPON_SCALE: 0.06000,
@@ -478,7 +261,7 @@
       p.WEAPON_GRIP_ROT.copyFrom(TUNE.WEAPON_GRIP_ROT);
     }
 
-    // Arm correction (match lobby)
+    // Arm correction
     const qArm     = BABYLON.Quaternion.FromEulerAngles(-0.10,  0.00,  0.00);
     const qForeArm = BABYLON.Quaternion.FromEulerAngles(-0.25,  0.00,  0.00);
     const qShould  = BABYLON.Quaternion.FromEulerAngles( 0.00,  0.00, -0.05);
@@ -486,21 +269,7 @@
     const WRIST_TWIST_ON = false;
     const qWrist = BABYLON.Quaternion.FromEulerAngles(0.00, 0.00, -0.25);
 
-    // ---------- Texture overrides (same as lobby, safe if you extend skins) ----------
-    const TEXTURE_BASE = "/assets/warzone3d/soldier_gltf_3/textures/";
-    const OVERRIDE_FILES = [
-      "material_8_diffuse.png",
-      "material_9_diffuse.png",
-      "material_10_diffuse.png",
-      "material_11_diffuse.png"
-    ];
-    const SKU_TO_TEXTURE_FOLDER = {
-      "wz_neon_edge": "neon_edge",
-      "wz_urban_shadow": "urban_shadow",
-      "wz_cinder_camo": "cinder_camo",
-      "wz_glow_legend": "glow_legend"
-    };
-
+    // ---------- helpers ----------
     function fileFromAnyUrl(u){
       try{
         const s = (u || "").toString();
@@ -512,43 +281,6 @@
       }
     }
 
-    function overrideTextureOnMaterial(mat, texProp, folder){
-      try{
-        const tex = mat && mat[texProp];
-        if(!tex) return false;
-
-        const urlOrName = (tex.url || tex.name || "");
-        const file = fileFromAnyUrl(urlOrName);
-        if(!file) return false;
-
-        if(!OVERRIDE_FILES.includes(file)) return false;
-
-        const newUrl = `${TEXTURE_BASE}${folder}/${file}`;
-        const newTex = new BABYLON.Texture(newUrl, scene, true, false);
-        newTex.hasAlpha = tex.hasAlpha || false;
-        newTex.level = (typeof tex.level === "number") ? tex.level : 1.0;
-
-        mat[texProp] = newTex;
-        return true;
-      }catch(e){
-        return false;
-      }
-    }
-
-    function applyTextureOverrides(container, skinSku){
-      const sku = (skinSku || "").toString().trim();
-      const folder = SKU_TO_TEXTURE_FOLDER[sku];
-      if(!folder) return;
-
-      const mats = (container && container.materials) ? container.materials : [];
-      mats.forEach(mat => {
-        if(!mat) return;
-        overrideTextureOnMaterial(mat, "albedoTexture", folder);
-        overrideTextureOnMaterial(mat, "diffuseTexture", folder);
-      });
-    }
-
-    // ---------- helpers ----------
     async function fetchHeadOrGet(url){
       try{
         const r = await fetch(url, { method:"HEAD", cache:"no-store" });
@@ -557,13 +289,15 @@
       return fetch(url, { method:"GET", cache:"no-store" });
     }
 
-    async function checkUrl(url){
+    async function checkUrlWithSize(url){
       try{
         const r = await fetchHeadOrGet(url);
         const ct = (r.headers && r.headers.get) ? (r.headers.get("content-type") || "") : "";
-        return { ok: r.ok, status: r.status, ct };
+        const cl = (r.headers && r.headers.get) ? (r.headers.get("content-length") || "") : "";
+        const size = cl ? parseInt(cl, 10) : 0;
+        return { ok: r.ok, status: r.status, ct, size: (Number.isFinite(size) ? size : 0) };
       }catch(e){
-        return { ok:false, status:0, ct:String(e) };
+        return { ok:false, status:0, ct:String(e), size:0 };
       }
     }
 
@@ -574,34 +308,66 @@
       return rootUrl + rel;
     }
 
-    async function preflightGltf(rootUrl, fileName, label){
-      const gltfUrl = rootUrl + fileName;
-      hud.textContent += `\n[check] ${label} gltf: ${gltfUrl}`;
+    function bytesToMB(n){
+      const mb = (n || 0) / (1024*1024);
+      return (Math.round(mb * 100) / 100).toFixed(2);
+    }
 
-      const gltfCheck = await checkUrl(gltfUrl);
-      hud.textContent += `\n       status: ${gltfCheck.status} ok:${gltfCheck.ok}`;
-      if (!gltfCheck.ok) return false;
+    async function preflightGltfWeapon(rootUrl, fileName, label){
+      const gltfUrl = rootUrl + fileName;
+      hud.textContent += `\n\n[gun] gltf: ${gltfUrl}`;
+
+      const gltfCheck = await checkUrlWithSize(gltfUrl);
+      hud.textContent += `\n  status: ${gltfCheck.status} ok:${gltfCheck.ok} type:${gltfCheck.ct} size:${bytesToMB(gltfCheck.size)} MB`;
+      if (!gltfCheck.ok) return { ok:false };
 
       let gltf;
       try{
         const r = await fetch(gltfUrl, { cache:"no-store" });
         gltf = await r.json();
       }catch(e){
-        hud.textContent += `\n       json read failed`;
-        return false;
+        hud.textContent += `\n  json read failed`;
+        return { ok:false };
       }
 
       const deps = [];
-      if (Array.isArray(gltf.buffers)) gltf.buffers.forEach(b => b?.uri && deps.push(b.uri));
-      if (Array.isArray(gltf.images))  gltf.images.forEach(i => i?.uri && deps.push(i.uri));
+      if (Array.isArray(gltf.buffers)) gltf.buffers.forEach(b => b?.uri && deps.push({ kind:"buffer", uri:b.uri }));
+      if (Array.isArray(gltf.images))  gltf.images.forEach(i => i?.uri && deps.push({ kind:"image", uri:i.uri }));
 
-      for (const uri of deps){
-        const url = joinUrl(rootUrl, uri);
-        const st = await checkUrl(url);
-        hud.textContent += `\n       dep: ${uri} -> ${st.status} ok:${st.ok}`;
-        if (!st.ok) return false;
+      let totalBytes = 0;
+
+      for (const d of deps){
+        const url = joinUrl(rootUrl, d.uri);
+        const st = await checkUrlWithSize(url);
+        totalBytes += (st.size || 0);
+
+        const line =
+          d.kind === "buffer"
+            ? `dep buffer: ${d.uri} -> ${st.status} ok:${st.ok} type:${st.ct} size:${bytesToMB(st.size)} MB`
+            : `dep image: ${d.uri} -> ${st.status} ok:${st.ok} type:${st.ct} size:${bytesToMB(st.size)} MB`;
+
+        hud.textContent += `\n  ${line}`;
+
+        if (!st.ok) return { ok:false };
       }
-      return true;
+
+      hud.textContent += `\n\n  deps: ${deps.length}, size sum: ${bytesToMB(totalBytes)} MB`;
+
+      hud.textContent +=
+`\n\n[why crash] common causes when weapon loads but page dies, especially on mobile
+- huge textures, many 4K PNGs, or uncompressed normal maps can spike GPU memory and crash the webview
+- big normal maps are expensive because they expand in VRAM, even if download size looks “only” 10 to 20 MB
+- lots of separate meshes and materials increases parse, shader compile, and draw overhead
+- the first time those big textures decode, some devices hit a watchdog kill
+
+[workaround] this test page can load the gun with lightweight placeholder textures
+- so we can tune hand placement without crashing
+- later we optimize the real files, convert to KTX2, reduce normals, merge materials, then turn full textures back on
+
+[mode] LIGHTWEIGHT_WEAPON_TEXTURES: ${LIGHTWEIGHT_WEAPON_TEXTURES ? "ON (safe for tuning)" : "OFF (full textures, may crash)"}
+`;
+
+      return { ok:true, depCount: deps.length, totalBytes };
     }
 
     function getBounds(node){
@@ -619,7 +385,6 @@
       return s;
     }
 
-    // MATCH LOBBY framing exactly
     function frameCameraToRoot(root){
       try{
         const bb = getBounds(root);
@@ -651,11 +416,11 @@
     let weaponContainer = null;
     let weaponRoot = null;
     let weaponGrip = null;
+    let mergedWeaponMesh = null;
 
     let skinnedMesh = null;
     let skeleton = null;
 
-    // User interacting flag, match lobby behavior
     let userInteracting = false;
     canvas.addEventListener("pointerdown", () => { userInteracting = true; }, { passive:true });
     canvas.addEventListener("pointerup", () => { userInteracting = false; }, { passive:true });
@@ -705,6 +470,12 @@
 
     function clearWeapon(){
       try{
+        if(mergedWeaponMesh){
+          mergedWeaponMesh.dispose(false, true);
+          mergedWeaponMesh = null;
+        }
+      }catch(e){}
+      try{
         if(weaponRoot){
           weaponRoot.dispose(true, false);
           weaponRoot = null;
@@ -738,18 +509,62 @@
       return wrapper;
     }
 
-    async function loadSoldierSkin(skinSku){
+    // Texture overrides for soldier only, unchanged
+    const TEXTURE_BASE = "/assets/warzone3d/soldier_gltf_3/textures/";
+    const OVERRIDE_FILES = [
+      "material_8_diffuse.png",
+      "material_9_diffuse.png",
+      "material_10_diffuse.png",
+      "material_11_diffuse.png"
+    ];
+    const SKU_TO_TEXTURE_FOLDER = {
+      "wz_neon_edge": "neon_edge",
+      "wz_urban_shadow": "urban_shadow",
+      "wz_cinder_camo": "cinder_camo",
+      "wz_glow_legend": "glow_legend"
+    };
+
+    function overrideTextureOnMaterial(mat, texProp, folder){
+      try{
+        const tex = mat && mat[texProp];
+        if(!tex) return false;
+
+        const urlOrName = (tex.url || tex.name || "");
+        const file = fileFromAnyUrl(urlOrName);
+        if(!file) return false;
+
+        if(!OVERRIDE_FILES.includes(file)) return false;
+
+        const newUrl = `${TEXTURE_BASE}${folder}/${file}`;
+        const newTex = new BABYLON.Texture(newUrl, scene, true, false);
+        newTex.hasAlpha = tex.hasAlpha || false;
+        newTex.level = (typeof tex.level === "number") ? tex.level : 1.0;
+
+        mat[texProp] = newTex;
+        return true;
+      }catch(e){
+        return false;
+      }
+    }
+
+    function applyTextureOverrides(container, skinSku){
+      const sku = (skinSku || "").toString().trim();
+      const folder = SKU_TO_TEXTURE_FOLDER[sku];
+      if(!folder) return;
+
+      const mats = (container && container.materials) ? container.materials : [];
+      mats.forEach(mat => {
+        if(!mat) return;
+        overrideTextureOnMaterial(mat, "albedoTexture", folder);
+        overrideTextureOnMaterial(mat, "diffuseTexture", folder);
+      });
+    }
+
+    async function loadSoldierSkinHiddenHud(skinSku){
       clearWeapon();
       clearSoldier();
 
-      const okSoldier = await preflightGltf(SOLDIER_ROOT, SOLDIER_FILE, "soldier");
-      if (!okSoldier){
-        hud.textContent += "\n[FAIL] soldier preflight";
-        return false;
-      }
-
       const container = await BABYLON.SceneLoader.LoadAssetContainerAsync(SOLDIER_ROOT, SOLDIER_FILE, scene);
-
       applyTextureOverrides(container, skinSku);
 
       container.addAllToScene();
@@ -760,7 +575,6 @@
 
       normalizeToGroundAndHeight(wrapper, 1.75);
 
-      // MATCH LOBBY: extra scale and lift
       wrapper.scaling.scaleInPlace(LOBBY_EXTRA_SCALE);
       wrapper.position.y += LOBBY_EXTRA_Y;
 
@@ -776,7 +590,7 @@
       skinnedMesh = findSkinnedMeshFromContainer(container);
       skeleton = skinnedMesh?.skeleton || null;
 
-      hud.textContent += `\n[OK] soldier loaded, skinned:${!!skinnedMesh} bones:${skeleton?.bones?.length || 0}`;
+      // No soldier green text, per your request
       return true;
     }
 
@@ -796,15 +610,7 @@
       weaponGrip = new BABYLON.TransformNode("weaponGrip", scene);
       weaponGrip.parent = weaponRoot;
 
-      return {
-        ok:true,
-        bones:{
-          rightHand,
-          rightShoulder: findBoneByNameOrIncludes(skeleton, "mixamorig:RightShoulder.206_218") || findBoneByNameOrIncludes(skeleton, "RightShoulder"),
-          rightArm:      findBoneByNameOrIncludes(skeleton, "mixamorig:RightArm.207_219")      || findBoneByNameOrIncludes(skeleton, "RightArm"),
-          rightForeArm:  findBoneByNameOrIncludes(skeleton, "mixamorig:RightForeArm.208_220")  || findBoneByNameOrIncludes(skeleton, "RightForeArm")
-        }
-      };
+      return { ok:true };
     }
 
     function applyTuneToWeapon(){
@@ -812,7 +618,6 @@
 
       weaponRoot.position.copyFrom(TUNE.WEAPON_POS);
 
-      // MATCH LOBBY: rotation formula
       weaponRoot.rotation.set(
         (TUNE.WEAPON_PITCH_FIX || 0.0),
         Math.PI + (TUNE.WEAPON_YAW_FIX || 0.0),
@@ -825,6 +630,32 @@
       weaponGrip.rotation.copyFrom(TUNE.WEAPON_GRIP_ROT);
     }
 
+    function tryMergeWeaponMeshes(meshes){
+      // Why you saw “3 parts”
+      // The glTF has multiple mesh primitives, body, clip, rail, each exported as separate meshes.
+      // We merge them for tuning view, so it behaves like one object.
+      try{
+        const valid = (meshes || []).filter(m => m && m.getTotalVertices && m.getTotalVertices() > 0);
+        if (valid.length <= 1) return valid[0] || null;
+
+        // Make sure they are free to merge
+        valid.forEach(m => { try{ m.parent = null; }catch(e){} });
+
+        const merged = BABYLON.Mesh.MergeMeshes(
+          valid,
+          true,   // dispose sources
+          true,   // allow 32 bit indices
+          undefined,
+          false,  // subdivideWithSubMeshes
+          true    // multiMultiMaterial, keep different materials
+        );
+
+        return merged || null;
+      }catch(e){
+        return null;
+      }
+    }
+
     async function loadWeapon(key){
       clearWeapon();
 
@@ -834,18 +665,20 @@
         return false;
       }
 
-      const okWeapon = await preflightGltf(cfg.root, cfg.file, `weapon:${key}`);
-      if (!okWeapon){
-        hud.textContent += `\n[FAIL] weapon preflight`;
+      // diagnostics, includes file sizes, explains crash
+      const diag = await preflightGltfWeapon(cfg.root, cfg.file, `weapon:${key}`);
+      if (!diag.ok){
+        hud.textContent += `\n\n[FAIL] weapon preflight`;
         return false;
       }
 
       if(!currentWrapper || !currentContainer || !skinnedMesh || !skeleton){
-        hud.textContent += `\n[FAIL] soldier not ready`;
+        hud.textContent += `\n\n[FAIL] soldier not ready`;
         return false;
       }
 
-      // Lobby loads weapons as asset containers
+      hud.textContent += `\n\n[load] attempting to load gun model now...`;
+
       const w = await BABYLON.SceneLoader.LoadAssetContainerAsync(cfg.root, cfg.file, scene);
       w.addAllToScene();
       weaponContainer = w;
@@ -856,30 +689,28 @@
         return false;
       }
 
-      // Parent weapon meshes to weaponGrip (skip container root mesh)
-      const wMeshes = (w.meshes || []);
-      wMeshes.forEach(m => {
-        if(!m) return;
-        if(m === wMeshes[0]) return;
-        try{ m.parent = weaponGrip; }catch(e){}
-      });
+      // collect weapon meshes, skip the first container root mesh if present
+      const wMeshes = (w.meshes || []).filter(m => m && m.name !== "__root__");
+      const usable = wMeshes.slice(1).length ? wMeshes.slice(1) : wMeshes;
+
+      // merge so it is not “3 parts” while tuning
+      const merged = tryMergeWeaponMeshes(usable);
+      if (merged){
+        mergedWeaponMesh = merged;
+        merged.parent = weaponGrip;
+        hud.textContent += `\n[OK] weapon merged for tuning view, parts:${usable.length} -> 1`;
+      } else {
+        // fallback, parent all parts
+        usable.forEach(m => { try{ m.parent = weaponGrip; }catch(e){} });
+        hud.textContent += `\n[OK] weapon attached, parts:${usable.length} (not merged)`;
+      }
 
       applyTuneToWeapon();
-      hud.textContent += `\n[OK] weapon attached`;
+
       return true;
     }
 
     // ---------- Keyboard tuner ----------
-    // Modes:
-    //   1: WEAPON_POS
-    //   2: WEAPON_GRIP_POS
-    //   3: WEAPON_GRIP_ROT
-    //   4: YAW_FIX
-    //   5: PITCH_FIX
-    //   6: SCALE
-    // Extra:
-    //   R = reset
-    //   C = copy constants
     let MODE = 1;
 
     function stepForEvent(ev){
@@ -919,8 +750,8 @@ const WEAPON_GRIP_ROT = new BABYLON.Vector3(${TUNE.WEAPON_GRIP_ROT.x.toFixed(5)}
         MODE===5 ? "PITCH_FIX" :
         MODE===6 ? "SCALE" : "???";
 
-      hud.textContent =
-`Skin: ${ACTIVE_SKIN_SKU}
+      hud.textContent +=
+`\n\n----- tuner -----
 Weapon: ${ACTIVE_WEAPON_KEY}   Mode: ${MODE} (${modeName})
 Keys: 1-6 mode, arrows XY, Q/E Z, Shift fast, Alt slow, R reset, C copy
 
@@ -951,7 +782,6 @@ ${lockText()}`;
       }
       applyTuneToWeapon();
       saveTuneBackToPreset(ACTIVE_WEAPON_KEY);
-      printHud();
     }
 
     window.addEventListener("keydown", async (ev) => {
@@ -959,20 +789,17 @@ ${lockText()}`;
 
       if (ev.key >= "1" && ev.key <= "6"){
         MODE = parseInt(ev.key, 10);
-        printHud();
         return;
       }
 
       if (ev.key.toLowerCase() === "r"){
         loadPresetIntoTune(ACTIVE_WEAPON_KEY);
         applyTuneToWeapon();
-        printHud();
         return;
       }
 
       if (ev.key.toLowerCase() === "c"){
         await copyLock();
-        printHud();
         return;
       }
 
@@ -984,14 +811,14 @@ ${lockText()}`;
       if (ev.key.toLowerCase() === "e") return adjust(ev, 0, 0,  1);
     }, { passive:false });
 
-    // ---------- main loop (match lobby osc + arm correction) ----------
+    // ---------- main loop ----------
     let tOsc = 0;
     const baseY = Math.PI;
 
     scene.onBeforeRenderObservable.add(() => {
       if(!currentWrapper) return;
 
-      // arm correction (same math as lobby)
+      // arm correction
       try{
         if(skinnedMesh && skeleton){
           const rightShoulder = findBoneByNameOrIncludes(skeleton, "mixamorig:RightShoulder.206_218") || findBoneByNameOrIncludes(skeleton, "RightShoulder");
@@ -1018,7 +845,6 @@ ${lockText()}`;
         }
       }catch(e){}
 
-      // MATCH LOBBY: oscillation pauses while interacting
       if(!userInteracting){
         const dt = scene.getEngine().getDeltaTime() * 0.001;
         tOsc += dt * AUTO_OSC_SPEED;
@@ -1030,9 +856,7 @@ ${lockText()}`;
     // ---------- boot ----------
     (async () => {
       try{
-        hud.textContent = "Loading, soldier (lobby accurate)...";
-        const ok = await loadSoldierSkin(ACTIVE_SKIN_SKU);
-        if(!ok) return;
+        await loadSoldierSkinHiddenHud(ACTIVE_SKIN_SKU);
 
         loadPresetIntoTune(ACTIVE_WEAPON_KEY);
         await loadWeapon(ACTIVE_WEAPON_KEY);
