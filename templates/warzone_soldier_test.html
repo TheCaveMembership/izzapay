@@ -23,7 +23,6 @@
       display:block;
       touch-action:none;
     }
-    /* laptop HUD (not green slider text, not big spam) */
     #hud{
       position:fixed;
       top:8px;
@@ -51,9 +50,33 @@
     const canvas = document.getElementById("renderCanvas");
     const hudEl  = document.getElementById("hud");
 
+    function setHudText(t){ hudEl.textContent = t; }
+
+    // ---------- keyboard tuning ----------
+    let MODE = 1; // 1 pos, 2 rot, 3 scale
+    let STEP = 0.01;
+
+    // IMPORTANT: better default rotation for the neon marksman (aim forward-ish)
+    // Upward gun usually means it needs a -90deg X fix.
+    const TUNE = {
+      pos:   new BABYLON.Vector3(0.02, 0.00, 0.06),
+      rot:   new BABYLON.Vector3(-Math.PI * 0.5, Math.PI, 0.00),
+      scale: 0.25
+    };
+
+    const DEFAULTS = {
+      pos: TUNE.pos.clone(),
+      rot: TUNE.rot.clone(),
+      scale: TUNE.scale
+    };
+
+    function fmt3(v){
+      return `${v.x.toFixed(5)}, ${v.y.toFixed(5)}, ${v.z.toFixed(5)}`;
+    }
+
     function hud(){
       const modeName = MODE===1 ? "POS" : MODE===2 ? "ROT" : "SCALE";
-      hudEl.textContent =
+      setHudText(
 `Soldier + Neon Marksman (Laptop Keyboard Tuner)
 Mode: ${MODE} (${modeName})   Step: ${STEP}
 
@@ -65,11 +88,8 @@ Keys:
 
 POS   : ${fmt3(TUNE.pos)}
 ROT   : ${fmt3(TUNE.rot)}
-SCALE : ${TUNE.scale.toFixed(5)}`;
-    }
-
-    function fmt3(v){
-      return `${v.x.toFixed(5)}, ${v.y.toFixed(5)}, ${v.z.toFixed(5)}`;
+SCALE : ${TUNE.scale.toFixed(5)}`
+      );
     }
 
     async function copyToClipboard(text){
@@ -77,7 +97,91 @@ SCALE : ${TUNE.scale.toFixed(5)}`;
       catch(e){ window.prompt("Copy:", text); }
     }
 
-    const engine = new BABYLON.Engine(canvas, true, { preserveDrawingBuffer:true, stencil:true });
+    function stepForEvent(ev){
+      if (ev.altKey) return Math.max(0.0005, STEP * 0.1);
+      if (ev.shiftKey) return STEP * 5.0;
+      return STEP;
+    }
+
+    let weaponRootGlobal = null;
+    function applyTune(){
+      if(!weaponRootGlobal) return;
+      weaponRootGlobal.position.copyFrom(TUNE.pos);
+      weaponRootGlobal.rotation.copyFrom(TUNE.rot);
+      weaponRootGlobal.scaling.set(TUNE.scale, TUNE.scale, TUNE.scale);
+    }
+
+    window.addEventListener("keydown", async (ev) => {
+      const k = ev.key;
+
+      if (k === "1"){ MODE = 1; hud(); return; }
+      if (k === "2"){ MODE = 2; hud(); return; }
+      if (k === "3"){ MODE = 3; hud(); return; }
+
+      if (k === "["){ STEP = Math.max(0.0005, STEP * 0.5); hud(); return; }
+      if (k === "]"){ STEP = Math.min(0.5, STEP * 2.0); hud(); return; }
+
+      if (k.toLowerCase() === "r"){
+        TUNE.pos.copyFrom(DEFAULTS.pos);
+        TUNE.rot.copyFrom(DEFAULTS.rot);
+        TUNE.scale = DEFAULTS.scale;
+        applyTune();
+        hud();
+        return;
+      }
+
+      if (k.toLowerCase() === "c"){
+        const txt =
+`// Neon Marksman tuning
+const WEAPON_POS   = new BABYLON.Vector3(${TUNE.pos.x.toFixed(5)}, ${TUNE.pos.y.toFixed(5)}, ${TUNE.pos.z.toFixed(5)});
+const WEAPON_ROT   = new BABYLON.Vector3(${TUNE.rot.x.toFixed(5)}, ${TUNE.rot.y.toFixed(5)}, ${TUNE.rot.z.toFixed(5)});
+const WEAPON_SCALE = ${TUNE.scale.toFixed(5)};`;
+        await copyToClipboard(txt);
+        hud();
+        return;
+      }
+
+      const s = stepForEvent(ev);
+
+      const dx = (k === "ArrowRight") ? 1 : (k === "ArrowLeft") ? -1 : 0;
+      const dy = (k === "ArrowUp") ? 1 : (k === "ArrowDown") ? -1 : 0;
+      const dz = (k.toLowerCase() === "e") ? 1 : (k.toLowerCase() === "q") ? -1 : 0;
+
+      if (!dx && !dy && !dz) return;
+
+      if (MODE === 1){
+        TUNE.pos.x += dx*s; TUNE.pos.y += dy*s; TUNE.pos.z += dz*s;
+      } else if (MODE === 2){
+        TUNE.rot.x += dx*s; TUNE.rot.y += dy*s; TUNE.rot.z += dz*s;
+      } else {
+        if (dy !== 0) TUNE.scale = Math.max(0.0001, TUNE.scale + dy*s);
+      }
+
+      applyTune();
+      hud();
+    }, { passive:true });
+
+    // ---------- safer engine init (fixes “white screen on laptop”) ----------
+    function makeEngine(){
+      // Try safer flags first for older laptops (no preserveDrawingBuffer, no stencil)
+      try{
+        return new BABYLON.Engine(canvas, true, { stencil:false, preserveDrawingBuffer:false });
+      }catch(e1){
+        // Fallback: force WebGL1 by disabling WebGL2
+        try{
+          return new BABYLON.Engine(canvas, true, { stencil:false, preserveDrawingBuffer:false, disableWebGL2Support:true });
+        }catch(e2){
+          return null;
+        }
+      }
+    }
+
+    const engine = makeEngine();
+    if (!engine){
+      setHudText("FAILED: Babylon Engine could not start on this laptop (WebGL issue).");
+      throw new Error("Engine init failed");
+    }
+
     const scene  = new BABYLON.Scene(engine);
     scene.clearColor = new BABYLON.Color4(0,0,0,1);
 
@@ -102,7 +206,7 @@ SCALE : ${TUNE.scale.toFixed(5)}`;
     engine.runRenderLoop(() => scene.render());
     window.addEventListener("resize", () => engine.resize());
 
-    // --- helpers (kept from your page, but no green spam) ---
+    // ---------- helpers ----------
     async function fetchHeadOrGet(url){
       try{
         const r = await fetch(url, { method:"HEAD", cache:"no-store" });
@@ -142,12 +246,8 @@ SCALE : ${TUNE.scale.toFixed(5)}`;
       }
 
       const deps = [];
-      if (Array.isArray(gltf.buffers)){
-        gltf.buffers.forEach(b => b?.uri && deps.push(b.uri));
-      }
-      if (Array.isArray(gltf.images)){
-        gltf.images.forEach(img => img?.uri && deps.push(img.uri));
-      }
+      if (Array.isArray(gltf.buffers)) gltf.buffers.forEach(b => b?.uri && deps.push(b.uri));
+      if (Array.isArray(gltf.images))  gltf.images.forEach(img => img?.uri && deps.push(img.uri));
 
       for (const uri of deps){
         const url = joinUrl(rootUrl, uri);
@@ -189,15 +289,11 @@ SCALE : ${TUNE.scale.toFixed(5)}`;
 
     async function importModel(label, rootUrl, fileName){
       const result = await BABYLON.SceneLoader.ImportMeshAsync("", rootUrl, fileName, scene);
-
       const wrapper = new BABYLON.TransformNode(label + "Root", scene);
 
       const gltfRoot = result.meshes && result.meshes.length ? result.meshes[0] : null;
-      if (gltfRoot){
-        gltfRoot.parent = wrapper;
-      } else {
-        result.meshes.forEach(m => { m.parent = wrapper; });
-      }
+      if (gltfRoot) gltfRoot.parent = wrapper;
+      else result.meshes.forEach(m => { m.parent = wrapper; });
 
       return { root: wrapper, result };
     }
@@ -209,150 +305,84 @@ SCALE : ${TUNE.scale.toFixed(5)}`;
 
     function findBoneByNameOrIncludes(skeleton, want){
       if (!skeleton || !skeleton.bones) return null;
-
       const exact = skeleton.bones.find(b => (b.name || "") === want);
       if (exact) return exact;
-
       const wantLow = (want || "").toLowerCase();
       return skeleton.bones.find(b => ((b.name || "").toLowerCase().includes(wantLow))) || null;
     }
 
-    // --- tuning state ---
-    let MODE = 1; // 1 pos, 2 rot, 3 scale
-    let STEP = 0.01;
+    // ---------- merge gun meshes into ONE mesh ----------
+    function mergeWeaponMeshes(meshes){
+      const geo = meshes.filter(m => m && m.getTotalVertices && m.getTotalVertices() > 0);
+      if (geo.length <= 1) return geo[0] || null;
 
-    const TUNE = {
-      pos: new BABYLON.Vector3(0.02, 0.00, 0.06),
-      rot: new BABYLON.Vector3(0.00, Math.PI, 0.00),
-      scale: 0.25
-    };
+      // Keep submeshes/materials so attachments still render correctly
+      const merged = BABYLON.Mesh.MergeMeshes(
+        geo,
+        true,   // disposeSource
+        true,   // allow32BitsIndices
+        undefined,
+        false,  // subdivideWithSubMeshes
+        true    // multiMultiMaterials
+      );
 
-    const DEFAULTS = {
-      pos: TUNE.pos.clone(),
-      rot: TUNE.rot.clone(),
-      scale: TUNE.scale
-    };
-
-    function applyTune(weaponRoot){
-      if(!weaponRoot) return;
-      weaponRoot.position.copyFrom(TUNE.pos);
-      weaponRoot.rotation.copyFrom(TUNE.rot);
-      weaponRoot.scaling.set(TUNE.scale, TUNE.scale, TUNE.scale);
+      return merged || geo[0] || null;
     }
 
-    function stepForEvent(ev){
-      if (ev.altKey) return Math.max(0.0005, STEP * 0.1);
-      if (ev.shiftKey) return STEP * 5.0;
-      return STEP;
-    }
-
-    window.addEventListener("keydown", async (ev) => {
-      const k = ev.key;
-
-      if (k === "1"){ MODE = 1; hud(); return; }
-      if (k === "2"){ MODE = 2; hud(); return; }
-      if (k === "3"){ MODE = 3; hud(); return; }
-
-      if (k === "["){ STEP = Math.max(0.0005, STEP * 0.5); hud(); return; }
-      if (k === "]"){ STEP = Math.min(0.5, STEP * 2.0); hud(); return; }
-
-      if (k.toLowerCase() === "r"){
-        TUNE.pos.copyFrom(DEFAULTS.pos);
-        TUNE.rot.copyFrom(DEFAULTS.rot);
-        TUNE.scale = DEFAULTS.scale;
-        if (weaponRootGlobal) applyTune(weaponRootGlobal);
-        hud();
-        return;
-      }
-
-      if (k.toLowerCase() === "c"){
-        const txt =
-`// Neon Marksman tuning
-const WEAPON_POS   = new BABYLON.Vector3(${TUNE.pos.x.toFixed(5)}, ${TUNE.pos.y.toFixed(5)}, ${TUNE.pos.z.toFixed(5)});
-const WEAPON_ROT   = new BABYLON.Vector3(${TUNE.rot.x.toFixed(5)}, ${TUNE.rot.y.toFixed(5)}, ${TUNE.rot.z.toFixed(5)});
-const WEAPON_SCALE = ${TUNE.scale.toFixed(5)};`;
-        await copyToClipboard(txt);
-        hud();
-        return;
-      }
-
-      const s = stepForEvent(ev);
-
-      // Arrow keys for X/Y, Q/E for Z
-      const dx = (k === "ArrowRight") ? 1 : (k === "ArrowLeft") ? -1 : 0;
-      const dy = (k === "ArrowUp") ? 1 : (k === "ArrowDown") ? -1 : 0;
-      const dz = (k.toLowerCase() === "e") ? 1 : (k.toLowerCase() === "q") ? -1 : 0;
-
-      if (!dx && !dy && !dz) return;
-
-      if (MODE === 1){
-        TUNE.pos.x += dx*s; TUNE.pos.y += dy*s; TUNE.pos.z += dz*s;
-      } else if (MODE === 2){
-        TUNE.rot.x += dx*s; TUNE.rot.y += dy*s; TUNE.rot.z += dz*s;
-      } else {
-        // scale mode, use up/down for +/- scale
-        if (dy !== 0) TUNE.scale = Math.max(0.0001, TUNE.scale + dy*s);
-      }
-
-      if (weaponRootGlobal) applyTune(weaponRootGlobal);
-      hud();
-    }, { passive:true });
-
-    // --- attach ---
-    let weaponRootGlobal = null;
-
+    // ---------- attach ----------
     function attachWeaponToRightHand(soldierImport, weaponImport){
       const skinned = findSkinnedMesh(soldierImport.result);
       const skeleton = skinned?.skeleton || (soldierImport.result?.skeletons?.[0] || null);
-
       if (!skinned || !skeleton) return false;
 
       const boneNameExact = "mixamorig:RightHand.209_221";
       let bone = findBoneByNameOrIncludes(skeleton, boneNameExact);
-      if (!bone){
-        bone = skeleton.bones.find(b => /RightHand/i.test(b.name || "")) || null;
-      }
+      if (!bone) bone = skeleton.bones.find(b => /RightHand/i.test(b.name || "")) || null;
       if (!bone) return false;
 
       const weaponRoot = new BABYLON.TransformNode("weaponRoot", scene);
-
-      (weaponImport.result?.meshes || []).forEach(m => {
-        if (!m) return;
-        if (m === weaponImport.result.meshes[0]) return;
-        m.parent = weaponRoot;
-      });
-
       weaponRoot.attachToBone(bone, skinned);
 
-      weaponRootGlobal = weaponRoot;
-      applyTune(weaponRootGlobal);
+      // collect meshes (exclude scene root)
+      const meshes = (weaponImport.result?.meshes || []).filter(m => m && m !== weaponImport.result.meshes[0]);
 
+      // IMPORTANT: ensure they are enabled (avoid weird “invisible on some browsers”)
+      meshes.forEach(m => m.setEnabled(true));
+
+      // parent under weaponRoot before merge (consistent transforms)
+      meshes.forEach(m => { m.parent = weaponRoot; });
+
+      // merge into one mesh, then parent merged to weaponRoot
+      const merged = mergeWeaponMeshes(meshes);
+      if (merged){
+        merged.parent = weaponRoot;
+      }
+
+      // remove wrapper so nothing weird stays around
+      try{ weaponImport.root.dispose(false, true); }catch(e){}
+
+      weaponRootGlobal = weaponRoot;
+      applyTune();
+      hud();
       return true;
     }
 
-    // Paths
+    // ---------- Paths ----------
     const SOLDIER_ROOT = "/assets/warzone3d/soldier_gltf_3/";
     const SOLDIER_FILE = "scene.gltf";
 
-    // CHANGED: neon marksman
     const WEAPON_ROOT  = "/assets/warzone3d/weapons/wz_neon_marksman/";
     const WEAPON_FILE  = "scene.gltf";
 
     (async () => {
       try{
-        hudEl.textContent = "Loading soldier + neon marksman...";
+        setHudText("Loading soldier + neon marksman...");
 
         const okSoldier = await preflightGltf(SOLDIER_ROOT, SOLDIER_FILE);
-        if(!okSoldier){
-          hudEl.textContent = "Stop, soldier preflight failed";
-          return;
-        }
+        if(!okSoldier){ setHudText("Stop: soldier preflight failed"); return; }
 
         const okWeapon = await preflightGltf(WEAPON_ROOT, WEAPON_FILE);
-        if(!okWeapon){
-          hudEl.textContent = "Stop, neon marksman preflight failed";
-          return;
-        }
+        if(!okWeapon){ setHudText("Stop: neon marksman preflight failed"); return; }
 
         const soldier = await importModel("soldier", SOLDIER_ROOT, SOLDIER_FILE);
         soldier.root.rotation.y = Math.PI;
@@ -366,17 +396,12 @@ const WEAPON_SCALE = ${TUNE.scale.toFixed(5)};`;
         }
 
         const gun = await importModel("neon_marksman", WEAPON_ROOT, WEAPON_FILE);
-        gun.root.setEnabled(false);
 
         const attached = attachWeaponToRightHand(soldier, gun);
-        if (!attached){
-          hudEl.textContent = "Attach FAIL, RightHand bone not found";
-          return;
-        }
+        if (!attached){ setHudText("Attach FAIL: RightHand bone not found"); return; }
 
         frameCameraToRoot(soldier.root);
 
-        // slow spin for inspection
         scene.onBeforeRenderObservable.clear();
         scene.onBeforeRenderObservable.add(() => {
           const dt = scene.getEngine().getDeltaTime() * 0.001;
@@ -386,7 +411,7 @@ const WEAPON_SCALE = ${TUNE.scale.toFixed(5)};`;
         hud();
       }catch(e){
         console.warn("Test failed", e);
-        hudEl.textContent = "FAILED, check console: " + (e?.message || e);
+        setHudText("FAILED: check console: " + (e?.message || e));
       }
     })();
   </script>
