@@ -99,8 +99,9 @@
     const SOLDIER_ROOT = "/assets/warzone3d/soldier_gltf_3/";
     const SOLDIER_FILE = "scene.gltf";
 
-    const BASIC_PISTOL_ROOT   = "/assets/warzone3d/weapons/wz_basic_pistol/";
-    const CITYRUNNER_SMG_ROOT = "/assets/warzone3d/weapons/wz_cityrunner_smg/";
+    const BASIC_PISTOL_ROOT    = "/assets/warzone3d/weapons/wz_basic_pistol/";
+    const CITYRUNNER_SMG_ROOT  = "/assets/warzone3d/weapons/wz_cityrunner_smg/";
+    const NEON_MARKSMAN_ROOT   = "/assets/warzone3d/weapons/wz_neon_marksman/";
     const WEAPON_FILE = "scene.gltf";
 
     // Match lobby weapon sku normalization
@@ -109,12 +110,14 @@
       if (!sku) return "basic_pistol";
       if (sku === "wz_basic_pistol") return "basic_pistol";
       if (sku === "wz_cityrunner_smg") return "cityrunner_smg";
+      if (sku === "wz_neon_marksman") return "neon_marksman";
       return sku;
     }
 
     const WEAPON_MAP = {
-      basic_pistol:   { root: BASIC_PISTOL_ROOT,   file: WEAPON_FILE },
-      cityrunner_smg: { root: CITYRUNNER_SMG_ROOT, file: WEAPON_FILE }
+      basic_pistol:    { root: BASIC_PISTOL_ROOT,   file: WEAPON_FILE },
+      cityrunner_smg:  { root: CITYRUNNER_SMG_ROOT, file: WEAPON_FILE },
+      neon_marksman:   { root: NEON_MARKSMAN_ROOT,  file: WEAPON_FILE }
     };
 
     // Skin tuning, same pipeline as lobby, but local keys you can extend
@@ -212,6 +215,16 @@
         WEAPON_GRIP_ROT: new BABYLON.Vector3(-0.260, -0.040,  0.010)
       },
       cityrunner_smg: {
+        WEAPON_SCALE: 0.11,
+        WEAPON_YAW_FIX: Math.PI * 0.5,
+        WEAPON_PITCH_FIX: -0.55,
+        WEAPON_POS:      new BABYLON.Vector3(-1.069,  0.327, -0.058),
+        WEAPON_GRIP_POS: new BABYLON.Vector3( 3.634, -0.030, -11.272),
+        WEAPON_GRIP_ROT: new BABYLON.Vector3(-0.120, -0.040,  0.010)
+      },
+
+      // NEW, start from SMG-ish defaults, you tune it with your hotkeys, then paste into lobby WEAPON_TUNING
+      neon_marksman: {
         WEAPON_SCALE: 0.11,
         WEAPON_YAW_FIX: Math.PI * 0.5,
         WEAPON_PITCH_FIX: -0.55,
@@ -722,6 +735,12 @@ ${lockText()}`;
       printHud();
     }
 
+    function nextWeaponKey(cur){
+      const order = ["cityrunner_smg","basic_pistol","neon_marksman"];
+      const i = Math.max(0, order.indexOf(cur));
+      return order[(i + 1) % order.length];
+    }
+
     window.addEventListener("keydown", async (ev) => {
       if (["ArrowUp","ArrowDown","ArrowLeft","ArrowRight","Tab"," "].includes(ev.key)) ev.preventDefault();
 
@@ -735,7 +754,7 @@ ${lockText()}`;
         ev.preventDefault();
         saveTuneBackToPreset(ACTIVE_WEAPON_KEY);
 
-        ACTIVE_WEAPON_KEY = (ACTIVE_WEAPON_KEY === "cityrunner_smg") ? "basic_pistol" : "cityrunner_smg";
+        ACTIVE_WEAPON_KEY = nextWeaponKey(ACTIVE_WEAPON_KEY);
         loadPresetIntoTune(ACTIVE_WEAPON_KEY);
         await loadWeapon(ACTIVE_WEAPON_KEY);
         printHud();
