@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="utf-8">
-  <title>War Zone test, soldier + weapon attach, keyboard tuner</title>
+  <title>War Zone Test, Lobby Accurate Soldier + Weapon Tuner</title>
   <meta name="viewport" content="width=device-width,initial-scale=1">
   <style>
     html,body{
@@ -24,8 +24,8 @@
       display:block;
       touch-action:none;
       outline:none;
+      background:transparent;
     }
-    /* debug text */
     #hud{
       position:fixed;
       left:10px;
@@ -38,6 +38,8 @@
       text-shadow: 0 0 10px rgba(0,0,0,.85);
       white-space:pre;
       pointer-events:none;
+      max-width: calc(100vw - 20px);
+      overflow:hidden;
     }
   </style>
   <script src="https://cdn.babylonjs.com/babylon.js"></script>
@@ -52,20 +54,30 @@
     const hud = document.getElementById("hud");
 
     canvas.tabIndex = 1;
-    canvas.addEventListener("pointerdown", () => canvas.focus());
+    canvas.addEventListener("pointerdown", () => canvas.focus(), { passive:true });
     window.addEventListener("keydown", () => canvas.focus());
 
     const engine = new BABYLON.Engine(canvas, true, { preserveDrawingBuffer:true, stencil:true });
     const scene  = new BABYLON.Scene(engine);
-    scene.clearColor = new BABYLON.Color4(0,0,0,1);
 
+    // MATCH LOBBY: transparent clearColor
+    scene.clearColor = new BABYLON.Color4(0,0,0,0);
+
+    // MATCH LOBBY: camera defaults + sensitivities
     const camera = new BABYLON.ArcRotateCamera(
-      "cam", Math.PI * 1.2, Math.PI / 2.35, 10.0,
-      new BABYLON.Vector3(0, 1.0, 0), scene
+      "cam",
+      Math.PI * 1.3,
+      Math.PI / 2.08,
+      3.15,
+      new BABYLON.Vector3(0,1,0),
+      scene
     );
     camera.attachControl(canvas, true);
     camera.panningSensibility = 0;
     camera.wheelPrecision = 60;
+    camera.pinchPrecision = 200;
+    camera.angularSensibilityX = 2200;
+    camera.angularSensibilityY = 2200;
 
     // allow arrow keys for our tuner, kill camera keyboard
     camera.inputs.removeByType("ArcRotateCameraKeyboardMoveInput");
@@ -76,11 +88,9 @@
       camera.inputs.attached.keyboard.keysRight = [];
     }
 
+    // MATCH LOBBY: hemispheric light only
     const hemi = new BABYLON.HemisphericLight("h", new BABYLON.Vector3(0,1,0), scene);
-    hemi.intensity = 1.05;
-
-    const dir = new BABYLON.DirectionalLight("d", new BABYLON.Vector3(-0.3,-1,-0.4), scene);
-    dir.intensity = 0.95;
+    hemi.intensity = 1.2;
 
     engine.runRenderLoop(() => scene.render());
     window.addEventListener("resize", () => engine.resize());
@@ -93,17 +103,103 @@
     const CITYRUNNER_SMG_ROOT = "/assets/warzone3d/weapons/wz_cityrunner_smg/";
     const WEAPON_FILE = "scene.gltf";
 
+    // Match lobby weapon sku normalization
+    function normalizeWeaponSku(s){
+      const sku = (s || "").toString().trim();
+      if (!sku) return "basic_pistol";
+      if (sku === "wz_basic_pistol") return "basic_pistol";
+      if (sku === "wz_cityrunner_smg") return "cityrunner_smg";
+      return sku;
+    }
+
     const WEAPON_MAP = {
       basic_pistol:   { root: BASIC_PISTOL_ROOT,   file: WEAPON_FILE },
       cityrunner_smg: { root: CITYRUNNER_SMG_ROOT, file: WEAPON_FILE }
     };
 
-    // Start on SMG (with fixes)
+    // Skin tuning, same pipeline as lobby, but local keys you can extend
+    let ACTIVE_SKIN_SKU = "wz_basic_soldier";
+
+    // Start on SMG
     let ACTIVE_WEAPON_KEY = "cityrunner_smg";
 
     const SOLDIER_ANIM_SPEED = 0.65;
     const AUTO_OSC_SPEED = 0.35;
     const AUTO_MAX_YAW   = Math.PI * 0.45;
+
+    // MATCH LOBBY: extra scale and Y offset after normalize
+    const LOBBY_EXTRA_SCALE = 0.72;
+    const LOBBY_EXTRA_Y     = 0.06;
+
+    // ---------- LOBBY SHADOW ANCHOR ----------
+    let shadowPlane = null;
+    let shadowMat = null;
+    const SHADOW_WORLD_Y = 0.005;
+
+    function ensureShadowMaterial(){
+      if(shadowMat) return shadowMat;
+
+      const dt = new BABYLON.DynamicTexture("shadowDT", { width:512, height:512 }, scene, true);
+      dt.hasAlpha = true;
+
+      const ctx = dt.getContext();
+      ctx.clearRect(0,0,512,512);
+
+      const g = ctx.createRadialGradient(256,256,6,256,256,220);
+      g.addColorStop(0.00, "rgba(0,0,0,1.00)");
+      g.addColorStop(0.20, "rgba(0,0,0,0.98)");
+      g.addColorStop(0.40, "rgba(0,0,0,0.82)");
+      g.addColorStop(0.62, "rgba(0,0,0,0.45)");
+      g.addColorStop(0.80, "rgba(0,0,0,0.14)");
+      g.addColorStop(1.00, "rgba(0,0,0,0.00)");
+
+      ctx.fillStyle = g;
+      ctx.beginPath();
+      ctx.ellipse(256, 305, 200, 120, 0, 0, Math.PI * 2);
+      ctx.fill();
+
+      dt.update(false);
+
+      shadowMat = new BABYLON.StandardMaterial("shadowMat", scene);
+      shadowMat.diffuseColor = new BABYLON.Color3(0,0,0);
+      shadowMat.emissiveColor = new BABYLON.Color3(0,0,0);
+      shadowMat.specularColor = new BABYLON.Color3(0,0,0);
+      shadowMat.opacityTexture = dt;
+      shadowMat.alpha = 1.0;
+      shadowMat.disableLighting = true;
+
+      return shadowMat;
+    }
+
+    function attachShadowToWrapper(wrapper){
+      try{
+        if(shadowPlane){
+          shadowPlane.dispose(false, true);
+          shadowPlane = null;
+        }
+      }catch(e){}
+
+      const mat = ensureShadowMaterial();
+
+      shadowPlane = BABYLON.MeshBuilder.CreateGround(
+        "shadowPlane",
+        { width: 9.30, height: 9.30 },
+        scene
+      );
+      shadowPlane.material = mat;
+      shadowPlane.isPickable = false;
+      shadowPlane.renderingGroupId = 0;
+
+      shadowPlane.parent = wrapper;
+
+      const localY = SHADOW_WORLD_Y - (wrapper.position.y || 0);
+      shadowPlane.position.y = localY;
+
+      shadowPlane.rotation.y = Math.PI / 2;
+      shadowPlane.position.x = -0.85;
+      shadowPlane.position.z = 0.00;
+    }
+    // ----------------------------------------
 
     // ----- Per-weapon defaults -----
     const PRESETS = {
@@ -111,7 +207,6 @@
         WEAPON_SCALE: 0.07,
         WEAPON_YAW_FIX: Math.PI * 0.5,
         WEAPON_PITCH_FIX: 0.00,
-
         WEAPON_POS:      new BABYLON.Vector3(-1.069,  0.327, -0.058),
         WEAPON_GRIP_POS: new BABYLON.Vector3( 3.634, -0.030, -11.272),
         WEAPON_GRIP_ROT: new BABYLON.Vector3(-0.260, -0.040,  0.010)
@@ -119,14 +214,9 @@
       cityrunner_smg: {
         WEAPON_SCALE: 0.11,
         WEAPON_YAW_FIX: Math.PI * 0.5,
-
-        // points up to counter "downward barrel"
         WEAPON_PITCH_FIX: -0.55,
-
         WEAPON_POS:      new BABYLON.Vector3(-1.069,  0.327, -0.058),
         WEAPON_GRIP_POS: new BABYLON.Vector3( 3.634, -0.030, -11.272),
-
-        // less downward tilt than pistol, as a starting point
         WEAPON_GRIP_ROT: new BABYLON.Vector3(-0.120, -0.040,  0.010)
       }
     };
@@ -160,13 +250,75 @@
       p.WEAPON_GRIP_ROT.copyFrom(TUNE.WEAPON_GRIP_ROT);
     }
 
-    // Arm correction (same as before)
+    // Arm correction (match lobby)
     const qArm     = BABYLON.Quaternion.FromEulerAngles(-0.10,  0.00,  0.00);
     const qForeArm = BABYLON.Quaternion.FromEulerAngles(-0.25,  0.00,  0.00);
     const qShould  = BABYLON.Quaternion.FromEulerAngles( 0.00,  0.00, -0.05);
 
     const WRIST_TWIST_ON = false;
     const qWrist = BABYLON.Quaternion.FromEulerAngles(0.00, 0.00, -0.25);
+
+    // ---------- Texture overrides (same as lobby, safe if you extend skins) ----------
+    const TEXTURE_BASE = "/assets/warzone3d/soldier_gltf_3/textures/";
+    const OVERRIDE_FILES = [
+      "material_8_diffuse.png",
+      "material_9_diffuse.png",
+      "material_10_diffuse.png",
+      "material_11_diffuse.png"
+    ];
+    const SKU_TO_TEXTURE_FOLDER = {
+      "wz_neon_edge": "neon_edge",
+      "wz_urban_shadow": "urban_shadow",
+      "wz_cinder_camo": "cinder_camo",
+      "wz_glow_legend": "glow_legend"
+    };
+
+    function fileFromAnyUrl(u){
+      try{
+        const s = (u || "").toString();
+        const q = s.split("?")[0];
+        const parts = q.split("/");
+        return parts[parts.length - 1] || "";
+      }catch(e){
+        return "";
+      }
+    }
+
+    function overrideTextureOnMaterial(mat, texProp, folder){
+      try{
+        const tex = mat && mat[texProp];
+        if(!tex) return false;
+
+        const urlOrName = (tex.url || tex.name || "");
+        const file = fileFromAnyUrl(urlOrName);
+        if(!file) return false;
+
+        if(!OVERRIDE_FILES.includes(file)) return false;
+
+        const newUrl = `${TEXTURE_BASE}${folder}/${file}`;
+        const newTex = new BABYLON.Texture(newUrl, scene, true, false);
+        newTex.hasAlpha = tex.hasAlpha || false;
+        newTex.level = (typeof tex.level === "number") ? tex.level : 1.0;
+
+        mat[texProp] = newTex;
+        return true;
+      }catch(e){
+        return false;
+      }
+    }
+
+    function applyTextureOverrides(container, skinSku){
+      const sku = (skinSku || "").toString().trim();
+      const folder = SKU_TO_TEXTURE_FOLDER[sku];
+      if(!folder) return;
+
+      const mats = (container && container.materials) ? container.materials : [];
+      mats.forEach(mat => {
+        if(!mat) return;
+        overrideTextureOnMaterial(mat, "albedoTexture", folder);
+        overrideTextureOnMaterial(mat, "diffuseTexture", folder);
+      });
+    }
 
     // ---------- helpers ----------
     async function fetchHeadOrGet(url){
@@ -229,154 +381,262 @@
       return { min: b.min.clone(), max: b.max.clone() };
     }
 
-    function normalizeToGroundAndHeight(root, targetHeight = 1.75){
+    function normalizeToGroundAndHeight(root, targetHeight){
       const bb1 = getBounds(root);
-      const size1 = bb1.max.subtract(bb1.min);
-      const h1 = Math.max(0.000001, size1.y);
-
-      const s = targetHeight / h1;
-      root.scaling = new BABYLON.Vector3(s, s, s);
-
+      const h1 = Math.max(0.000001, (bb1.max.y - bb1.min.y));
+      const s = (targetHeight || 1.75) / h1;
+      root.scaling = new BABYLON.Vector3(s,s,s);
       const bb2 = getBounds(root);
       root.position.y -= bb2.min.y;
       return s;
     }
 
+    // MATCH LOBBY framing exactly
     function frameCameraToRoot(root){
-      const bb = getBounds(root);
-      const size = bb.max.subtract(bb.min);
-      const center = bb.min.add(size.scale(0.5));
-      const maxDim = Math.max(size.x, size.y, size.z) || 1;
+      try{
+        const bb = getBounds(root);
+        const size = bb.max.subtract(bb.min);
+        const maxDim = Math.max(size.x, size.y, size.z) || 1.0;
+        const center = bb.min.add(size.scale(0.5));
 
-      camera.target = center;
-      camera.radius = maxDim * 1.9;
-      camera.lowerRadiusLimit = camera.radius * 0.5;
-      camera.upperRadiusLimit = camera.radius * 4.0;
+        const radius = Math.max(2.6, maxDim * 2.4) * 1.05;
+
+        camera.target = new BABYLON.Vector3(center.x, center.y + (maxDim * 0.50), center.z);
+        camera.radius = radius;
+        camera.alpha  = Math.PI * 1.3;
+        camera.beta   = Math.PI / 2.08;
+
+        camera.lowerRadiusLimit = radius * 0.65;
+        camera.upperRadiusLimit = radius * 1.25;
+      }catch(e){
+        camera.target = new BABYLON.Vector3(0,1,0);
+        camera.radius = 3.0;
+        camera.lowerRadiusLimit = 2.0;
+        camera.upperRadiusLimit = 4.0;
+      }
     }
 
-    async function importModel(label, rootUrl, fileName){
-      hud.textContent += `\n[load] ${label}: ${rootUrl}${fileName}`;
-      const result = await BABYLON.SceneLoader.ImportMeshAsync("", rootUrl, fileName, scene);
+    // ---------- live refs ----------
+    let currentWrapper = null;
+    let currentContainer = null;
 
-      const wrapper = new BABYLON.TransformNode(label + "Root", scene);
-
-      const gltfRoot = result.meshes && result.meshes.length ? result.meshes[0] : null;
-      if (gltfRoot) gltfRoot.parent = wrapper;
-      else result.meshes.forEach(m => { m.parent = wrapper; });
-
-      hud.textContent += `\n       meshes:${(result.meshes||[]).length} skeletons:${(result.skeletons||[]).length} animGroups:${(result.animationGroups||[]).length}`;
-      return { root: wrapper, result };
-    }
-
-    function findSkinnedMesh(importResult){
-      const meshes = importResult?.meshes || [];
-      return meshes.find(m => m && m.skeleton) || null;
-    }
-
-    function findBoneByNameOrIncludes(skeleton, want){
-      if (!skeleton || !skeleton.bones) return null;
-      const exact = skeleton.bones.find(b => (b.name || "") === want);
-      if (exact) return exact;
-      const wantLow = (want || "").toLowerCase();
-      return skeleton.bones.find(b => ((b.name || "").toLowerCase().includes(wantLow))) || null;
-    }
-
-    // ---- live refs ----
-    let soldier = null;
-    let weapon = null;
-    let attachInfo = null;
-
+    let weaponContainer = null;
     let weaponRoot = null;
     let weaponGrip = null;
 
-    function attachWeaponToRightHandLive(soldierImport, weaponImport){
-      const skinned = findSkinnedMesh(soldierImport.result);
-      const skeleton = skinned?.skeleton || (soldierImport.result?.skeletons?.[0] || null);
-      if (!skinned || !skeleton) return { ok:false };
+    let skinnedMesh = null;
+    let skeleton = null;
+
+    // User interacting flag, match lobby behavior
+    let userInteracting = false;
+    canvas.addEventListener("pointerdown", () => { userInteracting = true; }, { passive:true });
+    canvas.addEventListener("pointerup", () => { userInteracting = false; }, { passive:true });
+    canvas.addEventListener("pointercancel", () => { userInteracting = false; }, { passive:true });
+    canvas.addEventListener("pointerleave", () => { userInteracting = false; }, { passive:true });
+
+    function findSkinnedMeshFromContainer(container){
+      try{
+        const meshes = (container && container.meshes) ? container.meshes : [];
+        return meshes.find(m => m && m.skeleton) || null;
+      }catch(e){
+        return null;
+      }
+    }
+
+    function findBoneByNameOrIncludes(skel, want){
+      if (!skel || !skel.bones) return null;
+      const exact = skel.bones.find(b => (b.name || "") === want);
+      if (exact) return exact;
+      const wantLow = (want || "").toLowerCase();
+      return skel.bones.find(b => ((b.name || "").toLowerCase().includes(wantLow))) || null;
+    }
+
+    function clearSoldier(){
+      try{
+        if(currentContainer){
+          currentContainer.removeAllFromScene();
+          currentContainer.dispose();
+          currentContainer = null;
+        }
+      }catch(e){}
+      try{
+        if(currentWrapper){
+          currentWrapper.dispose(true, false);
+          currentWrapper = null;
+        }
+      }catch(e){}
+      try{
+        if(shadowPlane){
+          shadowPlane.dispose(false, true);
+          shadowPlane = null;
+        }
+      }catch(e){}
+      skinnedMesh = null;
+      skeleton = null;
+    }
+
+    function clearWeapon(){
+      try{
+        if(weaponRoot){
+          weaponRoot.dispose(true, false);
+          weaponRoot = null;
+        }
+      }catch(e){}
+      try{
+        if(weaponGrip){
+          weaponGrip.dispose(true, false);
+          weaponGrip = null;
+        }
+      }catch(e){}
+      try{
+        if(weaponContainer){
+          weaponContainer.removeAllFromScene();
+          weaponContainer.dispose();
+          weaponContainer = null;
+        }
+      }catch(e){}
+    }
+
+    function buildWrapperFromContainer(container){
+      const wrapper = new BABYLON.TransformNode("testSkinWrap", scene);
+      const nodes = []
+        .concat(container.meshes || [])
+        .concat(container.transformNodes || []);
+      nodes.forEach(n => {
+        if(!n) return;
+        try{ n.parent = wrapper; }catch(e){}
+      });
+      wrapper.rotation.y = Math.PI;
+      return wrapper;
+    }
+
+    async function loadSoldierSkin(skinSku){
+      clearWeapon();
+      clearSoldier();
+
+      const okSoldier = await preflightGltf(SOLDIER_ROOT, SOLDIER_FILE, "soldier");
+      if (!okSoldier){
+        hud.textContent += "\n[FAIL] soldier preflight";
+        return false;
+      }
+
+      const container = await BABYLON.SceneLoader.LoadAssetContainerAsync(SOLDIER_ROOT, SOLDIER_FILE, scene);
+
+      applyTextureOverrides(container, skinSku);
+
+      container.addAllToScene();
+      currentContainer = container;
+
+      const wrapper = buildWrapperFromContainer(container);
+      currentWrapper = wrapper;
+
+      normalizeToGroundAndHeight(wrapper, 1.75);
+
+      // MATCH LOBBY: extra scale and lift
+      wrapper.scaling.scaleInPlace(LOBBY_EXTRA_SCALE);
+      wrapper.position.y += LOBBY_EXTRA_Y;
+
+      frameCameraToRoot(wrapper);
+      attachShadowToWrapper(wrapper);
+
+      if(container.animationGroups && container.animationGroups.length){
+        container.animationGroups.forEach(g => g.stop());
+        container.animationGroups[0].start(true);
+        container.animationGroups[0].speedRatio = SOLDIER_ANIM_SPEED;
+      }
+
+      skinnedMesh = findSkinnedMeshFromContainer(container);
+      skeleton = skinnedMesh?.skeleton || null;
+
+      hud.textContent += `\n[OK] soldier loaded, skinned:${!!skinnedMesh} bones:${skeleton?.bones?.length || 0}`;
+      return true;
+    }
+
+    function attachWeaponToRightHand(){
+      if(!skinnedMesh || !skeleton) return { ok:false };
 
       const boneNameExact = "mixamorig:RightHand.209_221";
       let rightHand = findBoneByNameOrIncludes(skeleton, boneNameExact);
-      if (!rightHand){
+      if(!rightHand){
         rightHand = skeleton.bones.find(b => /RightHand/i.test(b.name || "")) || null;
       }
-      if (!rightHand) return { ok:false };
+      if(!rightHand) return { ok:false };
 
       weaponRoot = new BABYLON.TransformNode("weaponRoot", scene);
-      weaponRoot.attachToBone(rightHand, skinned);
+      weaponRoot.attachToBone(rightHand, skinnedMesh);
 
       weaponGrip = new BABYLON.TransformNode("weaponGrip", scene);
       weaponGrip.parent = weaponRoot;
 
-      (weaponImport.result?.meshes || []).forEach(m => {
-        if (!m) return;
-        if (m === weaponImport.result.meshes[0]) return;
-        m.parent = weaponGrip;
-      });
-
-      const rightArm      = findBoneByNameOrIncludes(skeleton, "mixamorig:RightArm.207_219") || findBoneByNameOrIncludes(skeleton, "RightArm");
-      const rightForeArm  = findBoneByNameOrIncludes(skeleton, "mixamorig:RightForeArm.208_220") || findBoneByNameOrIncludes(skeleton, "RightForeArm");
-      const rightShoulder = findBoneByNameOrIncludes(skeleton, "mixamorig:RightShoulder.206_218") || findBoneByNameOrIncludes(skeleton, "RightShoulder");
-
-      return { ok:true, skinned, bones: { rightHand, rightArm, rightForeArm, rightShoulder } };
+      return {
+        ok:true,
+        bones:{
+          rightHand,
+          rightShoulder: findBoneByNameOrIncludes(skeleton, "mixamorig:RightShoulder.206_218") || findBoneByNameOrIncludes(skeleton, "RightShoulder"),
+          rightArm:      findBoneByNameOrIncludes(skeleton, "mixamorig:RightArm.207_219")      || findBoneByNameOrIncludes(skeleton, "RightArm"),
+          rightForeArm:  findBoneByNameOrIncludes(skeleton, "mixamorig:RightForeArm.208_220")  || findBoneByNameOrIncludes(skeleton, "RightForeArm")
+        }
+      };
     }
 
     function applyTuneToWeapon(){
       if (!weaponRoot || !weaponGrip) return;
 
       weaponRoot.position.copyFrom(TUNE.WEAPON_POS);
+
+      // MATCH LOBBY: rotation formula
       weaponRoot.rotation.set(
-        TUNE.WEAPON_PITCH_FIX,
-        Math.PI + TUNE.WEAPON_YAW_FIX,
+        (TUNE.WEAPON_PITCH_FIX || 0.0),
+        Math.PI + (TUNE.WEAPON_YAW_FIX || 0.0),
         0
       );
+
       weaponRoot.scaling.set(TUNE.WEAPON_SCALE, TUNE.WEAPON_SCALE, TUNE.WEAPON_SCALE);
 
       weaponGrip.position.copyFrom(TUNE.WEAPON_GRIP_POS);
       weaponGrip.rotation.copyFrom(TUNE.WEAPON_GRIP_ROT);
     }
 
-    function clearWeaponModel(){
-      try{ if (weapon && weapon.root) weapon.root.dispose(false, true); }catch(e){}
-      try{ if (weaponRoot) weaponRoot.dispose(false, true); }catch(e){}
-      try{ if (weaponGrip) weaponGrip.dispose(false, true); }catch(e){}
-      weapon = null;
-      weaponRoot = null;
-      weaponGrip = null;
-      attachInfo = null;
-    }
-
     async function loadWeapon(key){
-      clearWeaponModel();
+      clearWeapon();
 
       const cfg = WEAPON_MAP[key] || WEAPON_MAP.basic_pistol;
       const okWeapon = await preflightGltf(cfg.root, cfg.file, `weapon:${key}`);
       if (!okWeapon){
         hud.textContent += `\n[FAIL] weapon preflight`;
-        return;
+        return false;
       }
 
-      weapon = await importModel("weapon", cfg.root, cfg.file);
-      weapon.root.setEnabled(false);
+      if(!currentWrapper || !currentContainer || !skinnedMesh || !skeleton){
+        hud.textContent += `\n[FAIL] soldier not ready`;
+        return false;
+      }
 
-      attachInfo = attachWeaponToRightHandLive(soldier, weapon);
-      if (!attachInfo?.ok){
+      // Lobby loads weapons as asset containers
+      const w = await BABYLON.SceneLoader.LoadAssetContainerAsync(cfg.root, cfg.file, scene);
+      w.addAllToScene();
+      weaponContainer = w;
+
+      const attach = attachWeaponToRightHand();
+      if(!attach?.ok){
         hud.textContent += `\n[FAIL] attachWeaponToRightHand`;
-        return;
+        return false;
       }
+
+      // Parent weapon meshes to weaponGrip (skip container root mesh)
+      const wMeshes = (w.meshes || []);
+      wMeshes.forEach(m => {
+        if(!m) return;
+        if(m === wMeshes[0]) return;
+        try{ m.parent = weaponGrip; }catch(e){}
+      });
 
       applyTuneToWeapon();
       hud.textContent += `\n[OK] weapon attached`;
+      return true;
     }
 
     // ---------- Keyboard tuner ----------
-    // Keys:
-    //   1-6 select what to edit
-    //   arrows = adjust axis (X/Y), Q/E = Z
-    //   Shift = faster, Alt = slower
-    //   Tab = cycle weapons
-    //   C = copy constants to clipboard
-    //   R = reset current weapon to its preset
-    //
     // Modes:
     //   1: WEAPON_POS
     //   2: WEAPON_GRIP_POS
@@ -384,6 +644,10 @@
     //   4: YAW_FIX
     //   5: PITCH_FIX
     //   6: SCALE
+    // Extra:
+    //   Tab = switch weapon
+    //   R = reset
+    //   C = copy constants
     let MODE = 1;
 
     function stepForEvent(ev){
@@ -424,7 +688,8 @@ const WEAPON_GRIP_ROT = new BABYLON.Vector3(${TUNE.WEAPON_GRIP_ROT.x.toFixed(5)}
         MODE===6 ? "SCALE" : "???";
 
       hud.textContent =
-`Weapon: ${ACTIVE_WEAPON_KEY}   Mode: ${MODE} (${modeName})
+`Skin: ${ACTIVE_SKIN_SKU}
+Weapon: ${ACTIVE_WEAPON_KEY}   Mode: ${MODE} (${modeName})
 Keys: 1-6 mode, arrows XY, Q/E Z, Shift fast, Alt slow, Tab switch weapon, R reset, C copy
 
 WEAPON_POS     : ${TUNE.WEAPON_POS.x.toFixed(5)}, ${TUNE.WEAPON_POS.y.toFixed(5)}, ${TUNE.WEAPON_POS.z.toFixed(5)}
@@ -446,11 +711,11 @@ ${lockText()}`;
       } else if (MODE === 3){
         TUNE.WEAPON_GRIP_ROT.x += dx*s; TUNE.WEAPON_GRIP_ROT.y += dy*s; TUNE.WEAPON_GRIP_ROT.z += dz*s;
       } else if (MODE === 4){
-        TUNE.WEAPON_YAW_FIX += dx*s; // use left/right
+        TUNE.WEAPON_YAW_FIX += dx*s;
       } else if (MODE === 5){
-        TUNE.WEAPON_PITCH_FIX += dy*s; // use up/down
+        TUNE.WEAPON_PITCH_FIX += dy*s;
       } else if (MODE === 6){
-        TUNE.WEAPON_SCALE = Math.max(0.0001, TUNE.WEAPON_SCALE + dy*s); // up/down
+        TUNE.WEAPON_SCALE = Math.max(0.0001, TUNE.WEAPON_SCALE + dy*s);
       }
       applyTuneToWeapon();
       saveTuneBackToPreset(ACTIVE_WEAPON_KEY);
@@ -458,7 +723,6 @@ ${lockText()}`;
     }
 
     window.addEventListener("keydown", async (ev) => {
-      // prevent scrolling
       if (["ArrowUp","ArrowDown","ArrowLeft","ArrowRight","Tab"," "].includes(ev.key)) ev.preventDefault();
 
       if (ev.key >= "1" && ev.key <= "6"){
@@ -470,6 +734,7 @@ ${lockText()}`;
       if (ev.key === "Tab"){
         ev.preventDefault();
         saveTuneBackToPreset(ACTIVE_WEAPON_KEY);
+
         ACTIVE_WEAPON_KEY = (ACTIVE_WEAPON_KEY === "cityrunner_smg") ? "basic_pistol" : "cityrunner_smg";
         loadPresetIntoTune(ACTIVE_WEAPON_KEY);
         await loadWeapon(ACTIVE_WEAPON_KEY);
@@ -490,7 +755,6 @@ ${lockText()}`;
         return;
       }
 
-      // Arrow/QE adjustments
       if (ev.key === "ArrowLeft")  return adjust(ev, -1,  0,  0);
       if (ev.key === "ArrowRight") return adjust(ev,  1,  0,  0);
       if (ev.key === "ArrowUp")    return adjust(ev,  0,  1,  0);
@@ -499,70 +763,60 @@ ${lockText()}`;
       if (ev.key.toLowerCase() === "e") return adjust(ev, 0, 0,  1);
     }, { passive:false });
 
-    // ---------- main ----------
+    // ---------- main loop (match lobby osc + arm correction) ----------
+    let tOsc = 0;
+    const baseY = Math.PI;
+
+    scene.onBeforeRenderObservable.add(() => {
+      if(!currentWrapper) return;
+
+      // arm correction (same math as lobby)
+      try{
+        if(skinnedMesh && skeleton){
+          const rightShoulder = findBoneByNameOrIncludes(skeleton, "mixamorig:RightShoulder.206_218") || findBoneByNameOrIncludes(skeleton, "RightShoulder");
+          const rightArm      = findBoneByNameOrIncludes(skeleton, "mixamorig:RightArm.207_219")      || findBoneByNameOrIncludes(skeleton, "RightArm");
+          const rightForeArm  = findBoneByNameOrIncludes(skeleton, "mixamorig:RightForeArm.208_220")  || findBoneByNameOrIncludes(skeleton, "RightForeArm");
+          const rightHand     = skeleton.bones.find(b => /RightHand/i.test(b.name || "")) || null;
+
+          if (rightShoulder && rightShoulder.getRotationQuaternion){
+            const cur = rightShoulder.getRotationQuaternion(BABYLON.Space.LOCAL, skinnedMesh) || BABYLON.Quaternion.Identity();
+            rightShoulder.setRotationQuaternion(cur.multiply(qShould), BABYLON.Space.LOCAL, skinnedMesh);
+          }
+          if (rightArm && rightArm.getRotationQuaternion){
+            const cur = rightArm.getRotationQuaternion(BABYLON.Space.LOCAL, skinnedMesh) || BABYLON.Quaternion.Identity();
+            rightArm.setRotationQuaternion(cur.multiply(qArm), BABYLON.Space.LOCAL, skinnedMesh);
+          }
+          if (rightForeArm && rightForeArm.getRotationQuaternion){
+            const cur = rightForeArm.getRotationQuaternion(BABYLON.Space.LOCAL, skinnedMesh) || BABYLON.Quaternion.Identity();
+            rightForeArm.setRotationQuaternion(cur.multiply(qForeArm), BABYLON.Space.LOCAL, skinnedMesh);
+          }
+          if (WRIST_TWIST_ON && rightHand && rightHand.getRotationQuaternion){
+            const cur = rightHand.getRotationQuaternion(BABYLON.Space.LOCAL, skinnedMesh) || BABYLON.Quaternion.Identity();
+            rightHand.setRotationQuaternion(cur.multiply(qWrist), BABYLON.Space.LOCAL, skinnedMesh);
+          }
+        }
+      }catch(e){}
+
+      // MATCH LOBBY: oscillation pauses while interacting
+      if(!userInteracting){
+        const dt = scene.getEngine().getDeltaTime() * 0.001;
+        tOsc += dt * AUTO_OSC_SPEED;
+        const yaw = Math.sin(tOsc) * AUTO_MAX_YAW;
+        currentWrapper.rotation.y = baseY + yaw;
+      }
+    });
+
+    // ---------- boot ----------
     (async () => {
       try{
-        hud.textContent = "Loading, preflight soldier...";
-        const okSoldier = await preflightGltf(SOLDIER_ROOT, SOLDIER_FILE, "soldier");
-        if (!okSoldier){
-          hud.textContent += "\n[FAIL] soldier preflight";
-          return;
-        }
+        hud.textContent = "Loading, soldier (lobby accurate)...";
+        const ok = await loadSoldierSkin(ACTIVE_SKIN_SKU);
+        if(!ok) return;
 
-        soldier = await importModel("soldier", SOLDIER_ROOT, SOLDIER_FILE);
-        soldier.root.rotation.y = Math.PI;
-        normalizeToGroundAndHeight(soldier.root, 1.75);
-
-        const ag = soldier.result?.animationGroups || [];
-        if (ag.length){
-          ag.forEach(g => g.stop());
-          ag[0].start(true);
-          ag[0].speedRatio = SOLDIER_ANIM_SPEED;
-        }
-
-        frameCameraToRoot(soldier.root);
-
-        // start on SMG preset
         loadPresetIntoTune(ACTIVE_WEAPON_KEY);
         await loadWeapon(ACTIVE_WEAPON_KEY);
 
-        scene.onBeforeRenderObservable.clear();
-
-        let t = 0;
-        const baseY = soldier.root.rotation.y;
-
-        scene.onBeforeRenderObservable.add(() => {
-          const dt = scene.getEngine().getDeltaTime() * 0.001;
-
-          t += dt * AUTO_OSC_SPEED;
-          const yaw = Math.sin(t) * AUTO_MAX_YAW;
-          soldier.root.rotation.y = baseY + yaw;
-
-          if (attachInfo?.ok && attachInfo?.bones && attachInfo?.skinned){
-            const skinned = attachInfo.skinned;
-            const b = attachInfo.bones;
-
-            if (b.rightShoulder && b.rightShoulder.getRotationQuaternion){
-              const cur = b.rightShoulder.getRotationQuaternion(BABYLON.Space.LOCAL, skinned) || BABYLON.Quaternion.Identity();
-              b.rightShoulder.setRotationQuaternion(cur.multiply(qShould), BABYLON.Space.LOCAL, skinned);
-            }
-            if (b.rightArm && b.rightArm.getRotationQuaternion){
-              const cur = b.rightArm.getRotationQuaternion(BABYLON.Space.LOCAL, skinned) || BABYLON.Quaternion.Identity();
-              b.rightArm.setRotationQuaternion(cur.multiply(qArm), BABYLON.Space.LOCAL, skinned);
-            }
-            if (b.rightForeArm && b.rightForeArm.getRotationQuaternion){
-              const cur = b.rightForeArm.getRotationQuaternion(BABYLON.Space.LOCAL, skinned) || BABYLON.Quaternion.Identity();
-              b.rightForeArm.setRotationQuaternion(cur.multiply(qForeArm), BABYLON.Space.LOCAL, skinned);
-            }
-            if (WRIST_TWIST_ON && b.rightHand && b.rightHand.getRotationQuaternion){
-              const cur = b.rightHand.getRotationQuaternion(BABYLON.Space.LOCAL, skinned) || BABYLON.Quaternion.Identity();
-              b.rightHand.setRotationQuaternion(cur.multiply(qWrist), BABYLON.Space.LOCAL, skinned);
-            }
-          }
-        });
-
         printHud();
-
       }catch(e){
         hud.textContent += "\n[EXCEPTION] " + (e?.message || e);
         console.warn("Test failed", e);
