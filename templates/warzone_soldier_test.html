@@ -22,6 +22,7 @@
       height:100%;
       display:block;
       touch-action:none;
+      outline:none;
     }
     #hud{
       position:fixed;
@@ -39,6 +40,7 @@
       font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
     }
   </style>
+
   <script src="https://cdn.babylonjs.com/babylon.js"></script>
   <script src="https://cdn.babylonjs.com/loaders/babylonjs.loaders.min.js"></script>
 </head>
@@ -49,17 +51,37 @@
   <script>
     const canvas = document.getElementById("renderCanvas");
     const hudEl  = document.getElementById("hud");
-    const setHudText = (t) => { hudEl.textContent = t; };
+    function setHudText(t){ hudEl.textContent = t; }
+
+    // --------- stop Babylon "loading spinner" completely ----------
+    try{
+      BABYLON.SceneLoader.ShowLoadingScreen = false;
+    }catch(e){}
+
+    // --------- WebGL context loss handling (prevents silent white screen) ----------
+    canvas.addEventListener("webglcontextlost", (e) => {
+      e.preventDefault();
+      setHudText(
+`WEBGL CONTEXT LOST (your laptop GPU/VRAM got overwhelmed)
+Fix:
+  1) Refresh
+  2) Close extra tabs
+  3) If still happens, weapon assets are too heavy
+
+This page is now paused.`
+      );
+    }, false);
 
     // ---------- keyboard tuning ----------
     let MODE = 1; // 1 pos, 2 rot, 3 scale
     let STEP = 0.01;
 
-    // Default: neon marksman often needs -90deg X to stop pointing upward
+    // Default fix for "gun points upward":
+    // most rifle models need a -90deg X rotation when attached to a hand bone.
     const TUNE = {
       pos:   new BABYLON.Vector3(0.02, 0.00, 0.06),
       rot:   new BABYLON.Vector3(-Math.PI * 0.5, Math.PI, 0.00),
-      scale: 0.15   // start smaller to avoid GPU spike on older laptops
+      scale: 0.25
     };
 
     const DEFAULTS = {
@@ -68,7 +90,9 @@
       scale: TUNE.scale
     };
 
-    function fmt3(v){ return `${v.x.toFixed(5)}, ${v.y.toFixed(5)}, ${v.z.toFixed(5)}`; }
+    function fmt3(v){
+      return `${v.x.toFixed(5)}, ${v.y.toFixed(5)}, ${v.z.toFixed(5)}`;
+    }
 
     function hud(){
       const modeName = MODE===1 ? "POS" : MODE===2 ? "ROT" : "SCALE";
@@ -99,19 +123,15 @@ SCALE : ${TUNE.scale.toFixed(5)}`
       return STEP;
     }
 
-    let weaponRootGlobal = null;
-    function applyTune(){
-      if(!weaponRootGlobal) return;
-      weaponRootGlobal.position.copyFrom(TUNE.pos);
-      weaponRootGlobal.rotation.copyFrom(TUNE.rot);
-      weaponRootGlobal.scaling.set(TUNE.scale, TUNE.scale, TUNE.scale);
-    }
+    // This is the node we tune (the thing attached to the bone)
+    let weaponBoneNode = null;
 
-    // Prevent arrow keys scrolling the page on laptops
-    window.addEventListener("keydown", (ev) => {
-      const k = ev.key;
-      if (k === "ArrowLeft" || k === "ArrowRight" || k === "ArrowUp" || k === "ArrowDown") ev.preventDefault();
-    }, { passive:false });
+    function applyTune(){
+      if(!weaponBoneNode) return;
+      weaponBoneNode.position.copyFrom(TUNE.pos);
+      weaponBoneNode.rotation.copyFrom(TUNE.rot);
+      weaponBoneNode.scaling.set(TUNE.scale, TUNE.scale, TUNE.scale);
+    }
 
     window.addEventListener("keydown", async (ev) => {
       const k = ev.key;
@@ -156,23 +176,34 @@ const WEAPON_SCALE = ${TUNE.scale.toFixed(5)};`;
       } else if (MODE === 2){
         TUNE.rot.x += dx*s; TUNE.rot.y += dy*s; TUNE.rot.z += dz*s;
       } else {
-        // scale mode: up/down adjusts scale
         if (dy !== 0) TUNE.scale = Math.max(0.0001, TUNE.scale + dy*s);
       }
 
       applyTune();
       hud();
-    }, { passive:false });
+    }, { passive:true });
 
-    // ---------- safer engine init (avoids “white screen” on weaker laptops) ----------
+    // ---------- low-end safety settings (targets your Chromebook style laptop) ----------
+    const devMem = navigator.deviceMemory || 0;            // may be undefined
+    const cores  = navigator.hardwareConcurrency || 0;     // may be undefined
+    const LOW_END = (devMem && devMem <= 4) || (cores && cores <= 4);
+
+    // Cap texture size for weak GPUs (big win vs context loss)
+    try{
+      BABYLON.Engine.MaxTextureSize = LOW_END ? 512 : 1024;
+    }catch(e){}
+
     function makeEngine(){
+      // Prefer WebGL1 on weak laptops to reduce crashes
       try{
-        // Safer defaults: no preserveDrawingBuffer/stencil (can blow memory on chromebooks)
-        return new BABYLON.Engine(canvas, true, { stencil:false, preserveDrawingBuffer:false });
-      }catch(e1){
+        return new BABYLON.Engine(canvas, true, {
+          stencil:false,
+          preserveDrawingBuffer:false,
+          disableWebGL2Support: LOW_END
+        });
+      }catch(e){
         try{
-          // Fallback: force WebGL1
-          return new BABYLON.Engine(canvas, true, { stencil:false, preserveDrawingBuffer:false, disableWebGL2Support:true });
+          return new BABYLON.Engine(canvas, true, { disableWebGL2Support:true });
         }catch(e2){
           return null;
         }
@@ -181,12 +212,13 @@ const WEAPON_SCALE = ${TUNE.scale.toFixed(5)};`;
 
     const engine = makeEngine();
     if (!engine){
-      setHudText("FAILED: Babylon Engine could not start (WebGL init error).");
+      setHudText("FAILED: WebGL could not start on this laptop.");
       throw new Error("Engine init failed");
     }
 
-    // Optional: show loader while importing
-    try{ engine.displayLoadingUI?.(); }catch(e){}
+    // Lower render resolution (massive stability boost)
+    // Bigger number = lower resolution = less VRAM use
+    engine.setHardwareScalingLevel(LOW_END ? 2.5 : 1.5);
 
     const scene  = new BABYLON.Scene(engine);
     scene.clearColor = new BABYLON.Color4(0,0,0,1);
@@ -203,22 +235,15 @@ const WEAPON_SCALE = ${TUNE.scale.toFixed(5)};`;
     camera.panningSensibility = 0;
     camera.wheelPrecision = 60;
 
-    // Disable keyboard camera inputs so our keys are purely for tuning
-    camera.inputs.removeByType("ArcRotateCameraKeyboardMoveInput");
-    if (camera.inputs && camera.inputs.attached && camera.inputs.attached.keyboard) {
-      camera.inputs.attached.keyboard.keysUp = [];
-      camera.inputs.attached.keyboard.keysDown = [];
-      camera.inputs.attached.keyboard.keysLeft = [];
-      camera.inputs.attached.keyboard.keysRight = [];
-    }
-
     const hemi = new BABYLON.HemisphericLight("h", new BABYLON.Vector3(0,1,0), scene);
     hemi.intensity = 1.05;
 
     const dir = new BABYLON.DirectionalLight("d", new BABYLON.Vector3(-0.3,-1,-0.4), scene);
     dir.intensity = 0.95;
 
-    engine.runRenderLoop(() => scene.render());
+    engine.runRenderLoop(() => {
+      if (!scene.isDisposed()) scene.render();
+    });
     window.addEventListener("resize", () => engine.resize());
 
     // ---------- helpers ----------
@@ -248,7 +273,6 @@ const WEAPON_SCALE = ${TUNE.scale.toFixed(5)};`;
 
     async function preflightGltf(rootUrl, fileName){
       const gltfUrl = rootUrl + fileName;
-
       const gltfCheck = await checkUrl(gltfUrl);
       if (!gltfCheck.ok) return false;
 
@@ -263,6 +287,10 @@ const WEAPON_SCALE = ${TUNE.scale.toFixed(5)};`;
       const deps = [];
       if (Array.isArray(gltf.buffers)) gltf.buffers.forEach(b => b?.uri && deps.push(b.uri));
       if (Array.isArray(gltf.images))  gltf.images.forEach(img => img?.uri && deps.push(img.uri));
+
+      // On weak laptops, do NOT preflight every texture (extra memory + time).
+      // Only verify the gltf exists.
+      if (LOW_END) return true;
 
       for (const uri of deps){
         const url = joinUrl(rootUrl, uri);
@@ -308,8 +336,10 @@ const WEAPON_SCALE = ${TUNE.scale.toFixed(5)};`;
 
       const gltfRoot = result.meshes && result.meshes.length ? result.meshes[0] : null;
       if (gltfRoot) gltfRoot.parent = wrapper;
-      else result.meshes.forEach(m => { m.parent = wrapper; });
+      else (result.meshes || []).forEach(m => { if(m) m.parent = wrapper; });
 
+      // Keep everything enabled (some browsers behave weird if parents are disabled)
+      wrapper.setEnabled(true);
       return { root: wrapper, result };
     }
 
@@ -326,25 +356,7 @@ const WEAPON_SCALE = ${TUNE.scale.toFixed(5)};`;
       return skeleton.bones.find(b => ((b.name || "").toLowerCase().includes(wantLow))) || null;
     }
 
-    // ---------- merge gun meshes into ONE mesh (reduces draw calls, prevents white screen) ----------
-    function mergeWeaponMeshes(allMeshes){
-      const geo = allMeshes.filter(m => m && m.getTotalVertices && m.getTotalVertices() > 0);
-      if (geo.length === 0) return null;
-      if (geo.length === 1) return geo[0];
-
-      const merged = BABYLON.Mesh.MergeMeshes(
-        geo,
-        true,   // disposeSource
-        true,   // allow32BitsIndices
-        undefined,
-        true,   // subdivideWithSubMeshes (KEEP submeshes -> keeps materials sane)
-        true    // multiMultiMaterials
-      );
-
-      return merged || geo[0];
-    }
-
-    // ---------- attach ----------
+    // ---------- attach (keeps GLTF hierarchy intact, fixes "3 pieces") ----------
     function attachWeaponToRightHand(soldierImport, weaponImport){
       const skinned = findSkinnedMesh(soldierImport.result);
       const skeleton = skinned?.skeleton || (soldierImport.result?.skeletons?.[0] || null);
@@ -355,28 +367,16 @@ const WEAPON_SCALE = ${TUNE.scale.toFixed(5)};`;
       if (!bone) bone = skeleton.bones.find(b => /RightHand/i.test(b.name || "")) || null;
       if (!bone) return false;
 
-      // Root attached to bone
-      const weaponRoot = new BABYLON.TransformNode("weaponRoot", scene);
-      weaponRoot.attachToBone(bone, skinned);
+      // This node is attached to the bone, and we tune THIS
+      const boneNode = new BABYLON.TransformNode("weaponBoneNode", scene);
+      boneNode.attachToBone(bone, skinned);
 
-      // Collect real meshes (exclude scene root)
-      const meshes = (weaponImport.result?.meshes || [])
-        .filter(m => m && m !== weaponImport.result.meshes[0]);
+      // Parent the imported weapon ROOT under the bone node
+      // This preserves the weapon's original hierarchy and relative transforms.
+      weaponImport.root.parent = boneNode;
+      weaponImport.root.setEnabled(true);
 
-      // Ensure enabled (some browsers load disabled nodes weird)
-      meshes.forEach(m => m.setEnabled(true));
-
-      // Parent under weaponRoot so transforms are consistent
-      meshes.forEach(m => { m.parent = weaponRoot; });
-
-      // Merge into one mesh to stop “3 pieces” and reduce GPU load
-      const merged = mergeWeaponMeshes(meshes);
-      if (merged) merged.parent = weaponRoot;
-
-      // Dispose wrapper so nothing else hangs around
-      try{ weaponImport.root.dispose(false, true); }catch(e){}
-
-      weaponRootGlobal = weaponRoot;
+      weaponBoneNode = boneNode;
       applyTune();
       hud();
       return true;
@@ -391,7 +391,7 @@ const WEAPON_SCALE = ${TUNE.scale.toFixed(5)};`;
 
     (async () => {
       try{
-        setHudText("Loading soldier + neon marksman...");
+        setHudText(`Loading soldier + neon marksman... (lowEnd=${LOW_END})`);
 
         const okSoldier = await preflightGltf(SOLDIER_ROOT, SOLDIER_FILE);
         if(!okSoldier){ setHudText("Stop: soldier preflight failed"); return; }
@@ -413,22 +413,23 @@ const WEAPON_SCALE = ${TUNE.scale.toFixed(5)};`;
         const gun = await importModel("neon_marksman", WEAPON_ROOT, WEAPON_FILE);
 
         const attached = attachWeaponToRightHand(soldier, gun);
-        if (!attached){ setHudText("Attach FAIL: RightHand bone not found"); return; }
+        if (!attached){
+          setHudText("Attach FAIL: RightHand bone not found");
+          return;
+        }
 
         frameCameraToRoot(soldier.root);
 
-        // slow spin for inspection
+        // slow spin (inspection)
         scene.onBeforeRenderObservable.clear();
         scene.onBeforeRenderObservable.add(() => {
           const dt = scene.getEngine().getDeltaTime() * 0.001;
           soldier.root.rotation.y += dt * 0.25;
         });
 
-        try{ engine.hideLoadingUI?.(); }catch(e){}
         hud();
       }catch(e){
         console.warn("Test failed", e);
-        try{ engine.hideLoadingUI?.(); }catch(_){}
         setHudText("FAILED: check console: " + (e?.message || e));
       }
     })();
