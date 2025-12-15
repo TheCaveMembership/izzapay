@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="utf-8">
-  <title>War Zone Test, Lobby Accurate Soldier + Weapon Tuner</title>
+  <title>War Zone Test, Lobby Accurate Soldier + Weapon Tuner (Neon Marksman)</title>
   <meta name="viewport" content="width=device-width,initial-scale=1">
   <style>
     html,body{
@@ -99,32 +99,19 @@
     const SOLDIER_ROOT = "/assets/warzone3d/soldier_gltf_3/";
     const SOLDIER_FILE = "scene.gltf";
 
-    const BASIC_PISTOL_ROOT    = "/assets/warzone3d/weapons/wz_basic_pistol/";
-    const CITYRUNNER_SMG_ROOT  = "/assets/warzone3d/weapons/wz_cityrunner_smg/";
-    const NEON_MARKSMAN_ROOT   = "/assets/warzone3d/weapons/wz_neon_marksman/";
+    // ✅ ONLY weapon under test (removes switch-crash path)
+    const NEON_MARKSMAN_ROOT = "/assets/warzone3d/weapons/wz_neon_marksman/";
     const WEAPON_FILE = "scene.gltf";
 
-    // Match lobby weapon sku normalization
-    function normalizeWeaponSku(s){
-      const sku = (s || "").toString().trim();
-      if (!sku) return "basic_pistol";
-      if (sku === "wz_basic_pistol") return "basic_pistol";
-      if (sku === "wz_cityrunner_smg") return "cityrunner_smg";
-      if (sku === "wz_neon_marksman") return "neon_marksman";
-      return sku;
-    }
-
     const WEAPON_MAP = {
-      basic_pistol:    { root: BASIC_PISTOL_ROOT,   file: WEAPON_FILE },
-      cityrunner_smg:  { root: CITYRUNNER_SMG_ROOT, file: WEAPON_FILE },
-      neon_marksman:   { root: NEON_MARKSMAN_ROOT,  file: WEAPON_FILE }
+      neon_marksman: { root: NEON_MARKSMAN_ROOT, file: WEAPON_FILE }
     };
 
     // Skin tuning, same pipeline as lobby, but local keys you can extend
     let ACTIVE_SKIN_SKU = "wz_basic_soldier";
 
-    // Start on SMG
-    let ACTIVE_WEAPON_KEY = "cityrunner_smg";
+    // ✅ Start on Neon Marksman (only weapon in this test page)
+    let ACTIVE_WEAPON_KEY = "neon_marksman";
 
     const SOLDIER_ANIM_SPEED = 0.65;
     const AUTO_OSC_SPEED = 0.35;
@@ -205,46 +192,30 @@
     // ----------------------------------------
 
     // ----- Per-weapon defaults -----
+    // ✅ Match Neon Marksman to Lobby Pistol tuning FOR NOW (exact lobby constants)
     const PRESETS = {
-      basic_pistol: {
-        WEAPON_SCALE: 0.07,
-        WEAPON_YAW_FIX: Math.PI * 0.5,
-        WEAPON_PITCH_FIX: 0.00,
-        WEAPON_POS:      new BABYLON.Vector3(-1.069,  0.327, -0.058),
-        WEAPON_GRIP_POS: new BABYLON.Vector3( 3.634, -0.030, -11.272),
-        WEAPON_GRIP_ROT: new BABYLON.Vector3(-0.260, -0.040,  0.010)
-      },
-      cityrunner_smg: {
-        WEAPON_SCALE: 0.11,
-        WEAPON_YAW_FIX: Math.PI * 0.5,
-        WEAPON_PITCH_FIX: -0.55,
-        WEAPON_POS:      new BABYLON.Vector3(-1.069,  0.327, -0.058),
-        WEAPON_GRIP_POS: new BABYLON.Vector3( 3.634, -0.030, -11.272),
-        WEAPON_GRIP_ROT: new BABYLON.Vector3(-0.120, -0.040,  0.010)
-      },
-
-      // NEW, start from SMG-ish defaults, you tune it with your hotkeys, then paste into lobby WEAPON_TUNING
       neon_marksman: {
-        WEAPON_SCALE: 0.11,
-        WEAPON_YAW_FIX: Math.PI * 0.5,
-        WEAPON_PITCH_FIX: -0.55,
-        WEAPON_POS:      new BABYLON.Vector3(-1.069,  0.327, -0.058),
-        WEAPON_GRIP_POS: new BABYLON.Vector3( 3.634, -0.030, -11.272),
-        WEAPON_GRIP_ROT: new BABYLON.Vector3(-0.120, -0.040,  0.010)
+        WEAPON_SCALE: 0.06000,
+        WEAPON_YAW_FIX: 1.52080,
+        WEAPON_PITCH_FIX: -0.03000,
+
+        WEAPON_POS:      new BABYLON.Vector3(-1.06900,  0.32700, -0.05800),
+        WEAPON_GRIP_POS: new BABYLON.Vector3( 2.98400,  1.23000, -11.27200),
+        WEAPON_GRIP_ROT: new BABYLON.Vector3(-0.23000,  0.00000,  0.01000),
       }
     };
 
     const TUNE = {
-      WEAPON_SCALE: 0.07,
-      WEAPON_YAW_FIX: Math.PI * 0.5,
-      WEAPON_PITCH_FIX: 0.0,
+      WEAPON_SCALE: 0.06000,
+      WEAPON_YAW_FIX: 1.52080,
+      WEAPON_PITCH_FIX: -0.03000,
       WEAPON_POS: new BABYLON.Vector3(0,0,0),
       WEAPON_GRIP_POS: new BABYLON.Vector3(0,0,0),
       WEAPON_GRIP_ROT: new BABYLON.Vector3(0,0,0)
     };
 
     function loadPresetIntoTune(key){
-      const p = PRESETS[key] || PRESETS.basic_pistol;
+      const p = PRESETS[key] || PRESETS.neon_marksman;
       TUNE.WEAPON_SCALE = p.WEAPON_SCALE;
       TUNE.WEAPON_YAW_FIX = p.WEAPON_YAW_FIX;
       TUNE.WEAPON_PITCH_FIX = p.WEAPON_PITCH_FIX;
@@ -254,7 +225,7 @@
     }
 
     function saveTuneBackToPreset(key){
-      const p = PRESETS[key] || PRESETS.basic_pistol;
+      const p = PRESETS[key] || PRESETS.neon_marksman;
       p.WEAPON_SCALE = TUNE.WEAPON_SCALE;
       p.WEAPON_YAW_FIX = TUNE.WEAPON_YAW_FIX;
       p.WEAPON_PITCH_FIX = TUNE.WEAPON_PITCH_FIX;
@@ -613,7 +584,12 @@
     async function loadWeapon(key){
       clearWeapon();
 
-      const cfg = WEAPON_MAP[key] || WEAPON_MAP.basic_pistol;
+      const cfg = WEAPON_MAP[key];
+      if(!cfg){
+        hud.textContent += `\n[FAIL] weapon key not mapped: ${key}`;
+        return false;
+      }
+
       const okWeapon = await preflightGltf(cfg.root, cfg.file, `weapon:${key}`);
       if (!okWeapon){
         hud.textContent += `\n[FAIL] weapon preflight`;
@@ -658,7 +634,6 @@
     //   5: PITCH_FIX
     //   6: SCALE
     // Extra:
-    //   Tab = switch weapon
     //   R = reset
     //   C = copy constants
     let MODE = 1;
@@ -703,7 +678,7 @@ const WEAPON_GRIP_ROT = new BABYLON.Vector3(${TUNE.WEAPON_GRIP_ROT.x.toFixed(5)}
       hud.textContent =
 `Skin: ${ACTIVE_SKIN_SKU}
 Weapon: ${ACTIVE_WEAPON_KEY}   Mode: ${MODE} (${modeName})
-Keys: 1-6 mode, arrows XY, Q/E Z, Shift fast, Alt slow, Tab switch weapon, R reset, C copy
+Keys: 1-6 mode, arrows XY, Q/E Z, Shift fast, Alt slow, R reset, C copy
 
 WEAPON_POS     : ${TUNE.WEAPON_POS.x.toFixed(5)}, ${TUNE.WEAPON_POS.y.toFixed(5)}, ${TUNE.WEAPON_POS.z.toFixed(5)}
 GRIP_POS       : ${TUNE.WEAPON_GRIP_POS.x.toFixed(5)}, ${TUNE.WEAPON_GRIP_POS.y.toFixed(5)}, ${TUNE.WEAPON_GRIP_POS.z.toFixed(5)}
@@ -735,28 +710,11 @@ ${lockText()}`;
       printHud();
     }
 
-    function nextWeaponKey(cur){
-      const order = ["cityrunner_smg","basic_pistol","neon_marksman"];
-      const i = Math.max(0, order.indexOf(cur));
-      return order[(i + 1) % order.length];
-    }
-
     window.addEventListener("keydown", async (ev) => {
-      if (["ArrowUp","ArrowDown","ArrowLeft","ArrowRight","Tab"," "].includes(ev.key)) ev.preventDefault();
+      if (["ArrowUp","ArrowDown","ArrowLeft","ArrowRight"," "].includes(ev.key)) ev.preventDefault();
 
       if (ev.key >= "1" && ev.key <= "6"){
         MODE = parseInt(ev.key, 10);
-        printHud();
-        return;
-      }
-
-      if (ev.key === "Tab"){
-        ev.preventDefault();
-        saveTuneBackToPreset(ACTIVE_WEAPON_KEY);
-
-        ACTIVE_WEAPON_KEY = nextWeaponKey(ACTIVE_WEAPON_KEY);
-        loadPresetIntoTune(ACTIVE_WEAPON_KEY);
-        await loadWeapon(ACTIVE_WEAPON_KEY);
         printHud();
         return;
       }
