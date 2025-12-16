@@ -246,7 +246,7 @@ def _linked_wallet_pub_for_username(uname: str) -> str:
 
 
 # ----------------------------------------------------------------------
-# WAR ZONE SHOP: schema + seed
+# WAR ZONE SHOP, schema + seed
 # ----------------------------------------------------------------------
 
 def _ensure_shop_schema(cx):
@@ -272,6 +272,26 @@ def _ensure_shop_schema(cx):
           equipped INTEGER NOT NULL DEFAULT 0,
           created_at INTEGER NOT NULL,
           UNIQUE(user_id, slot, sku),
+          FOREIGN KEY(user_id) REFERENCES users(id)
+        );
+
+        CREATE TABLE IF NOT EXISTS warzone_ammo_packs(
+          id INTEGER PRIMARY KEY,
+          pack_sku TEXT NOT NULL UNIQUE,
+          weapon_sku TEXT NOT NULL,
+          rounds INTEGER NOT NULL DEFAULT 0,
+          price_izza REAL NOT NULL DEFAULT 0,
+          active INTEGER NOT NULL DEFAULT 1,
+          sort_order INTEGER NOT NULL DEFAULT 0
+        );
+
+        CREATE TABLE IF NOT EXISTS warzone_ammo(
+          id INTEGER PRIMARY KEY,
+          user_id INTEGER NOT NULL,
+          weapon_sku TEXT NOT NULL,
+          rounds INTEGER NOT NULL DEFAULT 0,
+          updated_at INTEGER NOT NULL,
+          UNIQUE(user_id, weapon_sku),
           FOREIGN KEY(user_id) REFERENCES users(id)
         );
         """
@@ -330,8 +350,45 @@ def _seed_shop_if_empty(cx):
         )
 
 
+def _seed_ammo_packs_if_empty(cx):
+    row = cx.execute("SELECT COUNT(*) AS c FROM warzone_ammo_packs").fetchone()
+    if row and row["c"]:
+        return
+
+    packs = [
+        {"pack_sku": "wz_ammo_pistol_100", "weapon_sku": "wz_basic_pistol", "rounds": 100, "price": 25, "order": 10},
+        {"pack_sku": "wz_ammo_smg_200", "weapon_sku": "wz_cityrunner_smg", "rounds": 200, "price": 50, "order": 20},
+    ]
+
+    for p in packs:
+        cx.execute(
+            """
+            INSERT OR IGNORE INTO warzone_ammo_packs
+              (pack_sku, weapon_sku, rounds, price_izza, active, sort_order)
+            VALUES (?, ?, ?, ?, 1, ?)
+            """,
+            (p["pack_sku"], p["weapon_sku"], int(p["rounds"]), float(p["price"]), int(p["order"])),
+        )
+
+
+def _canon_weapon_sku(raw: str) -> str:
+    """
+    Keep server strict, supports the legacy raw values your lobby loaders might emit.
+    """
+    if not raw:
+        return ""
+    low = str(raw).strip().lower()
+    if low in ("basic_pistol", "wz_basic_pistol"):
+        return "wz_basic_pistol"
+    if low in ("cityrunner_smg", "wz_cityrunner_smg"):
+        return "wz_cityrunner_smg"
+    if low in ("neon_marksman", "wz_neon_marksman"):
+        return "wz_neon_marksman"
+    return low
+
+
 # ----------------------------------------------------------------------
-# Auth / lobby / NEW shop page
+# Auth, lobby, shop page
 # ----------------------------------------------------------------------
 
 @warzone_bp.get("/auth")
@@ -436,7 +493,6 @@ def warzone_shop_page():
 
 @warzone_bp.get("/shop/skins")
 def warzone_shop_skins_redirect():
-    # keep ?u= if present
     qs = request.query_string.decode("utf-8")
     join = "&" if qs else ""
     return redirect(f"/warzone/shop?tab=skins{join}{qs}")
@@ -450,7 +506,7 @@ def warzone_shop_weapons_redirect():
 
 
 # ----------------------------------------------------------------------
-# War Zone API: friend search + lobby invites
+# War Zone API, friend search + lobby invites
 # ----------------------------------------------------------------------
 
 @warzone_bp.get("/api/search")
@@ -527,9 +583,8 @@ def warzone_shop():
     with conn() as cx:
         _ensure_shop_schema(cx)
         _seed_shop_if_empty(cx)
+        _seed_ammo_packs_if_empty(cx)
 
-        # FIX:
-        # Determine equipped sku for this slot, so starter can be marked equipped
         equipped_sku = None
         if inv_uid != -1:
             eq = cx.execute(
@@ -572,9 +627,6 @@ def warzone_shop():
         owned = bool(r["owned"]) or starting
 
         if starting:
-            # FIX:
-            # Starter is equipped if there is no equipped item in this slot,
-            # OR if the equipped sku explicitly equals the starter sku.
             if equipped_sku is None:
                 equipped = True
             else:
@@ -652,6 +704,7 @@ def warzone_purchase():
     with conn() as cx:
         _ensure_shop_schema(cx)
         _seed_shop_if_empty(cx)
+        _seed_ammo_packs_if_empty(cx)
 
         item = cx.execute(
             """
@@ -723,6 +776,162 @@ def warzone_purchase():
     )
 
 
+@warzone_bp.post("/api/ammo/purchase")
+def warzone_ammo_purchase():
+    """
+    NEW:
+    Handles Buy ammo button in warzone_shop.html
+
+    Server is authoritative:
+      reads ammo pack config from DB
+      ignores client supplied rounds and price if mismatched
+      sends IZZA transfer
+      credits ammo balance per user, per weapon
+    """
+    uid = _require_user_id_or_u()
+    if not uid:
+        return jsonify({"error": "auth_required"}), 401
+
+    if not _izza_payment_config_ok():
+        return jsonify(
+            {"error": "shop_config_invalid", "detail": "Missing IZZA asset code/issuer or shop dest on server."}
+        ), 500
+
+    data = request.get_json(silent=True) or {}
+
+    weapon_sku_raw = (data.get("weapon_sku") or "").strip()
+    pack_sku = (data.get("pack_sku") or "").strip()
+    try:
+        rounds_client = int(data.get("rounds") or 0)
+    except Exception:
+        rounds_client = 0
+
+    try:
+        price_izza_client = float(data.get("price_izza") or 0)
+    except Exception:
+        price_izza_client = 0.0
+
+    buyer_pub = (data.get("buyer_pub") or "").strip().upper()
+    buyer_sec = (data.get("buyer_sec") or "").strip()
+
+    weapon_sku = _canon_weapon_sku(weapon_sku_raw)
+    if not weapon_sku or not pack_sku:
+        return jsonify({"error": "bad_request"}), 400
+
+    if not (buyer_sec and buyer_sec.startswith("S") and len(buyer_sec) == 56):
+        return jsonify({"error": "buyer_sec_missing"}), 400
+
+    try:
+        kp = Keypair.from_secret(buyer_sec)
+        derived_pub = kp.public_key
+    except Exception:
+        return jsonify({"error": "buyer_key_invalid"}), 400
+
+    if buyer_pub:
+        if not (buyer_pub.startswith("G") and len(buyer_pub) == 56):
+            return jsonify({"error": "buyer_pub_invalid"}), 400
+        if derived_pub != buyer_pub:
+            return jsonify({"error": "buyer_key_mismatch"}), 400
+
+    uname = _resolve_username()
+    if not uname:
+        return jsonify({"error": "username_required"}), 401
+
+    linked_pub = _linked_wallet_pub_for_username(uname)
+    if not linked_pub:
+        return jsonify({"error": "no_linked_wallet"}), 403
+    if linked_pub != derived_pub:
+        return jsonify({"error": "wallet_not_linked_for_user"}), 403
+
+    with conn() as cx:
+        _ensure_shop_schema(cx)
+        _seed_shop_if_empty(cx)
+        _seed_ammo_packs_if_empty(cx)
+
+        pack = cx.execute(
+            """
+            SELECT pack_sku, weapon_sku, rounds, price_izza, active
+            FROM warzone_ammo_packs
+            WHERE pack_sku = ?
+            LIMIT 1
+            """,
+            (pack_sku,),
+        ).fetchone()
+
+        if not pack or not int(pack["active"] or 0):
+            return jsonify({"error": "unknown_pack"}), 400
+
+        pack_weapon = _canon_weapon_sku(pack["weapon_sku"] or "")
+        if pack_weapon != weapon_sku:
+            return jsonify({"error": "pack_weapon_mismatch"}), 400
+
+        db_rounds = int(pack["rounds"] or 0)
+        if db_rounds <= 0:
+            return jsonify({"error": "invalid_rounds_config"}), 500
+
+        db_price = _parse_izza_amount(pack["price_izza"])
+        if db_price is None:
+            return jsonify({"error": "invalid_price_config"}), 500
+
+        if rounds_client and rounds_client != db_rounds:
+            return jsonify({"error": "rounds_mismatch", "rounds": db_rounds}), 400
+
+        if price_izza_client:
+            client_dec = _parse_izza_amount(price_izza_client)
+            if not client_dec or client_dec != db_price:
+                return jsonify({"error": "price_mismatch", "price_izza": float(db_price)}), 400
+
+    try:
+        tx_hash = _send_izza_payment(
+            from_secret=buyer_sec,
+            to_pub=WZ_SHOP_DEST,
+            amount=db_price,
+            memo_text=f"WZ,ammo,{pack_sku}",
+        )
+    except Exception as e:
+        return jsonify({"error": "payment_failed", "detail": str(e)}), 502
+
+    now_ts = _now_i()
+    with conn() as cx:
+        _ensure_shop_schema(cx)
+
+        row = cx.execute(
+            """
+            SELECT rounds
+            FROM warzone_ammo
+            WHERE user_id = ? AND weapon_sku = ?
+            LIMIT 1
+            """,
+            (uid, weapon_sku),
+        ).fetchone()
+
+        current_rounds = int(row["rounds"] or 0) if row else 0
+        new_total = current_rounds + int(db_rounds)
+
+        cx.execute(
+            """
+            INSERT INTO warzone_ammo (user_id, weapon_sku, rounds, updated_at)
+            VALUES (?, ?, ?, ?)
+            ON CONFLICT(user_id, weapon_sku) DO UPDATE SET
+              rounds = excluded.rounds,
+              updated_at = excluded.updated_at
+            """,
+            (uid, weapon_sku, int(new_total), now_ts),
+        )
+
+    return jsonify(
+        {
+            "ok": True,
+            "tx": tx_hash,
+            "weapon_sku": weapon_sku,
+            "pack_sku": pack_sku,
+            "added_rounds": int(db_rounds),
+            "total_rounds": int(new_total),
+            "price_izza": float(db_price),
+        }
+    )
+
+
 @warzone_bp.post("/api/equip")
 def warzone_equip():
     uid = _require_user_id_or_u()
@@ -740,6 +949,7 @@ def warzone_equip():
     with conn() as cx:
         _ensure_shop_schema(cx)
         _seed_shop_if_empty(cx)
+        _seed_ammo_packs_if_empty(cx)
 
         item = cx.execute(
             """
@@ -764,7 +974,6 @@ def warzone_equip():
             if not owned:
                 return jsonify({"error": "not_owned"}), 400
 
-        # Clear equipped for this slot
         cx.execute(
             """
             UPDATE warzone_inventory
@@ -774,7 +983,6 @@ def warzone_equip():
             (uid, slot),
         )
 
-        # Ensure row exists (starter can be inserted too)
         cx.execute(
             """
             INSERT OR IGNORE INTO warzone_inventory
@@ -784,7 +992,6 @@ def warzone_equip():
             (uid, slot, sku, now_ts),
         )
 
-        # Set equipped
         cx.execute(
             """
             UPDATE warzone_inventory
