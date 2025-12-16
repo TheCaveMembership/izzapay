@@ -87,6 +87,20 @@
       box-shadow:0 0 18px rgba(255,207,77,.6);
       flex-shrink:0;
     }
+    /* NEW: make IZZA token act like a button */
+    .izzacoin-btn{
+      border:none;
+      background:transparent;
+      padding:0;
+      display:inline-flex;
+      align-items:center;
+      cursor:pointer;
+      border-radius:999px;
+    }
+    .izzacoin-btn:focus{ outline:none; }
+    .izzacoin-btn:focus-visible{
+      box-shadow:0 0 0 2px rgba(127,209,255,.65);
+    }
 
     .deploy-btn{
       min-width:170px;
@@ -471,7 +485,10 @@
       <div class="shell">
         <div class="top-row">
           <div class="logo-block">
-            <div class="izzacoin"></div>
+            <!-- NEW: IZZA token is now a "Back home" button -->
+            <button class="izzacoin-btn" id="homeBtn" type="button" aria-label="Back home">
+              <div class="izzacoin"></div>
+            </button>
             <span>IZZA, WAR ZONE</span>
           </div>
           <button class="deploy-btn" id="deployBtn">
@@ -489,10 +506,10 @@
             <div class="zone-header">
               <div>
                 <span>Drop zone</span>
-                <strong>Pre deployment view</strong>
+                <strong>Pre deployment</strong>
               </div>
               <div style="font-size:10px;color:#7fd1ff;">
-                IZZA maps, rotated view
+                IZZA maps, rotated
               </div>
             </div>
 
@@ -645,6 +662,11 @@
       document.getElementById("warzoneShopBtn")?.addEventListener("click", () => {
         const qs = window.location.search || "";
         window.location.href = "/warzone/shop" + qs;
+      });
+
+      // NEW: IZZA token goes back home (pi_signin.html)
+      document.getElementById("homeBtn")?.addEventListener("click", () => {
+        window.location.href = "/pi_signin";
       });
 
       const searchDisplay = document.getElementById("searchDisplay");
