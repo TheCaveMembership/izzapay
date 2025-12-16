@@ -102,7 +102,6 @@
       box-shadow:0 0 0 2px rgba(127,209,255,.65);
     }
 
-    /* NEW: turquoise WARZONE title style */
     .warzone-title{
       font-weight:900;
       font-size:12px;
@@ -233,7 +232,6 @@
       touch-action:none;
     }
 
-    /* NEW: ammo HUD bottom-right in map area */
     .ammo-hud{
       position:absolute;
       right:10px;
@@ -538,7 +536,6 @@
             <button class="izzacoin-btn" id="homeBtn" type="button" aria-label="Back home">
               <div class="izzacoin"></div>
             </button>
-            <!-- CHANGED: title -->
             <span class="warzone-title">WARZONE</span>
           </div>
           <button class="deploy-btn" id="deployBtn">
@@ -568,7 +565,6 @@
               id="zoneCanvasShell"
               style="background-image:url('{{ map_image_url or "/assets/warzone-map-izzacity.jpg" }}');">
 
-              <!-- NEW: ammo HUD -->
               <div class="ammo-hud" id="ammoHud" aria-label="Ammo">
                 <div class="label">AMMO</div>
                 <div class="value" id="ammoValue">--</div>
@@ -585,7 +581,6 @@
                 <button class="btn-ghost" id="inviteBtn">Invite friends</button>
                 <button class="btn-ghost secondary" id="searchBtn">Search players</button>
               </div>
-              <!-- CHANGED: paragraph -->
               <div class="friends-foot">
                 IZZA WARZONE runs its own party system. Invited Pi authed friends will appear standing beside your operator when they accept your lobby invite.
               </div>
@@ -654,17 +649,16 @@
           </div>
         </div>
 
+        <!-- UPDATED: deploy overlay now matches the FPS enter flow -->
         <div class="overlay" id="deployOverlay">
           <div class="overlay-card">
             <div class="overlay-header">
-              <div class="overlay-title">Matchmaking</div>
+              <div class="overlay-title">IZZA WARZONE</div>
               <button class="overlay-close" data-close="deployOverlay">Cancel</button>
             </div>
             <div class="overlay-body">
               <p>
-                Connecting to the IZZA WAR ZONE lobby, filling up to 20 players
-                per match and topping up with bots if needed. When the match is
-                ready the FPS client will load.
+                ENTERING IZZA WARZONE. Loading your equipped soldier skin and weapon, deploying into solo zombies mode. The FPS client will start in a moment.
               </p>
             </div>
           </div>
@@ -707,7 +701,18 @@
 
       document.getElementById("inviteBtn")?.addEventListener("click", () => show("inviteOverlay"));
       document.getElementById("searchBtn")?.addEventListener("click", () => show("searchOverlay"));
-      document.getElementById("deployBtn")?.addEventListener("click", () => show("deployOverlay"));
+
+      /* UPDATED: Deploy now shows overlay, then redirects into the new FPS route */
+      document.getElementById("deployBtn")?.addEventListener("click", () => {
+        show("deployOverlay");
+
+        const qs = window.location.search || "";
+        const target = "/warzone/fps" + qs;
+
+        setTimeout(() => {
+          window.location.href = target;
+        }, 900);
+      });
 
       document.querySelectorAll(".overlay-close").forEach(btn => {
         btn.addEventListener("click", function(){
@@ -898,7 +903,7 @@
       }catch(e){}
     }
 
-    /* NEW: Ammo HUD fetch, safe non-breaking */
+    /* Ammo HUD fetch, safe non breaking */
     (function(){
       const ammoEl = document.getElementById("ammoValue");
       if(!ammoEl) return;
