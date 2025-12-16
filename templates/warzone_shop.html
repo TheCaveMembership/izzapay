@@ -68,6 +68,7 @@
       justify-content:space-between;
       gap:10px;
       flex-wrap:wrap;
+      position:relative; /* allow centered operator pill */
     }
     .logo{
       display:flex;
@@ -112,6 +113,15 @@
       font-size:10px;
     }
     .pill .name{ font-weight:600;color:#e7f0ff; }
+
+    /* center operator pill in the top bar without changing layout elsewhere */
+    .pill.operator{
+      position:absolute;
+      left:50%;
+      transform:translateX(-50%);
+      top:0;
+      z-index:2;
+    }
 
     .bar{
       display:flex;
@@ -393,6 +403,14 @@
       align-items:center;
       justify-content:flex-end;
     }
+    .walletMeta{
+      display:flex;
+      gap:10px;
+      flex-wrap:wrap;
+      align-items:center;
+      justify-content:space-between;
+      margin-top:8px;
+    }
     .sInput{
       flex:1;
       min-width:180px;
@@ -415,7 +433,8 @@
             <div class="izzacoin"></div>
             <span class="warzoneTitle">WARZONE SHOP</span>
           </div>
-          <div class="pill">
+
+          <div class="pill operator">
             <span class="label">Operator</span>
             <span class="name">{{ player.username }}</span>
           </div>
@@ -452,19 +471,18 @@
             <div class="small" style="margin-top:6px;">Active wallet pub</div>
             <div class="mono" id="pub">—</div>
 
-            <div class="small" style="margin-top:8px;">Local S key</div>
-            <div class="mono" id="sStatus">—</div>
+            <div class="walletMeta">
+              <div>
+                <div class="small">Local S key</div>
+                <div class="mono" id="sStatus">—</div>
+              </div>
+              <button class="btn danger" id="forgetS">Forget</button>
+            </div>
 
             <div class="walletRow">
               <input id="sInput" class="sInput" placeholder="S... private key"
                 autocomplete="off" spellcheck="false" autocapitalize="none">
               <button class="btn" id="saveS">Save S</button>
-              <button class="btn danger" id="forgetS">Forget</button>
-              <a class="btn gold" href="/token/auth?next=/token/izza">Open full wallet</a>
-            </div>
-
-            <div class="small" style="margin-top:6px;">
-              Open full wallet if you need to create one, set active wallet, or reveal your S key.
             </div>
           </div>
         </div>
