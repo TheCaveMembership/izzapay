@@ -243,6 +243,7 @@
       align-items:center;
       justify-content:center;
       margin-right:4px;
+      position:relative;
     }
     .shop-preview img{
       width:100%;
@@ -259,6 +260,30 @@
       text-align:center;
       padding:6px;
       line-height:1.2;
+    }
+
+    /* COMING SOON overlay */
+    .soon-badge{
+      position:absolute;
+      inset:0;
+      display:flex;
+      align-items:center;
+      justify-content:center;
+      background:linear-gradient(145deg,rgba(0,0,0,.10),rgba(0,0,0,.70));
+      z-index:3;
+      pointer-events:none;
+    }
+    .soon-badge span{
+      padding:5px 8px;
+      border-radius:999px;
+      border:1px solid rgba(255,59,107,.85);
+      background:linear-gradient(90deg,rgba(255,59,107,.92),rgba(255,156,107,.88));
+      color:#1a0006;
+      font-weight:900;
+      font-size:10px;
+      text-transform:uppercase;
+      letter-spacing:.14em;
+      box-shadow:0 0 18px rgba(255,59,107,.25);
     }
 
     .shop-main{flex:1;min-width:0;}
@@ -286,6 +311,12 @@
       background:linear-gradient(90deg,#041626,#04384d);
       color:#cfe9ff;
     }
+    .price-tag.soon{
+      border-color:rgba(255,59,107,.75);
+      background:linear-gradient(90deg,rgba(255,59,107,.22),rgba(255,156,107,.20));
+      color:#ffd0dc;
+    }
+
     .shop-btn{
       padding:6px 10px;
       border-radius:999px;
@@ -308,6 +339,13 @@
       background:linear-gradient(90deg,#00e5b0,#62ffd5);
       color:#001b11;
       font-weight:900;
+    }
+    .shop-btn.soon{
+      border-color:rgba(159,176,214,.55);
+      background:rgba(10,14,28,.70);
+      color:rgba(159,176,214,.85);
+      cursor:not-allowed;
+      opacity:.95;
     }
 
     .msg{
@@ -630,7 +668,17 @@
       }
       return "/assets/warzone_shop_previews/" + encodeURIComponent(s) + ".png";
     }
-    function buildPreview(slot, sku){
+
+    function addComingSoonOverlay(previewWrap){
+      const badge = document.createElement("div");
+      badge.className = "soon-badge";
+      const span = document.createElement("span");
+      span.textContent = "Coming soon";
+      badge.appendChild(span);
+      previewWrap.appendChild(badge);
+    }
+
+    function buildPreview(slot, sku, isComingSoon){
       const wrap = document.createElement("div");
       wrap.className = "shop-preview";
 
@@ -645,9 +693,13 @@
         ph.className = "ph";
         ph.textContent = slot === "weapons" ? "Weapon" : "Skin";
         wrap.appendChild(ph);
+        if(isComingSoon) addComingSoonOverlay(wrap);
       };
 
       wrap.appendChild(img);
+
+      if(isComingSoon) addComingSoonOverlay(wrap);
+
       return wrap;
     }
 
@@ -660,12 +712,26 @@
         if(low === "basic_pistol") return "wz_basic_pistol";
         if(low === "cityrunner_smg") return "wz_cityrunner_smg";
         if(low === "neon_marksman") return "wz_neon_marksman";
-        if(low.startsWith("wz_")) return low; // already canonical
-        return raw; // unknown weapon, do not guess
+        if(low.startsWith("wz_")) return low;
+        return raw;
       }
 
-      // skins: keep whatever your backend uses, do not touch
       return raw;
+    }
+
+    // ✅ HARD LOCK WEAPON AVAILABILITY
+    function canonWeaponKey(sku){
+      const low = (sku || "").toString().trim().toLowerCase();
+      if(low === "basic_pistol" || low === "wz_basic_pistol") return "wz_basic_pistol";
+      if(low === "cityrunner_smg" || low === "wz_cityrunner_smg") return "wz_cityrunner_smg";
+      if(low === "neon_marksman" || low === "wz_neon_marksman") return "wz_neon_marksman";
+      return low || "";
+    }
+    const ALLOWED_WEAPONS = new Set(["wz_basic_pistol","wz_cityrunner_smg"]);
+    function weaponIsComingSoon(rawSku){
+      const key = canonWeaponKey(rawSku);
+      if(!key) return false;
+      return !ALLOWED_WEAPONS.has(key);
     }
 
     // Shop logic
@@ -681,7 +747,7 @@
       tabSkins?.classList.toggle("active", tab === "skins");
       if(listTitle) listTitle.textContent = tab === "weapons" ? "Weapons" : "Skins";
       if(listDesc) listDesc.textContent = tab === "weapons"
-        ? "Unlock weapons, then equip before returning to lobby."
+        ? "Only starter pistol and SMG are live right now. Everything else is coming soon."
         : "Unlock skins, then equip before returning to lobby.";
     }
 
@@ -711,8 +777,10 @@
           const row = document.createElement("div");
           row.className = "shop-item";
 
+          const isSoon = (CURRENT_TAB === "weapons") ? weaponIsComingSoon(it.sku || "") : false;
+
           // preview uses raw sku from API so image filenames remain stable
-          row.appendChild(buildPreview(CURRENT_TAB, it.sku || ""));
+          row.appendChild(buildPreview(CURRENT_TAB, it.sku || "", isSoon));
 
           const main = document.createElement("div");
           main.className = "shop-main";
@@ -732,8 +800,13 @@
           side.className = "shop-side";
 
           const price = document.createElement("div");
-          price.className = "price-tag" + (it.starting ? " start" : "");
-          price.textContent = it.starting ? "Starter" : (it.price_izza + " IZZA");
+          if(isSoon){
+            price.className = "price-tag soon";
+            price.textContent = "Coming soon";
+          }else{
+            price.className = "price-tag" + (it.starting ? " start" : "");
+            price.textContent = it.starting ? "Starter" : (it.price_izza + " IZZA");
+          }
           side.appendChild(price);
 
           const btn = document.createElement("button");
@@ -741,38 +814,44 @@
           btn.dataset.sku = it.sku;
           btn.dataset.price = it.price_izza;
 
-          // starter items are equip-able again
-          if(it.equipped){
-            btn.classList.add("equipped","owned");
-            btn.textContent = "Equipped";
-          }else if(it.starting){
-            btn.classList.add("owned");
-            btn.textContent = "Equip";
-          }else if(it.owned){
-            btn.classList.add("owned");
-            btn.textContent = "Equip";
-          }else{
-            btn.textContent = "Buy";
+          // COMING SOON lockout
+          if(isSoon){
+            btn.classList.add("soon");
+            btn.textContent = "Coming soon";
+            btn.disabled = true;
+          } else {
+            if(it.equipped){
+              btn.classList.add("equipped","owned");
+              btn.textContent = "Equipped";
+            }else if(it.starting){
+              btn.classList.add("owned");
+              btn.textContent = "Equip";
+            }else if(it.owned){
+              btn.classList.add("owned");
+              btn.textContent = "Equip";
+            }else{
+              btn.textContent = "Buy";
+            }
+
+            btn.addEventListener("click", async () => {
+              if(it.equipped) return;
+
+              const rawSku = it.sku;
+              const canonSku = normalizeShopSku(CURRENT_TAB, rawSku);
+
+              if(it.starting){
+                await equipItem(canonSku);
+                return;
+              }
+
+              if(it.owned){
+                await equipItem(canonSku);
+                return;
+              }
+
+              await purchaseItem(canonSku, it.name || rawSku, Number(it.price_izza || 0));
+            });
           }
-
-          btn.addEventListener("click", async () => {
-            if(it.equipped) return;
-
-            const rawSku = it.sku;
-            const canonSku = normalizeShopSku(CURRENT_TAB, rawSku);
-
-            if(it.starting){
-              await equipItem(canonSku);
-              return;
-            }
-
-            if(it.owned){
-              await equipItem(canonSku);
-              return;
-            }
-
-            await purchaseItem(canonSku, it.name || rawSku, Number(it.price_izza || 0));
-          });
 
           side.appendChild(btn);
 
