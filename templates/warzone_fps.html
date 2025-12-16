@@ -1,0 +1,878 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>IZZA WARZONE, FPS</title>
+  <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+  <style>
+    :root{
+      --bg:#02030a;
+      --panel:#070b18;
+      --line:#222b47;
+      --txt:#edf3ff;
+      --muted:#9fb0d6;
+      --accent1:#0ff;
+      --accent2:#ff3b6b;
+      --accent3:#ffcf4d;
+    }
+    *{box-sizing:border-box;margin:0;padding:0}
+    html,body{
+      width:100%;
+      height:100%;
+      background:#000;
+      color:var(--txt);
+      font-family:Inter,system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;
+      overflow:hidden;
+      touch-action:none;
+      user-select:none;
+    }
+
+    /* SAME MANUAL ROTATION MODEL AS YOUR LOBBY */
+    .rot-wrapper{
+      position:fixed;
+      top:0;
+      left:0;
+      width:100vh;
+      height:100vw;
+      transform-origin:top left;
+      transform:rotate(90deg) translateY(-100%);
+      transition:transform .15s ease,width .15s ease,height .15s ease;
+    }
+
+    .fps-root{
+      width:100%;
+      height:100%;
+      position:relative;
+      background:radial-gradient(circle at top,#15192e 0,#02030a 55%,#000 100%);
+      overflow:hidden;
+    }
+
+    #renderCanvas{
+      position:absolute;
+      inset:0;
+      width:100%;
+      height:100%;
+      display:block;
+      background:transparent;
+    }
+
+    /* HUD */
+    .hud-top{
+      position:absolute;
+      left:10px;
+      top:10px;
+      right:10px;
+      z-index:10;
+      display:flex;
+      justify-content:space-between;
+      gap:10px;
+      pointer-events:none;
+    }
+    .hud-box{
+      pointer-events:none;
+      border-radius:14px;
+      border:1px solid rgba(132,153,255,.35);
+      background:rgba(7,11,24,.62);
+      box-shadow:0 0 26px rgba(0,255,255,.10), 0 0 30px rgba(255,59,107,.08);
+      padding:10px 12px;
+      backdrop-filter:blur(8px);
+      max-width:49vw;
+    }
+    .hud-title{
+      font-size:10px;
+      text-transform:uppercase;
+      letter-spacing:.18em;
+      color:rgba(159,176,214,.95);
+      margin-bottom:6px;
+    }
+    .hud-row{
+      display:flex;
+      gap:10px;
+      flex-wrap:wrap;
+      align-items:center;
+      font-size:12px;
+      color:#e7f0ff;
+    }
+    .tag{
+      padding:4px 8px;
+      border-radius:999px;
+      border:1px solid rgba(127,209,255,.45);
+      background:linear-gradient(90deg,rgba(2,8,36,.85),rgba(0,87,126,.45));
+      color:#e7f0ff;
+      font-size:11px;
+      white-space:nowrap;
+    }
+    .tag.warn{
+      border-color:rgba(255,184,107,.55);
+      background:linear-gradient(90deg,rgba(60,34,0,.60),rgba(120,65,0,.35));
+    }
+
+    /* Center overlay, entering and countdown */
+    .center-overlay{
+      position:absolute;
+      inset:0;
+      z-index:30;
+      display:flex;
+      align-items:center;
+      justify-content:center;
+      background:radial-gradient(circle at top,rgba(7,11,30,.92),rgba(1,2,10,.96));
+      transition:opacity .25s ease;
+    }
+    .center-card{
+      width:min(520px,92vw);
+      border-radius:18px;
+      border:1px solid rgba(132,153,255,.7);
+      background:linear-gradient(145deg,#050818,#02030c);
+      padding:18px 18px 14px;
+      box-shadow:0 0 40px rgba(0,0,0,.9);
+      text-align:center;
+    }
+    .center-title{
+      font-size:12px;
+      text-transform:uppercase;
+      letter-spacing:.22em;
+      color:#9fb0d6;
+      margin-bottom:8px;
+    }
+    .center-big{
+      font-size:22px;
+      font-weight:900;
+      letter-spacing:.12em;
+      color:var(--accent1);
+      text-shadow:0 0 12px rgba(0,255,255,.55), 0 0 24px rgba(0,255,255,.20);
+      margin:6px 0 8px;
+      white-space:nowrap;
+    }
+    .center-sub{
+      font-size:12px;
+      color:#c3cff5;
+      line-height:1.6;
+    }
+    .countdown{
+      position:absolute;
+      left:50%;
+      top:50%;
+      transform:translate(-50%,-50%);
+      z-index:40;
+      pointer-events:none;
+      font-weight:1000;
+      letter-spacing:.22em;
+      text-transform:uppercase;
+      color:var(--accent1);
+      text-shadow:0 0 16px rgba(0,255,255,.55), 0 0 30px rgba(0,255,255,.20);
+      font-size:min(64px,14vw);
+      opacity:0;
+      transition:opacity .15s ease;
+      white-space:nowrap;
+    }
+    .countdown.show{ opacity:1; }
+
+    /* Touch controls */
+    .touch-ui{
+      position:absolute;
+      inset:0;
+      z-index:20;
+      pointer-events:none;
+    }
+    .stick{
+      position:absolute;
+      width:140px;
+      height:140px;
+      border-radius:50%;
+      border:1px solid rgba(127,209,255,.35);
+      background:radial-gradient(circle at 30% 30%,rgba(0,255,255,.18),rgba(0,0,0,.15));
+      box-shadow:0 0 24px rgba(0,255,255,.08);
+      pointer-events:auto;
+      touch-action:none;
+    }
+    .stick.left{ left:16px; bottom:18px; }
+    .stick.right{ right:16px; bottom:18px; }
+    .stick .nub{
+      position:absolute;
+      left:50%;
+      top:50%;
+      width:52px;
+      height:52px;
+      transform:translate(-50%,-50%);
+      border-radius:50%;
+      border:1px solid rgba(255,59,107,.35);
+      background:radial-gradient(circle at 30% 30%,rgba(255,59,107,.22),rgba(0,0,0,.10));
+      box-shadow:0 0 18px rgba(255,59,107,.10);
+    }
+
+    .fireBtn{
+      position:absolute;
+      right:18px;
+      bottom:176px;
+      width:92px;
+      height:92px;
+      border-radius:50%;
+      border:none;
+      pointer-events:auto;
+      touch-action:none;
+      cursor:pointer;
+      background:linear-gradient(145deg,rgba(0,255,255,.95),rgba(255,59,107,.92));
+      color:#001520;
+      font-weight:900;
+      letter-spacing:.12em;
+      text-transform:uppercase;
+      box-shadow:0 0 26px rgba(0,255,255,.32), 0 0 32px rgba(255,59,107,.22);
+    }
+    .fireBtn:active{ transform:scale(.98); }
+
+    .pauseBtn{
+      position:absolute;
+      left:18px;
+      top:62px;
+      padding:8px 10px;
+      border-radius:999px;
+      border:1px solid rgba(127,209,255,.55);
+      background:rgba(2,6,27,.55);
+      color:#e7f0ff;
+      font-size:11px;
+      letter-spacing:.16em;
+      text-transform:uppercase;
+      pointer-events:auto;
+      cursor:pointer;
+      box-shadow:0 0 18px rgba(0,255,255,.08);
+    }
+
+    @media (min-width:900px){
+      .stick{ width:160px; height:160px; }
+      .fireBtn{ width:100px; height:100px; }
+    }
+  </style>
+
+  <script src="https://cdn.babylonjs.com/babylon.js"></script>
+  <script src="https://cdn.babylonjs.com/loaders/babylonjs.loaders.min.js"></script>
+</head>
+
+<body>
+  <div class="rot-wrapper" id="rotWrapper">
+    <div class="fps-root">
+      <canvas id="renderCanvas"></canvas>
+
+      <div class="hud-top">
+        <div class="hud-box">
+          <div class="hud-title">Operator</div>
+          <div class="hud-row">
+            <span class="tag" id="hudUser">loading</span>
+            <span class="tag" id="hudWeapon">weapon</span>
+          </div>
+        </div>
+        <div class="hud-box" style="text-align:right;">
+          <div class="hud-title">Status</div>
+          <div class="hud-row" style="justify-content:flex-end;">
+            <span class="tag" id="hudAmmo">AMMO, --</span>
+            <span class="tag warn" id="hudZ">ZOMBIES, --</span>
+          </div>
+        </div>
+      </div>
+
+      <div class="center-overlay" id="enterOverlay">
+        <div class="center-card">
+          <div class="center-title">IZZA WARZONE</div>
+          <div class="center-big">ENTERING IZZA WARZONE</div>
+          <div class="center-sub">
+            Loading your equipped soldier skin and weapon, deploying into solo zombies mode.
+          </div>
+        </div>
+      </div>
+
+      <div class="countdown" id="countdownText">3</div>
+
+      <div class="touch-ui">
+        <button class="pauseBtn" id="exitBtn" type="button">Exit</button>
+
+        <div class="stick left" id="moveStick">
+          <div class="nub" id="moveNub"></div>
+        </div>
+
+        <div class="stick right" id="lookStick">
+          <div class="nub" id="lookNub"></div>
+        </div>
+
+        <button class="fireBtn" id="fireBtn" type="button">Fire</button>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    // Rotation wrapper, same behavior as lobby
+    (function(){
+      const wrapper = document.getElementById("rotWrapper");
+      function updateLayout(){
+        if (!wrapper) return;
+        const landscape = window.innerWidth >= window.innerHeight;
+        if (landscape){
+          wrapper.style.transform = "none";
+          wrapper.style.width = "100%";
+          wrapper.style.height = "100%";
+        } else {
+          wrapper.style.width = window.innerHeight + "px";
+          wrapper.style.height = window.innerWidth + "px";
+          wrapper.style.transform = "rotate(90deg) translateY(-100%)";
+        }
+      }
+      window.addEventListener("resize", updateLayout);
+      window.addEventListener("orientationchange", updateLayout);
+      updateLayout();
+    })();
+
+    // Username resolution, matches your warzone lobby style
+    const SRV_USER = {{ (player.username or '') | tojson }};
+    function stripAt(s){ return (s||"").toString().trim().replace(/^@+/, ""); }
+    function canonU(s){
+      const v = stripAt(s);
+      return v ? v.toLowerCase() : "";
+    }
+    const USER_CANON = (()=>{
+      const fromSrv = stripAt(SRV_USER);
+      if(fromSrv) return fromSrv;
+      try{
+        const raw = localStorage.getItem("piAuthUser");
+        if(raw){
+          const j = JSON.parse(raw);
+          if(j && j.username) return stripAt(j.username);
+        }
+      }catch(e){}
+      try{
+        const uCanon = localStorage.getItem("izzaUserCanon");
+        if(uCanon) return stripAt(uCanon);
+        const u = localStorage.getItem("izzaUserU");
+        if(u) return stripAt(u);
+      }catch(e){}
+      return "";
+    })();
+    const USER_U = canonU(USER_CANON);
+    function uQS(){
+      return USER_U ? ("&u=" + encodeURIComponent(USER_U)) : "";
+    }
+    if(USER_CANON){
+      try{
+        localStorage.setItem("izzaUserCanon", USER_CANON);
+        localStorage.setItem("izzaUserU", USER_U);
+      }catch(e){}
+    }
+
+    // HUD elements
+    const hudUser = document.getElementById("hudUser");
+    const hudWeapon = document.getElementById("hudWeapon");
+    const hudAmmo = document.getElementById("hudAmmo");
+    const hudZ = document.getElementById("hudZ");
+    const enterOverlay = document.getElementById("enterOverlay");
+    const countdownText = document.getElementById("countdownText");
+
+    hudUser.textContent = USER_CANON || "Operator";
+
+    // Helpers for weapon sku consistency
+    function normalizeWeaponSku(s){
+      const sku = (s || "").toString().trim();
+      if (!sku) return "wz_basic_pistol";
+      if (sku === "basic_pistol") return "wz_basic_pistol";
+      if (sku === "cityrunner_smg") return "wz_cityrunner_smg";
+      if (sku === "neon_marksman") return "wz_neon_marksman";
+      return sku;
+    }
+
+    // Babylon setup
+    const canvas = document.getElementById("renderCanvas");
+    const engine = new BABYLON.Engine(canvas, true, {
+      preserveDrawingBuffer:true,
+      stencil:true
+    });
+
+    let scene, camera;
+    let weaponSku = "wz_basic_pistol";
+    let ammo = 0;
+
+    // Viewmodel
+    let weaponContainer = null;
+    let weaponGrip = null;
+
+    // We will load soldier skin too, so your equipped skin is actually used
+    // We hide it from the FPS camera to avoid blocking the view, but it is in the scene and follows the player
+    let soldierContainer = null;
+    let soldierRoot = null;
+
+    // Zombies
+    const zombies = [];
+    let zombieCount = 0;
+
+    // Fire behavior
+    const FIRE = {
+      pistolCooldownMs: 220,
+      smgIntervalMs: 95,
+      lastShotAt: 0,
+      holding: false
+    };
+
+    // Touch sticks
+    const moveState = { active:false, id:null, dx:0, dy:0 };
+    const lookState = { active:false, id:null, dx:0, dy:0 };
+
+    const moveStick = document.getElementById("moveStick");
+    const moveNub = document.getElementById("moveNub");
+    const lookStick = document.getElementById("lookStick");
+    const lookNub = document.getElementById("lookNub");
+    const fireBtn = document.getElementById("fireBtn");
+    const exitBtn = document.getElementById("exitBtn");
+
+    exitBtn.addEventListener("click", () => {
+      const qs = window.location.search || "";
+      window.location.href = "/warzone/" + qs;
+    });
+
+    function clamp(v, a, b){ return Math.max(a, Math.min(b, v)); }
+
+    function setupStick(el, nub, state){
+      const r = () => el.getBoundingClientRect();
+
+      function setNub(x, y){
+        const max = (r().width / 2) - (nub.getBoundingClientRect().width / 2);
+        const nx = clamp(x, -max, max);
+        const ny = clamp(y, -max, max);
+        nub.style.transform = `translate(calc(-50% + ${nx}px), calc(-50% + ${ny}px))`;
+        state.dx = nx / max;
+        state.dy = ny / max;
+      }
+
+      function reset(){
+        nub.style.transform = "translate(-50%,-50%)";
+        state.dx = 0;
+        state.dy = 0;
+      }
+
+      el.addEventListener("pointerdown", (e) => {
+        state.active = true;
+        state.id = e.pointerId;
+        el.setPointerCapture(e.pointerId);
+        const box = r();
+        const cx = box.left + box.width/2;
+        const cy = box.top + box.height/2;
+        setNub(e.clientX - cx, e.clientY - cy);
+      }, { passive:false });
+
+      el.addEventListener("pointermove", (e) => {
+        if(!state.active || e.pointerId !== state.id) return;
+        const box = r();
+        const cx = box.left + box.width/2;
+        const cy = box.top + box.height/2;
+        setNub(e.clientX - cx, e.clientY - cy);
+      }, { passive:false });
+
+      function end(e){
+        if(e && state.id !== null && e.pointerId !== state.id) return;
+        state.active = false;
+        state.id = null;
+        reset();
+      }
+
+      el.addEventListener("pointerup", end, { passive:true });
+      el.addEventListener("pointercancel", end, { passive:true });
+      el.addEventListener("pointerleave", end, { passive:true });
+    }
+
+    setupStick(moveStick, moveNub, moveState);
+    setupStick(lookStick, lookNub, lookState);
+
+    // Fire button behavior, pistol tap, smg hold
+    function isSMG(){
+      return weaponSku === "wz_cityrunner_smg";
+    }
+
+    function canShoot(nowMs){
+      if(ammo <= 0) return false;
+      if(isSMG()){
+        return (nowMs - FIRE.lastShotAt) >= FIRE.smgIntervalMs;
+      }
+      return (nowMs - FIRE.lastShotAt) >= FIRE.pistolCooldownMs;
+    }
+
+    function shootOnce(){
+      const nowMs = performance.now();
+      if(!canShoot(nowMs)) return;
+      FIRE.lastShotAt = nowMs;
+
+      ammo = Math.max(0, ammo - 1);
+      hudAmmo.textContent = `AMMO, ${ammo}`;
+
+      // Raycast from camera forward
+      const origin = camera.position.clone();
+      const forward = camera.getForwardRay(200).direction;
+
+      const ray = new BABYLON.Ray(origin, forward, 200);
+      const hit = scene.pickWithRay(ray, (m) => m && m.metadata && m.metadata.isZombie);
+
+      if(hit && hit.pickedMesh){
+        const z = hit.pickedMesh;
+        z.metadata.hp = (z.metadata.hp || 1) - 1;
+        if(z.metadata.hp <= 0){
+          // remove zombie
+          const idx = zombies.findIndex(x => x.mesh === z);
+          if(idx >= 0) zombies.splice(idx, 1);
+          try{ z.dispose(); }catch(e){}
+          zombieCount = Math.max(0, zombieCount - 1);
+          hudZ.textContent = `ZOMBIES, ${zombieCount}`;
+        }
+      }
+
+      // Tiny recoil feel
+      camera.rotation.x = clamp(camera.rotation.x - 0.02, -1.25, 1.25);
+    }
+
+    fireBtn.addEventListener("pointerdown", (e) => {
+      e.preventDefault();
+      FIRE.holding = true;
+
+      if(!isSMG()){
+        // pistol is single shot only, one shot per tap
+        shootOnce();
+      }
+    }, { passive:false });
+
+    fireBtn.addEventListener("pointerup", () => { FIRE.holding = false; }, { passive:true });
+    fireBtn.addEventListener("pointercancel", () => { FIRE.holding = false; }, { passive:true });
+    fireBtn.addEventListener("pointerleave", () => { FIRE.holding = false; }, { passive:true });
+
+    // Assets
+    function getSkinAsset(){
+      return { rootUrl:"/assets/warzone3d/soldier_gltf_3/", fileName:"scene.gltf" };
+    }
+    function getWeaponAsset(sku){
+      const s = normalizeWeaponSku(sku);
+      if(s === "wz_basic_pistol")   return { rootUrl:"/assets/warzone3d/weapons/wz_basic_pistol/", fileName:"scene.gltf" };
+      if(s === "wz_cityrunner_smg") return { rootUrl:"/assets/warzone3d/weapons/wz_cityrunner_smg/", fileName:"scene.gltf" };
+      if(s === "wz_neon_marksman")  return { rootUrl:"/assets/warzone3d/weapons/wz_neon_marksman/", fileName:"scene.gltf" };
+      return { rootUrl:"/assets/warzone3d/weapons/wz_basic_pistol/", fileName:"scene.gltf" };
+    }
+
+    // Reuse your existing weapon tuning numbers, these are your proven alignments
+    const WEAPON_TUNING = {
+      wz_basic_pistol: {
+        WEAPON_SCALE: 0.06000,
+        WEAPON_YAW_FIX: 1.52080,
+        WEAPON_PITCH_FIX: -0.03000,
+        WEAPON_POS:      new BABYLON.Vector3( 0.35, -0.25,  0.65),
+        WEAPON_GRIP_POS: new BABYLON.Vector3( 2.98400,  1.23000, -11.27200),
+        WEAPON_GRIP_ROT: new BABYLON.Vector3(-0.23000,  0.00000,  0.01000),
+      },
+      wz_cityrunner_smg: {
+        WEAPON_SCALE: 0.11000,
+        WEAPON_YAW_FIX: 1.10080,
+        WEAPON_PITCH_FIX: -1.84000,
+        WEAPON_POS:      new BABYLON.Vector3( 0.52, -0.30,  0.85),
+        WEAPON_GRIP_POS: new BABYLON.Vector3( 7.42400, -2.71000, -11.27200),
+        WEAPON_GRIP_ROT: new BABYLON.Vector3(-0.05000, -0.22000,  0.01000),
+      },
+      wz_neon_marksman: {
+        WEAPON_SCALE: 0.03000,
+        WEAPON_YAW_FIX: 3.24160,
+        WEAPON_PITCH_FIX: 0.12000,
+        WEAPON_POS:      new BABYLON.Vector3( 0.45, -0.28,  0.90),
+        WEAPON_GRIP_POS: new BABYLON.Vector3(48.64112,  0.58674,  9.32631),
+        WEAPON_GRIP_ROT: new BABYLON.Vector3( 1.22000, -0.54000, -0.10000),
+      }
+    };
+    function getWeaponTune(sku){
+      const s = normalizeWeaponSku(sku);
+      return WEAPON_TUNING[s] || WEAPON_TUNING.wz_basic_pistol;
+    }
+
+    async function fetchEquippedSkinSku(){
+      try{
+        const res = await fetch("/warzone/api/shop?slot=skins" + uQS(), { credentials:"include" });
+        if(!res.ok) return "wz_basic_soldier";
+        const data = await res.json().catch(()=>null);
+        const items = (data && data.items) || [];
+        const eq = items.find(x => x && x.equipped);
+        if(eq && eq.sku) return String(eq.sku);
+      }catch(e){}
+      return "wz_basic_soldier";
+    }
+    async function fetchEquippedWeaponSku(){
+      try{
+        const res = await fetch("/warzone/api/shop?slot=weapons" + uQS(), { credentials:"include" });
+        if(!res.ok) return "wz_basic_pistol";
+        const data = await res.json().catch(()=>null);
+        const items = (data && data.items) || [];
+        const eq = items.find(x => x && x.equipped);
+        if(eq && eq.sku) return normalizeWeaponSku(String(eq.sku));
+      }catch(e){}
+      return "wz_basic_pistol";
+    }
+    async function fetchAmmoForCurrentWeapon(){
+      try{
+        const res = await fetch("/warzone/api/ammo/current?_" + Date.now() + uQS(), { credentials:"include" });
+        if(!res.ok) return 0;
+        const data = await res.json().catch(()=>null);
+        if(!data || !data.ok) return 0;
+        const rounds = (typeof data.rounds === "number") ? data.rounds : 0;
+        return Math.max(0, rounds|0);
+      }catch(e){
+        return 0;
+      }
+    }
+
+    function clearWeapon(){
+      try{ if(weaponGrip){ weaponGrip.dispose(true,false); weaponGrip = null; } }catch(e){}
+      try{
+        if(weaponContainer){
+          weaponContainer.removeAllFromScene();
+          weaponContainer.dispose();
+          weaponContainer = null;
+        }
+      }catch(e){}
+    }
+
+    async function setWeaponViewModel(sku){
+      clearWeapon();
+
+      const asset = getWeaponAsset(sku);
+      const cont = await BABYLON.SceneLoader.LoadAssetContainerAsync(asset.rootUrl, asset.fileName, scene);
+      cont.addAllToScene();
+      weaponContainer = cont;
+
+      const tune = getWeaponTune(sku);
+
+      weaponGrip = new BABYLON.TransformNode("weaponGrip", scene);
+      weaponGrip.parent = camera;
+      weaponGrip.position.copyFrom(tune.WEAPON_POS);
+
+      // Keep it stable, attach as viewmodel
+      weaponGrip.rotation.set(
+        (tune.WEAPON_PITCH_FIX || 0.0),
+        Math.PI + (tune.WEAPON_YAW_FIX || 0.0),
+        0
+      );
+      weaponGrip.scaling.set(tune.WEAPON_SCALE, tune.WEAPON_SCALE, tune.WEAPON_SCALE);
+
+      // parent all meshes under grip
+      (cont.meshes || []).forEach(m => {
+        if(!m) return;
+        const nm = (m.name || "").toLowerCase();
+        if(nm === "__root__" || nm.includes("rootnode")) return;
+        try{
+          m.parent = weaponGrip;
+          m.isPickable = false;
+        }catch(e){}
+      });
+
+      hudWeapon.textContent = `WEAPON, ${sku.replace(/^wz_/, "").toUpperCase()}`;
+    }
+
+    function clearSoldier(){
+      try{ if(soldierRoot){ soldierRoot.dispose(true,false); soldierRoot = null; } }catch(e){}
+      try{
+        if(soldierContainer){
+          soldierContainer.removeAllFromScene();
+          soldierContainer.dispose();
+          soldierContainer = null;
+        }
+      }catch(e){}
+    }
+
+    async function loadSoldierInScene(skinSku){
+      clearSoldier();
+
+      const asset = getSkinAsset();
+      const cont = await BABYLON.SceneLoader.LoadAssetContainerAsync(asset.rootUrl, asset.fileName, scene);
+      cont.addAllToScene();
+      soldierContainer = cont;
+
+      // Put soldier at player position, but hide from FPS camera so it never blocks view
+      soldierRoot = new BABYLON.TransformNode("soldierRoot", scene);
+      (cont.meshes || []).forEach(m => {
+        if(!m) return;
+        try{
+          m.parent = soldierRoot;
+          m.isPickable = false;
+          // Hide soldier body for FPS, but it is still loaded and used as your equipped skin
+          m.visibility = 0.0;
+        }catch(e){}
+      });
+    }
+
+    function createZombie(x, z){
+      const body = BABYLON.MeshBuilder.CreateBox("z", { size: 1.0 }, scene);
+      body.position.set(x, 0.5, z);
+      body.metadata = { isZombie:true, hp:2 };
+      const mat = new BABYLON.StandardMaterial("zm", scene);
+      mat.emissiveColor = new BABYLON.Color3(0.1, 0.9, 0.4);
+      mat.diffuseColor = new BABYLON.Color3(0.1, 0.2, 0.1);
+      body.material = mat;
+      zombies.push({ mesh: body, speed: 1.2 + Math.random()*0.8 });
+      zombieCount += 1;
+      hudZ.textContent = `ZOMBIES, ${zombieCount}`;
+    }
+
+    function spawnWave(){
+      zombieCount = 0;
+      hudZ.textContent = "ZOMBIES, 0";
+      zombies.splice(0, zombies.length);
+
+      const n = 12;
+      for(let i=0;i<n;i++){
+        const angle = (i / n) * Math.PI * 2;
+        const r = 18 + Math.random()*10;
+        const x = Math.cos(angle) * r;
+        const z = Math.sin(angle) * r;
+        createZombie(x, z);
+      }
+    }
+
+    function createScene(){
+      scene = new BABYLON.Scene(engine);
+      scene.clearColor = new BABYLON.Color4(0,0,0,0);
+
+      const light = new BABYLON.HemisphericLight("h", new BABYLON.Vector3(0,1,0), scene);
+      light.intensity = 1.15;
+
+      const dir = new BABYLON.DirectionalLight("d", new BABYLON.Vector3(-0.2,-1,-0.15), scene);
+      dir.intensity = 0.55;
+
+      // Simple ground
+      const ground = BABYLON.MeshBuilder.CreateGround("g", { width: 220, height: 220 }, scene);
+      const gmat = new BABYLON.StandardMaterial("gmat", scene);
+      gmat.diffuseColor = new BABYLON.Color3(0.03,0.04,0.07);
+      gmat.emissiveColor = new BABYLON.Color3(0.02,0.03,0.06);
+      gmat.specularColor = new BABYLON.Color3(0,0,0);
+      ground.material = gmat;
+      ground.isPickable = true;
+
+      // Camera, true FPS
+      camera = new BABYLON.UniversalCamera("fpsCam", new BABYLON.Vector3(0,1.7,0), scene);
+      camera.minZ = 0.05;
+      camera.speed = 0.15;
+      camera.angularSensibility = 2500;
+
+      // We control movement manually, keep inputs off
+      camera.inputs.clear();
+
+      engine.runRenderLoop(() => {
+        if(scene) scene.render();
+      });
+      window.addEventListener("resize", () => engine.resize());
+
+      // Per frame update, movement, aiming, zombies, SMG auto fire
+      scene.onBeforeRenderObservable.add(() => {
+        const dt = scene.getEngine().getDeltaTime() * 0.001;
+
+        // Move, left stick
+        const forward = camera.getDirection(new BABYLON.Vector3(0,0,1));
+        const right = camera.getDirection(new BABYLON.Vector3(1,0,0));
+
+        const mvX = moveState.dx;
+        const mvY = moveState.dy;
+
+        // dy positive is down on screen, invert for forward
+        const moveF = -mvY;
+        const moveS = mvX;
+
+        const spd = 4.2 * dt;
+
+        const delta = forward.scale(moveF * spd).add(right.scale(moveS * spd));
+        camera.position.addInPlace(new BABYLON.Vector3(delta.x, 0, delta.z));
+
+        // Look, right stick
+        const lx = lookState.dx;
+        const ly = lookState.dy;
+
+        const lookSpeed = 2.4;
+        camera.rotation.y += lx * lookSpeed * dt;
+        camera.rotation.x += ly * lookSpeed * dt;
+        camera.rotation.x = clamp(camera.rotation.x, -1.2, 1.2);
+
+        // Keep weapon fixed in front of camera
+        if(weaponGrip){
+          // slight sway
+          const sway = Math.sin(performance.now() * 0.004) * 0.01;
+          weaponGrip.position.x = weaponGrip.position.x + (sway * 0.0);
+        }
+
+        // Zombies chase
+        for(const z of zombies){
+          const m = z.mesh;
+          if(!m) continue;
+
+          const to = camera.position.subtract(m.position);
+          const dist = Math.max(0.001, to.length());
+          const dir = to.scale(1.0 / dist);
+
+          m.position.x += dir.x * z.speed * dt;
+          m.position.z += dir.z * z.speed * dt;
+
+          // Face player
+          m.rotation.y = Math.atan2(dir.x, dir.z);
+
+          // Tiny attack bump if close
+          if(dist < 1.2){
+            // optional, you can add hp later
+          }
+        }
+
+        // SMG auto fire if holding
+        if(isSMG() && FIRE.holding){
+          shootOnce();
+        }
+
+        // Keep soldierRoot following player position, still using equipped skin
+        if(soldierRoot){
+          soldierRoot.position.x = camera.position.x;
+          soldierRoot.position.y = 0;
+          soldierRoot.position.z = camera.position.z;
+        }
+      });
+
+      return scene;
+    }
+
+    async function runEnterSequence(){
+      // Show enter overlay first, loadouts and ammo
+      enterOverlay.style.display = "flex";
+      countdownText.classList.remove("show");
+
+      weaponSku = await fetchEquippedWeaponSku();
+      ammo = await fetchAmmoForCurrentWeapon();
+
+      hudWeapon.textContent = `WEAPON, ${weaponSku.replace(/^wz_/, "").toUpperCase()}`;
+      hudAmmo.textContent = `AMMO, ${ammo}`;
+
+      const skinSku = await fetchEquippedSkinSku();
+      await loadSoldierInScene(skinSku);
+      await setWeaponViewModel(weaponSku);
+
+      // Spawn zombies, but game is paused until countdown completes
+      spawnWave();
+
+      // Small delay to feel premium
+      await new Promise(r => setTimeout(r, 750));
+
+      // Hide enter overlay, run countdown over live FPS view
+      enterOverlay.style.display = "none";
+
+      const steps = ["3","2","1","GO"];
+      for(const s of steps){
+        countdownText.textContent = s;
+        countdownText.classList.add("show");
+        await new Promise(r => setTimeout(r, s === "GO" ? 520 : 700));
+        countdownText.classList.remove("show");
+        await new Promise(r => setTimeout(r, 140));
+      }
+    }
+
+    // Boot
+    (async function(){
+      createScene();
+
+      try{
+        await runEnterSequence();
+      }catch(e){
+        console.error("[WARZONE FPS] boot failed", e);
+        // Keep it playable even if something fails
+        try{ enterOverlay.style.display = "none"; }catch(_){}
+      }
+    })();
+  </script>
+</body>
+</html>
