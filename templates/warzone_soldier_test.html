@@ -104,33 +104,24 @@
       neon_marksman: { root: NEON_MARKSMAN_ROOT, file: WEAPON_FILE }
     };
 
-    // Only show weapon diagnostics text, soldier assumed good
-    hud.textContent =
-`Weapon diagnostics starting...
-(Soldier diagnostics hidden, soldier assumed good)
-`;
-
-    // IMPORTANT: crash workaround while tuning
-    // true = replaces weapon textures with tiny placeholder data, prevents 150 MB decode spikes
-    const LIGHTWEIGHT_WEAPON_TEXTURES = true;
+    // This page is not crashing now, so load full weapon textures
+    const LIGHTWEIGHT_WEAPON_TEXTURES = false;
 
     // This is a 1x1 transparent PNG data url
     const ONE_BY_ONE_PNG =
       "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR4nGNgYAAAAAMAASsJTYQAAAAASUVORK5CYII=";
 
-    // Hook glTF loader to optionally redirect huge textures to 1x1 placeholder
+    // Hook glTF loader to optionally redirect huge textures to 1x1 placeholder (OFF by default now)
     BABYLON.SceneLoader.OnPluginActivatedObservable.add((plugin) => {
       try{
         if (!plugin || plugin.name !== "gltf") return;
 
-        // Keep this hook very narrow, only affects the gun, not the soldier
         const original = plugin.preprocessUrlAsync;
         plugin.preprocessUrlAsync = (url) => {
           try{
             const s = (url || "").toString();
             const isWeapon = s.includes("/weapons/wz_neon_marksman/");
             if (LIGHTWEIGHT_WEAPON_TEXTURES && isWeapon){
-              // Redirect common texture formats only
               if (/\.(png|jpg|jpeg|webp|ktx2)$/i.test(s)) return Promise.resolve(ONE_BY_ONE_PNG);
             }
           }catch(e){}
@@ -149,6 +140,13 @@
 
     const LOBBY_EXTRA_SCALE = 0.72;
     const LOBBY_EXTRA_Y     = 0.06;
+
+    // ---------- HUD state ----------
+    const logLines = [];
+    function logLine(s){
+      logLines.push(String(s || ""));
+      if (logLines.length > 18) logLines.shift();
+    }
 
     // ---------- shadow anchor ----------
     let shadowPlane = null;
@@ -219,7 +217,7 @@
     }
 
     // ----- Per-weapon defaults -----
-    // Neon Marksman matches pistol tuning for now
+    // These defaults now bias toward placing the hand nearer the trigger area instead of the butt/handle.
     const PRESETS = {
       neon_marksman: {
         WEAPON_SCALE: 0.06000,
@@ -227,8 +225,10 @@
         WEAPON_PITCH_FIX: -0.03000,
 
         WEAPON_POS:      new BABYLON.Vector3(-1.06900,  0.32700, -0.05800),
-        WEAPON_GRIP_POS: new BABYLON.Vector3( 2.98400,  1.23000, -11.27200),
-        WEAPON_GRIP_ROT: new BABYLON.Vector3(-0.23000,  0.00000,  0.01000),
+
+        // Hand-to-trigger tuning starts closer to zero, and we auto-seed from weapon bounds on first load
+        WEAPON_GRIP_POS: new BABYLON.Vector3( 0.00000,  0.00000,  0.00000),
+        WEAPON_GRIP_ROT: new BABYLON.Vector3( 0.00000,  0.00000,  0.00000),
       }
     };
 
@@ -313,12 +313,12 @@
       return (Math.round(mb * 100) / 100).toFixed(2);
     }
 
-    async function preflightGltfWeapon(rootUrl, fileName, label){
+    async function preflightGltfWeapon(rootUrl, fileName){
       const gltfUrl = rootUrl + fileName;
-      hud.textContent += `\n\n[gun] gltf: ${gltfUrl}`;
+      logLine(`[gun] gltf: ${gltfUrl}`);
 
       const gltfCheck = await checkUrlWithSize(gltfUrl);
-      hud.textContent += `\n  status: ${gltfCheck.status} ok:${gltfCheck.ok} type:${gltfCheck.ct} size:${bytesToMB(gltfCheck.size)} MB`;
+      logLine(`  status:${gltfCheck.status} ok:${gltfCheck.ok} type:${gltfCheck.ct} size:${bytesToMB(gltfCheck.size)} MB`);
       if (!gltfCheck.ok) return { ok:false };
 
       let gltf;
@@ -326,7 +326,7 @@
         const r = await fetch(gltfUrl, { cache:"no-store" });
         gltf = await r.json();
       }catch(e){
-        hud.textContent += `\n  json read failed`;
+        logLine(`  json read failed`);
         return { ok:false };
       }
 
@@ -344,28 +344,14 @@
         const line =
           d.kind === "buffer"
             ? `dep buffer: ${d.uri} -> ${st.status} ok:${st.ok} type:${st.ct} size:${bytesToMB(st.size)} MB`
-            : `dep image: ${d.uri} -> ${st.status} ok:${st.ok} type:${st.ct} size:${bytesToMB(st.size)} MB`;
+            : `dep image : ${d.uri} -> ${st.status} ok:${st.ok} type:${st.ct} size:${bytesToMB(st.size)} MB`;
 
-        hud.textContent += `\n  ${line}`;
-
+        logLine(`  ${line}`);
         if (!st.ok) return { ok:false };
       }
 
-      hud.textContent += `\n\n  deps: ${deps.length}, size sum: ${bytesToMB(totalBytes)} MB`;
-
-      hud.textContent +=
-`\n\n[why crash] common causes when weapon loads but page dies, especially on mobile
-- huge textures, many 4K PNGs, or uncompressed normal maps can spike GPU memory and crash the webview
-- big normal maps are expensive because they expand in VRAM, even if download size looks “only” 10 to 20 MB
-- lots of separate meshes and materials increases parse, shader compile, and draw overhead
-- the first time those big textures decode, some devices hit a watchdog kill
-
-[workaround] this test page can load the gun with lightweight placeholder textures
-- so we can tune hand placement without crashing
-- later we optimize the real files, convert to KTX2, reduce normals, merge materials, then turn full textures back on
-
-[mode] LIGHTWEIGHT_WEAPON_TEXTURES: ${LIGHTWEIGHT_WEAPON_TEXTURES ? "ON (safe for tuning)" : "OFF (full textures, may crash)"}
-`;
+      logLine(`  deps:${deps.length} size sum:${bytesToMB(totalBytes)} MB`);
+      logLine(`[mode] LIGHTWEIGHT_WEAPON_TEXTURES: ${LIGHTWEIGHT_WEAPON_TEXTURES ? "ON" : "OFF"}`);
 
       return { ok:true, depCount: deps.length, totalBytes };
     }
@@ -415,7 +401,8 @@
 
     let weaponContainer = null;
     let weaponRoot = null;
-    let weaponGrip = null;
+    let weaponGrip = null;     // this is the "trigger/grip alignment" node
+    let weaponHold = null;     // gun meshes parent here, so we can tune grip separately
     let mergedWeaponMesh = null;
 
     let skinnedMesh = null;
@@ -476,15 +463,21 @@
         }
       }catch(e){}
       try{
-        if(weaponRoot){
-          weaponRoot.dispose(true, false);
-          weaponRoot = null;
+        if(weaponHold){
+          weaponHold.dispose(true, false);
+          weaponHold = null;
         }
       }catch(e){}
       try{
         if(weaponGrip){
           weaponGrip.dispose(true, false);
           weaponGrip = null;
+        }
+      }catch(e){}
+      try{
+        if(weaponRoot){
+          weaponRoot.dispose(true, false);
+          weaponRoot = null;
         }
       }catch(e){}
       try{
@@ -509,14 +502,11 @@
       return wrapper;
     }
 
-    // Texture overrides for soldier only, unchanged
+    // ---------- Soldier texture overrides ----------
+    // Your textures folder is now "one file" style, so we auto-detect which file exists per skin folder,
+    // then apply it across all soldier materials for albedo/diffuse so the colors load reliably.
+
     const TEXTURE_BASE = "/assets/warzone3d/soldier_gltf_3/textures/";
-    const OVERRIDE_FILES = [
-      "material_8_diffuse.png",
-      "material_9_diffuse.png",
-      "material_10_diffuse.png",
-      "material_11_diffuse.png"
-    ];
     const SKU_TO_TEXTURE_FOLDER = {
       "wz_neon_edge": "neon_edge",
       "wz_urban_shadow": "urban_shadow",
@@ -524,40 +514,91 @@
       "wz_glow_legend": "glow_legend"
     };
 
-    function overrideTextureOnMaterial(mat, texProp, folder){
-      try{
-        const tex = mat && mat[texProp];
-        if(!tex) return false;
+    const FOLDER_OVERRIDE_FILE = {}; // folder -> fileName
 
-        const urlOrName = (tex.url || tex.name || "");
-        const file = fileFromAnyUrl(urlOrName);
-        if(!file) return false;
+    const OVERRIDE_CANDIDATES = [
+      // common "single texture" names
+      "texture.png",
+      "textures.png",
+      "basecolor.png",
+      "base_color.png",
+      "albedo.png",
+      "diffuse.png",
+      "skin.png",
+      "skin_diffuse.png",
+      "main.png",
+      // your old multi-file names, just in case
+      "material_8_diffuse.png",
+      "material_9_diffuse.png",
+      "material_10_diffuse.png",
+      "material_11_diffuse.png"
+    ];
 
-        if(!OVERRIDE_FILES.includes(file)) return false;
+    async function detectSingleTextureFile(folder){
+      if (!folder) return null;
+      if (FOLDER_OVERRIDE_FILE[folder]) return FOLDER_OVERRIDE_FILE[folder];
 
-        const newUrl = `${TEXTURE_BASE}${folder}/${file}`;
-        const newTex = new BABYLON.Texture(newUrl, scene, true, false);
-        newTex.hasAlpha = tex.hasAlpha || false;
-        newTex.level = (typeof tex.level === "number") ? tex.level : 1.0;
-
-        mat[texProp] = newTex;
-        return true;
-      }catch(e){
-        return false;
+      for (const f of OVERRIDE_CANDIDATES){
+        const url = `${TEXTURE_BASE}${folder}/${f}`;
+        const st = await checkUrlWithSize(url);
+        if (st.ok){
+          FOLDER_OVERRIDE_FILE[folder] = f;
+          logLine(`[skin] override texture found, ${folder}/${f}`);
+          return f;
+        }
       }
+
+      logLine(`[skin] no override texture found in ${folder}, leaving default`);
+      FOLDER_OVERRIDE_FILE[folder] = null;
+      return null;
     }
 
-    function applyTextureOverrides(container, skinSku){
+    function applySingleTextureToMaterials(container, folder, file){
+      try{
+        if(!container || !folder || !file) return;
+
+        const texUrl = `${TEXTURE_BASE}${folder}/${file}`;
+        const mats = (container && container.materials) ? container.materials : [];
+
+        mats.forEach(mat => {
+          if(!mat) return;
+
+          // if PBR material
+          if (mat.albedoTexture){
+            const newTex = new BABYLON.Texture(texUrl, scene, true, false);
+            newTex.hasAlpha = mat.albedoTexture.hasAlpha || false;
+            newTex.level = (typeof mat.albedoTexture.level === "number") ? mat.albedoTexture.level : 1.0;
+            mat.albedoTexture = newTex;
+          }
+          // if Standard material
+          if (mat.diffuseTexture){
+            const newTex = new BABYLON.Texture(texUrl, scene, true, false);
+            newTex.hasAlpha = mat.diffuseTexture.hasAlpha || false;
+            newTex.level = (typeof mat.diffuseTexture.level === "number") ? mat.diffuseTexture.level : 1.0;
+            mat.diffuseTexture = newTex;
+          }
+
+          // In case the material has no texture assigned (some exports do this),
+          // force an albedo/diffuse to ensure the color set actually shows.
+          if (!mat.albedoTexture && mat.getClassName && /PBR/i.test(mat.getClassName())){
+            mat.albedoTexture = new BABYLON.Texture(texUrl, scene, true, false);
+          }
+          if (!mat.diffuseTexture && mat.getClassName && /Standard/i.test(mat.getClassName())){
+            mat.diffuseTexture = new BABYLON.Texture(texUrl, scene, true, false);
+          }
+        });
+      }catch(e){}
+    }
+
+    async function applyTextureOverrides(container, skinSku){
       const sku = (skinSku || "").toString().trim();
       const folder = SKU_TO_TEXTURE_FOLDER[sku];
       if(!folder) return;
 
-      const mats = (container && container.materials) ? container.materials : [];
-      mats.forEach(mat => {
-        if(!mat) return;
-        overrideTextureOnMaterial(mat, "albedoTexture", folder);
-        overrideTextureOnMaterial(mat, "diffuseTexture", folder);
-      });
+      const f = await detectSingleTextureFile(folder);
+      if(!f) return;
+
+      applySingleTextureToMaterials(container, folder, f);
     }
 
     async function loadSoldierSkinHiddenHud(skinSku){
@@ -565,7 +606,9 @@
       clearSoldier();
 
       const container = await BABYLON.SceneLoader.LoadAssetContainerAsync(SOLDIER_ROOT, SOLDIER_FILE, scene);
-      applyTextureOverrides(container, skinSku);
+
+      // IMPORTANT: now async so the single texture file override always loads colors
+      await applyTextureOverrides(container, skinSku);
 
       container.addAllToScene();
       currentContainer = container;
@@ -590,7 +633,6 @@
       skinnedMesh = findSkinnedMeshFromContainer(container);
       skeleton = skinnedMesh?.skeleton || null;
 
-      // No soldier green text, per your request
       return true;
     }
 
@@ -607,8 +649,13 @@
       weaponRoot = new BABYLON.TransformNode("weaponRoot", scene);
       weaponRoot.attachToBone(rightHand, skinnedMesh);
 
+      // weaponGrip is where we align the hand to the trigger area
       weaponGrip = new BABYLON.TransformNode("weaponGrip", scene);
       weaponGrip.parent = weaponRoot;
+
+      // weaponHold is where the gun meshes actually live
+      weaponHold = new BABYLON.TransformNode("weaponHold", scene);
+      weaponHold.parent = weaponGrip;
 
       return { ok:true };
     }
@@ -626,19 +673,16 @@
 
       weaponRoot.scaling.set(TUNE.WEAPON_SCALE, TUNE.WEAPON_SCALE, TUNE.WEAPON_SCALE);
 
+      // This is the important part: TUNE.GRIP_* moves the gun relative to the hand
       weaponGrip.position.copyFrom(TUNE.WEAPON_GRIP_POS);
       weaponGrip.rotation.copyFrom(TUNE.WEAPON_GRIP_ROT);
     }
 
     function tryMergeWeaponMeshes(meshes){
-      // Why you saw “3 parts”
-      // The glTF has multiple mesh primitives, body, clip, rail, each exported as separate meshes.
-      // We merge them for tuning view, so it behaves like one object.
       try{
         const valid = (meshes || []).filter(m => m && m.getTotalVertices && m.getTotalVertices() > 0);
         if (valid.length <= 1) return valid[0] || null;
 
-        // Make sure they are free to merge
         valid.forEach(m => { try{ m.parent = null; }catch(e){} });
 
         const merged = BABYLON.Mesh.MergeMeshes(
@@ -647,7 +691,7 @@
           true,   // allow 32 bit indices
           undefined,
           false,  // subdivideWithSubMeshes
-          true    // multiMultiMaterial, keep different materials
+          true    // multiMultiMaterial
         );
 
         return merged || null;
@@ -656,57 +700,93 @@
       }
     }
 
+    // Auto-seed grip so the hand starts nearer the trigger area (simple heuristic from weapon bounds)
+    function seedGripFromWeaponBounds(mesh){
+      try{
+        if(!mesh) return false;
+
+        // Only seed if still at zero-ish, so it doesn't fight your tuning
+        const isZeroish =
+          Math.abs(TUNE.WEAPON_GRIP_POS.x) < 0.0001 &&
+          Math.abs(TUNE.WEAPON_GRIP_POS.y) < 0.0001 &&
+          Math.abs(TUNE.WEAPON_GRIP_POS.z) < 0.0001 &&
+          Math.abs(TUNE.WEAPON_GRIP_ROT.x) < 0.0001 &&
+          Math.abs(TUNE.WEAPON_GRIP_ROT.y) < 0.0001 &&
+          Math.abs(TUNE.WEAPON_GRIP_ROT.z) < 0.0001;
+
+        if(!isZeroish) return false;
+
+        const bb = mesh.getBoundingInfo().boundingBox;
+        const min = bb.minimumWorld.clone();
+        const max = bb.maximumWorld.clone();
+        const size = max.subtract(min);
+
+        // Heuristic: move "grip point" toward handle/trigger region on most rifles
+        // (you can tune from here)
+        TUNE.WEAPON_GRIP_POS.x = -(min.x + size.x * 0.30);
+        TUNE.WEAPON_GRIP_POS.y = -(min.y + size.y * 0.35);
+        TUNE.WEAPON_GRIP_POS.z = -(min.z + size.z * 0.45);
+
+        // slight roll to bring palm onto grip, tune as needed
+        TUNE.WEAPON_GRIP_ROT.x = 0.00;
+        TUNE.WEAPON_GRIP_ROT.y = 0.00;
+        TUNE.WEAPON_GRIP_ROT.z = -0.10;
+
+        saveTuneBackToPreset(ACTIVE_WEAPON_KEY);
+        return true;
+      }catch(e){
+        return false;
+      }
+    }
+
     async function loadWeapon(key){
       clearWeapon();
 
       const cfg = WEAPON_MAP[key];
       if(!cfg){
-        hud.textContent += `\n[FAIL] weapon key not mapped: ${key}`;
+        logLine(`[FAIL] weapon key not mapped: ${key}`);
         return false;
       }
 
-      // diagnostics, includes file sizes, explains crash
-      const diag = await preflightGltfWeapon(cfg.root, cfg.file, `weapon:${key}`);
+      const diag = await preflightGltfWeapon(cfg.root, cfg.file);
       if (!diag.ok){
-        hud.textContent += `\n\n[FAIL] weapon preflight`;
+        logLine(`[FAIL] weapon preflight`);
         return false;
       }
 
       if(!currentWrapper || !currentContainer || !skinnedMesh || !skeleton){
-        hud.textContent += `\n\n[FAIL] soldier not ready`;
+        logLine(`[FAIL] soldier not ready`);
         return false;
       }
 
-      hud.textContent += `\n\n[load] attempting to load gun model now...`;
-
+      logLine(`[load] loading weapon container...`);
       const w = await BABYLON.SceneLoader.LoadAssetContainerAsync(cfg.root, cfg.file, scene);
       w.addAllToScene();
       weaponContainer = w;
 
       const attach = attachWeaponToRightHand();
       if(!attach?.ok){
-        hud.textContent += `\n[FAIL] attachWeaponToRightHand`;
+        logLine(`[FAIL] attachWeaponToRightHand`);
         return false;
       }
 
-      // collect weapon meshes, skip the first container root mesh if present
       const wMeshes = (w.meshes || []).filter(m => m && m.name !== "__root__");
       const usable = wMeshes.slice(1).length ? wMeshes.slice(1) : wMeshes;
 
-      // merge so it is not “3 parts” while tuning
       const merged = tryMergeWeaponMeshes(usable);
       if (merged){
         mergedWeaponMesh = merged;
-        merged.parent = weaponGrip;
-        hud.textContent += `\n[OK] weapon merged for tuning view, parts:${usable.length} -> 1`;
+        merged.parent = weaponHold; // IMPORTANT: parent to weaponHold, not weaponGrip
+        logLine(`[OK] weapon merged for tuning view, parts:${usable.length} -> 1`);
       } else {
-        // fallback, parent all parts
-        usable.forEach(m => { try{ m.parent = weaponGrip; }catch(e){} });
-        hud.textContent += `\n[OK] weapon attached, parts:${usable.length} (not merged)`;
+        usable.forEach(m => { try{ m.parent = weaponHold; }catch(e){} });
+        logLine(`[OK] weapon attached, parts:${usable.length} (not merged)`);
       }
 
-      applyTuneToWeapon();
+      // If grip was zeroed, seed it so the hand starts near trigger area
+      seedGripFromWeaponBounds(mergedWeaponMesh || usable[0] || null);
 
+      applyTuneToWeapon();
       return true;
     }
 
@@ -735,24 +815,28 @@ const WEAPON_GRIP_ROT = new BABYLON.Vector3(${TUNE.WEAPON_GRIP_ROT.x.toFixed(5)}
       const txt = lockText();
       try{
         await navigator.clipboard.writeText(txt);
-        hud.textContent += `\n[COPIED]`;
+        logLine(`[COPIED] tune constants`);
+        renderHud();
       }catch(e){
         prompt("Copy these constants", txt);
       }
     }
 
-    function printHud(){
-      const modeName =
+    function modeName(){
+      return (
         MODE===1 ? "WEAPON_POS" :
-        MODE===2 ? "GRIP_POS" :
-        MODE===3 ? "GRIP_ROT" :
+        MODE===2 ? "GRIP_POS (HAND -> TRIGGER)" :
+        MODE===3 ? "GRIP_ROT (HAND -> TRIGGER)" :
         MODE===4 ? "YAW_FIX" :
         MODE===5 ? "PITCH_FIX" :
-        MODE===6 ? "SCALE" : "???";
+        MODE===6 ? "SCALE" : "???"
+      );
+    }
 
-      hud.textContent +=
-`\n\n----- tuner -----
-Weapon: ${ACTIVE_WEAPON_KEY}   Mode: ${MODE} (${modeName})
+    function renderHud(){
+      hud.textContent =
+`Weapon tuner, Neon Marksman
+Weapon: ${ACTIVE_WEAPON_KEY}   Mode: ${MODE} (${modeName()})
 Keys: 1-6 mode, arrows XY, Q/E Z, Shift fast, Alt slow, R reset, C copy
 
 WEAPON_POS     : ${TUNE.WEAPON_POS.x.toFixed(5)}, ${TUNE.WEAPON_POS.y.toFixed(5)}, ${TUNE.WEAPON_POS.z.toFixed(5)}
@@ -762,11 +846,15 @@ YAW_FIX        : ${TUNE.WEAPON_YAW_FIX.toFixed(5)}
 PITCH_FIX      : ${TUNE.WEAPON_PITCH_FIX.toFixed(5)}
 SCALE          : ${TUNE.WEAPON_SCALE.toFixed(5)}
 
-${lockText()}`;
+${lockText()}
+
+----- log -----
+${logLines.join("\n")}`;
     }
 
     function adjust(ev, dx, dy, dz){
       const s = stepForEvent(ev);
+
       if (MODE === 1){
         TUNE.WEAPON_POS.x += dx*s; TUNE.WEAPON_POS.y += dy*s; TUNE.WEAPON_POS.z += dz*s;
       } else if (MODE === 2){
@@ -780,8 +868,12 @@ ${lockText()}`;
       } else if (MODE === 6){
         TUNE.WEAPON_SCALE = Math.max(0.0001, TUNE.WEAPON_SCALE + dy*s);
       }
+
       applyTuneToWeapon();
       saveTuneBackToPreset(ACTIVE_WEAPON_KEY);
+
+      // IMPORTANT: live HUD updates every adjustment
+      renderHud();
     }
 
     window.addEventListener("keydown", async (ev) => {
@@ -789,12 +881,15 @@ ${lockText()}`;
 
       if (ev.key >= "1" && ev.key <= "6"){
         MODE = parseInt(ev.key, 10);
+        renderHud();
         return;
       }
 
       if (ev.key.toLowerCase() === "r"){
         loadPresetIntoTune(ACTIVE_WEAPON_KEY);
         applyTuneToWeapon();
+        logLine(`[reset] preset loaded`);
+        renderHud();
         return;
       }
 
@@ -856,14 +951,20 @@ ${lockText()}`;
     // ---------- boot ----------
     (async () => {
       try{
+        logLine(`Weapon diagnostics starting...`);
+        logLine(`(Soldier diagnostics hidden, soldier assumed good)`);
+        renderHud();
+
         await loadSoldierSkinHiddenHud(ACTIVE_SKIN_SKU);
 
         loadPresetIntoTune(ACTIVE_WEAPON_KEY);
         await loadWeapon(ACTIVE_WEAPON_KEY);
 
-        printHud();
+        logLine(`[ready] tune GRIP_POS and GRIP_ROT to move hand onto trigger area`);
+        renderHud();
       }catch(e){
-        hud.textContent += "\n[EXCEPTION] " + (e?.message || e);
+        logLine(`[EXCEPTION] ${e?.message || e}`);
+        renderHud();
         console.warn("Test failed", e);
       }
     })();
