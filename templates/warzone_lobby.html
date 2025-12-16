@@ -70,6 +70,7 @@
       gap:10px;
       flex-wrap:wrap;
     }
+
     .logo-block{
       display:flex;
       align-items:center;
@@ -87,7 +88,6 @@
       box-shadow:0 0 18px rgba(255,207,77,.6);
       flex-shrink:0;
     }
-    /* NEW: make IZZA token act like a button */
     .izzacoin-btn{
       border:none;
       background:transparent;
@@ -100,6 +100,19 @@
     .izzacoin-btn:focus{ outline:none; }
     .izzacoin-btn:focus-visible{
       box-shadow:0 0 0 2px rgba(127,209,255,.65);
+    }
+
+    /* NEW: turquoise WARZONE title style */
+    .warzone-title{
+      font-weight:900;
+      font-size:12px;
+      letter-spacing:.28em;
+      color:var(--accent1);
+      text-shadow:
+        0 0 10px rgba(0,255,255,.55),
+        0 0 22px rgba(0,255,255,.20);
+      transform:translateY(-1px);
+      white-space:nowrap;
     }
 
     .deploy-btn{
@@ -218,6 +231,43 @@
       z-index:2;
       display:block;
       touch-action:none;
+    }
+
+    /* NEW: ammo HUD bottom-right in map area */
+    .ammo-hud{
+      position:absolute;
+      right:10px;
+      bottom:10px;
+      z-index:3;
+      pointer-events:none;
+      padding:8px 10px;
+      border-radius:10px;
+      border:1px solid rgba(0,255,255,.35);
+      background:linear-gradient(180deg, rgba(1,6,18,.70), rgba(0,0,0,.25));
+      backdrop-filter: blur(3px);
+      -webkit-backdrop-filter: blur(3px);
+      min-width:120px;
+      text-align:right;
+      box-shadow:
+        0 0 18px rgba(0,255,255,.10);
+    }
+    .ammo-hud .label{
+      font-size:10px;
+      text-transform:uppercase;
+      letter-spacing:.22em;
+      color:rgba(127,209,255,.95);
+      margin-bottom:2px;
+    }
+    .ammo-hud .value{
+      font-size:18px;
+      font-weight:900;
+      letter-spacing:.14em;
+      color:var(--accent1);
+      text-shadow:
+        0 0 10px rgba(0,255,255,.55),
+        0 0 22px rgba(0,255,255,.20);
+      line-height:1;
+      white-space:nowrap;
     }
 
     .side-panel{
@@ -485,11 +535,11 @@
       <div class="shell">
         <div class="top-row">
           <div class="logo-block">
-            <!-- NEW: IZZA token is now a "Back home" button -->
             <button class="izzacoin-btn" id="homeBtn" type="button" aria-label="Back home">
               <div class="izzacoin"></div>
             </button>
-            <span>IZZA, WAR ZONE</span>
+            <!-- CHANGED: title -->
+            <span class="warzone-title">WARZONE</span>
           </div>
           <button class="deploy-btn" id="deployBtn">
             <span>Deploy</span>
@@ -517,6 +567,13 @@
               class="zone-canvas-shell"
               id="zoneCanvasShell"
               style="background-image:url('{{ map_image_url or "/assets/warzone-map-izzacity.jpg" }}');">
+
+              <!-- NEW: ammo HUD -->
+              <div class="ammo-hud" id="ammoHud" aria-label="Ammo">
+                <div class="label">AMMO</div>
+                <div class="value" id="ammoValue">--</div>
+              </div>
+
               <canvas id="soldierCanvas" class="zone-soldier-canvas"></canvas>
             </div>
           </section>
@@ -528,9 +585,9 @@
                 <button class="btn-ghost" id="inviteBtn">Invite friends</button>
                 <button class="btn-ghost secondary" id="searchBtn">Search players</button>
               </div>
+              <!-- CHANGED: paragraph -->
               <div class="friends-foot">
-                War Zone runs its own party system. Invited Pi authed friends
-                will appear standing beside your operator when they accept.
+                IZZA WARZONE runs its own party system. Invited Pi authed friends will appear standing beside your operator when they accept your lobby invite.
               </div>
             </div>
 
@@ -664,7 +721,6 @@
         window.location.href = "/warzone/shop" + qs;
       });
 
-      // NEW: IZZA token goes back home (pi_signin.html)
       document.getElementById("homeBtn")?.addEventListener("click", () => {
         window.location.href = "/signin";
       });
@@ -841,6 +897,37 @@
         localStorage.setItem("izzaUserU", USER_U);
       }catch(e){}
     }
+
+    /* NEW: Ammo HUD fetch, safe non-breaking */
+    (function(){
+      const ammoEl = document.getElementById("ammoValue");
+      if(!ammoEl) return;
+
+      async function refreshAmmo(){
+        try{
+          const res = await fetch("/warzone/api/ammo/current?_" + Date.now() + uQS(), { credentials:"include" });
+          if(!res.ok){
+            ammoEl.textContent = "--";
+            return;
+          }
+          const data = await res.json().catch(()=>null);
+          if(!data || !data.ok){
+            ammoEl.textContent = "--";
+            return;
+          }
+          const rounds = (typeof data.rounds === "number") ? data.rounds : null;
+          ammoEl.textContent = (rounds === null) ? "--" : String(rounds);
+        }catch(e){
+          ammoEl.textContent = "--";
+        }
+      }
+
+      refreshAmmo();
+      setInterval(refreshAmmo, 5000);
+      document.addEventListener("visibilitychange", () => {
+        if(!document.hidden) refreshAmmo();
+      });
+    })();
 
     // Babylon soldier
     (function(){
@@ -1358,9 +1445,25 @@
           if(!currentWrapper) return;
 
           try{
-            const skinned = currentContainer ? findSkinnedMeshFromContainer(currentContainer) : null;
+            const skinned = currentContainer ? (function findSkinnedMeshFromContainer(container){
+              try{
+                const meshes = (container && container.meshes) ? container.meshes : [];
+                return meshes.find(m => m && m.skeleton) || null;
+              }catch(e){
+                return null;
+              }
+            })(currentContainer) : null;
+
             const skeleton = skinned?.skeleton || null;
             if(skinned && skeleton){
+              const findBoneByNameOrIncludes = (skeleton, want) => {
+                if (!skeleton || !skeleton.bones) return null;
+                const exact = skeleton.bones.find(b => (b.name || "") === want);
+                if (exact) return exact;
+                const wantLow = (want || "").toLowerCase();
+                return skeleton.bones.find(b => ((b.name || "").toLowerCase().includes(wantLow))) || null;
+              };
+
               const rightShoulder = findBoneByNameOrIncludes(skeleton, "mixamorig:RightShoulder.206_218") || findBoneByNameOrIncludes(skeleton, "RightShoulder");
               const rightArm      = findBoneByNameOrIncludes(skeleton, "mixamorig:RightArm.207_219") || findBoneByNameOrIncludes(skeleton, "RightArm");
               const rightForeArm  = findBoneByNameOrIncludes(skeleton, "mixamorig:RightForeArm.208_220") || findBoneByNameOrIncludes(skeleton, "RightForeArm");
