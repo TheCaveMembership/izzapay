@@ -307,16 +307,16 @@ def _seed_shop_if_empty(cx):
          "price": 0, "starting": 1, "order": 0},
         {"slot": "skins", "sku": "wz_neon_edge", "name": "Neon Edge",
          "description": "Black armor with cyan edge lights and subtle neon trims.",
-         "price": 5, "starting": 0, "order": 10},
+         "price": 50, "starting": 0, "order": 10},
         {"slot": "skins", "sku": "wz_urban_shadow", "name": "Urban Shadow",
          "description": "Stealth trench and face mask tuned for city outskirts.",
-         "price": 5, "starting": 0, "order": 20},
+         "price": 150, "starting": 0, "order": 20},
         {"slot": "skins", "sku": "wz_cinder_camo", "name": "Cinder Camo",
          "description": "Burnt orange and charcoal pattern inspired by IZZA tokens.",
-         "price": 15, "starting": 0, "order": 30},
+         "price": 200, "starting": 0, "order": 30},
         {"slot": "skins", "sku": "wz_glow_legend", "name": "Glow Legend",
          "description": "Premium holo-vest with animated neon highlights.",
-         "price": 15, "starting": 0, "order": 40},
+         "price": 500, "starting": 0, "order": 40},
     ]
 
     for it in weapons + skins:
