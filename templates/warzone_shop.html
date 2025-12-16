@@ -55,7 +55,7 @@
         0 0 80px rgba(255,59,107,.12);
       padding:10px;
       display:grid;
-      grid-template-rows:auto auto 1fr auto;
+      grid-template-rows:auto auto 1fr;
       gap:10px;
       overflow:auto;
       -webkit-overflow-scrolling:touch;
@@ -86,6 +86,15 @@
       box-shadow:0 0 18px rgba(255,207,77,.6);
       flex-shrink:0;
     }
+    .warzoneTitle{
+      color:var(--accent1);
+      font-weight:900;
+      letter-spacing:.18em;
+      text-shadow:
+        0 0 14px rgba(0,255,255,.28),
+        0 0 26px rgba(0,255,255,.16);
+    }
+
     .pill{
       padding:6px 10px;
       border-radius:999px;
@@ -262,7 +271,6 @@
       line-height:1.2;
     }
 
-    /* COMING SOON overlay */
     .soon-badge{
       position:absolute;
       inset:0;
@@ -288,7 +296,14 @@
 
     .shop-main{flex:1;min-width:0;}
     .shop-name{font-size:12px;font-weight:700;margin-bottom:2px;}
-    .shop-sub{font-size:11px;color:#9fb0d6;}
+    .shop-sub{font-size:11px;color:#9fb0d6;white-space:pre-line;}
+    .shop-ammo{
+      margin-top:4px;
+      font-size:11px;
+      color:#cfe9ff;
+      text-shadow:0 0 12px rgba(0,255,255,.10);
+    }
+
     .shop-side{
       display:flex;
       flex-direction:column;
@@ -347,7 +362,6 @@
       cursor:not-allowed;
       opacity:.95;
     }
-    /* BUY AMMO button */
     .shop-btn.ammo{
       border-color:rgba(255,207,77,.85);
       background:linear-gradient(90deg,rgba(59,43,11,.85),rgba(90,63,16,.85));
@@ -363,22 +377,32 @@
     .msg.ok{ color:#5ad49e; }
     .msg.err{ color:#ffb86b; }
 
-    .footer{
-      display:flex;
-      justify-content:space-between;
-      align-items:center;
-      gap:10px;
-      flex-wrap:wrap;
-      padding:10px;
-      border-radius:14px;
-      background:var(--panel);
-      border:1px solid rgba(66,91,168,.8);
-    }
     .mono{
       font-family:ui-monospace,Menlo,Consolas,monospace;
       word-break:break-all;
       font-size:10px;
       color:#c3cff5;
+    }
+
+    /* wallet compact fit */
+    .walletRow{
+      display:flex;
+      gap:8px;
+      flex-wrap:wrap;
+      margin-top:8px;
+      align-items:center;
+      justify-content:flex-end;
+    }
+    .sInput{
+      flex:1;
+      min-width:180px;
+      border-radius:999px;
+      border:1px solid rgba(127,209,255,.6);
+      background:#02061b;
+      color:#edf3ff;
+      font-size:12px;
+      padding:8px 10px;
+      outline:none;
     }
   </style>
 </head>
@@ -389,7 +413,7 @@
         <div class="top">
           <div class="logo">
             <div class="izzacoin"></div>
-            <span>IZZA, WAR ZONE SHOP</span>
+            <span class="warzoneTitle">WARZONE SHOP</span>
           </div>
           <div class="pill">
             <span class="label">Operator</span>
@@ -419,37 +443,32 @@
           </div>
 
           <div class="card">
-            <div class="title">Wallet Gate</div>
+            <div class="title">IZZA Wallet</div>
             <div class="small">
-              You must have an active linked wallet, and your S key saved locally on this device, to purchase.
-              Equip works without the S key.
+              You must have an active IZZA WALLET linked, and your S key saved locally on this device, to purchase.
+              Equip works without the S key stored locally.
             </div>
+
             <div class="small" style="margin-top:6px;">Active wallet pub</div>
             <div class="mono" id="pub">—</div>
 
-            <div class="small" style="margin-top:10px;">Local S key</div>
+            <div class="small" style="margin-top:8px;">Local S key</div>
             <div class="mono" id="sStatus">—</div>
 
-            <div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:10px;">
-              <input id="sInput" placeholder="S... private key"
-                autocomplete="off" spellcheck="false" autocapitalize="none"
-                style="flex:1;min-width:220px;border-radius:999px;border:1px solid rgba(127,209,255,.6);background:#02061b;color:#edf3ff;font-size:12px;padding:8px 10px;outline:none;">
+            <div class="walletRow">
+              <input id="sInput" class="sInput" placeholder="S... private key"
+                autocomplete="off" spellcheck="false" autocapitalize="none">
               <button class="btn" id="saveS">Save S</button>
               <button class="btn danger" id="forgetS">Forget</button>
+              <a class="btn gold" href="/token/auth?next=/token/izza">Open full wallet</a>
             </div>
 
-            <div class="small" style="margin-top:10px;">
+            <div class="small" style="margin-top:6px;">
               Open full wallet if you need to create one, set active wallet, or reveal your S key.
-            </div>
-            <div style="display:flex;justify-content:flex-end;margin-top:10px;">
-              <a class="btn gold" href="/token/auth?next=/token/izza">Open full wallet</a>
             </div>
           </div>
         </div>
 
-        <div class="footer">
-          <div class="small"></div>
-        </div>
       </div>
     </div>
   </div>
@@ -546,6 +565,28 @@
       }catch(e){}
     }
 
+    // Local ammo cache (so we can show pistol + smg ammo without adding new endpoints)
+    const AMMO_CACHE_KEY = "wz_ammo_cache_v1";
+    function readAmmoCache(){
+      try{
+        const s = localStorage.getItem(AMMO_CACHE_KEY);
+        return s ? (JSON.parse(s) || {}) : {};
+      }catch(e){ return {}; }
+    }
+    function writeAmmoCache(j){
+      try{ localStorage.setItem(AMMO_CACHE_KEY, JSON.stringify(j || {})); }catch(e){}
+    }
+    function setAmmoCached(weaponSku, rounds){
+      const m = readAmmoCache();
+      m[String(weaponSku||"").trim().toLowerCase()] = Math.max(0, parseInt(rounds||0,10) || 0);
+      writeAmmoCache(m);
+    }
+    function getAmmoCached(weaponSku){
+      const m = readAmmoCache();
+      const k = String(weaponSku||"").trim().toLowerCase();
+      return Math.max(0, parseInt(m[k] || 0, 10) || 0);
+    }
+
     async function fetchActiveWallet(){
       const r = await fetch("/api/wallet/active" + uQS(), { credentials:"include" });
       if(!r.ok) return null;
@@ -567,6 +608,12 @@
       });
       const j = await r.json().catch(()=>null);
       return { ok:r.ok, status:r.status, json:j };
+    }
+
+    async function fetchAmmoCurrent(){
+      const r = await fetch("/warzone/api/ammo/current" + uQS(), { credentials:"include" });
+      if(!r.ok) return null;
+      return r.json().catch(()=>null);
     }
 
     const elPub = document.getElementById("pub");
@@ -594,6 +641,15 @@
         elSStatus.textContent = hasS ? "Saved locally" : "Not saved";
       }
       return { pub, hasS };
+    }
+
+    async function refreshAmmoCacheFromServer(){
+      const j = await fetchAmmoCurrent();
+      if(j && j.ok && j.weapon_sku){
+        setAmmoCached(j.weapon_sku, j.rounds || 0);
+        return j;
+      }
+      return null;
     }
 
     async function walletGateForPurchase(){
@@ -702,7 +758,6 @@
       };
 
       wrap.appendChild(img);
-
       if(isComingSoon) addComingSoonOverlay(wrap);
 
       return wrap;
@@ -743,22 +798,10 @@
     function ammoPackForWeapon(rawSku){
       const key = canonWeaponKey(rawSku);
       if(key === "wz_basic_pistol"){
-        return {
-          weapon_sku: "wz_basic_pistol",
-          pack_sku: "wz_ammo_pistol_100",
-          label: "Buy ammo",
-          rounds: 100,
-          price_izza: 25
-        };
+        return { weapon_sku:"wz_basic_pistol", pack_sku:"wz_ammo_pistol_100", label:"Buy ammo", rounds:100, price_izza:25 };
       }
       if(key === "wz_cityrunner_smg"){
-        return {
-          weapon_sku: "wz_cityrunner_smg",
-          pack_sku: "wz_ammo_smg_200",
-          label: "Buy ammo",
-          rounds: 200,
-          price_izza: 50
-        };
+        return { weapon_sku:"wz_cityrunner_smg", pack_sku:"wz_ammo_smg_200", label:"Buy ammo", rounds:200, price_izza:50 };
       }
       return null;
     }
@@ -780,10 +823,25 @@
         : "Unlock skins, then equip before returning to lobby.";
     }
 
+    function ammoLineForWeapon(rawSku){
+      const key = canonWeaponKey(rawSku);
+      if(key === "wz_basic_pistol" || key === "wz_cityrunner_smg"){
+        const rounds = getAmmoCached(key);
+        return "Ammo, " + rounds + " rounds";
+      }
+      return "";
+    }
+
     async function loadShop(){
       setMsg("", "");
       if(!elShopList) return;
       elShopList.textContent = "Loading…";
+
+      // keep ammo cache fresh for equipped weapon (no new endpoints, no breakage)
+      if(CURRENT_TAB === "weapons"){
+        await refreshAmmoCacheFromServer();
+      }
+
       try{
         const res = await fetch("/warzone/api/shop?slot=" + encodeURIComponent(CURRENT_TAB) + "&" + (USER_U ? ("u=" + encodeURIComponent(USER_U)) : ""), {
           credentials:"include"
@@ -825,6 +883,17 @@
           main.appendChild(nm);
           main.appendChild(sub);
 
+          // ammo line under weapon details (pistol + smg)
+          if(CURRENT_TAB === "weapons" && !isSoon){
+            const line = ammoLineForWeapon(it.sku || "");
+            if(line){
+              const ammo = document.createElement("div");
+              ammo.className = "shop-ammo";
+              ammo.textContent = line;
+              main.appendChild(ammo);
+            }
+          }
+
           const side = document.createElement("div");
           side.className = "shop-side";
 
@@ -843,7 +912,6 @@
           btn.dataset.sku = it.sku;
           btn.dataset.price = it.price_izza;
 
-          // COMING SOON lockout
           if(isSoon){
             btn.classList.add("soon");
             btn.textContent = "Coming soon";
@@ -964,7 +1032,6 @@
 
       setMsg("Submitting IZZA transfer…", "");
 
-      // NOTE: Server endpoint to implement later without breaking current working flows
       const res = await fetch("/warzone/api/ammo/purchase" + uQS(), {
         method:"POST",
         headers:{ "Content-Type":"application/json" },
@@ -986,8 +1053,14 @@
         return;
       }
 
-      setMsg("Ammo purchased, +" + pack.rounds + " rounds.", "ok");
+      // cache totals so pistol + smg can show correctly in the shop list
+      if(data.weapon_sku){
+        setAmmoCached(data.weapon_sku, data.total_rounds || 0);
+      }
+
+      setMsg("Ammo purchased, +" + (data.added_rounds || pack.rounds) + " rounds.", "ok");
       await refreshWalletUI();
+      await loadShop();
     }
 
     async function equipItem(sku){
@@ -1004,6 +1077,7 @@
         return;
       }
       setMsg("Equipped.", "ok");
+      await refreshAmmoCacheFromServer();
       await loadShop();
     }
 
@@ -1019,6 +1093,7 @@
     (async () => {
       setActiveTab(CURRENT_TAB);
       await refreshWalletUI();
+      await refreshAmmoCacheFromServer();
       await loadShop();
     })();
   </script>
