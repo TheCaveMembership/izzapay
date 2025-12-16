@@ -289,16 +289,16 @@ def _seed_shop_if_empty(cx):
          "price": 0, "starting": 1, "order": 0},
         {"slot": "weapons", "sku": "wz_cityrunner_smg", "name": "Cityrunner SMG",
          "description": "High-rate SMG tuned for close-quarters street fights.",
-         "price": 5, "starting": 0, "order": 10},
+         "price": 100, "starting": 0, "order": 10},
         {"slot": "weapons", "sku": "wz_neon_marksman", "name": "Neon Marksman",
          "description": "Burst rifle with a glowing IZZA reticle and tight recoil.",
-         "price": 5, "starting": 0, "order": 20},
+         "price": 150, "starting": 0, "order": 20},
         {"slot": "weapons", "sku": "wz_skyline_sniper", "name": "Skyline Sniper",
          "description": "Long-range bolt-action tuned for rooftop control.",
-         "price": 15, "starting": 0, "order": 30},
+         "price": 150, "starting": 0, "order": 30},
         {"slot": "weapons", "sku": "wz_pulse_rifle", "name": "Pulse Rifle",
          "description": "Experimental IZZA tech that fires charged plasma rounds.",
-         "price": 15, "starting": 0, "order": 40},
+         "price": 200, "starting": 0, "order": 40},
     ]
 
     skins = [
