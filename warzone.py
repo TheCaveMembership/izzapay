@@ -294,6 +294,18 @@ def _ensure_shop_schema(cx):
           UNIQUE(user_id, weapon_sku),
           FOREIGN KEY(user_id) REFERENCES users(id)
         );
+
+        /* NEW: invite table, your invite endpoint uses this */
+        CREATE TABLE IF NOT EXISTS warzone_invites(
+          id INTEGER PRIMARY KEY,
+          from_user_id INTEGER NOT NULL,
+          to_user_id INTEGER NOT NULL,
+          status TEXT NOT NULL DEFAULT 'pending',
+          created_at INTEGER NOT NULL,
+          UNIQUE(from_user_id, to_user_id),
+          FOREIGN KEY(from_user_id) REFERENCES users(id),
+          FOREIGN KEY(to_user_id) REFERENCES users(id)
+        );
         """
     )
 
@@ -385,6 +397,46 @@ def _canon_weapon_sku(raw: str) -> str:
     if low in ("neon_marksman", "wz_neon_marksman"):
         return "wz_neon_marksman"
     return low
+
+
+def _get_equipped_weapon_sku(cx, uid: int) -> str:
+    """
+    Authoritative equipped weapon resolution for ammo HUD:
+      1) warzone_inventory equipped weapon
+      2) if none, fallback to starting weapon from shop config
+      3) final fallback: wz_basic_pistol
+    """
+    try:
+        eq = cx.execute(
+            """
+            SELECT sku
+            FROM warzone_inventory
+            WHERE user_id = ? AND slot = 'weapons' AND equipped = 1
+            LIMIT 1
+            """,
+            (uid,),
+        ).fetchone()
+        if eq and eq["sku"]:
+            return _canon_weapon_sku(eq["sku"])
+    except Exception:
+        pass
+
+    try:
+        st = cx.execute(
+            """
+            SELECT sku
+            FROM warzone_shop_items
+            WHERE slot = 'weapons' AND starting = 1 AND active = 1
+            ORDER BY sort_order ASC, id ASC
+            LIMIT 1
+            """
+        ).fetchone()
+        if st and st["sku"]:
+            return _canon_weapon_sku(st["sku"])
+    except Exception:
+        pass
+
+    return "wz_basic_pistol"
 
 
 # ----------------------------------------------------------------------
@@ -555,6 +607,7 @@ def warzone_invite_player():
 
     now_ts = _now_i()
     with conn() as cx:
+        _ensure_shop_schema(cx)
         cx.execute(
             """
             INSERT OR IGNORE INTO warzone_invites
@@ -565,6 +618,44 @@ def warzone_invite_player():
         )
 
     return jsonify({"ok": True})
+
+
+# ----------------------------------------------------------------------
+# Ammo HUD API, used by warzone_lobby.html
+# ----------------------------------------------------------------------
+
+@warzone_bp.get("/api/ammo/current")
+def warzone_ammo_current():
+    """
+    Returns ammo for the user's currently equipped weapon.
+
+    Response:
+      { ok: true, weapon_sku: "wz_basic_pistol", rounds: 123 }
+    """
+    uid = _require_user_id_or_u()
+    if not uid:
+        return jsonify({"ok": False, "error": "auth_required"}), 401
+
+    with conn() as cx:
+        _ensure_shop_schema(cx)
+        _seed_shop_if_empty(cx)
+        _seed_ammo_packs_if_empty(cx)
+
+        weapon_sku = _get_equipped_weapon_sku(cx, uid)
+
+        row = cx.execute(
+            """
+            SELECT rounds
+            FROM warzone_ammo
+            WHERE user_id = ? AND weapon_sku = ?
+            LIMIT 1
+            """,
+            (uid, weapon_sku),
+        ).fetchone()
+
+        rounds = int(row["rounds"] or 0) if row else 0
+
+    return jsonify({"ok": True, "weapon_sku": weapon_sku, "rounds": rounds})
 
 
 # ----------------------------------------------------------------------
