@@ -55,7 +55,7 @@
         0 0 80px rgba(255,59,107,.12);
       padding:10px;
       display:grid;
-      grid-template-rows:auto auto 1fr auto;
+      grid-template-rows:auto auto 1fr;
       gap:10px;
       overflow:auto;
       -webkit-overflow-scrolling:touch;
@@ -177,14 +177,13 @@
       font-weight:900;
     }
 
+    /* NEW: single column layout, wallet gate below list */
     .grid{
       display:grid;
-      grid-template-columns:1.2fr 1fr;
+      grid-template-columns:1fr;
       gap:10px;
       min-height:0;
-    }
-    @media (max-height:620px){
-      .grid{ grid-template-columns:1fr; }
+      align-content:start;
     }
 
     .card{
@@ -207,6 +206,110 @@
       font-size:11px;
       color:#9fb0d6;
       line-height:1.5;
+    }
+
+    /* NEW: carousel */
+    .carousel{
+      border-radius:12px;
+      border:1px solid rgba(66,91,168,.7);
+      background:radial-gradient(circle at top,#050919,#010308);
+      padding:8px;
+      overflow:hidden;
+    }
+    .carousel-head{
+      display:flex;
+      align-items:center;
+      justify-content:space-between;
+      gap:8px;
+      margin-bottom:6px;
+    }
+    .carousel-head .hint{
+      font-size:10px;
+      color:#7fd1ff;
+      text-transform:uppercase;
+      letter-spacing:.14em;
+      white-space:nowrap;
+      opacity:.95;
+    }
+    .carousel-track{
+      display:flex;
+      gap:8px;
+      overflow:auto;
+      scroll-snap-type:x mandatory;
+      -webkit-overflow-scrolling:touch;
+      padding-bottom:2px;
+    }
+    .carousel-track::-webkit-scrollbar{ width:0;height:0; }
+    .car-item{
+      width:128px;
+      flex:0 0 auto;
+      border-radius:12px;
+      border:1px solid rgba(127,209,255,.35);
+      background:radial-gradient(circle at top,#06102a,#02030a);
+      box-shadow:0 0 14px rgba(0,255,255,.06), inset 0 0 18px rgba(0,0,0,.55);
+      overflow:hidden;
+      scroll-snap-align:start;
+      cursor:pointer;
+      position:relative;
+    }
+    .car-item img{
+      width:100%;
+      height:92px;
+      object-fit:cover;
+      display:block;
+      pointer-events:none;
+    }
+    .car-meta{
+      padding:7px 8px 8px;
+      display:flex;
+      flex-direction:column;
+      gap:4px;
+      min-height:44px;
+    }
+    .car-name{
+      font-size:11px;
+      font-weight:800;
+      color:#e7f0ff;
+      white-space:nowrap;
+      overflow:hidden;
+      text-overflow:ellipsis;
+    }
+    .car-tag{
+      font-size:10px;
+      color:#9fb0d6;
+      white-space:nowrap;
+      overflow:hidden;
+      text-overflow:ellipsis;
+    }
+    .car-badge{
+      position:absolute;
+      top:6px;
+      left:6px;
+      padding:3px 7px;
+      border-radius:999px;
+      font-size:10px;
+      text-transform:uppercase;
+      letter-spacing:.12em;
+      font-weight:900;
+      border:1px solid rgba(159,176,214,.55);
+      background:rgba(10,14,28,.65);
+      color:rgba(159,176,214,.92);
+      pointer-events:none;
+    }
+    .car-badge.eq{
+      border-color:rgba(0,255,170,.9);
+      background:linear-gradient(90deg,#00e5b0,#62ffd5);
+      color:#001b11;
+    }
+    .car-badge.own{
+      border-color:rgba(255,207,77,.75);
+      background:linear-gradient(90deg,#3b2b0b,#5a3f10);
+      color:#ffe8a6;
+    }
+    .car-badge.soon{
+      border-color:rgba(255,59,107,.75);
+      background:linear-gradient(90deg,rgba(255,59,107,.22),rgba(255,156,107,.20));
+      color:#ffd0dc;
     }
 
     .shop-list{
@@ -262,7 +365,6 @@
       line-height:1.2;
     }
 
-    /* COMING SOON overlay */
     .soon-badge{
       position:absolute;
       inset:0;
@@ -356,22 +458,45 @@
     .msg.ok{ color:#5ad49e; }
     .msg.err{ color:#ffb86b; }
 
-    .footer{
-      display:flex;
-      justify-content:space-between;
-      align-items:center;
-      gap:10px;
-      flex-wrap:wrap;
+    /* NEW: compact wallet gate */
+    .wallet-compact{
       padding:10px;
-      border-radius:14px;
-      background:var(--panel);
-      border:1px solid rgba(66,91,168,.8);
+    }
+    .wallet-rows{
+      display:grid;
+      grid-template-columns:1fr;
+      gap:8px;
     }
     .mono{
       font-family:ui-monospace,Menlo,Consolas,monospace;
       word-break:break-all;
       font-size:10px;
       color:#c3cff5;
+    }
+    .wallet-actions{
+      display:flex;
+      gap:8px;
+      flex-wrap:wrap;
+      align-items:center;
+      justify-content:flex-end;
+      margin-top:6px;
+    }
+    .wallet-input-row{
+      display:flex;
+      gap:8px;
+      flex-wrap:wrap;
+      align-items:center;
+    }
+    .wallet-input-row input{
+      flex:1;
+      min-width:220px;
+      border-radius:999px;
+      border:1px solid rgba(127,209,255,.6);
+      background:#02061b;
+      color:#edf3ff;
+      font-size:12px;
+      padding:8px 10px;
+      outline:none;
     }
   </style>
 </head>
@@ -407,44 +532,51 @@
             <div class="small" id="listDesc">
               Buy with Testnet IZZA token transfers, same as bot buckets, then equip here.
             </div>
+
+            <!-- NEW: carousel -->
+            <div class="carousel" id="carousel">
+              <div class="carousel-head">
+                <div class="hint" id="carouselHint">Preview</div>
+                <div class="small" style="opacity:.9;">Auto scroll every 3 seconds</div>
+              </div>
+              <div class="carousel-track" id="carouselTrack"></div>
+            </div>
+
             <div class="shop-list" id="shopList">Loading…</div>
             <div class="msg" id="msg"></div>
           </div>
 
-          <div class="card">
-            <div class="title">Wallet Gate</div>
+          <!-- NEW: wallet gate moved under list, compact -->
+          <div class="card wallet-compact">
+            <div class="title">Wallet gate</div>
             <div class="small">
-              You must have an active linked wallet, and your S key saved locally on this device, to purchase.
-              Equip works without the S key.
-            </div>
-            <div class="small" style="margin-top:6px;">Active wallet pub</div>
-            <div class="mono" id="pub">—</div>
-
-            <div class="small" style="margin-top:10px;">Local S key</div>
-            <div class="mono" id="sStatus">—</div>
-
-            <div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:10px;">
-              <input id="sInput" placeholder="S... private key"
-                autocomplete="off" spellcheck="false" autocapitalize="none"
-                style="flex:1;min-width:220px;border-radius:999px;border:1px solid rgba(127,209,255,.6);background:#02061b;color:#edf3ff;font-size:12px;padding:8px 10px;outline:none;">
-              <button class="btn" id="saveS">Save S</button>
-              <button class="btn danger" id="forgetS">Forget</button>
+              Purchase needs an active linked wallet, and your S key saved locally on this device. Equip works without the S key.
             </div>
 
-            <div class="small" style="margin-top:10px;">
-              Open full wallet if you need to create one, set active wallet, or reveal your S key.
-            </div>
-            <div style="display:flex;justify-content:flex-end;margin-top:10px;">
-              <a class="btn gold" href="/token/auth?next=/token/izza">Open full wallet</a>
+            <div class="wallet-rows">
+              <div>
+                <div class="small" style="margin-top:6px;">Active wallet pub</div>
+                <div class="mono" id="pub">—</div>
+              </div>
+
+              <div>
+                <div class="small" style="margin-top:6px;">Local S key</div>
+                <div class="mono" id="sStatus">—</div>
+              </div>
+
+              <div class="wallet-input-row" style="margin-top:6px;">
+                <input id="sInput" placeholder="S... private key" autocomplete="off" spellcheck="false" autocapitalize="none">
+                <button class="btn" id="saveS">Save S</button>
+                <button class="btn danger" id="forgetS">Forget</button>
+              </div>
+
+              <div class="wallet-actions">
+                <a class="btn gold" href="/token/auth?next=/token/izza">Open full wallet</a>
+              </div>
             </div>
           </div>
         </div>
 
-        <div class="footer">
-          <div class="small">
-            If you equip a skin or weapon here, it will persist in your DB inventory, and the lobby can show it on return.
-          </div>
-        </div>
       </div>
     </div>
   </div>
@@ -734,6 +866,132 @@
       return !ALLOWED_WEAPONS.has(key);
     }
 
+    // NEW: carousel logic
+    const carouselTrack = document.getElementById("carouselTrack");
+    const carouselHint = document.getElementById("carouselHint");
+    let CAR_ITEMS = [];
+    let CAR_TIMER = null;
+    let CAR_INDEX = 0;
+
+    function stopCarousel(){
+      if(CAR_TIMER){
+        clearInterval(CAR_TIMER);
+        CAR_TIMER = null;
+      }
+    }
+
+    function startCarousel(){
+      stopCarousel();
+      if(!carouselTrack) return;
+      if(!CAR_ITEMS || CAR_ITEMS.length <= 1) return;
+
+      CAR_TIMER = setInterval(() => {
+        if(!carouselTrack) return;
+        const kids = carouselTrack.children || [];
+        if(!kids.length) return;
+
+        CAR_INDEX = (CAR_INDEX + 1) % kids.length;
+        const el = kids[CAR_INDEX];
+        if(el && typeof el.scrollIntoView === "function"){
+          el.scrollIntoView({ behavior:"smooth", inline:"start", block:"nearest" });
+        }
+      }, 3000);
+    }
+
+    function buildCarousel(slot, items){
+      if(!carouselTrack) return;
+
+      carouselTrack.innerHTML = "";
+      CAR_ITEMS = items || [];
+      CAR_INDEX = 0;
+
+      if(carouselHint){
+        carouselHint.textContent = slot === "weapons" ? "Weapons preview" : "Skins preview";
+      }
+
+      if(!CAR_ITEMS.length){
+        startCarousel();
+        return;
+      }
+
+      CAR_ITEMS.forEach((it, idx) => {
+        const rawSku = (it && it.sku) ? String(it.sku) : "";
+        const name = (it && it.name) ? String(it.name) : rawSku;
+
+        const isSoon = (slot === "weapons") ? weaponIsComingSoon(rawSku) : false;
+
+        const btn = document.createElement("div");
+        btn.className = "car-item";
+        btn.dataset.sku = rawSku;
+
+        const img = document.createElement("img");
+        img.src = previewSrc(slot, rawSku);
+        img.alt = slot === "weapons" ? "Weapon" : "Skin";
+        img.loading = "lazy";
+        img.onerror = () => {
+          img.remove();
+        };
+
+        const meta = document.createElement("div");
+        meta.className = "car-meta";
+
+        const nm = document.createElement("div");
+        nm.className = "car-name";
+        nm.textContent = name;
+
+        const tag = document.createElement("div");
+        tag.className = "car-tag";
+        if(isSoon){
+          tag.textContent = "Coming soon";
+        }else if(it.equipped){
+          tag.textContent = "Equipped";
+        }else if(it.starting){
+          tag.textContent = "Starter";
+        }else if(it.owned){
+          tag.textContent = "Owned";
+        }else{
+          tag.textContent = (it.price_izza + " IZZA");
+        }
+
+        meta.appendChild(nm);
+        meta.appendChild(tag);
+
+        btn.appendChild(img);
+        btn.appendChild(meta);
+
+        const badge = document.createElement("div");
+        badge.className = "car-badge";
+        if(isSoon){
+          badge.classList.add("soon");
+          badge.textContent = "Soon";
+        }else if(it.equipped){
+          badge.classList.add("eq");
+          badge.textContent = "Eq";
+        }else if(it.starting || it.owned){
+          badge.classList.add("own");
+          badge.textContent = "Owned";
+        }else{
+          badge.textContent = "Buy";
+        }
+        btn.appendChild(badge);
+
+        btn.addEventListener("click", () => {
+          stopCarousel();
+          CAR_INDEX = idx;
+          const id = "item_" + rawSku;
+          const row = document.getElementById(id);
+          if(row && typeof row.scrollIntoView === "function"){
+            row.scrollIntoView({ behavior:"smooth", block:"center" });
+          }
+          startCarousel();
+        });
+
+        carouselTrack.appendChild(btn);
+      });
+
+      startCarousel();
+    }
+
     // Shop logic
     let CURRENT_TAB = "{{ default_tab }}";
     const tabWeapons = document.getElementById("tabWeapons");
@@ -755,6 +1013,8 @@
       setMsg("", "");
       if(!elShopList) return;
       elShopList.textContent = "Loading…";
+      stopCarousel();
+
       try{
         const res = await fetch("/warzone/api/shop?slot=" + encodeURIComponent(CURRENT_TAB) + "&" + (USER_U ? ("u=" + encodeURIComponent(USER_U)) : ""), {
           credentials:"include"
@@ -763,6 +1023,7 @@
         if(!res.ok){
           elShopList.textContent = "Failed to load.";
           setMsg("Shop load failed, " + ((data && data.error) || res.status), "err");
+          buildCarousel(CURRENT_TAB, []);
           return;
         }
 
@@ -770,12 +1031,16 @@
         elShopList.innerHTML = "";
         if(!items.length){
           elShopList.textContent = "No items configured.";
+          buildCarousel(CURRENT_TAB, []);
           return;
         }
+
+        buildCarousel(CURRENT_TAB, items);
 
         items.forEach(it => {
           const row = document.createElement("div");
           row.className = "shop-item";
+          row.id = "item_" + (it.sku || "");
 
           const isSoon = (CURRENT_TAB === "weapons") ? weaponIsComingSoon(it.sku || "") : false;
 
@@ -864,6 +1129,7 @@
         console.error(e);
         elShopList.textContent = "Error loading shop.";
         setMsg("Shop error.", "err");
+        buildCarousel(CURRENT_TAB, []);
       }
     }
 
@@ -942,6 +1208,16 @@
       await refreshWalletUI();
       await loadShop();
     })();
+
+    // Prevent runaway timers if user navigates away
+    window.addEventListener("pagehide", () => { try{ stopCarousel(); }catch(e){} });
+    window.addEventListener("visibilitychange", () => {
+      if(document.hidden){
+        stopCarousel();
+      }else{
+        startCarousel();
+      }
+    });
   </script>
 </body>
 </html>
