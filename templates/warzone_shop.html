@@ -651,6 +651,23 @@
       return wrap;
     }
 
+    // ✅ SKU NORMALIZATION, keeps previews untouched, fixes equip/purchase for lobby loaders
+    function normalizeShopSku(slot, sku){
+      const raw = (sku || "").toString().trim();
+      const low = raw.toLowerCase();
+
+      if(slot === "weapons"){
+        if(low === "basic_pistol") return "wz_basic_pistol";
+        if(low === "cityrunner_smg") return "wz_cityrunner_smg";
+        if(low === "neon_marksman") return "wz_neon_marksman";
+        if(low.startsWith("wz_")) return low; // already canonical
+        return raw; // unknown weapon, do not guess
+      }
+
+      // skins: keep whatever your backend uses, do not touch
+      return raw;
+    }
+
     // Shop logic
     let CURRENT_TAB = "{{ default_tab }}";
     const tabWeapons = document.getElementById("tabWeapons");
@@ -694,6 +711,7 @@
           const row = document.createElement("div");
           row.className = "shop-item";
 
+          // preview uses raw sku from API so image filenames remain stable
           row.appendChild(buildPreview(CURRENT_TAB, it.sku || ""));
 
           const main = document.createElement("div");
@@ -723,7 +741,7 @@
           btn.dataset.sku = it.sku;
           btn.dataset.price = it.price_izza;
 
-          // FIX: starter items are equip-able again
+          // starter items are equip-able again
           if(it.equipped){
             btn.classList.add("equipped","owned");
             btn.textContent = "Equipped";
@@ -740,17 +758,20 @@
           btn.addEventListener("click", async () => {
             if(it.equipped) return;
 
+            const rawSku = it.sku;
+            const canonSku = normalizeShopSku(CURRENT_TAB, rawSku);
+
             if(it.starting){
-              await equipItem(it.sku);
+              await equipItem(canonSku);
               return;
             }
 
             if(it.owned){
-              await equipItem(it.sku);
+              await equipItem(canonSku);
               return;
             }
 
-            await purchaseItem(it.sku, it.name || it.sku, Number(it.price_izza || 0));
+            await purchaseItem(canonSku, it.name || rawSku, Number(it.price_izza || 0));
           });
 
           side.appendChild(btn);
