@@ -217,24 +217,25 @@
     }
 
     // ----- Per-weapon defaults -----
-    // These defaults now bias toward placing the hand nearer the trigger area instead of the butt/handle.
+    // SURGICAL UPDATE:
+    // - scale set to 0.03
+    // - yaw offset rotated +90 degrees so barrel points at camera
     const PRESETS = {
       neon_marksman: {
-        WEAPON_SCALE: 0.06000,
-        WEAPON_YAW_FIX: 1.52080,
+        WEAPON_SCALE: 0.03000,
+        WEAPON_YAW_FIX: 1.52080 + (Math.PI / 2),
         WEAPON_PITCH_FIX: -0.03000,
 
         WEAPON_POS:      new BABYLON.Vector3(-1.06900,  0.32700, -0.05800),
 
-        // Hand-to-trigger tuning starts closer to zero, and we auto-seed from weapon bounds on first load
         WEAPON_GRIP_POS: new BABYLON.Vector3( 0.00000,  0.00000,  0.00000),
         WEAPON_GRIP_ROT: new BABYLON.Vector3( 0.00000,  0.00000,  0.00000),
       }
     };
 
     const TUNE = {
-      WEAPON_SCALE: 0.06000,
-      WEAPON_YAW_FIX: 1.52080,
+      WEAPON_SCALE: 0.03000,
+      WEAPON_YAW_FIX: 1.52080 + (Math.PI / 2),
       WEAPON_PITCH_FIX: -0.03000,
       WEAPON_POS: new BABYLON.Vector3(0,0,0),
       WEAPON_GRIP_POS: new BABYLON.Vector3(0,0,0),
@@ -401,8 +402,8 @@
 
     let weaponContainer = null;
     let weaponRoot = null;
-    let weaponGrip = null;     // this is the "trigger/grip alignment" node
-    let weaponHold = null;     // gun meshes parent here, so we can tune grip separately
+    let weaponGrip = null;
+    let weaponHold = null;
     let mergedWeaponMesh = null;
 
     let skinnedMesh = null;
@@ -503,9 +504,6 @@
     }
 
     // ---------- Soldier texture overrides ----------
-    // Your textures folder is now "one file" style, so we auto-detect which file exists per skin folder,
-    // then apply it across all soldier materials for albedo/diffuse so the colors load reliably.
-
     const TEXTURE_BASE = "/assets/warzone3d/soldier_gltf_3/textures/";
     const SKU_TO_TEXTURE_FOLDER = {
       "wz_neon_edge": "neon_edge",
@@ -514,24 +512,10 @@
       "wz_glow_legend": "glow_legend"
     };
 
-    const FOLDER_OVERRIDE_FILE = {}; // folder -> fileName
-
+    const FOLDER_OVERRIDE_FILE = {};
     const OVERRIDE_CANDIDATES = [
-      // common "single texture" names
-      "texture.png",
-      "textures.png",
-      "basecolor.png",
-      "base_color.png",
-      "albedo.png",
-      "diffuse.png",
-      "skin.png",
-      "skin_diffuse.png",
-      "main.png",
-      // your old multi-file names, just in case
-      "material_8_diffuse.png",
-      "material_9_diffuse.png",
-      "material_10_diffuse.png",
-      "material_11_diffuse.png"
+      "texture.png","textures.png","basecolor.png","base_color.png","albedo.png","diffuse.png","skin.png","skin_diffuse.png","main.png",
+      "material_8_diffuse.png","material_9_diffuse.png","material_10_diffuse.png","material_11_diffuse.png"
     ];
 
     async function detectSingleTextureFile(folder){
@@ -563,14 +547,12 @@
         mats.forEach(mat => {
           if(!mat) return;
 
-          // if PBR material
           if (mat.albedoTexture){
             const newTex = new BABYLON.Texture(texUrl, scene, true, false);
             newTex.hasAlpha = mat.albedoTexture.hasAlpha || false;
             newTex.level = (typeof mat.albedoTexture.level === "number") ? mat.albedoTexture.level : 1.0;
             mat.albedoTexture = newTex;
           }
-          // if Standard material
           if (mat.diffuseTexture){
             const newTex = new BABYLON.Texture(texUrl, scene, true, false);
             newTex.hasAlpha = mat.diffuseTexture.hasAlpha || false;
@@ -578,8 +560,6 @@
             mat.diffuseTexture = newTex;
           }
 
-          // In case the material has no texture assigned (some exports do this),
-          // force an albedo/diffuse to ensure the color set actually shows.
           if (!mat.albedoTexture && mat.getClassName && /PBR/i.test(mat.getClassName())){
             mat.albedoTexture = new BABYLON.Texture(texUrl, scene, true, false);
           }
@@ -606,8 +586,6 @@
       clearSoldier();
 
       const container = await BABYLON.SceneLoader.LoadAssetContainerAsync(SOLDIER_ROOT, SOLDIER_FILE, scene);
-
-      // IMPORTANT: now async so the single texture file override always loads colors
       await applyTextureOverrides(container, skinSku);
 
       container.addAllToScene();
@@ -649,11 +627,9 @@
       weaponRoot = new BABYLON.TransformNode("weaponRoot", scene);
       weaponRoot.attachToBone(rightHand, skinnedMesh);
 
-      // weaponGrip is where we align the hand to the trigger area
       weaponGrip = new BABYLON.TransformNode("weaponGrip", scene);
       weaponGrip.parent = weaponRoot;
 
-      // weaponHold is where the gun meshes actually live
       weaponHold = new BABYLON.TransformNode("weaponHold", scene);
       weaponHold.parent = weaponGrip;
 
@@ -673,7 +649,6 @@
 
       weaponRoot.scaling.set(TUNE.WEAPON_SCALE, TUNE.WEAPON_SCALE, TUNE.WEAPON_SCALE);
 
-      // This is the important part: TUNE.GRIP_* moves the gun relative to the hand
       weaponGrip.position.copyFrom(TUNE.WEAPON_GRIP_POS);
       weaponGrip.rotation.copyFrom(TUNE.WEAPON_GRIP_ROT);
     }
@@ -687,11 +662,11 @@
 
         const merged = BABYLON.Mesh.MergeMeshes(
           valid,
-          true,   // dispose sources
-          true,   // allow 32 bit indices
+          true,
+          true,
           undefined,
-          false,  // subdivideWithSubMeshes
-          true    // multiMultiMaterial
+          false,
+          true
         );
 
         return merged || null;
@@ -700,12 +675,10 @@
       }
     }
 
-    // Auto-seed grip so the hand starts nearer the trigger area (simple heuristic from weapon bounds)
     function seedGripFromWeaponBounds(mesh){
       try{
         if(!mesh) return false;
 
-        // Only seed if still at zero-ish, so it doesn't fight your tuning
         const isZeroish =
           Math.abs(TUNE.WEAPON_GRIP_POS.x) < 0.0001 &&
           Math.abs(TUNE.WEAPON_GRIP_POS.y) < 0.0001 &&
@@ -721,13 +694,10 @@
         const max = bb.maximumWorld.clone();
         const size = max.subtract(min);
 
-        // Heuristic: move "grip point" toward handle/trigger region on most rifles
-        // (you can tune from here)
         TUNE.WEAPON_GRIP_POS.x = -(min.x + size.x * 0.30);
         TUNE.WEAPON_GRIP_POS.y = -(min.y + size.y * 0.35);
         TUNE.WEAPON_GRIP_POS.z = -(min.z + size.z * 0.45);
 
-        // slight roll to bring palm onto grip, tune as needed
         TUNE.WEAPON_GRIP_ROT.x = 0.00;
         TUNE.WEAPON_GRIP_ROT.y = 0.00;
         TUNE.WEAPON_GRIP_ROT.z = -0.10;
@@ -776,14 +746,13 @@
       const merged = tryMergeWeaponMeshes(usable);
       if (merged){
         mergedWeaponMesh = merged;
-        merged.parent = weaponHold; // IMPORTANT: parent to weaponHold, not weaponGrip
+        merged.parent = weaponHold;
         logLine(`[OK] weapon merged for tuning view, parts:${usable.length} -> 1`);
       } else {
         usable.forEach(m => { try{ m.parent = weaponHold; }catch(e){} });
         logLine(`[OK] weapon attached, parts:${usable.length} (not merged)`);
       }
 
-      // If grip was zeroed, seed it so the hand starts near trigger area
       seedGripFromWeaponBounds(mergedWeaponMesh || usable[0] || null);
 
       applyTuneToWeapon();
@@ -871,8 +840,6 @@ ${logLines.join("\n")}`;
 
       applyTuneToWeapon();
       saveTuneBackToPreset(ACTIVE_WEAPON_KEY);
-
-      // IMPORTANT: live HUD updates every adjustment
       renderHud();
     }
 
