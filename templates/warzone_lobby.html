@@ -26,7 +26,6 @@
       overflow:hidden;
     }
 
-    /* Manual landscape for Pi Browser */
     .rot-wrapper{
       position:fixed;
       top:0;
@@ -145,7 +144,6 @@
       gap:10px;
     }
 
-    /* Left side: map / drop zone preview */
     .zone-panel{
       border-radius:14px;
       background:linear-gradient(145deg,#050815,#02030c);
@@ -172,7 +170,6 @@
       font-size:12px;
     }
 
-    /* Map box expands down */
     .zone-canvas-shell{
       border-radius:10px;
       border:1px solid rgba(39,62,130,.9);
@@ -196,7 +193,6 @@
       z-index:1;
     }
 
-    /* Soldier canvas */
     .zone-soldier-canvas{
       position:absolute;
       left:50%;
@@ -210,7 +206,6 @@
       touch-action:none;
     }
 
-    /* Right side: friends + character */
     .side-panel{
       display:flex;
       flex-direction:column;
@@ -307,7 +302,6 @@
       color:#ffefc6;
     }
 
-    /* Overlays */
     .overlay{
       position:absolute;
       inset:0;
@@ -362,7 +356,6 @@
       align-items:center;
     }
 
-    /* Custom IZZA keyboard display */
     .izzakey-display{
       flex:1;
       min-height:30px;
@@ -543,7 +536,6 @@
           </aside>
         </div>
 
-        <!-- INVITE OVERLAY -->
         <div class="overlay" id="inviteOverlay">
           <div class="overlay-card">
             <div class="overlay-header">
@@ -565,7 +557,6 @@
           </div>
         </div>
 
-        <!-- SEARCH OVERLAY -->
         <div class="overlay" id="searchOverlay">
           <div class="overlay-card">
             <div class="overlay-header">
@@ -589,7 +580,6 @@
           </div>
         </div>
 
-        <!-- DEPLOY OVERLAY -->
         <div class="overlay" id="deployOverlay">
           <div class="overlay-card">
             <div class="overlay-header">
@@ -606,12 +596,11 @@
           </div>
         </div>
 
-      </div><!-- /.shell -->
+      </div>
     </div>
   </div>
 
   <script>
-    // Manual landscape
     (function(){
       const wrapper = document.getElementById("rotWrapper");
       function updateLayout(){
@@ -632,7 +621,6 @@
       updateLayout();
     })();
 
-    // ---------- Overlays + Search + Shop button ----------
     (function(){
       function show(id){
         const el = document.getElementById(id);
@@ -659,7 +647,6 @@
         window.location.href = "/warzone/shop" + qs;
       });
 
-      // Custom IZZA keyboard for player search
       const searchDisplay = document.getElementById("searchDisplay");
       const keyGrid = document.getElementById("izzakeyGrid");
       const searchResults = document.getElementById("searchResults");
@@ -696,12 +683,7 @@
         if (!keyGrid) return;
         keyGrid.innerHTML = "";
 
-        const rows = [
-          "QWERTYUIOP",
-          "ASDFGHJKL",
-          "ZXCVBNM",
-          "1234567890"
-        ];
+        const rows = ["QWERTYUIOP","ASDFGHJKL","ZXCVBNM","1234567890"];
 
         rows.forEach(row => {
           row.split("").forEach(ch => {
@@ -802,14 +784,13 @@
       searchGo?.addEventListener("click", doSearch);
     })();
 
-    // ---------- USER QS HELPERS (matches shop) ----------
+    // USER QS HELPERS
     const SRV_USER = {{ (player.username or '') | tojson }};
     function stripAt(s){ return (s||"").toString().trim().replace(/^@+/, ""); }
     function canonU(s){
       const v = stripAt(s);
       return v ? v.toLowerCase() : "";
     }
-
     const USER_CANON = (()=>{
       const fromSrv = stripAt(SRV_USER);
       if(fromSrv) return fromSrv;
@@ -828,7 +809,6 @@
       }catch(e){}
       return "";
     })();
-
     const USER_U = canonU(USER_CANON);
     function uQS(){
       return USER_U ? ("&u=" + encodeURIComponent(USER_U)) : "";
@@ -839,9 +819,8 @@
         localStorage.setItem("izzaUserU", USER_U);
       }catch(e){}
     }
-    // --------------------------------------------------------
 
-    // ---------- Babylon.js lobby soldier ----------
+    // Babylon soldier
     (function(){
       const canvas = document.getElementById("soldierCanvas");
       if (!canvas || !window.BABYLON) {
@@ -858,60 +837,48 @@
       let currentWrapper = null;
       let currentContainer = null;
 
-      // weapon state
       let currentWeaponContainer = null;
       let currentWeaponRoot = null;
       let currentWeaponGrip = null;
 
-      /* SHADOW ANCHOR */
       let shadowPlane = null;
       let shadowMat = null;
       const SHADOW_WORLD_Y = 0.005;
 
       const SOLDIER_ANIM_SPEED = 0.45;
-
       const AUTO_OSC_SPEED = 0.35;
       const AUTO_MAX_YAW   = Math.PI * 0.45;
 
-      // ---- normalize weapon SKU so lobby works like test page ----
       function normalizeWeaponSku(s){
         const sku = (s || "").toString().trim();
         if (!sku) return "wz_basic_pistol";
-
         if (sku === "basic_pistol") return "wz_basic_pistol";
         if (sku === "cityrunner_smg") return "wz_cityrunner_smg";
         if (sku === "neon_marksman") return "wz_neon_marksman";
-
         return sku;
       }
 
-      // ✅ LOCKED IN, Neon Marksman tuned values from your tester
       const WEAPON_TUNING = {
         wz_basic_pistol: {
           WEAPON_SCALE: 0.06000,
           WEAPON_YAW_FIX: 1.52080,
           WEAPON_PITCH_FIX: -0.03000,
-
           WEAPON_POS:      new BABYLON.Vector3(-1.06900,  0.32700, -0.05800),
           WEAPON_GRIP_POS: new BABYLON.Vector3( 2.98400,  1.23000, -11.27200),
           WEAPON_GRIP_ROT: new BABYLON.Vector3(-0.23000,  0.00000,  0.01000),
         },
-
         wz_cityrunner_smg: {
           WEAPON_SCALE: 0.11000,
           WEAPON_YAW_FIX: 1.10080,
           WEAPON_PITCH_FIX: -1.84000,
-
           WEAPON_POS:      new BABYLON.Vector3( 1.18100,  1.01700, -0.05800),
           WEAPON_GRIP_POS: new BABYLON.Vector3( 7.42400, -2.71000, -11.27200),
           WEAPON_GRIP_ROT: new BABYLON.Vector3(-0.05000, -0.22000,  0.01000),
         },
-
         wz_neon_marksman: {
           WEAPON_SCALE: 0.03000,
           WEAPON_YAW_FIX: 3.24160,
           WEAPON_PITCH_FIX: 0.12000,
-
           WEAPON_POS:      new BABYLON.Vector3(-1.16900,  0.09700, -0.05800),
           WEAPON_GRIP_POS: new BABYLON.Vector3(48.64112,  0.58674,  9.32631),
           WEAPON_GRIP_ROT: new BABYLON.Vector3( 1.22000, -0.54000, -0.10000),
@@ -923,7 +890,6 @@
         return WEAPON_TUNING[sku] || WEAPON_TUNING.wz_basic_pistol;
       }
 
-      // Arm correction, same pattern you used in test soldier
       const qArm     = BABYLON.Quaternion.FromEulerAngles(-0.10,  0.00,  0.00);
       const qForeArm = BABYLON.Quaternion.FromEulerAngles(-0.25,  0.00,  0.00);
       const qShould  = BABYLON.Quaternion.FromEulerAngles( 0.00,  0.00, -0.05);
@@ -993,7 +959,6 @@
         shadowPlane.position.x = -0.85;
         shadowPlane.position.z = 0.00;
       }
-      /* END SHADOW ANCHOR */
 
       function getSkinAsset(){
         return { rootUrl:"/assets/warzone3d/soldier_gltf_3/", fileName:"scene.gltf" };
@@ -1005,15 +970,12 @@
         if(sku === "wz_basic_pistol"){
           return { rootUrl:"/assets/warzone3d/weapons/wz_basic_pistol/", fileName:"scene.gltf" };
         }
-
         if(sku === "wz_cityrunner_smg"){
           return { rootUrl:"/assets/warzone3d/weapons/wz_cityrunner_smg/", fileName:"scene.gltf" };
         }
-
         if(sku === "wz_neon_marksman"){
           return { rootUrl:"/assets/warzone3d/weapons/wz_neon_marksman/", fileName:"scene.gltf" };
         }
-
         return null;
       }
 
@@ -1037,7 +999,6 @@
           const size = bb.max.subtract(bb.min);
           const maxDim = Math.max(size.x, size.y, size.z) || 1.0;
           const center = bb.min.add(size.scale(0.5));
-
           const radius = Math.max(2.6, maxDim * 2.4) * 1.05;
 
           camera.target = new BABYLON.Vector3(center.x, center.y + (maxDim * 0.50), center.z);
@@ -1056,19 +1017,15 @@
         }
       }
 
-      // ---------- TEXTURE OVERRIDES ----------
       const TEXTURE_BASE = "/assets/warzone3d/soldier_gltf_3/textures/";
-
       const OVERRIDE_FILES = [
         "material_8_diffuse.png",
         "material_9_diffuse.png",
         "material_10_diffuse.png",
         "material_11_diffuse.png"
       ];
-
       const SKU_TO_TEXTURE_FOLDER = {
         "wz_neon_edge": "neon_edge",
-
         "wz_urban_shadow": "urban_shadow",
         "wz_cinder_camo": "cinder_camo",
         "wz_glow_legend": "glow_legend"
@@ -1120,7 +1077,6 @@
           overrideTextureOnMaterial(mat, "diffuseTexture", folder);
         });
       }
-      // ---------- END TEXTURE OVERRIDES ----------
 
       function buildWrapperFromContainer(container){
         const wrapper = new BABYLON.TransformNode("lobbySkinWrap", scene);
@@ -1176,6 +1132,19 @@
         }catch(e){}
       }
 
+      function meshHasGeo(m){
+        try{
+          if(!m) return false;
+          if(typeof m.getTotalVertices === "function"){
+            return (m.getTotalVertices() || 0) > 0;
+          }
+          if(m.geometry) return true;
+          return false;
+        }catch(e){
+          return false;
+        }
+      }
+
       async function setLobbyWeapon(weaponSku){
         clearWeapon();
 
@@ -1206,13 +1175,11 @@
         weaponRoot.attachToBone(rightHand, skinned);
 
         weaponRoot.position.copyFrom(T.WEAPON_POS);
-
         weaponRoot.rotation.set(
           (T.WEAPON_PITCH_FIX || 0.0),
           Math.PI + (T.WEAPON_YAW_FIX || 0.0),
           0
         );
-
         weaponRoot.scaling.set(T.WEAPON_SCALE, T.WEAPON_SCALE, T.WEAPON_SCALE);
         currentWeaponRoot = weaponRoot;
 
@@ -1223,11 +1190,29 @@
         currentWeaponGrip = weaponGrip;
 
         const wMeshes = (w.meshes || []);
+
+        let attached = 0;
         wMeshes.forEach(m => {
           if(!m) return;
-          if(m === wMeshes[0]) return;
-          try{ m.parent = weaponGrip; }catch(e){}
+
+          const nm = (m.name || "").toLowerCase();
+          const looksLikeRoot = (nm === "__root__" || nm === "root" || nm.includes("rootnode"));
+
+          if(looksLikeRoot) return;
+
+          if(!meshHasGeo(m) && (m.getChildMeshes && m.getChildMeshes().length === 0)) return;
+
+          try{
+            m.parent = weaponGrip;
+            attached += 1;
+          }catch(e){}
         });
+
+        if(attached === 0){
+          try{
+            wMeshes.forEach(m => { try{ m.parent = weaponGrip; }catch(e){} });
+          }catch(e){}
+        }
       }
 
       async function setLobbySkin(skinSku){
@@ -1269,11 +1254,9 @@
 
           normalizeToGroundAndHeight(wrapper, 1.75);
           wrapper.scaling.scaleInPlace(0.72);
-
           wrapper.position.y += 0.06;
 
           frameCameraToRoot(wrapper);
-
           attachShadowToWrapper(wrapper);
 
           if(container.animationGroups && container.animationGroups.length){
@@ -1395,7 +1378,6 @@
       }
 
       window.__warzoneSetLobbySkin = setLobbySkin;
-
       createScene();
     })();
   </script>
