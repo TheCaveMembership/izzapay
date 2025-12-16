@@ -347,6 +347,13 @@
       cursor:not-allowed;
       opacity:.95;
     }
+    /* BUY AMMO button */
+    .shop-btn.ammo{
+      border-color:rgba(255,207,77,.85);
+      background:linear-gradient(90deg,rgba(59,43,11,.85),rgba(90,63,16,.85));
+      color:#ffe8a6;
+      font-weight:900;
+    }
 
     .msg{
       min-height:18px;
@@ -441,9 +448,7 @@
         </div>
 
         <div class="footer">
-          <div class="small">
-            If you equip a skin or weapon here, it will persist in your DB inventory, and the lobby can show it on return.
-          </div>
+          <div class="small"></div>
         </div>
       </div>
     </div>
@@ -734,6 +739,30 @@
       return !ALLOWED_WEAPONS.has(key);
     }
 
+    // AMMO packs, shown under EQUIP for weapons you own
+    function ammoPackForWeapon(rawSku){
+      const key = canonWeaponKey(rawSku);
+      if(key === "wz_basic_pistol"){
+        return {
+          weapon_sku: "wz_basic_pistol",
+          pack_sku: "wz_ammo_pistol_100",
+          label: "Buy ammo",
+          rounds: 100,
+          price_izza: 25
+        };
+      }
+      if(key === "wz_cityrunner_smg"){
+        return {
+          weapon_sku: "wz_cityrunner_smg",
+          pack_sku: "wz_ammo_smg_200",
+          label: "Buy ammo",
+          rounds: 200,
+          price_izza: 50
+        };
+      }
+      return null;
+    }
+
     // Shop logic
     let CURRENT_TAB = "{{ default_tab }}";
     const tabWeapons = document.getElementById("tabWeapons");
@@ -855,6 +884,21 @@
 
           side.appendChild(btn);
 
+          // BUY AMMO button, under EQUIP for weapons that are owned or starter
+          const showAmmo = (CURRENT_TAB === "weapons") && !isSoon && (it.starting || it.owned || it.equipped);
+          if(showAmmo){
+            const pack = ammoPackForWeapon(it.sku || "");
+            if(pack){
+              const ammoBtn = document.createElement("button");
+              ammoBtn.className = "shop-btn ammo";
+              ammoBtn.textContent = "Buy ammo";
+              ammoBtn.addEventListener("click", async () => {
+                await purchaseAmmo(pack);
+              });
+              side.appendChild(ammoBtn);
+            }
+          }
+
           row.appendChild(main);
           row.appendChild(side);
           elShopList.appendChild(row);
@@ -908,6 +952,41 @@
       }
 
       await loadShop();
+      await refreshWalletUI();
+    }
+
+    async function purchaseAmmo(pack){
+      const gate = await walletGateForPurchase();
+      if(!gate) return;
+
+      const ok = confirm("Spend " + pack.price_izza + " IZZA for " + pack.rounds + " rounds?");
+      if(!ok) return;
+
+      setMsg("Submitting IZZA transfer…", "");
+
+      // NOTE: Server endpoint to implement later without breaking current working flows
+      const res = await fetch("/warzone/api/ammo/purchase" + uQS(), {
+        method:"POST",
+        headers:{ "Content-Type":"application/json" },
+        body: JSON.stringify({
+          weapon_sku: pack.weapon_sku,
+          pack_sku: pack.pack_sku,
+          rounds: pack.rounds,
+          price_izza: pack.price_izza,
+          buyer_pub: gate.pub,
+          buyer_sec: gate.sec
+        }),
+        credentials:"include"
+      });
+
+      const data = await res.json().catch(()=>({}));
+
+      if(!res.ok || !data.ok){
+        setMsg("Ammo purchase failed, " + String((data && (data.error || data.detail)) || res.status), "err");
+        return;
+      }
+
+      setMsg("Ammo purchased, +" + pack.rounds + " rounds.", "ok");
       await refreshWalletUI();
     }
 
