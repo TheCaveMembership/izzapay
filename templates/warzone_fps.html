@@ -69,7 +69,6 @@
       pointer-events:none;
     }
     .hud-box{
-      pointer-events:none;
       border-radius:14px;
       border:1px solid rgba(132,153,255,.35);
       background:rgba(7,11,24,.62);
@@ -77,6 +76,7 @@
       padding:10px 12px;
       backdrop-filter:blur(8px);
       max-width:49vw;
+      pointer-events:auto; /* allow the Exit button to be clickable */
     }
     .hud-title{
       font-size:10px;
@@ -106,6 +106,13 @@
       border-color:rgba(255,184,107,.55);
       background:linear-gradient(90deg,rgba(60,34,0,.60),rgba(120,65,0,.35));
     }
+    .tag.btn{
+      cursor:pointer;
+      user-select:none;
+      border-color:rgba(255,59,107,.55);
+      background:linear-gradient(90deg,rgba(30,6,18,.75),rgba(80,10,30,.45));
+    }
+    .tag.btn:active{ transform:scale(.98); }
 
     /* Center overlay, entering and countdown */
     .center-overlay{
@@ -220,23 +227,6 @@
     }
     .fireBtn:active{ transform:scale(.98); }
 
-    .pauseBtn{
-      position:absolute;
-      left:18px;
-      top:62px;
-      padding:8px 10px;
-      border-radius:999px;
-      border:1px solid rgba(127,209,255,.55);
-      background:rgba(2,6,27,.55);
-      color:#e7f0ff;
-      font-size:11px;
-      letter-spacing:.16em;
-      text-transform:uppercase;
-      pointer-events:auto;
-      cursor:pointer;
-      box-shadow:0 0 18px rgba(0,255,255,.08);
-    }
-
     @media (min-width:900px){
       .stick{ width:160px; height:160px; }
       .fireBtn{ width:100px; height:100px; }
@@ -257,6 +247,7 @@
           <div class="hud-title">Operator</div>
           <div class="hud-row">
             <span class="tag" id="hudUser">loading</span>
+            <button class="tag btn" id="exitBtn" type="button">Exit</button>
             <span class="tag" id="hudWeapon">weapon</span>
           </div>
         </div>
@@ -264,7 +255,7 @@
           <div class="hud-title">Status</div>
           <div class="hud-row" style="justify-content:flex-end;">
             <span class="tag" id="hudAmmo">AMMO, --</span>
-            <span class="tag warn" id="hudZ">ZOMBIES, --</span>
+            <span class="tag warn" id="hudLevel">LEVEL, --</span>
           </div>
         </div>
       </div>
@@ -282,8 +273,6 @@
       <div class="countdown" id="countdownText">3</div>
 
       <div class="touch-ui">
-        <button class="pauseBtn" id="exitBtn" type="button">Exit</button>
-
         <div class="stick left" id="moveStick">
           <div class="nub" id="moveNub"></div>
         </div>
@@ -359,13 +348,19 @@
     const hudUser = document.getElementById("hudUser");
     const hudWeapon = document.getElementById("hudWeapon");
     const hudAmmo = document.getElementById("hudAmmo");
-    const hudZ = document.getElementById("hudZ");
+    const hudLevel = document.getElementById("hudLevel");
     const enterOverlay = document.getElementById("enterOverlay");
     const countdownText = document.getElementById("countdownText");
+    const exitBtn = document.getElementById("exitBtn");
 
     hudUser.textContent = USER_CANON || "Operator";
 
-    // Helpers for weapon sku consistency
+    exitBtn.addEventListener("click", () => {
+      const qs = window.location.search || "";
+      window.location.href = "/warzone/" + qs;
+    });
+
+    // Helpers for weapon sku consistency + display formatting
     function normalizeWeaponSku(s){
       const sku = (s || "").toString().trim();
       if (!sku) return "wz_basic_pistol";
@@ -374,6 +369,25 @@
       if (sku === "neon_marksman") return "wz_neon_marksman";
       return sku;
     }
+    function weaponLabelFromSku(sku){
+      const t = (sku || "").toString().replace(/^wz_/, "").toUpperCase();
+      return t.replaceAll("_", " ");
+    }
+
+    // LEVEL system (replaces ZOMBIES HUD)
+    let level = 1;
+    let killsThisLevel = 0;
+
+    function targetKillsForLevel(lv){
+      if(lv === 1) return 5;
+      if(lv === 2) return 6;
+      if(lv === 3) return 10;
+      return 10 + Math.max(0, (lv - 3)) * 2;
+    }
+    function setHudLevel(){
+      hudLevel.textContent = `LEVEL, ${level}`;
+    }
+    setHudLevel();
 
     // Babylon setup
     const canvas = document.getElementById("renderCanvas");
@@ -386,18 +400,17 @@
     let weaponSku = "wz_basic_pistol";
     let ammo = 0;
 
-    // Viewmodel
-    let weaponContainer = null;
-    let weaponGrip = null;
-
-    // We will load soldier skin too, so your equipped skin is actually used
-    // We hide it from the FPS camera to avoid blocking the view, but it is in the scene and follows the player
+    // Soldier (arms view) + weapon attached to hand bone (like lobby)
     let soldierContainer = null;
     let soldierRoot = null;
+    let soldierSkinned = null;
+
+    let weaponContainer = null;
+    let weaponRoot = null;
+    let weaponGrip = null;
 
     // Zombies
     const zombies = [];
-    let zombieCount = 0;
 
     // Fire behavior
     const FIRE = {
@@ -416,12 +429,6 @@
     const lookStick = document.getElementById("lookStick");
     const lookNub = document.getElementById("lookNub");
     const fireBtn = document.getElementById("fireBtn");
-    const exitBtn = document.getElementById("exitBtn");
-
-    exitBtn.addEventListener("click", () => {
-      const qs = window.location.search || "";
-      window.location.href = "/warzone/" + qs;
-    });
 
     function clamp(v, a, b){ return Math.max(a, Math.min(b, v)); }
 
@@ -508,16 +515,27 @@
         const z = hit.pickedMesh;
         z.metadata.hp = (z.metadata.hp || 1) - 1;
         if(z.metadata.hp <= 0){
-          // remove zombie
           const idx = zombies.findIndex(x => x.mesh === z);
           if(idx >= 0) zombies.splice(idx, 1);
           try{ z.dispose(); }catch(e){}
-          zombieCount = Math.max(0, zombieCount - 1);
-          hudZ.textContent = `ZOMBIES, ${zombieCount}`;
+
+          killsThisLevel += 1;
+
+          // Advance level when we hit the required kills
+          const target = targetKillsForLevel(level);
+          if(killsThisLevel >= target){
+            level += 1;
+            killsThisLevel = 0;
+            setHudLevel();
+            spawnLevel(level);
+          } else {
+            // keep pressure, replace a killed zombie if you want constant action
+            // (optional) spawn one to maintain count:
+            // createZombie(randomX, randomZ);
+          }
         }
       }
 
-      // Tiny recoil feel
       camera.rotation.x = clamp(camera.rotation.x - 0.02, -1.25, 1.25);
     }
 
@@ -526,7 +544,6 @@
       FIRE.holding = true;
 
       if(!isSMG()){
-        // pistol is single shot only, one shot per tap
         shootOnce();
       }
     }, { passive:false });
@@ -547,13 +564,14 @@
       return { rootUrl:"/assets/warzone3d/weapons/wz_basic_pistol/", fileName:"scene.gltf" };
     }
 
-    // Reuse your existing weapon tuning numbers, these are your proven alignments
+    // IMPORTANT: use the same "weapon in hand" attach logic as lobby
+    // These tuning numbers are copied from your lobby weapon attach (not the old FPS viewmodel)
     const WEAPON_TUNING = {
       wz_basic_pistol: {
         WEAPON_SCALE: 0.06000,
         WEAPON_YAW_FIX: 1.52080,
         WEAPON_PITCH_FIX: -0.03000,
-        WEAPON_POS:      new BABYLON.Vector3( 0.35, -0.25,  0.65),
+        WEAPON_POS:      new BABYLON.Vector3(-1.06900,  0.32700, -0.05800),
         WEAPON_GRIP_POS: new BABYLON.Vector3( 2.98400,  1.23000, -11.27200),
         WEAPON_GRIP_ROT: new BABYLON.Vector3(-0.23000,  0.00000,  0.01000),
       },
@@ -561,7 +579,7 @@
         WEAPON_SCALE: 0.11000,
         WEAPON_YAW_FIX: 1.10080,
         WEAPON_PITCH_FIX: -1.84000,
-        WEAPON_POS:      new BABYLON.Vector3( 0.52, -0.30,  0.85),
+        WEAPON_POS:      new BABYLON.Vector3( 1.18100,  1.01700, -0.05800),
         WEAPON_GRIP_POS: new BABYLON.Vector3( 7.42400, -2.71000, -11.27200),
         WEAPON_GRIP_ROT: new BABYLON.Vector3(-0.05000, -0.22000,  0.01000),
       },
@@ -569,7 +587,7 @@
         WEAPON_SCALE: 0.03000,
         WEAPON_YAW_FIX: 3.24160,
         WEAPON_PITCH_FIX: 0.12000,
-        WEAPON_POS:      new BABYLON.Vector3( 0.45, -0.28,  0.90),
+        WEAPON_POS:      new BABYLON.Vector3(-1.16900,  0.09700, -0.05800),
         WEAPON_GRIP_POS: new BABYLON.Vector3(48.64112,  0.58674,  9.32631),
         WEAPON_GRIP_ROT: new BABYLON.Vector3( 1.22000, -0.54000, -0.10000),
       }
@@ -614,7 +632,25 @@
       }
     }
 
+    // --- soldier + weapon attach helpers (same pattern as lobby) ---
+    function findSkinnedMeshFromContainer(container){
+      try{
+        const meshes = (container && container.meshes) ? container.meshes : [];
+        return meshes.find(m => m && m.skeleton) || null;
+      }catch(e){
+        return null;
+      }
+    }
+    function findBoneByNameOrIncludes(skeleton, want){
+      if (!skeleton || !skeleton.bones) return null;
+      const exact = skeleton.bones.find(b => (b.name || "") === want);
+      if (exact) return exact;
+      const wantLow = (want || "").toLowerCase();
+      return skeleton.bones.find(b => ((b.name || "").toLowerCase().includes(wantLow))) || null;
+    }
+
     function clearWeapon(){
+      try{ if(weaponRoot){ weaponRoot.dispose(true,false); weaponRoot = null; } }catch(e){}
       try{ if(weaponGrip){ weaponGrip.dispose(true,false); weaponGrip = null; } }catch(e){}
       try{
         if(weaponContainer){
@@ -625,43 +661,9 @@
       }catch(e){}
     }
 
-    async function setWeaponViewModel(sku){
-      clearWeapon();
-
-      const asset = getWeaponAsset(sku);
-      const cont = await BABYLON.SceneLoader.LoadAssetContainerAsync(asset.rootUrl, asset.fileName, scene);
-      cont.addAllToScene();
-      weaponContainer = cont;
-
-      const tune = getWeaponTune(sku);
-
-      weaponGrip = new BABYLON.TransformNode("weaponGrip", scene);
-      weaponGrip.parent = camera;
-      weaponGrip.position.copyFrom(tune.WEAPON_POS);
-
-      // Keep it stable, attach as viewmodel
-      weaponGrip.rotation.set(
-        (tune.WEAPON_PITCH_FIX || 0.0),
-        Math.PI + (tune.WEAPON_YAW_FIX || 0.0),
-        0
-      );
-      weaponGrip.scaling.set(tune.WEAPON_SCALE, tune.WEAPON_SCALE, tune.WEAPON_SCALE);
-
-      // parent all meshes under grip
-      (cont.meshes || []).forEach(m => {
-        if(!m) return;
-        const nm = (m.name || "").toLowerCase();
-        if(nm === "__root__" || nm.includes("rootnode")) return;
-        try{
-          m.parent = weaponGrip;
-          m.isPickable = false;
-        }catch(e){}
-      });
-
-      hudWeapon.textContent = `WEAPON, ${sku.replace(/^wz_/, "").toUpperCase()}`;
-    }
-
     function clearSoldier(){
+      clearWeapon();
+      soldierSkinned = null;
       try{ if(soldierRoot){ soldierRoot.dispose(true,false); soldierRoot = null; } }catch(e){}
       try{
         if(soldierContainer){
@@ -672,7 +674,30 @@
       }catch(e){}
     }
 
-    async function loadSoldierInScene(skinSku){
+    function setArmsOnlyVisibility(container){
+      // Show only arm/hand meshes so the player sees their equipped skin in FPS
+      const meshes = (container && container.meshes) ? container.meshes : [];
+      meshes.forEach(m => {
+        if(!m) return;
+        const nm = (m.name || "").toLowerCase();
+        const isArms =
+          nm.includes("arm") ||
+          nm.includes("forearm") ||
+          nm.includes("hand") ||
+          nm.includes("wrist") ||
+          nm.includes("glove");
+
+        try{
+          m.isPickable = false;
+          m.visibility = isArms ? 1.0 : 0.0;
+          m.renderingGroupId = 2;
+        }catch(e){}
+      });
+    }
+
+    async function loadSoldierArmsInFPS(skinSku){
+      // Right now the soldier skin variants are handled by your lobby texture override system.
+      // FPS uses the same base model and shows arms from that model (so skins appear in FPS).
       clearSoldier();
 
       const asset = getSkinAsset();
@@ -680,15 +705,75 @@
       cont.addAllToScene();
       soldierContainer = cont;
 
-      // Put soldier at player position, but hide from FPS camera so it never blocks view
-      soldierRoot = new BABYLON.TransformNode("soldierRoot", scene);
-      (cont.meshes || []).forEach(m => {
+      soldierRoot = new BABYLON.TransformNode("soldierRootFPS", scene);
+
+      // Parent all nodes to soldierRoot
+      const nodes = []
+        .concat(cont.meshes || [])
+        .concat(cont.transformNodes || []);
+      nodes.forEach(n => {
+        if(!n) return;
+        try{ n.parent = soldierRoot; }catch(e){}
+      });
+
+      // Put the arms in first-person space (parented to camera)
+      soldierRoot.parent = camera;
+      soldierRoot.position = new BABYLON.Vector3(0.00, -1.72, 0.00);
+      soldierRoot.rotation = new BABYLON.Vector3(0, Math.PI, 0);
+
+      // Slightly scale so hands/arms feel right in view
+      soldierRoot.scaling = new BABYLON.Vector3(0.72, 0.72, 0.72);
+
+      setArmsOnlyVisibility(cont);
+
+      soldierSkinned = findSkinnedMeshFromContainer(cont);
+    }
+
+    async function attachWeaponToSoldierHandFPS(sku){
+      clearWeapon();
+      if(!soldierSkinned || !soldierSkinned.skeleton) return;
+
+      const skeleton = soldierSkinned.skeleton;
+
+      const boneNameExact = "mixamorig:RightHand.209_221";
+      let rightHand = findBoneByNameOrIncludes(skeleton, boneNameExact);
+      if(!rightHand){
+        rightHand = skeleton.bones.find(b => /RightHand/i.test(b.name || "")) || null;
+      }
+      if(!rightHand) return;
+
+      const asset = getWeaponAsset(sku);
+      const w = await BABYLON.SceneLoader.LoadAssetContainerAsync(asset.rootUrl, asset.fileName, scene);
+      w.addAllToScene();
+      weaponContainer = w;
+
+      const T = getWeaponTune(sku);
+
+      weaponRoot = new BABYLON.TransformNode("weaponRootFPS", scene);
+      weaponRoot.attachToBone(rightHand, soldierSkinned);
+
+      weaponRoot.position.copyFrom(T.WEAPON_POS);
+      weaponRoot.rotation.set(
+        (T.WEAPON_PITCH_FIX || 0.0),
+        Math.PI + (T.WEAPON_YAW_FIX || 0.0),
+        0
+      );
+      weaponRoot.scaling.set(T.WEAPON_SCALE, T.WEAPON_SCALE, T.WEAPON_SCALE);
+
+      weaponGrip = new BABYLON.TransformNode("weaponGripFPS", scene);
+      weaponGrip.parent = weaponRoot;
+      weaponGrip.position.copyFrom(T.WEAPON_GRIP_POS);
+      weaponGrip.rotation.copyFrom(T.WEAPON_GRIP_ROT);
+
+      (w.meshes || []).forEach(m => {
         if(!m) return;
+        const nm = (m.name || "").toLowerCase();
+        const looksLikeRoot = (nm === "__root__" || nm === "root" || nm.includes("rootnode"));
+        if(looksLikeRoot) return;
         try{
-          m.parent = soldierRoot;
+          m.parent = weaponGrip;
           m.isPickable = false;
-          // Hide soldier body for FPS, but it is still loaded and used as your equipped skin
-          m.visibility = 0.0;
+          m.renderingGroupId = 2;
         }catch(e){}
       });
     }
@@ -702,16 +787,21 @@
       mat.diffuseColor = new BABYLON.Color3(0.1, 0.2, 0.1);
       body.material = mat;
       zombies.push({ mesh: body, speed: 1.2 + Math.random()*0.8 });
-      zombieCount += 1;
-      hudZ.textContent = `ZOMBIES, ${zombieCount}`;
     }
 
-    function spawnWave(){
-      zombieCount = 0;
-      hudZ.textContent = "ZOMBIES, 0";
-      zombies.splice(0, zombies.length);
+    function clearZombies(){
+      while(zombies.length){
+        const z = zombies.pop();
+        try{ z.mesh && z.mesh.dispose(); }catch(e){}
+      }
+    }
 
-      const n = 12;
+    function spawnLevel(lv){
+      clearZombies();
+
+      // Spawn count equals the required kills for this level (simple, clean, matches your example)
+      const n = targetKillsForLevel(lv);
+
       for(let i=0;i<n;i++){
         const angle = (i / n) * Math.PI * 2;
         const r = 18 + Math.random()*10;
@@ -746,7 +836,6 @@
       camera.speed = 0.15;
       camera.angularSensibility = 2500;
 
-      // We control movement manually, keep inputs off
       camera.inputs.clear();
 
       engine.runRenderLoop(() => {
@@ -765,12 +854,10 @@
         const mvX = moveState.dx;
         const mvY = moveState.dy;
 
-        // dy positive is down on screen, invert for forward
         const moveF = -mvY;
         const moveS = mvX;
 
         const spd = 4.2 * dt;
-
         const delta = forward.scale(moveF * spd).add(right.scale(moveS * spd));
         camera.position.addInPlace(new BABYLON.Vector3(delta.x, 0, delta.z));
 
@@ -783,13 +870,6 @@
         camera.rotation.x += ly * lookSpeed * dt;
         camera.rotation.x = clamp(camera.rotation.x, -1.2, 1.2);
 
-        // Keep weapon fixed in front of camera
-        if(weaponGrip){
-          // slight sway
-          const sway = Math.sin(performance.now() * 0.004) * 0.01;
-          weaponGrip.position.x = weaponGrip.position.x + (sway * 0.0);
-        }
-
         // Zombies chase
         for(const z of zombies){
           const m = z.mesh;
@@ -797,30 +877,16 @@
 
           const to = camera.position.subtract(m.position);
           const dist = Math.max(0.001, to.length());
-          const dir = to.scale(1.0 / dist);
+          const dirv = to.scale(1.0 / dist);
 
-          m.position.x += dir.x * z.speed * dt;
-          m.position.z += dir.z * z.speed * dt;
-
-          // Face player
-          m.rotation.y = Math.atan2(dir.x, dir.z);
-
-          // Tiny attack bump if close
-          if(dist < 1.2){
-            // optional, you can add hp later
-          }
+          m.position.x += dirv.x * z.speed * dt;
+          m.position.z += dirv.z * z.speed * dt;
+          m.rotation.y = Math.atan2(dirv.x, dirv.z);
         }
 
         // SMG auto fire if holding
         if(isSMG() && FIRE.holding){
           shootOnce();
-        }
-
-        // Keep soldierRoot following player position, still using equipped skin
-        if(soldierRoot){
-          soldierRoot.position.x = camera.position.x;
-          soldierRoot.position.y = 0;
-          soldierRoot.position.z = camera.position.z;
         }
       });
 
@@ -828,27 +894,30 @@
     }
 
     async function runEnterSequence(){
-      // Show enter overlay first, loadouts and ammo
       enterOverlay.style.display = "flex";
       countdownText.classList.remove("show");
 
       weaponSku = await fetchEquippedWeaponSku();
       ammo = await fetchAmmoForCurrentWeapon();
 
-      hudWeapon.textContent = `WEAPON, ${weaponSku.replace(/^wz_/, "").toUpperCase()}`;
+      hudWeapon.textContent = `WEAPON, ${weaponLabelFromSku(weaponSku)}`;
       hudAmmo.textContent = `AMMO, ${ammo}`;
+      setHudLevel();
 
       const skinSku = await fetchEquippedSkinSku();
-      await loadSoldierInScene(skinSku);
-      await setWeaponViewModel(weaponSku);
 
-      // Spawn zombies, but game is paused until countdown completes
-      spawnWave();
+      // Load arms + attach weapon to hand bone (so it matches lobby pointing/hand position)
+      await loadSoldierArmsInFPS(skinSku);
+      await attachWeaponToSoldierHandFPS(weaponSku);
 
-      // Small delay to feel premium
+      // Start at level 1
+      level = 1;
+      killsThisLevel = 0;
+      setHudLevel();
+      spawnLevel(level);
+
       await new Promise(r => setTimeout(r, 750));
 
-      // Hide enter overlay, run countdown over live FPS view
       enterOverlay.style.display = "none";
 
       const steps = ["3","2","1","GO"];
@@ -869,7 +938,6 @@
         await runEnterSequence();
       }catch(e){
         console.error("[WARZONE FPS] boot failed", e);
-        // Keep it playable even if something fails
         try{ enterOverlay.style.display = "none"; }catch(_){}
       }
     })();
