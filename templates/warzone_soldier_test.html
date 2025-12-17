@@ -34,13 +34,19 @@
       color:#35ff6b;
       font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
       font-size:12px;
-      line-height:1.35;
+      line-height:1.32;
       text-shadow: 0 0 10px rgba(0,0,0,.85);
       white-space:pre;
       pointer-events:none;
       max-width: calc(100vw - 20px);
       overflow:hidden;
+      background: rgba(0,0,0,.30);
+      padding:8px 10px;
+      border: 1px solid rgba(53,255,107,.25);
+      border-radius: 10px;
+      backdrop-filter: blur(4px);
     }
+
     .stick{
       position:fixed;
       width:140px;
@@ -67,13 +73,108 @@
       box-shadow:0 0 18px rgba(255,59,107,.10);
       pointer-events:none;
     }
+
+    /* Mobile tuning UI */
+    #ui{
+      position: fixed;
+      top: 10px;
+      right: 10px;
+      z-index: 10000;
+      display:flex;
+      flex-direction:column;
+      gap:8px;
+      align-items:flex-end;
+      user-select:none;
+      -webkit-user-select:none;
+    }
+    .btn{
+      border: 1px solid rgba(127,209,255,.35);
+      background: rgba(0,0,0,.45);
+      color: #d9f3ff;
+      font: 600 12px/1 system-ui, -apple-system, Segoe UI, Roboto, Arial;
+      padding: 10px 12px;
+      border-radius: 12px;
+      backdrop-filter: blur(4px);
+      touch-action: manipulation;
+    }
+    .btn:active{ transform: scale(0.98); }
+
+    #pad{
+      display:none;
+      width: 220px;
+      border: 1px solid rgba(127,209,255,.22);
+      background: rgba(0,0,0,.35);
+      border-radius: 14px;
+      padding: 10px;
+      backdrop-filter: blur(4px);
+    }
+    #pad.show{ display:block; }
+
+    .row{ display:flex; gap:8px; justify-content:flex-end; }
+    .pill{
+      min-width: 46px;
+      text-align:center;
+      padding: 10px 10px;
+      border-radius: 12px;
+      border: 1px solid rgba(255,59,107,.30);
+      background: rgba(0,0,0,.35);
+      color:#ffd4df;
+      font: 700 12px/1 system-ui, -apple-system, Segoe UI, Roboto, Arial;
+      touch-action: manipulation;
+    }
+    .pill.blue{
+      border-color: rgba(127,209,255,.35);
+      color:#d9f3ff;
+    }
+    .label{
+      color:#9fdcff;
+      font: 700 11px/1 system-ui, -apple-system, Segoe UI, Roboto, Arial;
+      opacity:.85;
+      padding: 6px 0 2px 0;
+      text-align:right;
+    }
   </style>
+
   <script src="https://cdn.babylonjs.com/babylon.js"></script>
   <script src="https://cdn.babylonjs.com/loaders/babylonjs.loaders.min.js"></script>
 </head>
 <body>
   <canvas id="renderCanvas"></canvas>
   <div id="hud">Loading...</div>
+
+  <div id="ui">
+    <button class="btn" id="toggleHudBtn">HUD, hide</button>
+    <button class="btn" id="togglePadBtn">Tuner, show</button>
+
+    <div id="pad">
+      <div class="label">Mode</div>
+      <div class="row">
+        <button class="pill blue" data-act="modePrev">◀</button>
+        <button class="pill blue" data-act="modeNext">▶</button>
+      </div>
+
+      <div class="label">Step</div>
+      <div class="row">
+        <button class="pill" data-act="stepFine">fine</button>
+        <button class="pill" data-act="stepNorm">norm</button>
+        <button class="pill" data-act="stepFast">fast</button>
+      </div>
+
+      <div class="label">Adjust</div>
+      <div class="row">
+        <button class="pill blue" data-act="xNeg">X-</button>
+        <button class="pill blue" data-act="xPos">X+</button>
+        <button class="pill blue" data-act="yNeg">Y-</button>
+        <button class="pill blue" data-act="yPos">Y+</button>
+      </div>
+      <div class="row">
+        <button class="pill blue" data-act="zNeg">Z-</button>
+        <button class="pill blue" data-act="zPos">Z+</button>
+        <button class="pill" data-act="copy">copy</button>
+        <button class="pill" data-act="reload">reload</button>
+      </div>
+    </div>
+  </div>
 
   <div class="stick left" id="moveStick"><div class="nub" id="moveNub"></div></div>
   <div class="stick right" id="lookStick"><div class="nub" id="lookNub"></div></div>
@@ -196,16 +297,11 @@
 
     // ---------- viewmodel + weapon tuning ----------
     const TUNE = {
-      // viewmodel placement, these defaults are safer for a full body model
-      VM_POS:   new BABYLON.Vector3( 0.00, -0.90,  1.05),
+      // start values that should visibly show something, then you tune from here
+      VM_POS:   new BABYLON.Vector3( 0.00, -1.25,  0.90),
       VM_ROT:   new BABYLON.Vector3( 0.00,  Math.PI, 0.00),
       VM_SCALE: 0.78,
 
-      // clip plane offsets in camera space
-      CLIP_FORWARD: 0.06,
-      CLIP_CHEST_Y: -0.20,
-
-      // weapon attach tuning
       WEAPON_SCALE: 0.03000,
       WEAPON_YAW_FIX: 3.24160,
       WEAPON_PITCH_FIX: 0.12000,
@@ -216,6 +312,7 @@
     };
 
     let MODE = 1;
+
     function modeName(){
       return (
         MODE===1 ? "VM_POS" :
@@ -234,11 +331,12 @@
       );
     }
 
-    function stepForEvent(ev){
-      let s = 0.01;
-      if (ev.shiftKey) s = 0.05;
-      if (ev.altKey)   s = 0.001;
-      return s;
+    // step control (mobile)
+    let STEP = 0.01; // norm
+    function setStep(which){
+      STEP = which === "fine" ? 0.001 : which === "fast" ? 0.05 : 0.01;
+      logLine(`[step] ${which}, ${STEP}`);
+      renderHud();
     }
 
     function lockText(){
@@ -246,9 +344,6 @@
 const VM_POS   = new BABYLON.Vector3(${TUNE.VM_POS.x.toFixed(5)}, ${TUNE.VM_POS.y.toFixed(5)}, ${TUNE.VM_POS.z.toFixed(5)});
 const VM_ROT   = new BABYLON.Vector3(${TUNE.VM_ROT.x.toFixed(5)}, ${TUNE.VM_ROT.y.toFixed(5)}, ${TUNE.VM_ROT.z.toFixed(5)});
 const VM_SCALE = ${TUNE.VM_SCALE.toFixed(5)};
-
-const CLIP_FORWARD = ${TUNE.CLIP_FORWARD.toFixed(5)};
-const CLIP_CHEST_Y = ${TUNE.CLIP_CHEST_Y.toFixed(5)};
 
 const WEAPON_SCALE = ${TUNE.WEAPON_SCALE.toFixed(5)};
 const WEAPON_YAW_FIX = ${TUNE.WEAPON_YAW_FIX.toFixed(5)};
@@ -285,11 +380,10 @@ const JOY_INVERT_Y = ${JOY.INVERT_Y};`;
     let weaponHold = null;
     let mergedWeaponMesh = null;
 
-    const soldierMats = new Set();
     const logLines = [];
     function logLine(s){
       logLines.push(String(s || ""));
-      if (logLines.length > 14) logLines.shift();
+      if (logLines.length > 10) logLines.shift();
     }
 
     function findSkinnedMeshFromContainer(container){
@@ -320,8 +414,6 @@ const JOY_INVERT_Y = ${JOY.INVERT_Y};`;
     }
 
     function clearAll(){
-      soldierMats.clear();
-
       try{ if(mergedWeaponMesh){ mergedWeaponMesh.dispose(false, true); mergedWeaponMesh = null; } }catch(e){}
       try{ if(weaponHold){ weaponHold.dispose(true, false); weaponHold = null; } }catch(e){}
       try{ if(weaponGrip){ weaponGrip.dispose(true, false); weaponGrip = null; } }catch(e){}
@@ -383,39 +475,15 @@ const JOY_INVERT_Y = ${JOY.INVERT_Y};`;
       }
     }
 
-    function ensureSoldierMaterialClones(container){
+    function forceVisible(container, groupId){
       const meshes = (container && container.meshes) ? container.meshes : [];
       meshes.forEach(m => {
-        if(!m || !m.material) return;
+        if(!m) return;
         try{
-          if (m.name === "__root__") return;
-          if (soldierMats.has(m.material)) return;
-
-          const oldMat = m.material;
-          const newMat = oldMat.clone(oldMat.name + "_fpsvm");
-          m.material = newMat;
-          soldierMats.add(newMat);
-        }catch(e){}
-      });
-    }
-
-    function updateViewmodelClipPlanes(){
-      if(!soldierContainer || soldierMats.size === 0) return;
-
-      const forward = camera.getDirection(new BABYLON.Vector3(0,0,1));
-      const up = camera.getDirection(new BABYLON.Vector3(0,1,0));
-
-      const pForward = camera.position.add(forward.scale(TUNE.CLIP_FORWARD));
-      const pChest   = camera.position.add(up.scale(TUNE.CLIP_CHEST_Y));
-
-      const planeForward = BABYLON.Plane.FromPositionAndNormal(pForward, forward);
-      const planeChest   = BABYLON.Plane.FromPositionAndNormal(pChest, up);
-
-      soldierMats.forEach(mat => {
-        try{
-          mat.backFaceCulling = false;
-          mat.clipPlane  = planeForward;
-          mat.clipPlane2 = planeChest;
+          m.visibility = 1.0;
+          m.isPickable = false;
+          m.alwaysSelectAsActiveMesh = true;
+          m.renderingGroupId = groupId || 2;
         }catch(e){}
       });
     }
@@ -423,7 +491,7 @@ const JOY_INVERT_Y = ${JOY.INVERT_Y};`;
     async function loadFPSViewmodelAndWeapon(){
       clearAll();
 
-      logLine("[boot] loading soldier container");
+      logLine("[boot] loading soldier");
       const sCont = await BABYLON.SceneLoader.LoadAssetContainerAsync(SOLDIER_ROOT, SOLDIER_FILE, scene);
       sCont.addAllToScene();
       soldierContainer = sCont;
@@ -431,35 +499,32 @@ const JOY_INVERT_Y = ${JOY.INVERT_Y};`;
       soldierRoot = new BABYLON.TransformNode("soldierRootFPS", scene);
       soldierRoot.parent = camera;
 
-      // IMPORTANT, only parent rootNodes, never flatten every node
+      // SAFE, keep hierarchy, parent only root nodes
       (sCont.rootNodes || []).forEach(rn => {
+        if(!rn) return;
         try{ rn.parent = soldierRoot; }catch(e){}
       });
 
       applyViewmodelTune();
+      forceVisible(sCont, 2);
 
       skinnedMesh = findSkinnedMeshFromContainer(sCont);
       skeleton = skinnedMesh?.skeleton || null;
 
       if(!skinnedMesh || !skeleton){
-        logLine("[vm] skinned mesh or skeleton not found");
+        logLine("[vm] skeleton not found");
       } else {
-        logLine(`[vm] skeleton bones, ${skeleton.bones.length}`);
+        logLine(`[vm] bones ${skeleton.bones.length}`);
       }
 
-      // This soldier uses generic mesh names, so do FPS clipping instead of name hiding
-      ensureSoldierMaterialClones(sCont);
-      updateViewmodelClipPlanes();
-      logLine("[vm] clip planes enabled");
-
-      logLine("[boot] loading weapon container");
+      logLine("[boot] loading weapon");
       const wCont = await BABYLON.SceneLoader.LoadAssetContainerAsync(WEAPON_ROOT, WEAPON_FILE, scene);
       wCont.addAllToScene();
       weaponContainer = wCont;
 
       const rightHand = findBoneSmart(skeleton);
       if(!rightHand){
-        logLine("[gun] right hand bone not found, weapon will parent to camera");
+        logLine("[gun] no right hand bone, camera parent fallback");
       }
 
       weaponRoot = new BABYLON.TransformNode("weaponRoot", scene);
@@ -471,40 +536,26 @@ const JOY_INVERT_Y = ${JOY.INVERT_Y};`;
 
       if(rightHand && skinnedMesh){
         weaponRoot.attachToBone(rightHand, skinnedMesh);
-        logLine(`[gun] attached to bone, ${rightHand.name || "RightHand"}`);
+        logLine(`[gun] bone ${rightHand.name || "RightHand"}`);
       } else {
         weaponRoot.parent = camera;
         weaponRoot.position.copyFrom(TUNE.VM_POS);
-        logLine("[gun] fallback, weaponRoot parented to camera");
       }
 
-      // parent weapon container properly
-      (wCont.rootNodes || []).forEach(rn => {
-        if(!rn) return;
-        if(rn.name === "__root__") return;
-        try{ rn.parent = weaponHold; }catch(e){}
-      });
-
+      // Attach weapon meshes (do NOT rely on rootNodes for this asset)
       const wMeshes = (wCont.meshes || []).filter(m => m && (m.name || "").toLowerCase() !== "__root__");
       const merged = tryMergeWeaponMeshes(wMeshes);
 
       if(merged){
         mergedWeaponMesh = merged;
         merged.parent = weaponHold;
-        logLine(`[gun] merged parts, ${wMeshes.length} to 1`);
+        logLine(`[gun] merged ${wMeshes.length} -> 1`);
       } else {
         wMeshes.forEach(m => { try{ m.parent = weaponHold; }catch(e){} });
-        logLine(`[gun] attached parts, ${wMeshes.length}`);
+        logLine(`[gun] parts ${wMeshes.length}`);
       }
 
-      (wMeshes || []).forEach(m => {
-        if(!m) return;
-        try{
-          m.visibility = 1.0;
-          m.renderingGroupId = 2;
-          m.alwaysSelectAsActiveMesh = true;
-        }catch(e){}
-      });
+      forceVisible(wCont, 2);
       if(mergedWeaponMesh){
         try{
           mergedWeaponMesh.visibility = 1.0;
@@ -514,45 +565,29 @@ const JOY_INVERT_Y = ${JOY.INVERT_Y};`;
       }
 
       applyTuneToWeapon();
-      logLine("[ready] use keys to tune, press C to copy constants");
+      logLine("[ready] tuner ok");
     }
 
     function renderHud(){
+      // SHORT HUD so it doesn't cover the screen
       hud.textContent =
-`FPS viewmodel tuner, Soldier + Neon Marksman
-Mode: ${MODE}, ${modeName()}
+`FPS tuner
+Mode ${MODE} ${modeName()}
+Step ${STEP}
 
-Modes, 1 VM_POS, 2 VM_ROT, 3 VM_SCALE, 4 WEAPON_POS, 5 GRIP_POS, 6 GRIP_ROT, 7 YAW, 8 PITCH, 9 W_SCALE
-Modes, 10 DZ, 11 LOOK, 12 MOVE, 13 INV_Y
-Keys, arrows XY, Q E Z, Shift fast, Alt slow, C copy, R reload assets
+VM_POS   ${TUNE.VM_POS.x.toFixed(3)}, ${TUNE.VM_POS.y.toFixed(3)}, ${TUNE.VM_POS.z.toFixed(3)}
+VM_ROT   ${TUNE.VM_ROT.x.toFixed(3)}, ${TUNE.VM_ROT.y.toFixed(3)}, ${TUNE.VM_ROT.z.toFixed(3)}
+VM_SCALE ${TUNE.VM_SCALE.toFixed(3)}
 
-VM_POS   : ${TUNE.VM_POS.x.toFixed(5)}, ${TUNE.VM_POS.y.toFixed(5)}, ${TUNE.VM_POS.z.toFixed(5)}
-VM_ROT   : ${TUNE.VM_ROT.x.toFixed(5)}, ${TUNE.VM_ROT.y.toFixed(5)}, ${TUNE.VM_ROT.z.toFixed(5)}
-VM_SCALE : ${TUNE.VM_SCALE.toFixed(5)}
+W_POS    ${TUNE.WEAPON_POS.x.toFixed(3)}, ${TUNE.WEAPON_POS.y.toFixed(3)}, ${TUNE.WEAPON_POS.z.toFixed(3)}
+GRIP_POS ${TUNE.WEAPON_GRIP_POS.x.toFixed(3)}, ${TUNE.WEAPON_GRIP_POS.y.toFixed(3)}, ${TUNE.WEAPON_GRIP_POS.z.toFixed(3)}
+YAW ${TUNE.WEAPON_YAW_FIX.toFixed(3)}  PITCH ${TUNE.WEAPON_PITCH_FIX.toFixed(3)}  W_SCALE ${TUNE.WEAPON_SCALE.toFixed(4)}
 
-CLIP FWD : ${TUNE.CLIP_FORWARD.toFixed(5)}
-CLIP Y   : ${TUNE.CLIP_CHEST_Y.toFixed(5)}
-
-W_POS    : ${TUNE.WEAPON_POS.x.toFixed(5)}, ${TUNE.WEAPON_POS.y.toFixed(5)}, ${TUNE.WEAPON_POS.z.toFixed(5)}
-GRIP_POS : ${TUNE.WEAPON_GRIP_POS.x.toFixed(5)}, ${TUNE.WEAPON_GRIP_POS.y.toFixed(5)}, ${TUNE.WEAPON_GRIP_POS.z.toFixed(5)}
-GRIP_ROT : ${TUNE.WEAPON_GRIP_ROT.x.toFixed(5)}, ${TUNE.WEAPON_GRIP_ROT.y.toFixed(5)}, ${TUNE.WEAPON_GRIP_ROT.z.toFixed(5)}
-YAW_FIX  : ${TUNE.WEAPON_YAW_FIX.toFixed(5)}
-PITCH_FIX: ${TUNE.WEAPON_PITCH_FIX.toFixed(5)}
-W_SCALE  : ${TUNE.WEAPON_SCALE.toFixed(5)}
-
-JOY DZ   : ${JOY.DEADZONE.toFixed(3)}
-JOY LOOK : ${JOY.LOOK_SENS.toFixed(3)}
-JOY MOVE : ${JOY.MOVE_SPEED.toFixed(3)}
-INV Y    : ${JOY.INVERT_Y}
-
-${lockText()}
-
-log
-${logLines.join("\n")}`;
+log ${logLines.join(" , ")}`;
     }
 
-    function adjust(ev, dx, dy, dz){
-      const s = stepForEvent(ev);
+    function adjust(dx, dy, dz){
+      const s = STEP;
 
       if (MODE === 1){
         TUNE.VM_POS.x += dx*s; TUNE.VM_POS.y += dy*s; TUNE.VM_POS.z += dz*s;
@@ -594,42 +629,29 @@ ${logLines.join("\n")}`;
       renderHud();
     }
 
+    // Keyboard still works on desktop
     window.addEventListener("keydown", async (ev) => {
       if (["ArrowUp","ArrowDown","ArrowLeft","ArrowRight"," "].includes(ev.key)) ev.preventDefault();
 
-      if (ev.key >= "1" && ev.key <= "9"){
-        MODE = parseInt(ev.key, 10);
-        renderHud();
-        return;
-      }
-      if (ev.key === "0"){
-        MODE = 10;
-        renderHud();
-        return;
-      }
+      if (ev.key >= "1" && ev.key <= "9"){ MODE = parseInt(ev.key, 10); renderHud(); return; }
+      if (ev.key === "0"){ MODE = 10; renderHud(); return; }
       if (ev.key.toLowerCase() === "l"){ MODE = 11; renderHud(); return; }
       if (ev.key.toLowerCase() === "m"){ MODE = 12; renderHud(); return; }
       if (ev.key.toLowerCase() === "i"){ MODE = 13; renderHud(); return; }
 
-      if (ev.key.toLowerCase() === "r"){
-        await loadFPSViewmodelAndWeapon();
-        renderHud();
-        return;
-      }
+      if (ev.key.toLowerCase() === "r"){ await loadFPSViewmodelAndWeapon(); renderHud(); return; }
+      if (ev.key.toLowerCase() === "c"){ await copyLock(); logLine("[copied]"); renderHud(); return; }
 
-      if (ev.key.toLowerCase() === "c"){
-        await copyLock();
-        logLine("[copied] constants");
-        renderHud();
-        return;
-      }
+      if (ev.shiftKey) STEP = 0.05;
+      else if (ev.altKey) STEP = 0.001;
+      else STEP = 0.01;
 
-      if (ev.key === "ArrowLeft")  return adjust(ev, -1,  0,  0);
-      if (ev.key === "ArrowRight") return adjust(ev,  1,  0,  0);
-      if (ev.key === "ArrowUp")    return adjust(ev,  0,  1,  0);
-      if (ev.key === "ArrowDown")  return adjust(ev,  0, -1,  0);
-      if (ev.key.toLowerCase() === "q") return adjust(ev, 0, 0, -1);
-      if (ev.key.toLowerCase() === "e") return adjust(ev, 0, 0,  1);
+      if (ev.key === "ArrowLeft")  return adjust(-1,  0,  0);
+      if (ev.key === "ArrowRight") return adjust( 1,  0,  0);
+      if (ev.key === "ArrowUp")    return adjust( 0,  1,  0);
+      if (ev.key === "ArrowDown")  return adjust( 0, -1,  0);
+      if (ev.key.toLowerCase() === "q") return adjust(0, 0, -1);
+      if (ev.key.toLowerCase() === "e") return adjust(0, 0,  1);
     }, { passive:false });
 
     // ---------- FPS movement loop using sticks ----------
@@ -658,20 +680,62 @@ ${logLines.join("\n")}`;
       camera.rotation.y += lx * JOY.LOOK_SENS * dt;
       camera.rotation.x += ly * JOY.LOOK_SENS * dt;
       camera.rotation.x = clamp(camera.rotation.x, -1.2, 1.2);
+    });
 
-      // keep FPS clip planes tracking camera every frame
-      updateViewmodelClipPlanes();
+    // ---------- Mobile UI wiring ----------
+    const toggleHudBtn = document.getElementById("toggleHudBtn");
+    const togglePadBtn = document.getElementById("togglePadBtn");
+    const pad = document.getElementById("pad");
+
+    let hudShown = true;
+    toggleHudBtn.addEventListener("click", () => {
+      hudShown = !hudShown;
+      hud.style.display = hudShown ? "block" : "none";
+      toggleHudBtn.textContent = hudShown ? "HUD, hide" : "HUD, show";
+    });
+
+    togglePadBtn.addEventListener("click", () => {
+      const show = !pad.classList.contains("show");
+      pad.classList.toggle("show", show);
+      togglePadBtn.textContent = show ? "Tuner, hide" : "Tuner, show";
+    });
+
+    function modeClamp(m){ return clamp(m, 1, 13) | 0; }
+
+    function doAction(act){
+      if(act === "modePrev"){ MODE = modeClamp(MODE - 1); renderHud(); return; }
+      if(act === "modeNext"){ MODE = modeClamp(MODE + 1); renderHud(); return; }
+
+      if(act === "stepFine"){ setStep("fine"); return; }
+      if(act === "stepNorm"){ setStep("norm"); return; }
+      if(act === "stepFast"){ setStep("fast"); return; }
+
+      if(act === "xNeg"){ adjust(-1,0,0); return; }
+      if(act === "xPos"){ adjust( 1,0,0); return; }
+      if(act === "yNeg"){ adjust(0,-1,0); return; }
+      if(act === "yPos"){ adjust(0, 1,0); return; }
+      if(act === "zNeg"){ adjust(0,0,-1); return; }
+      if(act === "zPos"){ adjust(0,0, 1); return; }
+
+      if(act === "copy"){ copyLock(); logLine("[copied]"); renderHud(); return; }
+      if(act === "reload"){ loadFPSViewmodelAndWeapon().then(renderHud); return; }
+    }
+
+    pad.addEventListener("click", (e) => {
+      const btn = e.target.closest("[data-act]");
+      if(!btn) return;
+      doAction(btn.getAttribute("data-act"));
     });
 
     // ---------- boot ----------
     (async () => {
       try{
-        logLine("[boot] starting");
+        logLine("[boot]");
         renderHud();
         await loadFPSViewmodelAndWeapon();
         renderHud();
       }catch(e){
-        logLine(`[EXCEPTION] ${e?.message || e}`);
+        logLine(`[EXC] ${e?.message || e}`);
         renderHud();
         console.warn("Test failed", e);
       }
