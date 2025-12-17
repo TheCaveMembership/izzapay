@@ -106,6 +106,7 @@
     const camera = new BABYLON.UniversalCamera("fpsCam", new BABYLON.Vector3(0,1.7,0), scene);
     camera.minZ = 0.05;
     camera.maxZ = 5000;
+    camera.fov = 1.0;
 
     engine.runRenderLoop(() => scene.render());
     window.addEventListener("resize", () => engine.resize());
@@ -195,10 +196,14 @@
 
     // ---------- viewmodel + weapon tuning ----------
     const TUNE = {
-      // soldier viewmodel relative to camera
-      VM_POS:   new BABYLON.Vector3( 0.00, -1.55,  0.48),
+      // viewmodel placement, these defaults are safer for a full body model
+      VM_POS:   new BABYLON.Vector3( 0.00, -0.90,  1.05),
       VM_ROT:   new BABYLON.Vector3( 0.00,  Math.PI, 0.00),
       VM_SCALE: 0.78,
+
+      // clip plane offsets in camera space
+      CLIP_FORWARD: 0.06,
+      CLIP_CHEST_Y: -0.20,
 
       // weapon attach tuning
       WEAPON_SCALE: 0.03000,
@@ -242,6 +247,9 @@ const VM_POS   = new BABYLON.Vector3(${TUNE.VM_POS.x.toFixed(5)}, ${TUNE.VM_POS.
 const VM_ROT   = new BABYLON.Vector3(${TUNE.VM_ROT.x.toFixed(5)}, ${TUNE.VM_ROT.y.toFixed(5)}, ${TUNE.VM_ROT.z.toFixed(5)});
 const VM_SCALE = ${TUNE.VM_SCALE.toFixed(5)};
 
+const CLIP_FORWARD = ${TUNE.CLIP_FORWARD.toFixed(5)};
+const CLIP_CHEST_Y = ${TUNE.CLIP_CHEST_Y.toFixed(5)};
+
 const WEAPON_SCALE = ${TUNE.WEAPON_SCALE.toFixed(5)};
 const WEAPON_YAW_FIX = ${TUNE.WEAPON_YAW_FIX.toFixed(5)};
 const WEAPON_PITCH_FIX = ${TUNE.WEAPON_PITCH_FIX.toFixed(5)};
@@ -277,6 +285,7 @@ const JOY_INVERT_Y = ${JOY.INVERT_Y};`;
     let weaponHold = null;
     let mergedWeaponMesh = null;
 
+    const soldierMats = new Set();
     const logLines = [];
     function logLine(s){
       logLines.push(String(s || ""));
@@ -311,18 +320,12 @@ const JOY_INVERT_Y = ${JOY.INVERT_Y};`;
     }
 
     function clearAll(){
-      try{
-        if(mergedWeaponMesh){ mergedWeaponMesh.dispose(false, true); mergedWeaponMesh = null; }
-      }catch(e){}
-      try{
-        if(weaponHold){ weaponHold.dispose(true, false); weaponHold = null; }
-      }catch(e){}
-      try{
-        if(weaponGrip){ weaponGrip.dispose(true, false); weaponGrip = null; }
-      }catch(e){}
-      try{
-        if(weaponRoot){ weaponRoot.dispose(true, false); weaponRoot = null; }
-      }catch(e){}
+      soldierMats.clear();
+
+      try{ if(mergedWeaponMesh){ mergedWeaponMesh.dispose(false, true); mergedWeaponMesh = null; } }catch(e){}
+      try{ if(weaponHold){ weaponHold.dispose(true, false); weaponHold = null; } }catch(e){}
+      try{ if(weaponGrip){ weaponGrip.dispose(true, false); weaponGrip = null; } }catch(e){}
+      try{ if(weaponRoot){ weaponRoot.dispose(true, false); weaponRoot = null; } }catch(e){}
       try{
         if(weaponContainer){
           weaponContainer.removeAllFromScene();
@@ -331,9 +334,7 @@ const JOY_INVERT_Y = ${JOY.INVERT_Y};`;
         }
       }catch(e){}
 
-      try{
-        if(soldierRoot){ soldierRoot.dispose(true, false); soldierRoot = null; }
-      }catch(e){}
+      try{ if(soldierRoot){ soldierRoot.dispose(true, false); soldierRoot = null; } }catch(e){}
       try{
         if(soldierContainer){
           soldierContainer.removeAllFromScene();
@@ -351,49 +352,6 @@ const JOY_INVERT_Y = ${JOY.INVERT_Y};`;
       soldierRoot.position.copyFrom(TUNE.VM_POS);
       soldierRoot.rotation.copyFrom(TUNE.VM_ROT);
       soldierRoot.scaling.set(TUNE.VM_SCALE, TUNE.VM_SCALE, TUNE.VM_SCALE);
-    }
-
-    function setViewmodelVisibility(container){
-      const meshes = (container && container.meshes) ? container.meshes : [];
-      if(!meshes.length) return;
-
-      // Pass 1, try arms only by names
-      let shown = 0;
-      meshes.forEach(m => {
-        if(!m) return;
-        const nm = (m.name || "").toLowerCase();
-        const isArm =
-          nm.includes("arm") ||
-          nm.includes("forearm") ||
-          nm.includes("hand") ||
-          nm.includes("wrist") ||
-          nm.includes("glove") ||
-          nm.includes("sleeve");
-
-        try{
-          m.isPickable = false;
-          m.alwaysSelectAsActiveMesh = true;
-          m.cullingStrategy = BABYLON.AbstractMesh.CULLINGSTRATEGY_BOUNDINGSPHERE_ONLY;
-          m.renderingGroupId = 2;
-          m.visibility = isArm ? 1.0 : 0.0;
-          if(isArm) shown += 1;
-        }catch(e){}
-      });
-
-      // Fallback, if filter hid everything, show all
-      if(shown === 0){
-        logLine("[vm] no arm named meshes matched, showing full soldier for debugging");
-        meshes.forEach(m => {
-          if(!m) return;
-          try{
-            m.visibility = 1.0;
-            m.renderingGroupId = 2;
-            m.alwaysSelectAsActiveMesh = true;
-          }catch(e){}
-        });
-      } else {
-        logLine(`[vm] showing arm meshes count, ${shown}`);
-      }
     }
 
     function applyTuneToWeapon(){
@@ -425,6 +383,43 @@ const JOY_INVERT_Y = ${JOY.INVERT_Y};`;
       }
     }
 
+    function ensureSoldierMaterialClones(container){
+      const meshes = (container && container.meshes) ? container.meshes : [];
+      meshes.forEach(m => {
+        if(!m || !m.material) return;
+        try{
+          if (m.name === "__root__") return;
+          if (soldierMats.has(m.material)) return;
+
+          const oldMat = m.material;
+          const newMat = oldMat.clone(oldMat.name + "_fpsvm");
+          m.material = newMat;
+          soldierMats.add(newMat);
+        }catch(e){}
+      });
+    }
+
+    function updateViewmodelClipPlanes(){
+      if(!soldierContainer || soldierMats.size === 0) return;
+
+      const forward = camera.getDirection(new BABYLON.Vector3(0,0,1));
+      const up = camera.getDirection(new BABYLON.Vector3(0,1,0));
+
+      const pForward = camera.position.add(forward.scale(TUNE.CLIP_FORWARD));
+      const pChest   = camera.position.add(up.scale(TUNE.CLIP_CHEST_Y));
+
+      const planeForward = BABYLON.Plane.FromPositionAndNormal(pForward, forward);
+      const planeChest   = BABYLON.Plane.FromPositionAndNormal(pChest, up);
+
+      soldierMats.forEach(mat => {
+        try{
+          mat.backFaceCulling = false;
+          mat.clipPlane  = planeForward;
+          mat.clipPlane2 = planeChest;
+        }catch(e){}
+      });
+    }
+
     async function loadFPSViewmodelAndWeapon(){
       clearAll();
 
@@ -434,28 +429,28 @@ const JOY_INVERT_Y = ${JOY.INVERT_Y};`;
       soldierContainer = sCont;
 
       soldierRoot = new BABYLON.TransformNode("soldierRootFPS", scene);
+      soldierRoot.parent = camera;
 
-      const nodes = []
-        .concat(sCont.meshes || [])
-        .concat(sCont.transformNodes || []);
-
-      nodes.forEach(n => {
-        if(!n) return;
-        try{ n.parent = soldierRoot; }catch(e){}
+      // IMPORTANT, only parent rootNodes, never flatten every node
+      (sCont.rootNodes || []).forEach(rn => {
+        try{ rn.parent = soldierRoot; }catch(e){}
       });
 
-      soldierRoot.parent = camera;
       applyViewmodelTune();
-      setViewmodelVisibility(sCont);
 
       skinnedMesh = findSkinnedMeshFromContainer(sCont);
       skeleton = skinnedMesh?.skeleton || null;
 
       if(!skinnedMesh || !skeleton){
-        logLine("[vm] skinned mesh or skeleton not found, viewmodel will not attach weapon");
+        logLine("[vm] skinned mesh or skeleton not found");
       } else {
         logLine(`[vm] skeleton bones, ${skeleton.bones.length}`);
       }
+
+      // This soldier uses generic mesh names, so do FPS clipping instead of name hiding
+      ensureSoldierMaterialClones(sCont);
+      updateViewmodelClipPlanes();
+      logLine("[vm] clip planes enabled");
 
       logLine("[boot] loading weapon container");
       const wCont = await BABYLON.SceneLoader.LoadAssetContainerAsync(WEAPON_ROOT, WEAPON_FILE, scene);
@@ -464,7 +459,7 @@ const JOY_INVERT_Y = ${JOY.INVERT_Y};`;
 
       const rightHand = findBoneSmart(skeleton);
       if(!rightHand){
-        logLine("[gun] could not find right hand bone, weapon will be free parented to camera");
+        logLine("[gun] right hand bone not found, weapon will parent to camera");
       }
 
       weaponRoot = new BABYLON.TransformNode("weaponRoot", scene);
@@ -483,6 +478,13 @@ const JOY_INVERT_Y = ${JOY.INVERT_Y};`;
         logLine("[gun] fallback, weaponRoot parented to camera");
       }
 
+      // parent weapon container properly
+      (wCont.rootNodes || []).forEach(rn => {
+        if(!rn) return;
+        if(rn.name === "__root__") return;
+        try{ rn.parent = weaponHold; }catch(e){}
+      });
+
       const wMeshes = (wCont.meshes || []).filter(m => m && (m.name || "").toLowerCase() !== "__root__");
       const merged = tryMergeWeaponMeshes(wMeshes);
 
@@ -495,7 +497,6 @@ const JOY_INVERT_Y = ${JOY.INVERT_Y};`;
         logLine(`[gun] attached parts, ${wMeshes.length}`);
       }
 
-      // make sure weapon is visible
       (wMeshes || []).forEach(m => {
         if(!m) return;
         try{
@@ -513,7 +514,7 @@ const JOY_INVERT_Y = ${JOY.INVERT_Y};`;
       }
 
       applyTuneToWeapon();
-      logLine("[ready] use keys to tune, then press C to copy constants");
+      logLine("[ready] use keys to tune, press C to copy constants");
     }
 
     function renderHud(){
@@ -528,6 +529,9 @@ Keys, arrows XY, Q E Z, Shift fast, Alt slow, C copy, R reload assets
 VM_POS   : ${TUNE.VM_POS.x.toFixed(5)}, ${TUNE.VM_POS.y.toFixed(5)}, ${TUNE.VM_POS.z.toFixed(5)}
 VM_ROT   : ${TUNE.VM_ROT.x.toFixed(5)}, ${TUNE.VM_ROT.y.toFixed(5)}, ${TUNE.VM_ROT.z.toFixed(5)}
 VM_SCALE : ${TUNE.VM_SCALE.toFixed(5)}
+
+CLIP FWD : ${TUNE.CLIP_FORWARD.toFixed(5)}
+CLIP Y   : ${TUNE.CLIP_CHEST_Y.toFixed(5)}
 
 W_POS    : ${TUNE.WEAPON_POS.x.toFixed(5)}, ${TUNE.WEAPON_POS.y.toFixed(5)}, ${TUNE.WEAPON_POS.z.toFixed(5)}
 GRIP_POS : ${TUNE.WEAPON_GRIP_POS.x.toFixed(5)}, ${TUNE.WEAPON_GRIP_POS.y.toFixed(5)}, ${TUNE.WEAPON_GRIP_POS.z.toFixed(5)}
@@ -584,7 +588,6 @@ ${logLines.join("\n")}`;
       } else if (MODE === 12){
         JOY.MOVE_SPEED = clamp(JOY.MOVE_SPEED + dy*s, 0.10, 20.0);
       } else if (MODE === 13){
-        // toggle with up or down
         if(dy !== 0) JOY.INVERT_Y = !JOY.INVERT_Y;
       }
 
@@ -655,6 +658,9 @@ ${logLines.join("\n")}`;
       camera.rotation.y += lx * JOY.LOOK_SENS * dt;
       camera.rotation.x += ly * JOY.LOOK_SENS * dt;
       camera.rotation.x = clamp(camera.rotation.x, -1.2, 1.2);
+
+      // keep FPS clip planes tracking camera every frame
+      updateViewmodelClipPlanes();
     });
 
     // ---------- boot ----------
