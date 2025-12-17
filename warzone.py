@@ -539,6 +539,45 @@ def warzone_shop_page():
     )
 
 
+@warzone_bp.get("/fps")
+def warzone_fps():
+    """
+    Serves templates/warzone_fps.html
+
+    Supports deep-links with ?u= just like lobby/shop.
+    Redirects to /warzone/auth if not authenticated.
+    """
+    uid = _require_user_id_or_u()
+    if not uid:
+        qs = request.query_string.decode("utf-8")
+        base = "/warzone/auth"
+        return redirect(f"{base}?{qs}" if qs else base)
+
+    with conn() as cx:
+        row = cx.execute(
+            "SELECT COALESCE(username, pi_username, pi_uid) AS name FROM users WHERE id=?",
+            (uid,),
+        ).fetchone()
+
+    display_name = (
+        (row["name"] if row and row["name"] else None)
+        or session.get("username")
+        or session.get("pi_username")
+        or session.get("pi_handle")
+        or f"User #{uid}"
+    )
+
+    u = _resolve_username() or ""
+    u_qs = f"u={u}" if u else ""
+
+    return render_template(
+        "warzone_fps.html",
+        player={"id": uid, "username": display_name},
+        u_qs=u_qs,
+        PI_SANDBOX=current_app.config.get("PI_SANDBOX", False),
+    )
+
+
 # ----------------------------------------------------------------------
 # Redirect routes for the old lobby buttons
 # ----------------------------------------------------------------------
@@ -739,61 +778,6 @@ def warzone_shop():
         )
 
     return jsonify({"items": items})
-
-
-@warzone_bp.get("/api/ammo/packs")
-def warzone_ammo_packs():
-    """
-    NEW, proper lookup route for the shop UI.
-
-    Returns active ammo packs, optionally filtered by weapon_sku.
-
-    Query params:
-      weapon_sku: optional, supports legacy values like "neon_marksman"
-    """
-    uid = _require_user_id_or_u()
-    if not uid:
-        return jsonify({"error": "auth_required"}), 401
-
-    weapon_sku_q = _canon_weapon_sku((request.args.get("weapon_sku") or "").strip())
-
-    with conn() as cx:
-        _ensure_shop_schema(cx)
-        _seed_shop_if_empty(cx)
-        _seed_ammo_packs_if_empty(cx)
-
-        if weapon_sku_q:
-            rows = cx.execute(
-                """
-                SELECT pack_sku, weapon_sku, rounds, price_izza, sort_order
-                FROM warzone_ammo_packs
-                WHERE active = 1 AND lower(weapon_sku) = lower(?)
-                ORDER BY sort_order ASC, id ASC
-                """,
-                (weapon_sku_q,),
-            ).fetchall()
-        else:
-            rows = cx.execute(
-                """
-                SELECT pack_sku, weapon_sku, rounds, price_izza, sort_order
-                FROM warzone_ammo_packs
-                WHERE active = 1
-                ORDER BY sort_order ASC, id ASC
-                """
-            ).fetchall()
-
-    packs = []
-    for r in rows:
-        packs.append(
-            {
-                "pack_sku": r["pack_sku"],
-                "weapon_sku": _canon_weapon_sku(r["weapon_sku"] or ""),
-                "rounds": int(r["rounds"] or 0),
-                "price_izza": float(r["price_izza"] or 0),
-            }
-        )
-
-    return jsonify({"packs": packs})
 
 
 @warzone_bp.post("/api/purchase")
