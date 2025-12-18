@@ -281,24 +281,27 @@
 
     /* Chest cam tuning,
        Higher start, like a taller person,
-       Keep aim forward, only position changes */
+       Tune mode can now go MUCH higher */
     const CHEST = {
-      pivotPos: new BABYLON.Vector3(0.00, 0.12, 0.10),
-      camPos:   new BABYLON.Vector3(0.00, 0.22, 0.55),
+      pivotPos: new BABYLON.Vector3(0.00, 0.22, 0.10),
+      camPos:   new BABYLON.Vector3(0.00, 0.55, 0.55),
       pitch:    -0.20,
       yaw:       0.00
     };
 
     const TUNE = {
       ENABLED: false,
-      POS_SPEED: 0.22,
-      X_LIMIT: 0.25,
-      Y_LIMIT: 0.45,
-      Z_MIN:  -0.30,
-      Z_MAX:   1.20
+      POS_SPEED: 0.28,
+      X_LIMIT: 0.35,
+      Y_LIMIT: 1.30,
+      Z_MIN:  -0.60,
+      Z_MAX:   1.60,
+      PIVOT_Y_MIN: -0.20,
+      PIVOT_Y_MAX: 1.80
     };
 
-    const IDLE = { SPEED: 0.12, LOOP: true };
+    /* Slow the idle animation even more */
+    const IDLE = { SPEED: 0.06, LOOP: true };
     const BOB  = { LOCK_HIPS_Y: true };
 
     const JOY = {
@@ -664,7 +667,7 @@
       }
 
       hintText.textContent = TUNE.ENABLED
-        ? "TUNE MODE, left stick moves camera X Y, right stick up down moves camera Z, aim does not change"
+        ? "TUNE MODE, left stick moves camera X and raises mount, right stick up down moves camera Z, aim does not change"
         : (FREE_LOOK
           ? "Left stick moves soldier, right stick aims camera only, soldier body does not rotate"
           : "Left stick moves soldier, right stick rotates soldier and aims camera together");
@@ -676,7 +679,7 @@
       hudControl.textContent = TUNE.ENABLED ? "CONTROL, TUNE CAM" : (FREE_LOOK ? "CONTROL, CAMERA" : "CONTROL, SOLDIER");
 
       hintText.textContent = TUNE.ENABLED
-        ? "TUNE MODE, left stick moves camera X Y, right stick up down moves camera Z, aim does not change"
+        ? "TUNE MODE, left stick moves camera X and raises mount, right stick up down moves camera Z, aim does not change"
         : (FREE_LOOK
           ? "Left stick moves soldier, right stick aims camera only, soldier body does not rotate"
           : "Left stick moves soldier, right stick rotates soldier and aims camera together");
@@ -688,8 +691,8 @@
       soldierRoot.position.set(0,0,0);
       soldierRoot.rotation.set(0,0,0);
 
-      CHEST.pivotPos = new BABYLON.Vector3(0.00, 0.12, 0.10);
-      CHEST.camPos   = new BABYLON.Vector3(0.00, 0.22, 0.55);
+      CHEST.pivotPos = new BABYLON.Vector3(0.00, 0.22, 0.10);
+      CHEST.camPos   = new BABYLON.Vector3(0.00, 0.55, 0.55);
       CHEST.pitch    = -0.20;
       CHEST.yaw      = 0.00;
 
@@ -753,6 +756,9 @@
           /* left stick, X and Y */
           CHEST.camPos.x = clamp(CHEST.camPos.x + (mvX * sp), -TUNE.X_LIMIT, TUNE.X_LIMIT);
           CHEST.camPos.y = clamp(CHEST.camPos.y + (-mvY * sp), -TUNE.Y_LIMIT, TUNE.Y_LIMIT);
+
+          /* ALSO raise or lower the mount pivot so you can go higher like a taller person */
+          CHEST.pivotPos.y = clamp(CHEST.pivotPos.y + (-mvY * sp * 0.6), TUNE.PIVOT_Y_MIN, TUNE.PIVOT_Y_MAX);
 
           /* right stick up down, Z in out */
           CHEST.camPos.z = clamp(CHEST.camPos.z + ((-ly) * sp), TUNE.Z_MIN, TUNE.Z_MAX);
