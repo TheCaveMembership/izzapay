@@ -33,7 +33,6 @@
       overflow:hidden;
       touch-action:none;
     }
-
     .rot-wrapper{
       position:fixed;
       top:0;
@@ -45,7 +44,6 @@
       transition:transform .15s ease,width .15s ease,height .15s ease;
       background:#000;
     }
-
     .fps-root{
       width:100%;
       height:100%;
@@ -53,7 +51,6 @@
       background:radial-gradient(circle at top,#15192e 0,#02030a 55%,#000 100%);
       overflow:hidden;
     }
-
     #renderCanvas{
       position:absolute;
       inset:0;
@@ -64,7 +61,6 @@
       touch-action:none;
       outline:none;
     }
-
     .hud-top{
       position:absolute;
       left:10px;
@@ -124,7 +120,6 @@
       outline:none;
     }
     .tag.btn:active{ transform:scale(.98); }
-
     .hint{
       opacity:.9;
       font-size:11px;
@@ -132,7 +127,6 @@
       color:#c3cff5;
       margin-top:6px;
     }
-
     .tuner{
       margin-top:8px;
       display:flex;
@@ -155,13 +149,16 @@
       accent-color: rgba(0,255,255,.9);
       touch-action:none;
     }
+    .tuner input[type="range"]:disabled{
+      opacity:0.55;
+      filter:saturate(.6);
+    }
     .tuner .val{
       min-width:54px;
       text-align:right;
       font-variant-numeric: tabular-nums;
       opacity:.95;
     }
-
     .touch-ui{
       position:absolute;
       inset:0;
@@ -195,7 +192,6 @@
       box-shadow:0 0 18px rgba(255,59,107,.10);
       pointer-events:none;
     }
-
     .fire-btn{
       position:absolute;
       right:182px;
@@ -232,7 +228,6 @@
       justify-content:center;
       line-height:1.1;
     }
-
     .reticle{
       position:absolute;
       left:50%;
@@ -265,7 +260,6 @@
     }
     .reticle .h{ width:18px; height:1px; opacity:.55; }
     .reticle .v{ width:1px; height:18px; opacity:.55; }
-
     .hit{
       position:absolute;
       left:50%;
@@ -352,12 +346,10 @@
   </div>
 
   <script>
-    // Hard block text selection / context menus during play
     document.addEventListener("selectstart", (e) => { e.preventDefault(); }, { passive:false });
     document.addEventListener("contextmenu", (e) => { e.preventDefault(); }, { passive:false });
     document.addEventListener("gesturestart", (e) => { e.preventDefault(); }, { passive:false });
 
-    // Portrait rotation flag, used to rotate joystick input back into "game space"
     let ROTATED_UI = true;
 
     (function(){
@@ -446,7 +438,6 @@
       }
     };
 
-    /* Recentered into the "old head space" */
     const CHEST_LOCK = {
       pivotPos: new BABYLON.Vector3(0.00, 0.30, 0.06),
       camPos:   new BABYLON.Vector3(0.00, 1.72, -0.28),
@@ -479,9 +470,12 @@
     const LOOK_SENS = { TOUCH_MULT: 0.90 };
 
     const FIRE = {
-      pistol: { rpm: 240, spread: 0.0035, maxDist: 120, tracerLife: 0.06, recoil: 0.020 },
-      smg:    { rpm: 900, spread: 0.0070, maxDist: 120, tracerLife: 0.045, recoil: 0.010 }
+      pistol: { rpm: 240, spread: 0.0035, maxDist: 120, tracerLife: 0.09, recoil: 0.020 },
+      smg:    { rpm: 900, spread: 0.0070, maxDist: 120, tracerLife: 0.06, recoil: 0.010 }
     };
+
+    // LOCK pistol yaw far-left
+    const PISTOL_YAW_LOCK = -0.80;
 
     function applyDeadzone(x){
       const ax = Math.abs(x);
@@ -515,10 +509,8 @@
     stickSetup(lookState, lookStick, lookNub);
     stickSetup(moveState, moveStick, moveNub);
 
-    // Rotate stick vector by -90 deg when UI is rotated in portrait
     function rotateIfPortrait(nx, ny){
       if(!ROTATED_UI) return { nx, ny };
-      // -90 degrees: (x, y) -> (y, -x)
       return { nx: ny, ny: -nx };
     }
 
@@ -532,7 +524,6 @@
 
       state.nub.style.transform = `translate(calc(-50% + ${nx}px), calc(-50% + ${ny}px))`;
 
-      // FIX, left and right were reversed, invert X only, keep Y as is
       state.dx = -(nx / state.max);
       state.dy =  (ny / state.max);
     }
@@ -617,7 +608,6 @@
     bindGlobalStick(lookState);
     bindGlobalStick(moveState);
 
-    /* Desktop fallback movement */
     const keys = { w:false,a:false,s:false,d:false };
     window.addEventListener("keydown", (e) => {
       const k = (e.key || "").toLowerCase();
@@ -644,60 +634,79 @@
     let weaponSku = "wz_basic_pistol";
     let weaponContainer = null;
     let weaponRoot = null;
+
+    let weaponYaw = null;
     let weaponGrip = null;
+
+    // barrel tip node
+    let muzzleNode = null;
 
     let isFiring = false;
     let nextShotAt = 0;
 
-    /* Look state */
     let aimYaw = 0.0;
     let aimPitch = CHEST_LOCK.pitch;
 
-    // Grip yaw tuner, stored per weapon
     const GRIP_TUNER = {
-      wz_basic_pistol: 0.0,
+      wz_basic_pistol: PISTOL_YAW_LOCK,
       wz_cityrunner_smg: 0.0
     };
 
     function loadGripTuner(){
       try{
         const raw = localStorage.getItem("izza_grip_tuner");
-        if(!raw) return;
-        const obj = JSON.parse(raw);
-        if(obj && typeof obj === "object"){
-          if(typeof obj.wz_basic_pistol === "number") GRIP_TUNER.wz_basic_pistol = obj.wz_basic_pistol;
-          if(typeof obj.wz_cityrunner_smg === "number") GRIP_TUNER.wz_cityrunner_smg = obj.wz_cityrunner_smg;
+        if(raw){
+          const obj = JSON.parse(raw);
+          if(obj && typeof obj === "object"){
+            if(typeof obj.wz_cityrunner_smg === "number") GRIP_TUNER.wz_cityrunner_smg = obj.wz_cityrunner_smg;
+          }
         }
       }catch(e){}
+      // always enforce pistol lock
+      GRIP_TUNER.wz_basic_pistol = PISTOL_YAW_LOCK;
+      saveGripTuner();
     }
+
     function saveGripTuner(){
       try{
         localStorage.setItem("izza_grip_tuner", JSON.stringify(GRIP_TUNER));
       }catch(e){}
     }
+
     function currentGripYaw(){
       return (weaponSku === "wz_cityrunner_smg") ? GRIP_TUNER.wz_cityrunner_smg : GRIP_TUNER.wz_basic_pistol;
     }
+
     function setCurrentGripYaw(v){
+      // pistol is locked far-left
+      if(weaponSku === "wz_basic_pistol"){
+        GRIP_TUNER.wz_basic_pistol = PISTOL_YAW_LOCK;
+        saveGripTuner();
+        syncGripYawUi();
+        applyGripYawToWeapon();
+        return;
+      }
+
       v = clamp(v, -0.80, 0.80);
-      if(weaponSku === "wz_cityrunner_smg") GRIP_TUNER.wz_cityrunner_smg = v;
-      else GRIP_TUNER.wz_basic_pistol = v;
+      GRIP_TUNER.wz_cityrunner_smg = v;
       saveGripTuner();
       syncGripYawUi();
       applyGripYawToWeapon();
     }
+
     function syncGripYawUi(){
       const v = currentGripYaw();
       gripYawSlider.value = String(v);
       gripYawVal.textContent = (Math.round(v * 100) / 100).toFixed(2);
-    }
-    function applyGripYawToWeapon(){
-      if(!weaponGrip) return;
-      const T = (weaponSku === "wz_cityrunner_smg") ? WEAPON_TUNING.wz_cityrunner_smg : WEAPON_TUNING.wz_basic_pistol;
-      const base = T.WEAPON_GRIP_ROT || new BABYLON.Vector3(0,0,0);
 
-      // Add yaw offset here, this rotates the gun left or right in the hands
-      weaponGrip.rotation.set(base.x, base.y + currentGripYaw(), base.z);
+      const pistol = (weaponSku === "wz_basic_pistol");
+      gripYawSlider.disabled = pistol;
+      gripYawSlider.title = pistol ? "Pistol yaw is locked" : "";
+    }
+
+    function applyGripYawToWeapon(){
+      if(!weaponYaw) return;
+      weaponYaw.rotation.set(0, currentGripYaw(), 0);
     }
 
     gripYawSlider.addEventListener("input", (e) => {
@@ -706,7 +715,6 @@
     }, { passive:false });
 
     function fmt(v){ return (Math.round(v*1000)/1000).toFixed(3); }
-
     function updateCamHud(){
       hudCam.textContent = `CAM, x ${fmt(CHEST.camPos.x)} y ${fmt(CHEST.camPos.y)} z ${fmt(CHEST.camPos.z)}`;
     }
@@ -783,18 +791,14 @@
       }catch(e){}
     }
 
-    // Force hide head and neck, arms protected
     function hideHeadAndNeck(container){
       const meshes = (container && container.meshes) ? container.meshes : [];
-
       const keepRx = /(arm|forearm|hand|wrist|glove|sleeve|weapon|gun|pistol|smg)/i;
       const hideRx = /(head|neck|helmet|face|hair|ear|mask|hood|cap|hat|beard|brow|eye|teeth|tongue|jaw|cheek|skull|cranium|visor|goggles|glass|glasses|mouth|lip)/i;
-
       const HEAD_ZONE = { minY: 1.35, minZ: -0.35 };
 
       meshes.forEach(m => {
         if(!m) return;
-
         const nm = (m.name || "").toLowerCase();
         if(nm === "__root__") return;
         if(keepRx.test(nm)) return;
@@ -882,7 +886,9 @@
     }
 
     function clearWeapon(){
+      try{ if(muzzleNode){ muzzleNode.dispose(true,false); muzzleNode = null; } }catch(e){}
       try{ if(weaponGrip){ weaponGrip.dispose(true,false); weaponGrip = null; } }catch(e){}
+      try{ if(weaponYaw){ weaponYaw.dispose(true,false); weaponYaw = null; } }catch(e){}
       try{ if(weaponRoot){ weaponRoot.dispose(true,false); weaponRoot = null; } }catch(e){}
       try{
         if(weaponContainer){
@@ -987,6 +993,58 @@
       updatePosHud();
     }
 
+    // compute a barrel tip point from weapon meshes, in weaponGrip local space
+    function computeMuzzleNodeFromBounds(){
+      try{
+        if(!weaponGrip || !weaponContainer) return null;
+
+        const invGripWorld = weaponGrip.getWorldMatrix().clone();
+        invGripWorld.invert();
+
+        let min = new BABYLON.Vector3(+1e9,+1e9,+1e9);
+        let max = new BABYLON.Vector3(-1e9,-1e9,-1e9);
+        let any = false;
+
+        const meshes = weaponContainer.meshes || [];
+        for(const m of meshes){
+          if(!m) continue;
+          const nm = (m.name || "").toLowerCase();
+          if(nm === "__root__") continue;
+          if(m.getTotalVertices && m.getTotalVertices() === 0) continue;
+
+          const bi = m.getBoundingInfo && m.getBoundingInfo();
+          if(!bi) continue;
+
+          const bb = bi.boundingBox;
+          const corners = bb.vectorsWorld;
+          if(!corners || !corners.length) continue;
+
+          for(const cw of corners){
+            const cl = BABYLON.Vector3.TransformCoordinates(cw, invGripWorld);
+            min.x = Math.min(min.x, cl.x); min.y = Math.min(min.y, cl.y); min.z = Math.min(min.z, cl.z);
+            max.x = Math.max(max.x, cl.x); max.y = Math.max(max.y, cl.y); max.z = Math.max(max.z, cl.z);
+            any = true;
+          }
+        }
+
+        if(!any) return null;
+
+        const centerX = (min.x + max.x) * 0.5;
+        const centerY = (min.y + max.y) * 0.5;
+
+        // assume forward is toward negative Z in grip local space, choose minZ as barrel end
+        const depth = Math.max(0.0001, (max.z - min.z));
+        const tipZ = min.z - depth * 0.06;
+
+        const node = new BABYLON.TransformNode("muzzleNode", scene);
+        node.parent = weaponGrip;
+        node.position.set(centerX, centerY, tipZ);
+        return node;
+      }catch(e){
+        return null;
+      }
+    }
+
     async function loadWeaponToRightHand(sku){
       clearWeapon();
 
@@ -998,8 +1056,12 @@
       weaponContainer = w;
 
       weaponRoot = new BABYLON.TransformNode("weaponRoot", scene);
+
+      weaponYaw = new BABYLON.TransformNode("weaponYaw", scene);
+      weaponYaw.parent = weaponRoot;
+
       weaponGrip = new BABYLON.TransformNode("weaponGrip", scene);
-      weaponGrip.parent = weaponRoot;
+      weaponGrip.parent = weaponYaw;
 
       const sk = soldierSkinned && soldierSkinned.skeleton ? soldierSkinned.skeleton : null;
       const rh = findRightHandBone(sk);
@@ -1037,7 +1099,15 @@
 
       weaponSku = sku;
 
-      // Sync tuner UI and apply yaw tuner immediately for this weapon
+      // enforce pistol yaw lock every swap
+      if(weaponSku === "wz_basic_pistol"){
+        GRIP_TUNER.wz_basic_pistol = PISTOL_YAW_LOCK;
+        saveGripTuner();
+      }
+
+      // build muzzle node from real model bounds
+      muzzleNode = computeMuzzleNodeFromBounds();
+
       syncGripYawUi();
       applyGripYawToWeapon();
 
@@ -1065,12 +1135,13 @@
     }
 
     function getMuzzleOrigin(){
-      if(weaponGrip){
-        try{ return weaponGrip.getAbsolutePosition().clone(); }catch(e){}
+      if(muzzleNode){
+        return muzzleNode.getAbsolutePosition().clone();
       }
+      // fallback, never invisible
       const p = camera.getAbsolutePosition();
       const dir = camera.getForwardRay(1).direction;
-      return p.add(dir.scale(0.35));
+      return p.add(dir.scale(0.55));
     }
 
     function shootOnce(){
@@ -1081,13 +1152,11 @@
 
       const origin = getMuzzleOrigin();
 
-      // Aim direction from muzzle toward the reticle ray target, so bullets line up with the crosshair
       const camPos = camera.getAbsolutePosition();
       const camDir = camera.getForwardRay(1).direction.clone();
       const target = camPos.add(camDir.scale(cfg.maxDist));
 
       let dir = target.subtract(origin).normalize();
-
       const s = randSpread(cfg.spread);
       dir = dir.add(new BABYLON.Vector3(s.x, s.y, 0)).normalize();
 
@@ -1096,30 +1165,47 @@
       const pick = scene.pickWithRay(ray, (m) => {
         if(!m) return false;
         if(m === weaponRoot) return false;
+        if(m === weaponYaw) return false;
         if(m === weaponGrip) return false;
         if(m.parent === weaponGrip) return false;
+        if(m === muzzleNode) return false;
         return true;
       });
 
       const hitPoint = (pick && pick.hit && pick.pickedPoint) ? pick.pickedPoint.clone() : origin.add(dir.scale(cfg.maxDist));
 
-      const tracer = BABYLON.MeshBuilder.CreateLines("tr", { points: [origin, hitPoint] }, scene);
-      tracer.isPickable = false;
-      tracer.alpha = 0.9;
-      tracer.color = new BABYLON.Color3(0.9, 0.95, 1.0);
-      tracer.renderingGroupId = 3;
-      setTimeout(() => { try{ tracer.dispose(); }catch(e){} }, Math.round(cfg.tracerLife * 1000));
+      // TRACER, tube so it is visible on mobile
+      const tube = BABYLON.MeshBuilder.CreateTube("trTube", {
+        path: [origin, hitPoint],
+        radius: 0.010,
+        tessellation: 6,
+        cap: BABYLON.Mesh.CAP_ALL
+      }, scene);
+      tube.isPickable = false;
+      tube.renderingGroupId = 3;
 
-      const flash = BABYLON.MeshBuilder.CreateSphere("mf", { diameter: 0.06 }, scene);
+      const tm = new BABYLON.StandardMaterial("trMat", scene);
+      tm.emissiveColor = new BABYLON.Color3(0.35, 0.95, 1.00);
+      tm.disableLighting = true;
+      tm.alpha = 0.90;
+      tube.material = tm;
+
+      setTimeout(() => { try{ tube.dispose(); }catch(e){} }, Math.round(cfg.tracerLife * 1000));
+
+      // MUZZLE FLASH, from barrel tip
+      const flash = BABYLON.MeshBuilder.CreatePlane("mfPlane", { size: 0.18 }, scene);
       flash.isPickable = false;
       flash.renderingGroupId = 3;
-      const mm = new BABYLON.StandardMaterial("mfm", scene);
-      mm.emissiveColor = new BABYLON.Color3(1.0, 0.85, 0.35);
-      mm.diffuseColor = new BABYLON.Color3(0,0,0);
-      mm.specularColor = new BABYLON.Color3(0,0,0);
-      flash.material = mm;
+      flash.billboardMode = BABYLON.Mesh.BILLBOARDMODE_ALL;
       flash.position.copyFrom(origin);
-      setTimeout(() => { try{ flash.dispose(); }catch(e){} }, 40);
+
+      const fm = new BABYLON.StandardMaterial("mfMat", scene);
+      fm.emissiveColor = new BABYLON.Color3(1.00, 0.85, 0.30);
+      fm.disableLighting = true;
+      fm.alpha = 0.95;
+      flash.material = fm;
+
+      setTimeout(() => { try{ flash.dispose(); }catch(e){} }, 45);
 
       if(pick && pick.hit) flashHit();
     }
@@ -1130,7 +1216,6 @@
         shootOnce();
         isFiring = false;
       } else {
-        // Set next shot time immediately, avoids backlog loops and prevents freezes
         nextShotAt = performance.now() * 0.001;
       }
     }
@@ -1180,19 +1265,14 @@
         const dt = scene.getEngine().getDeltaTime() * 0.001;
         const now = performance.now() * 0.001;
 
-        // RIGHT stick LOOK
         const lookMult = isTouch ? LOOK_SENS.TOUCH_MULT : 1.0;
         const lookX = applyDeadzone(lookState.dx) * lookMult;
         const lookY = applyDeadzone(lookState.dy) * lookMult;
 
-        // Yaw, right = turn right, left = turn left
         aimYaw   += (lookX * LOOK.YAW_SPEED * dt);
-
-        // Pitch, up = look up, down = look down
         aimPitch += (lookY * LOOK.PITCH_SPEED * dt);
         aimPitch  = clamp(aimPitch, LOOK.PITCH_MIN, LOOK.PITCH_MAX);
 
-        // LEFT stick MOVE
         let mvX = applyDeadzone(moveState.dx);
         let mvY = applyDeadzone(moveState.dy);
 
@@ -1218,10 +1298,8 @@
 
         applyChestMountAimed();
 
-        // SMG firing, single shot per interval, no while loop backlog, prevents screen freeze
         if(isFiring && weaponSku === "wz_cityrunner_smg"){
-          const cfg = FIRE.smg;
-          const interval = 60.0 / cfg.rpm;
+          const interval = 60.0 / FIRE.smg.rpm;
           if(now >= nextShotAt){
             shootOnce();
             nextShotAt = now + interval;
@@ -1243,8 +1321,6 @@
       function end(){ stopFiring(); }
       fireBtn.addEventListener("pointerup", end, { passive:true });
       fireBtn.addEventListener("pointercancel", end, { passive:true });
-
-      // Prevent any stray selection gestures from the fire button
       fireBtn.addEventListener("touchstart", (e) => { e.preventDefault(); }, { passive:false });
     })();
 
@@ -1270,13 +1346,5 @@
       }
     })();
   </script>
-
-  <!--
-    What I adjusted, in plain terms,
-    1, Fixed left and right being reversed on BOTH sticks by inverting only the X axis after the portrait rotation mapping,
-    2, Added a Grip yaw slider that rotates the weaponGrip left or right, per weapon, it is saved in localStorage, so you can tune pistol and SMG separately,
-    3, Fixed SMG fire freeze by removing the while loop backlog, now it fires one shot per interval, no catch up loops, much lighter on pickWithRay and mesh creation,
-    4, Kept hard blocks against text selection and context menus so moving and aiming never highlights page UI
-  -->
 </body>
 </html>
