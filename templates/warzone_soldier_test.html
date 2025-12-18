@@ -279,15 +279,14 @@
       }
     };
 
-    /* Chest cam tuning, IMPORTANT, push camera just outside chest by default */
+    /* Chest cam tuning, moved up so more weapon shows */
     const CHEST = {
       pivotPos: new BABYLON.Vector3(0.00, 0.02, 0.10),
-      camPos:   new BABYLON.Vector3(0.00, 0.00, 0.55),
+      camPos:   new BABYLON.Vector3(0.00, 0.10, 0.55),
       pitch:    -0.20,
       yaw:       0.00
     };
 
-    /* Camera tuning sensitivity + clamps */
     const TUNE = {
       ENABLED: false,
       POS_SPEED: 0.22,
@@ -478,7 +477,6 @@
         }catch(e){}
       });
 
-      /* If naming is weird and we did not detect arms, still hide common body parts */
       if(shown === 0){
         meshes.forEach(m => {
           if(!m) return;
@@ -688,7 +686,7 @@
       soldierRoot.rotation.set(0,0,0);
 
       CHEST.pivotPos = new BABYLON.Vector3(0.00, 0.02, 0.10);
-      CHEST.camPos   = new BABYLON.Vector3(0.00, 0.00, 0.55);
+      CHEST.camPos   = new BABYLON.Vector3(0.00, 0.10, 0.55);
       CHEST.pitch    = -0.20;
       CHEST.yaw      = 0.00;
 
