@@ -157,7 +157,6 @@
       pointer-events:none;
     }
 
-    /* Fire button */
     .fire-btn{
       position:absolute;
       right:182px;
@@ -196,7 +195,6 @@
       line-height:1.1;
     }
 
-    /* Reticle */
     .reticle{
       position:absolute;
       left:50%;
@@ -230,7 +228,6 @@
     .reticle .h{ width:18px; height:1px; opacity:.55; }
     .reticle .v{ width:1px; height:18px; opacity:.55; }
 
-    /* Hit marker */
     .hit{
       position:absolute;
       left:50%;
@@ -392,10 +389,10 @@
       }
     };
 
-    /* LOCKED CHEST CAM, values from your latest screenshot */
+    /* LOCKED CHEST CAM, values from your screenshot */
     const CHEST_LOCK = {
       pivotPos: new BABYLON.Vector3(0.00, 0.22, 0.10),
-      camPos:   new BABYLON.Vector3(0.350, 1.010, -0.391),
+      camPos:   new BABYLON.Vector3(-0.650, 1.800, -0.969),
       pitch:    -0.20,
       yaw:       0.00
     };
@@ -410,15 +407,14 @@
     const TUNE = {
       ENABLED: false,
       POS_SPEED: 0.28,
-      X_LIMIT: 0.65,
-      Y_LIMIT: 1.80,
-      Z_MIN:  -1.20,
-      Z_MAX:   1.60,
+      X_LIMIT: 0.90,
+      Y_LIMIT: 2.20,
+      Z_MIN:  -1.80,
+      Z_MAX:   1.80,
       PIVOT_Y_MIN: -0.20,
       PIVOT_Y_MAX: 2.20
     };
 
-    /* Idle slower */
     const IDLE = { SPEED: 0.05, LOOP: true };
     const BOB  = { LOCK_HIPS_Y: true };
 
@@ -429,7 +425,6 @@
       INVERT_Y: false
     };
 
-    /* Fire tuning */
     const FIRE = {
       pistol: { rpm: 240, spread: 0.0035, maxDist: 120, tracerLife: 0.06, recoil: 0.020 },
       smg:    { rpm: 900, spread: 0.0070, maxDist: 120, tracerLife: 0.045, recoil: 0.010 }
@@ -464,13 +459,22 @@
       if(k === "arrowright") keys.arrowright = false;
     });
 
+    /* IMPORTANT FIX
+       Do NOT reset on pointerleave, only reset on pointerup or pointercancel.
+       This is what was killing movement in real use. */
     function setupStick(el, nub, state){
-      const r = () => el.getBoundingClientRect();
+      const rect = () => el.getBoundingClientRect();
 
-      function setNub(x, y){
-        const max = (r().width / 2) - (nub.getBoundingClientRect().width / 2);
-        const nx = clamp(x, -max, max);
-        const ny = clamp(y, -max, max);
+      function setNubFromClient(clientX, clientY){
+        const box = rect();
+        const cx = box.left + box.width/2;
+        const cy = box.top + box.height/2;
+
+        const max = (box.width / 2) - (nub.getBoundingClientRect().width / 2);
+
+        const nx = clamp(clientX - cx, -max, max);
+        const ny = clamp(clientY - cy, -max, max);
+
         nub.style.transform = `translate(calc(-50% + ${nx}px), calc(-50% + ${ny}px))`;
         state.dx = nx / max;
         state.dy = ny / max;
@@ -482,34 +486,66 @@
         state.dy = 0;
       }
 
+      /* Pointer events */
       el.addEventListener("pointerdown", (e) => {
+        e.preventDefault();
         state.active = true;
         state.id = e.pointerId;
-        el.setPointerCapture(e.pointerId);
-        const box = r();
-        const cx = box.left + box.width/2;
-        const cy = box.top + box.height/2;
-        setNub(e.clientX - cx, e.clientY - cy);
+        try{ el.setPointerCapture(e.pointerId); }catch(_){}
+        setNubFromClient(e.clientX, e.clientY);
       }, { passive:false });
 
       el.addEventListener("pointermove", (e) => {
         if(!state.active || e.pointerId !== state.id) return;
-        const box = r();
-        const cx = box.left + box.width/2;
-        const cy = box.top + box.height/2;
-        setNub(e.clientX - cx, e.clientY - cy);
+        e.preventDefault();
+        setNubFromClient(e.clientX, e.clientY);
       }, { passive:false });
 
-      function end(e){
-        if(e && state.id !== null && e.pointerId !== state.id) return;
+      function endPointer(e){
+        if(state.id !== null && e.pointerId !== state.id) return;
         state.active = false;
         state.id = null;
         reset();
       }
 
-      el.addEventListener("pointerup", end, { passive:true });
-      el.addEventListener("pointercancel", end, { passive:true });
-      el.addEventListener("pointerleave", end, { passive:true });
+      el.addEventListener("pointerup", endPointer, { passive:true });
+      el.addEventListener("pointercancel", endPointer, { passive:true });
+
+      /* Touch fallback, for environments where pointer capture is flaky */
+      el.addEventListener("touchstart", (e) => {
+        if(!e.changedTouches || !e.changedTouches.length) return;
+        e.preventDefault();
+        const t = e.changedTouches[0];
+        state.active = true;
+        state.id = t.identifier;
+        setNubFromClient(t.clientX, t.clientY);
+      }, { passive:false });
+
+      el.addEventListener("touchmove", (e) => {
+        if(!state.active) return;
+        if(!e.changedTouches || !e.changedTouches.length) return;
+        e.preventDefault();
+        let t = null;
+        for(const tt of e.changedTouches){
+          if(tt.identifier === state.id){ t = tt; break; }
+        }
+        if(!t) t = e.changedTouches[0];
+        setNubFromClient(t.clientX, t.clientY);
+      }, { passive:false });
+
+      el.addEventListener("touchend", (e) => {
+        if(!state.active) return;
+        state.active = false;
+        state.id = null;
+        reset();
+      }, { passive:true });
+
+      el.addEventListener("touchcancel", (e) => {
+        if(!state.active) return;
+        state.active = false;
+        state.id = null;
+        reset();
+      }, { passive:true });
     }
 
     setupStick(moveStick, moveNub, moveState);
@@ -533,10 +569,8 @@
     let weaponRoot = null;
     let weaponGrip = null;
 
-    /* Free look, optional toggle, default off */
     let FREE_LOOK = false;
 
-    /* Firing state */
     let isFiring = false;
     let nextShotAt = 0;
 
@@ -569,25 +603,19 @@
 
     function findRightHandBone(skeleton){
       if(!skeleton || !skeleton.bones || !skeleton.bones.length) return null;
-
       const exact = skeleton.bones.find(b => (b.name || "") === "mixamorig:RightHand.209_221");
       if(exact) return exact;
-
       const rx = skeleton.bones.find(b => /mixamorig:RightHand/i.test(b.name || ""));
       if(rx) return rx;
-
       const generic = skeleton.bones.find(b => /RightHand/i.test(b.name || ""));
       if(generic) return generic;
-
       const anyHand = skeleton.bones.find(b => /Hand/i.test(b.name || ""));
       if(anyHand) return anyHand;
-
       return null;
     }
 
     function findChestBone(skeleton){
       if(!skeleton || !skeleton.bones || !skeleton.bones.length) return null;
-
       const prefer = [
         /mixamorig:Spine2/i,
         /mixamorig:Spine1/i,
@@ -626,7 +654,6 @@
       meshes.forEach(m => {
         if(!m) return;
         const nm = (m.name || "").toLowerCase();
-
         const isArms =
           nm.includes("arm") ||
           nm.includes("forearm") ||
@@ -660,7 +687,6 @@
             nm.includes("calf") ||
             nm.includes("foot") ||
             nm.includes("boot");
-
           try{
             m.isPickable = false;
             m.renderingGroupId = 2;
@@ -831,30 +857,23 @@
     function setFreeLook(on){
       FREE_LOOK = !!on;
       toggleFreeLookBtn.textContent = FREE_LOOK ? "Free Look, on" : "Free Look, off";
-
-      if(TUNE.ENABLED){
-        hudControl.textContent = "CONTROL, TUNE CAM";
-      } else {
-        hudControl.textContent = FREE_LOOK ? "CONTROL, FREE LOOK" : "CONTROL, FPS";
-      }
-
+      hudControl.textContent = TUNE.ENABLED ? "CONTROL, TUNE CAM" : (FREE_LOOK ? "CONTROL, FREE LOOK" : "CONTROL, FPS");
       hintText.textContent = TUNE.ENABLED
         ? "Tune mode, adjust camera offsets, reset returns to locked values"
         : (FREE_LOOK
-          ? "Left stick moves soldier, right stick looks around without rotating soldier body, fire shoots"
-          : "Left stick moves soldier, right stick looks around, soldier direction follows look, fire shoots");
+          ? "Left stick moves soldier, right stick looks around, body does not rotate, fire shoots"
+          : "Left stick moves soldier, right stick looks around, body follows look, fire shoots");
     }
 
     function setTuneCam(on){
       TUNE.ENABLED = !!on;
       tuneCamBtn.textContent = TUNE.ENABLED ? "Tune Cam, on" : "Tune Cam, off";
       hudControl.textContent = TUNE.ENABLED ? "CONTROL, TUNE CAM" : (FREE_LOOK ? "CONTROL, FREE LOOK" : "CONTROL, FPS");
-
       hintText.textContent = TUNE.ENABLED
         ? "Tune mode, left stick changes X Y, right stick up down changes Z, reset returns to locked values"
         : (FREE_LOOK
-          ? "Left stick moves soldier, right stick looks around without rotating soldier body, fire shoots"
-          : "Left stick moves soldier, right stick looks around, soldier direction follows look, fire shoots");
+          ? "Left stick moves soldier, right stick looks around, body does not rotate, fire shoots"
+          : "Left stick moves soldier, right stick looks around, body follows look, fire shoots");
     }
 
     function resetAll(){
@@ -914,7 +933,6 @@
 
       const hitPoint = (pick && pick.hit && pick.pickedPoint) ? pick.pickedPoint.clone() : origin.add(dir.scale(cfg.maxDist));
 
-      /* tracer */
       const pts = [origin, hitPoint];
       const tracer = BABYLON.MeshBuilder.CreateLines("tr", { points: pts }, scene);
       tracer.isPickable = false;
@@ -923,7 +941,6 @@
       tracer.renderingGroupId = 3;
       setTimeout(() => { try{ tracer.dispose(); }catch(e){} }, Math.round(cfg.tracerLife * 1000));
 
-      /* muzzle flash */
       const flash = BABYLON.MeshBuilder.CreateSphere("mf", { diameter: 0.06 }, scene);
       flash.isPickable = false;
       flash.renderingGroupId = 3;
@@ -935,7 +952,6 @@
       flash.position.copyFrom(origin);
       setTimeout(() => { try{ flash.dispose(); }catch(e){} }, 40);
 
-      /* recoil */
       CHEST.pitch = clamp(CHEST.pitch - cfg.recoil, -1.10, 0.65);
 
       if(pick && pick.hit){
@@ -998,7 +1014,6 @@
         const dt = scene.getEngine().getDeltaTime() * 0.001;
         const now = performance.now() * 0.001;
 
-        /* Joystick input */
         let mvX = applyDeadzone(moveState.dx);
         let mvY = applyDeadzone(moveState.dy);
 
@@ -1006,7 +1021,6 @@
         let lyRaw = applyDeadzone(lookState.dy);
         let ly = JOY.INVERT_Y ? -lyRaw : lyRaw;
 
-        /* Desktop fallback */
         if(!moveState.active){
           const kx = (keys.d ? 1 : 0) + (keys.a ? -1 : 0);
           const ky = (keys.s ? 1 : 0) + (keys.w ? -1 : 0);
@@ -1020,7 +1034,6 @@
           ly = clamp(ky, -1, 1) * 0.55;
         }
 
-        /* TUNE MODE, position only */
         if(TUNE.ENABLED){
           const sp = TUNE.POS_SPEED * dt;
 
@@ -1030,22 +1043,19 @@
 
           applyChestMount();
         } else {
-          /* PLAYSTATION STYLE FPS,
-             Right stick controls look (yaw, pitch),
-             Left stick moves soldier (legs) relative to look yaw,
-             Both can happen at the same time */
+          /* Right stick, camera look */
           CHEST.yaw   += lx * JOY.LOOK_SENS * dt;
           CHEST.pitch += ly * JOY.LOOK_SENS * dt;
           CHEST.pitch = clamp(CHEST.pitch, -1.10, 0.65);
 
           applyChestMount();
 
-          /* Soldier body follows look yaw unless Free Look is on */
+          /* Body follows look yaw unless Free Look is on */
           if(!FREE_LOOK){
             soldierRoot.rotation.y = CHEST.yaw;
           }
 
-          /* Move uses camera yaw, so forward is where you are looking */
+          /* Left stick, move relative to where you are looking */
           const yawForMove = CHEST.yaw;
           const forward = new BABYLON.Vector3(Math.sin(yawForMove), 0, Math.cos(yawForMove));
           const right = new BABYLON.Vector3(forward.z, 0, -forward.x);
@@ -1058,7 +1068,6 @@
           soldierRoot.position.addInPlace(new BABYLON.Vector3(delta.x, 0, delta.z));
         }
 
-        /* SMG full auto */
         if(isFiring && weaponSku === "wz_cityrunner_smg"){
           const cfg = FIRE.smg;
           const interval = 60.0 / cfg.rpm;
@@ -1077,14 +1086,13 @@
       return scene;
     }
 
-    /* Fire button pointer handling */
     (function(){
       let pid = null;
 
       fireBtn.addEventListener("pointerdown", (e) => {
         e.preventDefault();
         pid = e.pointerId;
-        fireBtn.setPointerCapture(pid);
+        try{ fireBtn.setPointerCapture(pid); }catch(_){}
         startFiring();
       }, { passive:false });
 
@@ -1096,7 +1104,6 @@
 
       fireBtn.addEventListener("pointerup", end, { passive:true });
       fireBtn.addEventListener("pointercancel", end, { passive:true });
-      fireBtn.addEventListener("pointerleave", end, { passive:true });
     })();
 
     toggleFreeLookBtn.addEventListener("click", () => setFreeLook(!FREE_LOOK));
