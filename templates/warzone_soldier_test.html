@@ -156,6 +156,71 @@
       box-shadow:0 0 18px rgba(255,59,107,.10);
       pointer-events:none;
     }
+
+    /* Fire button */
+    .fire-btn{
+      position:absolute;
+      right:182px;
+      bottom:46px;
+      width:110px;
+      height:110px;
+      border-radius:50%;
+      border:1px solid rgba(255,59,107,.55);
+      background:radial-gradient(circle at 30% 30%,rgba(255,59,107,.28),rgba(0,0,0,.22));
+      box-shadow:0 0 28px rgba(255,59,107,.14), 0 0 26px rgba(0,255,255,.08);
+      pointer-events:auto;
+      touch-action:none;
+      display:flex;
+      align-items:center;
+      justify-content:center;
+      font-weight:700;
+      letter-spacing:.10em;
+      text-transform:uppercase;
+      color:#ffe7ef;
+      user-select:none;
+      opacity:0.96;
+    }
+    .fire-btn:active{ transform:scale(.98); }
+    .fire-sub{
+      font-size:10px;
+      opacity:.85;
+      margin-top:2px;
+      letter-spacing:.12em;
+      color:#ffd2de;
+    }
+    .fire-wrap{
+      display:flex;
+      flex-direction:column;
+      align-items:center;
+      justify-content:center;
+      line-height:1.1;
+    }
+
+    /* Hit marker */
+    .hit{
+      position:absolute;
+      left:50%;
+      top:50%;
+      transform:translate(-50%,-50%);
+      width:28px;
+      height:28px;
+      z-index:25;
+      pointer-events:none;
+      opacity:0;
+    }
+    .hit::before,.hit::after{
+      content:"";
+      position:absolute;
+      left:50%;
+      top:50%;
+      width:28px;
+      height:2px;
+      background:rgba(255,255,255,.9);
+      transform-origin:center;
+      box-shadow:0 0 10px rgba(0,255,255,.18);
+    }
+    .hit::before{ transform:translate(-50%,-50%) rotate(45deg); }
+    .hit::after{ transform:translate(-50%,-50%) rotate(-45deg); }
   </style>
 
   <script src="https://cdn.babylonjs.com/babylon.js"></script>
@@ -178,7 +243,7 @@
             <button class="tag btn" id="resetBtn" type="button">Reset</button>
           </div>
           <div class="hint" id="hintText">
-            Left stick moves soldier, right stick aims, Free Look means aim camera only, soldier body does not rotate
+            Left stick moves soldier, right stick rotates soldier and aims camera together, fire button shoots
           </div>
         </div>
 
@@ -193,9 +258,18 @@
         </div>
       </div>
 
+      <div class="hit" id="hitMarker"></div>
+
       <div class="touch-ui" id="touchUi">
         <div class="stick left" id="moveStick"><div class="nub" id="moveNub"></div></div>
         <div class="stick right" id="lookStick"><div class="nub" id="lookNub"></div></div>
+
+        <div class="fire-btn" id="fireBtn" role="button" aria-label="Fire">
+          <div class="fire-wrap">
+            <div>FIRE</div>
+            <div class="fire-sub" id="fireModeText">tap</div>
+          </div>
+        </div>
       </div>
     </div>
   </div>
@@ -250,6 +324,10 @@
     const lookStick = document.getElementById("lookStick");
     const lookNub   = document.getElementById("lookNub");
 
+    const fireBtn = document.getElementById("fireBtn");
+    const fireModeText = document.getElementById("fireModeText");
+    const hitMarker = document.getElementById("hitMarker");
+
     function clamp(v,a,b){ return Math.max(a, Math.min(b, v)); }
 
     const SOLDIER_ROOT = "/assets/warzone3d/soldier_gltf_3/";
@@ -279,14 +357,19 @@
       }
     };
 
-    /* Chest cam tuning,
-       Higher start, like a taller person,
-       Tune mode can now go MUCH higher */
-    const CHEST = {
+    /* LOCKED CHEST CAM, values from your screenshot */
+    const CHEST_LOCK = {
       pivotPos: new BABYLON.Vector3(0.00, 0.22, 0.10),
-      camPos:   new BABYLON.Vector3(0.00, 0.55, 0.55),
+      camPos:   new BABYLON.Vector3(0.204, 0.792, 0.422),
       pitch:    -0.20,
       yaw:       0.00
+    };
+
+    const CHEST = {
+      pivotPos: CHEST_LOCK.pivotPos.clone(),
+      camPos:   CHEST_LOCK.camPos.clone(),
+      pitch:    CHEST_LOCK.pitch,
+      yaw:      CHEST_LOCK.yaw
     };
 
     const TUNE = {
@@ -300,7 +383,7 @@
       PIVOT_Y_MAX: 1.80
     };
 
-    /* Slow the idle animation even more */
+    /* Idle slower */
     const IDLE = { SPEED: 0.06, LOOP: true };
     const BOB  = { LOCK_HIPS_Y: true };
 
@@ -309,6 +392,12 @@
       LOOK_SENS: 2.4,
       DEADZONE: 0.10,
       INVERT_Y: false
+    };
+
+    /* Fire tuning */
+    const FIRE = {
+      pistol: { rpm: 240, spread: 0.0035, maxDist: 120, tracerLife: 0.06 },
+      smg:    { rpm: 900, spread: 0.0070, maxDist: 120, tracerLife: 0.045 }
     };
 
     function applyDeadzone(x){
@@ -392,9 +481,26 @@
 
     let FREE_LOOK = false;
 
+    /* Firing state */
+    let isFiring = false;
+    let nextShotAt = 0;
+
     function fmt(v){ return (Math.round(v*1000)/1000).toFixed(3); }
     function updateCamHud(){
       hudCam.textContent = `CAM, x ${fmt(CHEST.camPos.x)} y ${fmt(CHEST.camPos.y)} z ${fmt(CHEST.camPos.z)}`;
+    }
+
+    function setFireModeLabel(){
+      fireModeText.textContent = (weaponSku === "wz_cityrunner_smg") ? "hold" : "tap";
+    }
+
+    function flashHit(){
+      hitMarker.style.opacity = "1";
+      hitMarker.style.transition = "none";
+      requestAnimationFrame(() => {
+        hitMarker.style.transition = "opacity 120ms ease";
+        hitMarker.style.opacity = "0";
+      });
     }
 
     function findSkinnedMeshFromContainer(container){
@@ -553,6 +659,14 @@
       updateCamHud();
     }
 
+    function lockChestToScreenshot(){
+      CHEST.pivotPos.copyFrom(CHEST_LOCK.pivotPos);
+      CHEST.camPos.copyFrom(CHEST_LOCK.camPos);
+      CHEST.pitch = CHEST_LOCK.pitch;
+      CHEST.yaw   = CHEST_LOCK.yaw;
+      applyChestMount();
+    }
+
     async function loadSoldierAndChestCam(){
       clearSoldier();
       hudSoldier.textContent = "SOLDIER, loading";
@@ -596,7 +710,7 @@
       chestPivot.parent = chestBoneNode;
 
       camera.parent = chestPivot;
-      applyChestMount();
+      lockChestToScreenshot();
 
       hipsBone = findHipsBone(sk);
       if(hipsBone && BOB.LOCK_HIPS_Y){
@@ -656,6 +770,7 @@
       weaponSku = sku;
       hudWeapon.textContent = (weaponSku === "wz_cityrunner_smg") ? "WEAPON, SMG" : "WEAPON, pistol";
       weaponBtn.textContent = (weaponSku === "wz_cityrunner_smg") ? "Weapon, SMG" : "Weapon, pistol";
+      setFireModeLabel();
     }
 
     function setFreeLook(on){
@@ -667,10 +782,10 @@
       }
 
       hintText.textContent = TUNE.ENABLED
-        ? "TUNE MODE, left stick moves camera X and raises mount, right stick up down moves camera Z, aim does not change"
+        ? "TUNE MODE, position only"
         : (FREE_LOOK
-          ? "Left stick moves soldier, right stick aims camera only, soldier body does not rotate"
-          : "Left stick moves soldier, right stick rotates soldier and aims camera together");
+          ? "Left stick moves soldier, right stick aims camera only, soldier body does not rotate, fire button shoots"
+          : "Left stick moves soldier, right stick rotates soldier and aims camera together, fire button shoots");
     }
 
     function setTuneCam(on){
@@ -679,10 +794,10 @@
       hudControl.textContent = TUNE.ENABLED ? "CONTROL, TUNE CAM" : (FREE_LOOK ? "CONTROL, CAMERA" : "CONTROL, SOLDIER");
 
       hintText.textContent = TUNE.ENABLED
-        ? "TUNE MODE, left stick moves camera X and raises mount, right stick up down moves camera Z, aim does not change"
+        ? "TUNE MODE, left stick moves camera X Y, right stick up down moves camera Z, reset returns to locked screenshot values"
         : (FREE_LOOK
-          ? "Left stick moves soldier, right stick aims camera only, soldier body does not rotate"
-          : "Left stick moves soldier, right stick rotates soldier and aims camera together");
+          ? "Left stick moves soldier, right stick aims camera only, soldier body does not rotate, fire button shoots"
+          : "Left stick moves soldier, right stick rotates soldier and aims camera together, fire button shoots");
     }
 
     function resetAll(){
@@ -691,17 +806,95 @@
       soldierRoot.position.set(0,0,0);
       soldierRoot.rotation.set(0,0,0);
 
-      CHEST.pivotPos = new BABYLON.Vector3(0.00, 0.22, 0.10);
-      CHEST.camPos   = new BABYLON.Vector3(0.00, 0.55, 0.55);
-      CHEST.pitch    = -0.20;
-      CHEST.yaw      = 0.00;
-
-      applyChestMount();
+      lockChestToScreenshot();
       setTuneCam(false);
       setFreeLook(false);
 
       if(soldierContainer) playIdleAnimationsSlow(soldierContainer);
       if(hipsBone && hipsBaseY !== null){ hipsBone.position.y = hipsBaseY; }
+    }
+
+    function randSpread(spread){
+      const a = (Math.random() * 2 - 1) * spread;
+      const b = (Math.random() * 2 - 1) * spread;
+      return new BABYLON.Vector3(a, b, 0);
+    }
+
+    function getMuzzleOrigin(){
+      if(weaponGrip){
+        try{
+          const p = weaponGrip.getAbsolutePosition();
+          return p.clone();
+        }catch(e){}
+      }
+      const p = camera.getAbsolutePosition();
+      const dir = camera.getForwardRay(1).direction;
+      return p.add(dir.scale(0.35));
+    }
+
+    function shootOnce(){
+      if(!scene || !camera) return;
+
+      const mode = (weaponSku === "wz_cityrunner_smg") ? "smg" : "pistol";
+      const cfg = FIRE[mode];
+
+      const origin = getMuzzleOrigin();
+      const baseDir = camera.getForwardRay(1).direction.clone();
+
+      const s = randSpread(cfg.spread);
+      const dir = baseDir.add(new BABYLON.Vector3(s.x, s.y, 0)).normalize();
+
+      const ray = new BABYLON.Ray(origin, dir, cfg.maxDist);
+
+      const pick = scene.pickWithRay(ray, (m) => {
+        if(!m) return false;
+        if(m === weaponRoot) return false;
+        if(m === weaponGrip) return false;
+        if(m.parent === weaponGrip) return false;
+        return true;
+      });
+
+      const hitPoint = (pick && pick.hit && pick.pickedPoint) ? pick.pickedPoint.clone() : origin.add(dir.scale(cfg.maxDist));
+
+      /* tracer */
+      const pts = [origin, hitPoint];
+      const tracer = BABYLON.MeshBuilder.CreateLines("tr", { points: pts }, scene);
+      tracer.isPickable = false;
+      tracer.alpha = 0.9;
+      tracer.color = new BABYLON.Color3(0.9, 0.95, 1.0);
+      tracer.renderingGroupId = 3;
+
+      setTimeout(() => { try{ tracer.dispose(); }catch(e){} }, Math.round(cfg.tracerLife * 1000));
+
+      /* tiny muzzle flash */
+      const flash = BABYLON.MeshBuilder.CreateSphere("mf", { diameter: 0.06 }, scene);
+      flash.isPickable = false;
+      flash.renderingGroupId = 3;
+      const m = new BABYLON.StandardMaterial("mfm", scene);
+      m.emissiveColor = new BABYLON.Color3(1.0, 0.85, 0.35);
+      m.diffuseColor = new BABYLON.Color3(0,0,0);
+      m.specularColor = new BABYLON.Color3(0,0,0);
+      flash.material = m;
+      flash.position.copyFrom(origin);
+      setTimeout(() => { try{ flash.dispose(); }catch(e){} }, 40);
+
+      if(pick && pick.hit){
+        flashHit();
+      }
+    }
+
+    function startFiring(){
+      isFiring = true;
+      if(weaponSku === "wz_basic_pistol"){
+        shootOnce();
+        isFiring = false;
+      } else {
+        nextShotAt = 0;
+      }
+    }
+
+    function stopFiring(){
+      isFiring = false;
     }
 
     function createScene(){
@@ -720,6 +913,7 @@
       gmat.emissiveColor = new BABYLON.Color3(0.02,0.03,0.06);
       gmat.specularColor = new BABYLON.Color3(0,0,0);
       ground.material = gmat;
+      ground.isPickable = true;
 
       camera = new BABYLON.UniversalCamera("chestCam", new BABYLON.Vector3(0,1.6,0), scene);
       camera.minZ = 0.02;
@@ -741,6 +935,7 @@
         if(!soldierRoot || !chestPivot) return;
 
         const dt = scene.getEngine().getDeltaTime() * 0.001;
+        const now = performance.now() * 0.001;
 
         const mvX = applyDeadzone(moveState.dx);
         const mvY = applyDeadzone(moveState.dy);
@@ -749,51 +944,90 @@
         const lyRaw = applyDeadzone(lookState.dy);
         const ly = JOY.INVERT_Y ? -lyRaw : lyRaw;
 
-        /* TUNE MODE, position only, do not change yaw or pitch */
+        /* TUNE MODE */
         if(TUNE.ENABLED){
           const sp = TUNE.POS_SPEED * dt;
 
-          /* left stick, X and Y */
           CHEST.camPos.x = clamp(CHEST.camPos.x + (mvX * sp), -TUNE.X_LIMIT, TUNE.X_LIMIT);
           CHEST.camPos.y = clamp(CHEST.camPos.y + (-mvY * sp), -TUNE.Y_LIMIT, TUNE.Y_LIMIT);
 
-          /* ALSO raise or lower the mount pivot so you can go higher like a taller person */
           CHEST.pivotPos.y = clamp(CHEST.pivotPos.y + (-mvY * sp * 0.6), TUNE.PIVOT_Y_MIN, TUNE.PIVOT_Y_MAX);
 
-          /* right stick up down, Z in out */
           CHEST.camPos.z = clamp(CHEST.camPos.z + ((-ly) * sp), TUNE.Z_MIN, TUNE.Z_MAX);
 
           applyChestMount();
-          return;
-        }
-
-        /* NORMAL AIM, right stick controls aim, or rotates soldier + aim */
-        if(FREE_LOOK){
-          CHEST.yaw += lx * JOY.LOOK_SENS * dt;
-          CHEST.pitch += ly * JOY.LOOK_SENS * dt;
-          CHEST.pitch = clamp(CHEST.pitch, -1.10, 0.65);
-          applyChestMount();
         } else {
-          soldierRoot.rotation.y += lx * JOY.LOOK_SENS * dt;
-          CHEST.pitch += ly * JOY.LOOK_SENS * dt;
-          CHEST.pitch = clamp(CHEST.pitch, -1.10, 0.65);
-          applyChestMount();
+          /* NORMAL AIM */
+          if(FREE_LOOK){
+            CHEST.yaw += lx * JOY.LOOK_SENS * dt;
+            CHEST.pitch += ly * JOY.LOOK_SENS * dt;
+            CHEST.pitch = clamp(CHEST.pitch, -1.10, 0.65);
+            applyChestMount();
+          } else {
+            soldierRoot.rotation.y += lx * JOY.LOOK_SENS * dt;
+            CHEST.pitch += ly * JOY.LOOK_SENS * dt;
+            CHEST.pitch = clamp(CHEST.pitch, -1.10, 0.65);
+            applyChestMount();
+          }
+
+          /* Move soldier */
+          const forward = new BABYLON.Vector3(Math.sin(soldierRoot.rotation.y), 0, Math.cos(soldierRoot.rotation.y));
+          const right = new BABYLON.Vector3(forward.z, 0, -forward.x);
+
+          const moveF = -mvY;
+          const moveS = mvX;
+
+          const spd = JOY.MOVE_SPEED * dt;
+          const delta = forward.scale(moveF * spd).add(right.scale(moveS * spd));
+          soldierRoot.position.addInPlace(new BABYLON.Vector3(delta.x, 0, delta.z));
         }
 
-        /* Move soldier */
-        const forward = new BABYLON.Vector3(Math.sin(soldierRoot.rotation.y), 0, Math.cos(soldierRoot.rotation.y));
-        const right = new BABYLON.Vector3(forward.z, 0, -forward.x);
-
-        const moveF = -mvY;
-        const moveS = mvX;
-
-        const spd = JOY.MOVE_SPEED * dt;
-        const delta = forward.scale(moveF * spd).add(right.scale(moveS * spd));
-        soldierRoot.position.addInPlace(new BABYLON.Vector3(delta.x, 0, delta.z));
+        /* SMG full auto */
+        if(isFiring && weaponSku === "wz_cityrunner_smg"){
+          const cfg = FIRE.smg;
+          const interval = 60.0 / cfg.rpm;
+          if(nextShotAt === 0) nextShotAt = now;
+          while(now >= nextShotAt){
+            shootOnce();
+            nextShotAt += interval;
+            if(now - nextShotAt > 0.2){
+              nextShotAt = now + interval;
+              break;
+            }
+          }
+        }
       });
 
       return scene;
     }
+
+    /* Fire button pointer handling */
+    (function(){
+      let pid = null;
+
+      fireBtn.addEventListener("pointerdown", (e) => {
+        e.preventDefault();
+        pid = e.pointerId;
+        fireBtn.setPointerCapture(pid);
+        startFiring();
+      }, { passive:false });
+
+      function end(e){
+        if(pid !== null && e.pointerId !== pid) return;
+        stopFiring();
+        pid = null;
+      }
+
+      fireBtn.addEventListener("pointerup", end, { passive:true });
+      fireBtn.addEventListener("pointercancel", end, { passive:true });
+      fireBtn.addEventListener("pointerleave", end, { passive:true });
+    })();
+
+    /* Desktop test, mouse */
+    window.addEventListener("mousedown", (e) => {
+      if(e.button !== 0) return;
+      if(e.target === fireBtn) return;
+    });
 
     toggleFreeLookBtn.addEventListener("click", () => setFreeLook(!FREE_LOOK));
     tuneCamBtn.addEventListener("click", () => setTuneCam(!TUNE.ENABLED));
@@ -816,6 +1050,8 @@
       try{
         await loadSoldierAndChestCam();
         await loadWeaponToRightHand("wz_basic_pistol");
+        lockChestToScreenshot();
+        setFireModeLabel();
       }catch(e){
         console.error("[CHEST CAM TEST] boot failed", e);
         hudSoldier.textContent = "SOLDIER, failed";
