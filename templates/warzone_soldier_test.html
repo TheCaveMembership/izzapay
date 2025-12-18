@@ -267,14 +267,12 @@
         <div class="hud-box">
           <div class="hud-title">Chest Cam Align</div>
           <div class="hud-row">
-            <span class="tag" id="hudControl">CONTROL, FPS</span>
-            <button class="tag btn" id="toggleFreeLookBtn" type="button">Free Look, off</button>
-            <button class="tag btn" id="tuneCamBtn" type="button">Tune Cam, off</button>
+            <span class="tag" id="hudControl">CONTROL, SOLDIER</span>
             <button class="tag btn" id="weaponBtn" type="button">Weapon, pistol</button>
             <button class="tag btn" id="resetBtn" type="button">Reset</button>
           </div>
           <div class="hint" id="hintText">
-            Left stick moves soldier, right stick looks around, both work at the same time, fire shoots
+            Left stick moves soldier, right stick turns soldier, camera is locked, fire shoots
           </div>
         </div>
 
@@ -285,6 +283,7 @@
             <span class="tag warn" id="hudWeapon">WEAPON, pistol</span>
             <span class="tag" id="hudBone">CHEST, ?</span>
             <span class="tag" id="hudCam">CAM, ?</span>
+            <span class="tag" id="hudPos">POS, ?</span>
           </div>
         </div>
       </div>
@@ -294,7 +293,7 @@
 
       <div class="touch-ui" id="touchUi">
         <div class="stick left" id="moveStick"><div class="nub" id="moveNub"></div></div>
-        <div class="stick right" id="lookStick"><div class="nub" id="lookNub"></div></div>
+        <div class="stick right" id="turnStick"><div class="nub" id="turnNub"></div></div>
 
         <div class="fire-btn" id="fireBtn" role="button" aria-label="Fire">
           <div class="fire-wrap">
@@ -339,22 +338,19 @@
 
     const engine = new BABYLON.Engine(canvas, true, { preserveDrawingBuffer:true, stencil:true });
 
-    const hudControl = document.getElementById("hudControl");
     const hudSoldier = document.getElementById("hudSoldier");
     const hudWeapon  = document.getElementById("hudWeapon");
     const hudBone    = document.getElementById("hudBone");
     const hudCam     = document.getElementById("hudCam");
-    const hintText   = document.getElementById("hintText");
+    const hudPos     = document.getElementById("hudPos");
 
-    const toggleFreeLookBtn = document.getElementById("toggleFreeLookBtn");
-    const tuneCamBtn = document.getElementById("tuneCamBtn");
     const weaponBtn = document.getElementById("weaponBtn");
     const resetBtn = document.getElementById("resetBtn");
 
     const moveStick = document.getElementById("moveStick");
     const moveNub   = document.getElementById("moveNub");
-    const lookStick = document.getElementById("lookStick");
-    const lookNub   = document.getElementById("lookNub");
+    const turnStick = document.getElementById("turnStick");
+    const turnNub   = document.getElementById("turnNub");
 
     const fireBtn = document.getElementById("fireBtn");
     const fireModeText = document.getElementById("fireModeText");
@@ -389,7 +385,7 @@
       }
     };
 
-    /* LOCKED CHEST CAM, values from your screenshot */
+    /* LOCKED CHEST CAM, your screenshot */
     const CHEST_LOCK = {
       pivotPos: new BABYLON.Vector3(0.00, 0.22, 0.10),
       camPos:   new BABYLON.Vector3(-0.650, 1.800, -0.969),
@@ -404,25 +400,13 @@
       yaw:      CHEST_LOCK.yaw
     };
 
-    const TUNE = {
-      ENABLED: false,
-      POS_SPEED: 0.28,
-      X_LIMIT: 0.90,
-      Y_LIMIT: 2.20,
-      Z_MIN:  -1.80,
-      Z_MAX:   1.80,
-      PIVOT_Y_MIN: -0.20,
-      PIVOT_Y_MAX: 2.20
-    };
-
     const IDLE = { SPEED: 0.05, LOOP: true };
     const BOB  = { LOCK_HIPS_Y: true };
 
     const JOY = {
-      MOVE_SPEED: 4.2,
-      LOOK_SENS: 2.6,
-      DEADZONE: 0.10,
-      INVERT_Y: false
+      MOVE_SPEED: 5.5,
+      TURN_SPEED: 2.8,
+      DEADZONE: 0.10
     };
 
     const FIRE = {
@@ -437,119 +421,115 @@
       return Math.sign(x) * clamp(s, 0, 1);
     }
 
-    const moveState = { active:false, id:null, dx:0, dy:0 };
-    const lookState = { active:false, id:null, dx:0, dy:0 };
+    const moveState = { active:false, id:null, dx:0, dy:0, el:null, nub:null, max:1, cx:0, cy:0 };
+    const turnState = { active:false, id:null, dx:0, dy:0, el:null, nub:null, max:1, cx:0, cy:0 };
 
-    /* Desktop fallback controls */
-    const keys = { w:false,a:false,s:false,d:false, arrowup:false, arrowdown:false, arrowleft:false, arrowright:false };
-    window.addEventListener("keydown", (e) => {
-      const k = (e.key || "").toLowerCase();
-      if(k in keys){ keys[k] = true; }
-      if(k === "arrowup") keys.arrowup = true;
-      if(k === "arrowdown") keys.arrowdown = true;
-      if(k === "arrowleft") keys.arrowleft = true;
-      if(k === "arrowright") keys.arrowright = true;
-    });
-    window.addEventListener("keyup", (e) => {
-      const k = (e.key || "").toLowerCase();
-      if(k in keys){ keys[k] = false; }
-      if(k === "arrowup") keys.arrowup = false;
-      if(k === "arrowdown") keys.arrowdown = false;
-      if(k === "arrowleft") keys.arrowleft = false;
-      if(k === "arrowright") keys.arrowright = false;
-    });
-
-    /* IMPORTANT FIX
-       Do NOT reset on pointerleave, only reset on pointerup or pointercancel.
-       This is what was killing movement in real use. */
-    function setupStick(el, nub, state){
-      const rect = () => el.getBoundingClientRect();
-
-      function setNubFromClient(clientX, clientY){
-        const box = rect();
-        const cx = box.left + box.width/2;
-        const cy = box.top + box.height/2;
-
-        const max = (box.width / 2) - (nub.getBoundingClientRect().width / 2);
-
-        const nx = clamp(clientX - cx, -max, max);
-        const ny = clamp(clientY - cy, -max, max);
-
-        nub.style.transform = `translate(calc(-50% + ${nx}px), calc(-50% + ${ny}px))`;
-        state.dx = nx / max;
-        state.dy = ny / max;
+    function stickSetup(state, el, nub){
+      state.el = el;
+      state.nub = nub;
+      function recalc(){
+        const box = el.getBoundingClientRect();
+        state.cx = box.left + box.width/2;
+        state.cy = box.top + box.height/2;
+        state.max = (box.width/2) - (nub.getBoundingClientRect().width/2);
+        if(state.max < 10) state.max = 10;
       }
+      state.recalc = recalc;
+      recalc();
+      window.addEventListener("resize", recalc);
+    }
 
-      function reset(){
-        nub.style.transform = "translate(-50%,-50%)";
-        state.dx = 0;
-        state.dy = 0;
-      }
+    stickSetup(moveState, moveStick, moveNub);
+    stickSetup(turnState, turnStick, turnNub);
 
-      /* Pointer events */
-      el.addEventListener("pointerdown", (e) => {
+    function stickSetFromClient(state, clientX, clientY){
+      const nx = clamp(clientX - state.cx, -state.max, state.max);
+      const ny = clamp(clientY - state.cy, -state.max, state.max);
+      state.nub.style.transform = `translate(calc(-50% + ${nx}px), calc(-50% + ${ny}px))`;
+      state.dx = nx / state.max;
+      state.dy = ny / state.max;
+    }
+    function stickReset(state){
+      state.nub.style.transform = "translate(-50%,-50%)";
+      state.dx = 0;
+      state.dy = 0;
+    }
+
+    /* GLOBAL MOVE, no losing the stick when finger drifts */
+    function bindGlobalStick(state){
+      state.el.addEventListener("pointerdown", (e) => {
         e.preventDefault();
+        state.recalc();
         state.active = true;
         state.id = e.pointerId;
-        try{ el.setPointerCapture(e.pointerId); }catch(_){}
-        setNubFromClient(e.clientX, e.clientY);
+        stickSetFromClient(state, e.clientX, e.clientY);
       }, { passive:false });
 
-      el.addEventListener("pointermove", (e) => {
+      window.addEventListener("pointermove", (e) => {
         if(!state.active || e.pointerId !== state.id) return;
         e.preventDefault();
-        setNubFromClient(e.clientX, e.clientY);
+        stickSetFromClient(state, e.clientX, e.clientY);
       }, { passive:false });
 
-      function endPointer(e){
-        if(state.id !== null && e.pointerId !== state.id) return;
+      window.addEventListener("pointerup", (e) => {
+        if(!state.active || e.pointerId !== state.id) return;
         state.active = false;
         state.id = null;
-        reset();
-      }
+        stickReset(state);
+      }, { passive:true });
 
-      el.addEventListener("pointerup", endPointer, { passive:true });
-      el.addEventListener("pointercancel", endPointer, { passive:true });
+      window.addEventListener("pointercancel", (e) => {
+        if(!state.active || e.pointerId !== state.id) return;
+        state.active = false;
+        state.id = null;
+        stickReset(state);
+      }, { passive:true });
 
-      /* Touch fallback, for environments where pointer capture is flaky */
-      el.addEventListener("touchstart", (e) => {
+      /* Touch fallback */
+      state.el.addEventListener("touchstart", (e) => {
         if(!e.changedTouches || !e.changedTouches.length) return;
         e.preventDefault();
+        state.recalc();
         const t = e.changedTouches[0];
         state.active = true;
         state.id = t.identifier;
-        setNubFromClient(t.clientX, t.clientY);
+        stickSetFromClient(state, t.clientX, t.clientY);
       }, { passive:false });
 
-      el.addEventListener("touchmove", (e) => {
+      window.addEventListener("touchmove", (e) => {
         if(!state.active) return;
         if(!e.changedTouches || !e.changedTouches.length) return;
-        e.preventDefault();
-        let t = null;
-        for(const tt of e.changedTouches){
-          if(tt.identifier === state.id){ t = tt; break; }
+        for(const t of e.changedTouches){
+          if(t.identifier === state.id){
+            stickSetFromClient(state, t.clientX, t.clientY);
+            break;
+          }
         }
-        if(!t) t = e.changedTouches[0];
-        setNubFromClient(t.clientX, t.clientY);
       }, { passive:false });
 
-      el.addEventListener("touchend", (e) => {
+      window.addEventListener("touchend", (e) => {
         if(!state.active) return;
-        state.active = false;
-        state.id = null;
-        reset();
+        if(!e.changedTouches || !e.changedTouches.length) return;
+        for(const t of e.changedTouches){
+          if(t.identifier === state.id){
+            state.active = false;
+            state.id = null;
+            stickReset(state);
+            break;
+          }
+        }
       }, { passive:true });
 
-      el.addEventListener("touchcancel", (e) => {
+      window.addEventListener("touchcancel", () => {
         if(!state.active) return;
         state.active = false;
         state.id = null;
-        reset();
+        stickReset(state);
       }, { passive:true });
     }
 
-    setupStick(moveStick, moveNub, moveState);
-    setupStick(lookStick, lookNub, lookState);
+    bindGlobalStick(moveState);
+    bindGlobalStick(turnState);
 
     let scene;
     let camera;
@@ -569,14 +549,17 @@
     let weaponRoot = null;
     let weaponGrip = null;
 
-    let FREE_LOOK = false;
-
     let isFiring = false;
     let nextShotAt = 0;
 
     function fmt(v){ return (Math.round(v*1000)/1000).toFixed(3); }
+
     function updateCamHud(){
       hudCam.textContent = `CAM, x ${fmt(CHEST.camPos.x)} y ${fmt(CHEST.camPos.y)} z ${fmt(CHEST.camPos.z)}`;
+    }
+    function updatePosHud(){
+      if(!soldierRoot) return;
+      hudPos.textContent = `POS, x ${fmt(soldierRoot.position.x)} z ${fmt(soldierRoot.position.z)}`;
     }
 
     function setFireModeLabel(){
@@ -728,24 +711,22 @@
       }catch(e){}
     }
 
-    function applyChestMount(){
+    /* CAMERA IS LOCKED, never changes from CHEST_LOCK */
+    function applyChestMountLocked(){
       if(!chestPivot || !camera) return;
 
-      chestPivot.position.copyFrom(CHEST.pivotPos);
-      chestPivot.rotation.set(0, CHEST.yaw, 0);
+      chestPivot.position.copyFrom(CHEST_LOCK.pivotPos);
+      chestPivot.rotation.set(0, 0, 0);
 
-      camera.position.copyFrom(CHEST.camPos);
-      camera.rotation.set(CHEST.pitch, 0, 0);
+      camera.position.copyFrom(CHEST_LOCK.camPos);
+      camera.rotation.set(CHEST_LOCK.pitch, 0, 0);
 
-      updateCamHud();
-    }
-
-    function lockChestToScreenshot(){
       CHEST.pivotPos.copyFrom(CHEST_LOCK.pivotPos);
       CHEST.camPos.copyFrom(CHEST_LOCK.camPos);
       CHEST.pitch = CHEST_LOCK.pitch;
-      CHEST.yaw   = CHEST_LOCK.yaw;
-      applyChestMount();
+      CHEST.yaw = CHEST_LOCK.yaw;
+
+      updateCamHud();
     }
 
     async function loadSoldierAndChestCam(){
@@ -753,6 +734,7 @@
       hudSoldier.textContent = "SOLDIER, loading";
       hudBone.textContent = "CHEST, ?";
       hudCam.textContent = "CAM, ?";
+      hudPos.textContent = "POS, ?";
 
       const cont = await BABYLON.SceneLoader.LoadAssetContainerAsync(SOLDIER_ROOT, SOLDIER_FILE, scene);
       cont.addAllToScene();
@@ -791,7 +773,7 @@
       chestPivot.parent = chestBoneNode;
 
       camera.parent = chestPivot;
-      lockChestToScreenshot();
+      applyChestMountLocked();
 
       hipsBone = findHipsBone(sk);
       if(hipsBone && BOB.LOCK_HIPS_Y){
@@ -799,6 +781,7 @@
       }
 
       hudSoldier.textContent = "SOLDIER, loaded";
+      updatePosHud();
     }
 
     async function loadWeaponToRightHand(sku){
@@ -854,40 +837,14 @@
       setFireModeLabel();
     }
 
-    function setFreeLook(on){
-      FREE_LOOK = !!on;
-      toggleFreeLookBtn.textContent = FREE_LOOK ? "Free Look, on" : "Free Look, off";
-      hudControl.textContent = TUNE.ENABLED ? "CONTROL, TUNE CAM" : (FREE_LOOK ? "CONTROL, FREE LOOK" : "CONTROL, FPS");
-      hintText.textContent = TUNE.ENABLED
-        ? "Tune mode, adjust camera offsets, reset returns to locked values"
-        : (FREE_LOOK
-          ? "Left stick moves soldier, right stick looks around, body does not rotate, fire shoots"
-          : "Left stick moves soldier, right stick looks around, body follows look, fire shoots");
-    }
-
-    function setTuneCam(on){
-      TUNE.ENABLED = !!on;
-      tuneCamBtn.textContent = TUNE.ENABLED ? "Tune Cam, on" : "Tune Cam, off";
-      hudControl.textContent = TUNE.ENABLED ? "CONTROL, TUNE CAM" : (FREE_LOOK ? "CONTROL, FREE LOOK" : "CONTROL, FPS");
-      hintText.textContent = TUNE.ENABLED
-        ? "Tune mode, left stick changes X Y, right stick up down changes Z, reset returns to locked values"
-        : (FREE_LOOK
-          ? "Left stick moves soldier, right stick looks around, body does not rotate, fire shoots"
-          : "Left stick moves soldier, right stick looks around, body follows look, fire shoots");
-    }
-
     function resetAll(){
       if(!soldierRoot) return;
-
       soldierRoot.position.set(0,0,0);
       soldierRoot.rotation.set(0,0,0);
-
-      lockChestToScreenshot();
-      setTuneCam(false);
-      setFreeLook(false);
-
+      applyChestMountLocked();
       if(soldierContainer) playIdleAnimationsSlow(soldierContainer);
       if(hipsBone && hipsBaseY !== null){ hipsBone.position.y = hipsBaseY; }
+      updatePosHud();
     }
 
     function randSpread(spread){
@@ -898,10 +855,7 @@
 
     function getMuzzleOrigin(){
       if(weaponGrip){
-        try{
-          const p = weaponGrip.getAbsolutePosition();
-          return p.clone();
-        }catch(e){}
+        try{ return weaponGrip.getAbsolutePosition().clone(); }catch(e){}
       }
       const p = camera.getAbsolutePosition();
       const dir = camera.getForwardRay(1).direction;
@@ -910,7 +864,6 @@
 
     function shootOnce(){
       if(!scene || !camera) return;
-      if(TUNE.ENABLED) return;
 
       const mode = (weaponSku === "wz_cityrunner_smg") ? "smg" : "pistol";
       const cfg = FIRE[mode];
@@ -933,8 +886,7 @@
 
       const hitPoint = (pick && pick.hit && pick.pickedPoint) ? pick.pickedPoint.clone() : origin.add(dir.scale(cfg.maxDist));
 
-      const pts = [origin, hitPoint];
-      const tracer = BABYLON.MeshBuilder.CreateLines("tr", { points: pts }, scene);
+      const tracer = BABYLON.MeshBuilder.CreateLines("tr", { points: [origin, hitPoint] }, scene);
       tracer.isPickable = false;
       tracer.alpha = 0.9;
       tracer.color = new BABYLON.Color3(0.9, 0.95, 1.0);
@@ -952,15 +904,10 @@
       flash.position.copyFrom(origin);
       setTimeout(() => { try{ flash.dispose(); }catch(e){} }, 40);
 
-      CHEST.pitch = clamp(CHEST.pitch - cfg.recoil, -1.10, 0.65);
-
-      if(pick && pick.hit){
-        flashHit();
-      }
+      if(pick && pick.hit) flashHit();
     }
 
     function startFiring(){
-      if(TUNE.ENABLED) return;
       isFiring = true;
       if(weaponSku === "wz_basic_pistol"){
         shootOnce();
@@ -969,10 +916,7 @@
         nextShotAt = 0;
       }
     }
-
-    function stopFiring(){
-      isFiring = false;
-    }
+    function stopFiring(){ isFiring = false; }
 
     function createScene(){
       scene = new BABYLON.Scene(engine);
@@ -991,6 +935,15 @@
       gmat.specularColor = new BABYLON.Color3(0,0,0);
       ground.material = gmat;
       ground.isPickable = true;
+
+      /* grid lines so you can SEE movement immediately */
+      const grid = new BABYLON.GridMaterial("grid", scene);
+      grid.majorUnitFrequency = 5;
+      grid.minorUnitVisibility = 0.25;
+      grid.gridRatio = 1;
+      grid.backFaceCulling = false;
+      grid.opacity = 0.35;
+      ground.material = grid;
 
       camera = new BABYLON.UniversalCamera("chestCam", new BABYLON.Vector3(0,1.6,0), scene);
       camera.minZ = 0.02;
@@ -1014,60 +967,31 @@
         const dt = scene.getEngine().getDeltaTime() * 0.001;
         const now = performance.now() * 0.001;
 
-        let mvX = applyDeadzone(moveState.dx);
-        let mvY = applyDeadzone(moveState.dy);
+        /* sticks, soldier only */
+        const mvX = applyDeadzone(moveState.dx);
+        const mvY = applyDeadzone(moveState.dy);
 
-        let lx = applyDeadzone(lookState.dx);
-        let lyRaw = applyDeadzone(lookState.dy);
-        let ly = JOY.INVERT_Y ? -lyRaw : lyRaw;
+        const tx = applyDeadzone(turnState.dx);
 
-        if(!moveState.active){
-          const kx = (keys.d ? 1 : 0) + (keys.a ? -1 : 0);
-          const ky = (keys.s ? 1 : 0) + (keys.w ? -1 : 0);
-          mvX = clamp(kx, -1, 1);
-          mvY = clamp(ky, -1, 1);
-        }
-        if(!lookState.active){
-          const kx = (keys.arrowright ? 1 : 0) + (keys.arrowleft ? -1 : 0);
-          const ky = (keys.arrowdown ? 1 : 0) + (keys.arrowup ? -1 : 0);
-          lx = clamp(kx, -1, 1) * 0.55;
-          ly = clamp(ky, -1, 1) * 0.55;
-        }
+        /* turn soldier with right stick, no camera yaw, no camera pitch */
+        soldierRoot.rotation.y += tx * JOY.TURN_SPEED * dt;
 
-        if(TUNE.ENABLED){
-          const sp = TUNE.POS_SPEED * dt;
+        /* move soldier with left stick, relative to soldier facing */
+        const yaw = soldierRoot.rotation.y;
+        const forward = new BABYLON.Vector3(Math.sin(yaw), 0, Math.cos(yaw));
+        const right = new BABYLON.Vector3(forward.z, 0, -forward.x);
 
-          CHEST.camPos.x = clamp(CHEST.camPos.x + (mvX * sp), -TUNE.X_LIMIT, TUNE.X_LIMIT);
-          CHEST.camPos.y = clamp(CHEST.camPos.y + (-mvY * sp), -TUNE.Y_LIMIT, TUNE.Y_LIMIT);
-          CHEST.camPos.z = clamp(CHEST.camPos.z + ((-ly) * sp), TUNE.Z_MIN, TUNE.Z_MAX);
+        const moveF = -mvY;
+        const moveS = mvX;
 
-          applyChestMount();
-        } else {
-          /* Right stick, camera look */
-          CHEST.yaw   += lx * JOY.LOOK_SENS * dt;
-          CHEST.pitch += ly * JOY.LOOK_SENS * dt;
-          CHEST.pitch = clamp(CHEST.pitch, -1.10, 0.65);
+        const spd = JOY.MOVE_SPEED * dt;
+        const delta = forward.scale(moveF * spd).add(right.scale(moveS * spd));
+        soldierRoot.position.addInPlace(new BABYLON.Vector3(delta.x, 0, delta.z));
 
-          applyChestMount();
+        /* camera always locked */
+        applyChestMountLocked();
 
-          /* Body follows look yaw unless Free Look is on */
-          if(!FREE_LOOK){
-            soldierRoot.rotation.y = CHEST.yaw;
-          }
-
-          /* Left stick, move relative to where you are looking */
-          const yawForMove = CHEST.yaw;
-          const forward = new BABYLON.Vector3(Math.sin(yawForMove), 0, Math.cos(yawForMove));
-          const right = new BABYLON.Vector3(forward.z, 0, -forward.x);
-
-          const moveF = -mvY;
-          const moveS = mvX;
-
-          const spd = JOY.MOVE_SPEED * dt;
-          const delta = forward.scale(moveF * spd).add(right.scale(moveS * spd));
-          soldierRoot.position.addInPlace(new BABYLON.Vector3(delta.x, 0, delta.z));
-        }
-
+        /* SMG hold */
         if(isFiring && weaponSku === "wz_cityrunner_smg"){
           const cfg = FIRE.smg;
           const interval = 60.0 / cfg.rpm;
@@ -1081,6 +1005,8 @@
             }
           }
         }
+
+        updatePosHud();
       });
 
       return scene;
@@ -1092,12 +1018,10 @@
       fireBtn.addEventListener("pointerdown", (e) => {
         e.preventDefault();
         pid = e.pointerId;
-        try{ fireBtn.setPointerCapture(pid); }catch(_){}
         startFiring();
       }, { passive:false });
 
-      function end(e){
-        if(pid !== null && e.pointerId !== pid) return;
+      function end(){
         stopFiring();
         pid = null;
       }
@@ -1106,28 +1030,19 @@
       fireBtn.addEventListener("pointercancel", end, { passive:true });
     })();
 
-    toggleFreeLookBtn.addEventListener("click", () => setFreeLook(!FREE_LOOK));
-    tuneCamBtn.addEventListener("click", () => setTuneCam(!TUNE.ENABLED));
     resetBtn.addEventListener("click", resetAll);
 
     weaponBtn.addEventListener("click", async () => {
       const next = (weaponSku === "wz_basic_pistol") ? "wz_cityrunner_smg" : "wz_basic_pistol";
-      try{
-        await loadWeaponToRightHand(next);
-      }catch(e){
-        console.warn("weapon swap failed", e);
-      }
+      try{ await loadWeaponToRightHand(next); }catch(e){ console.warn("weapon swap failed", e); }
     });
 
     (async function(){
       createScene();
-      setFreeLook(false);
-      setTuneCam(false);
-
       try{
         await loadSoldierAndChestCam();
         await loadWeaponToRightHand("wz_basic_pistol");
-        lockChestToScreenshot();
+        applyChestMountLocked();
         setFireModeLabel();
       }catch(e){
         console.error("[CHEST CAM TEST] boot failed", e);
