@@ -174,8 +174,6 @@
             <span class="tag" id="hudControl">CONTROL, SOLDIER</span>
             <button class="tag btn" id="toggleFreeLookBtn" type="button">Free Look, off</button>
             <button class="tag btn" id="tuneCamBtn" type="button">Tune Cam, off</button>
-            <button class="tag btn" id="camYUpBtn" type="button">Cam Y, +</button>
-            <button class="tag btn" id="camYDownBtn" type="button">Cam Y, -</button>
             <button class="tag btn" id="weaponBtn" type="button">Weapon, pistol</button>
             <button class="tag btn" id="resetBtn" type="button">Reset</button>
           </div>
@@ -244,8 +242,6 @@
 
     const toggleFreeLookBtn = document.getElementById("toggleFreeLookBtn");
     const tuneCamBtn = document.getElementById("tuneCamBtn");
-    const camYUpBtn = document.getElementById("camYUpBtn");
-    const camYDownBtn = document.getElementById("camYDownBtn");
     const weaponBtn = document.getElementById("weaponBtn");
     const resetBtn = document.getElementById("resetBtn");
 
@@ -283,24 +279,22 @@
       }
     };
 
+    /* Chest cam tuning */
     const CHEST = {
       pivotPos: new BABYLON.Vector3(0.00, 0.02, 0.03),
-      camPos:   new BABYLON.Vector3(0.00, 0.00, -0.07),
+      camPos:   new BABYLON.Vector3(0.00, 0.00, -0.07), /* <-- we will tune Z in/out */
       pitch:    -0.20,
       yaw:       0.00
     };
 
-    /* FIXED: huge Z range + faster tuning for your model scale */
+    /* Camera tuning sensitivity + clamps */
     const TUNE = {
       ENABLED: false,
-
-      POS_SPEED: 18.0,      /* much faster so you can reach Z=40 quickly */
-
-      X_LIMIT: 10.0,
-      Y_LIMIT: 10.0,
-
-      Z_MIN:  -40.0,        /* deep inside */
-      Z_MAX:   40.0         /* far outside chest */
+      POS_SPEED: 0.22,          /* meters per second at full stick */
+      X_LIMIT: 0.25,
+      Y_LIMIT: 0.25,
+      Z_MIN:  -0.30,            /* deeper inside */
+      Z_MAX:   0.40             /* further out of chest */
     };
 
     const IDLE = { SPEED: 0.12, LOOP: true };
@@ -652,7 +646,7 @@
       }
 
       hintText.textContent = TUNE.ENABLED
-        ? "TUNE MODE, left stick adjusts camera X and Z, buttons adjust Y, right stick aims"
+        ? "TUNE MODE, left stick moves camera x y z, right stick aims, reset to save base"
         : (FREE_LOOK
           ? "Left stick moves soldier, right stick aims camera only, soldier body does not rotate"
           : "Left stick moves soldier, right stick rotates soldier and aims camera together");
@@ -663,7 +657,7 @@
       tuneCamBtn.textContent = TUNE.ENABLED ? "Tune Cam, on" : "Tune Cam, off";
       hudControl.textContent = TUNE.ENABLED ? "CONTROL, TUNE CAM" : (FREE_LOOK ? "CONTROL, CAMERA" : "CONTROL, SOLDIER");
       hintText.textContent = TUNE.ENABLED
-        ? "TUNE MODE, left stick adjusts camera X and Z, Cam Y buttons adjust up and down, right stick aims"
+        ? "TUNE MODE, left stick adjusts camera, up down is Y, left right is X, forward back is Z"
         : (FREE_LOOK
           ? "Left stick moves soldier, right stick aims camera only, soldier body does not rotate"
           : "Left stick moves soldier, right stick rotates soldier and aims camera together");
@@ -733,6 +727,7 @@
         const lyRaw = applyDeadzone(lookState.dy);
         const ly = JOY.INVERT_Y ? -lyRaw : lyRaw;
 
+        /* Right stick: aim */
         if(FREE_LOOK || TUNE.ENABLED){
           CHEST.yaw += lx * JOY.LOOK_SENS * dt;
           CHEST.pitch += ly * JOY.LOOK_SENS * dt;
@@ -745,13 +740,15 @@
           applyChestMount();
         }
 
+        /* Left stick: either tune camera, or move soldier */
         if(TUNE.ENABLED){
           const sp = TUNE.POS_SPEED * dt;
 
-          /* left/right = X */
+          /* left/right -> camera X, up/down -> camera Y, forward/back -> camera Z */
           CHEST.camPos.x = clamp(CHEST.camPos.x + (mvX * sp), -TUNE.X_LIMIT, TUNE.X_LIMIT);
+          CHEST.camPos.y = clamp(CHEST.camPos.y + (-mvY * sp), -TUNE.Y_LIMIT, TUNE.Y_LIMIT);
 
-          /* forward/back = Z (BIG RANGE) */
+          /* Use magnitude of forward/back (mvY) to move Z, but keep it separate feel */
           CHEST.camPos.z = clamp(CHEST.camPos.z + ((-mvY) * sp), TUNE.Z_MIN, TUNE.Z_MAX);
 
           applyChestMount();
@@ -775,16 +772,6 @@
     toggleFreeLookBtn.addEventListener("click", () => setFreeLook(!FREE_LOOK));
     tuneCamBtn.addEventListener("click", () => setTuneCam(!TUNE.ENABLED));
     resetBtn.addEventListener("click", resetAll);
-
-    /* Y buttons (works in tune mode or not, but intended for tune mode) */
-    camYUpBtn.addEventListener("click", () => {
-      CHEST.camPos.y = clamp(CHEST.camPos.y + 0.25, -TUNE.Y_LIMIT, TUNE.Y_LIMIT);
-      applyChestMount();
-    });
-    camYDownBtn.addEventListener("click", () => {
-      CHEST.camPos.y = clamp(CHEST.camPos.y - 0.25, -TUNE.Y_LIMIT, TUNE.Y_LIMIT);
-      applyChestMount();
-    });
 
     weaponBtn.addEventListener("click", async () => {
       const next = (weaponSku === "wz_basic_pistol") ? "wz_cityrunner_smg" : "wz_basic_pistol";
