@@ -186,6 +186,7 @@
           <div class="hud-row" style="justify-content:flex-end;">
             <span class="tag" id="hudSoldier">SOLDIER, loading</span>
             <span class="tag warn" id="hudWeapon">WEAPON, pistol</span>
+            <span class="tag" id="hudBone">CHEST, ?</span>
           </div>
         </div>
       </div>
@@ -233,6 +234,7 @@
     const hudControl = document.getElementById("hudControl");
     const hudSoldier = document.getElementById("hudSoldier");
     const hudWeapon  = document.getElementById("hudWeapon");
+    const hudBone    = document.getElementById("hudBone");
     const hintText   = document.getElementById("hintText");
 
     const toggleFreeLookBtn = document.getElementById("toggleFreeLookBtn");
@@ -273,18 +275,25 @@
       }
     };
 
-    /* Chest cam tuning, now INSIDE the torso like a real FPS */
+    /* Chest cam tuning (THIS is what you tune) */
     const CHEST = {
-      pivotPos: new BABYLON.Vector3(0.00, 1.52, 0.06),   /* closer to chest center */
-      camPos:   new BABYLON.Vector3(0.00, 0.00, -0.10),  /* push camera back INTO the body */
-      pitch:    -0.22,
+      /* This is LOCAL offset from the chosen CHEST BONE (Spine2/Spine1/etc) */
+      pivotPos: new BABYLON.Vector3(0.00, 0.02, 0.03),
+      /* Camera pushed slightly BACK into the torso so arms + gun fill view */
+      camPos:   new BABYLON.Vector3(0.00, 0.00, -0.07),
+      pitch:    -0.20,
       yaw:       0.00
     };
 
-    /* Idle animation control */
+    /* Idle animation control (keeps pose, avoids T stance) */
     const IDLE = {
-      SPEED: 0.18,          /* lower = less bounce, try 0.10 to 0.25 */
+      SPEED: 0.12,     /* 0.08 to 0.20 usually feels “almost stopped” */
       LOOP: true
+    };
+
+    /* Anti-bob, keeps arms animation but removes the up/down bounce from hips */
+    const BOB = {
+      LOCK_HIPS_Y: true
     };
 
     const JOY = {
@@ -362,7 +371,12 @@
     let soldierRoot = null;
     let soldierSkinned = null;
 
-    let chestPivot = null;
+    /* Bone mounts */
+    let chestBoneNode = null;     /* attached to spine bone */
+    let chestPivot = null;        /* local tuning pivot under chestBoneNode */
+
+    let hipsBone = null;
+    let hipsBaseY = null;
 
     let weaponSku = "wz_basic_pistol";
     let weaponContainer = null;
@@ -370,55 +384,6 @@
     let weaponGrip = null;
 
     let FREE_LOOK = false;
-
-    function playIdleAnimationsSlow(container){
-      try{
-        const groups = (container && container.animationGroups) ? container.animationGroups : [];
-        if(!groups.length) return;
-
-        groups.forEach(g => {
-          try{
-            g.stop();
-            g.speedRatio = IDLE.SPEED;
-            g.start(IDLE.LOOP);
-          }catch(e){}
-        });
-      }catch(e){}
-    }
-
-    function setArmsOnlyVisibility(container){
-      const meshes = (container && container.meshes) ? container.meshes : [];
-      let shown = 0;
-
-      meshes.forEach(m => {
-        if(!m) return;
-        const nm = (m.name || "").toLowerCase();
-        const isArms =
-          nm.includes("arm") ||
-          nm.includes("forearm") ||
-          nm.includes("hand") ||
-          nm.includes("wrist") ||
-          nm.includes("glove") ||
-          nm.includes("sleeve");
-
-        try{
-          m.isPickable = false;
-          m.renderingGroupId = 2;
-          m.visibility = isArms ? 1.0 : 0.0;
-          if(isArms) shown += 1;
-        }catch(e){}
-      });
-
-      if(shown === 0){
-        meshes.forEach(m => {
-          if(!m) return;
-          try{
-            m.visibility = 1.0;
-            m.renderingGroupId = 2;
-          }catch(e){}
-        });
-      }
-    }
 
     function findSkinnedMeshFromContainer(container){
       try{
@@ -447,6 +412,80 @@
       return null;
     }
 
+    function findChestBone(skeleton){
+      if(!skeleton || !skeleton.bones || !skeleton.bones.length) return null;
+
+      /* Prefer Spine2 for chest, then Spine1, then Spine, then Neck */
+      const prefer = [
+        /mixamorig:Spine2/i,
+        /mixamorig:Spine1/i,
+        /mixamorig:Spine\b/i,
+        /mixamorig:Neck/i
+      ];
+
+      for(const rx of prefer){
+        const b = skeleton.bones.find(x => rx.test(x.name || ""));
+        if(b) return b;
+      }
+
+      /* Last resort: any spine */
+      return skeleton.bones.find(x => /Spine/i.test(x.name || "")) || null;
+    }
+
+    function findHipsBone(skeleton){
+      if(!skeleton || !skeleton.bones || !skeleton.bones.length) return null;
+      return skeleton.bones.find(b => /mixamorig:Hips/i.test(b.name || "")) || skeleton.bones.find(b => /Hips/i.test(b.name || "")) || null;
+    }
+
+    function playIdleAnimationsSlow(container){
+      try{
+        const groups = (container && container.animationGroups) ? container.animationGroups : [];
+        if(!groups.length) return;
+
+        groups.forEach(g => {
+          try{
+            g.stop();                 /* reset */
+            g.start(IDLE.LOOP, IDLE.SPEED); /* loop + slow, avoids T stance */
+          }catch(e){}
+        });
+      }catch(e){}
+    }
+
+    function setArmsOnlyVisibility(container){
+      const meshes = (container && container.meshes) ? container.meshes : [];
+      let shown = 0;
+
+      meshes.forEach(m => {
+        if(!m) return;
+        const nm = (m.name || "").toLowerCase();
+        const isArms =
+          nm.includes("arm") ||
+          nm.includes("forearm") ||
+          nm.includes("hand") ||
+          nm.includes("wrist") ||
+          nm.includes("glove") ||
+          nm.includes("sleeve");
+
+        try{
+          m.isPickable = false;
+          m.renderingGroupId = 2;
+          m.visibility = isArms ? 1.0 : 0.0;
+          if(isArms) shown += 1;
+        }catch(e){}
+      });
+
+      /* If your mesh naming doesn’t include arm keywords, don’t hide anything */
+      if(shown === 0){
+        meshes.forEach(m => {
+          if(!m) return;
+          try{
+            m.visibility = 1.0;
+            m.renderingGroupId = 2;
+          }catch(e){}
+        });
+      }
+    }
+
     function clearWeapon(){
       try{ if(weaponGrip){ weaponGrip.dispose(true,false); weaponGrip = null; } }catch(e){}
       try{ if(weaponRoot){ weaponRoot.dispose(true,false); weaponRoot = null; } }catch(e){}
@@ -461,9 +500,15 @@
 
     function clearSoldier(){
       clearWeapon();
-      soldierSkinned = null;
+      hipsBone = null;
+      hipsBaseY = null;
+
       try{ if(chestPivot){ chestPivot.dispose(true,false); chestPivot = null; } }catch(e){}
+      try{ if(chestBoneNode){ chestBoneNode.dispose(true,false); chestBoneNode = null; } }catch(e){}
       try{ if(soldierRoot){ soldierRoot.dispose(true,false); soldierRoot = null; } }catch(e){}
+
+      soldierSkinned = null;
+
       try{
         if(soldierContainer){
           soldierContainer.removeAllFromScene();
@@ -486,6 +531,7 @@
     async function loadSoldierAndChestCam(){
       clearSoldier();
       hudSoldier.textContent = "SOLDIER, loading";
+      hudBone.textContent = "CHEST, ?";
 
       const cont = await BABYLON.SceneLoader.LoadAssetContainerAsync(SOLDIER_ROOT, SOLDIER_FILE, scene);
       cont.addAllToScene();
@@ -503,17 +549,39 @@
 
       soldierSkinned = findSkinnedMeshFromContainer(cont);
 
-      /* keep base animation but slow it down heavily */
+      /* Keep the base animation (no T stance), just slow it down heavily */
       playIdleAnimationsSlow(cont);
 
-      /* arms only for alignment */
+      /* Arms only for alignment (you can remove this later) */
       setArmsOnlyVisibility(cont);
 
+      /* Attach a node to the CHEST bone, THEN put your tuning pivot under it */
+      const sk = soldierSkinned && soldierSkinned.skeleton ? soldierSkinned.skeleton : null;
+      const chestBone = findChestBone(sk);
+
+      chestBoneNode = new BABYLON.TransformNode("chestBoneNode", scene);
       chestPivot = new BABYLON.TransformNode("chestPivot", scene);
-      chestPivot.parent = soldierRoot;
+
+      if(chestBone && soldierSkinned){
+        chestBoneNode.attachToBone(chestBone, soldierSkinned);
+        hudBone.textContent = "CHEST, " + (chestBone.name || "bone");
+      } else {
+        /* Fallback: still works, but not true chest mounting */
+        chestBoneNode.parent = soldierRoot;
+        chestBoneNode.position.set(0, 1.52, 0.06);
+        hudBone.textContent = "CHEST, fallback";
+      }
+
+      chestPivot.parent = chestBoneNode;
 
       camera.parent = chestPivot;
       applyChestMount();
+
+      /* Setup hips anti-bob (lock local Y to base) */
+      hipsBone = findHipsBone(sk);
+      if(hipsBone && BOB.LOCK_HIPS_Y){
+        hipsBaseY = hipsBone.position.y;
+      }
 
       hudSoldier.textContent = "SOLDIER, loaded";
     }
@@ -585,15 +653,19 @@
       soldierRoot.position.set(0,0,0);
       soldierRoot.rotation.set(0,0,0);
 
-      CHEST.pivotPos = new BABYLON.Vector3(0.00, 1.52, 0.06);
-      CHEST.camPos   = new BABYLON.Vector3(0.00, 0.00, -0.10);
-      CHEST.pitch    = -0.22;
+      CHEST.pivotPos = new BABYLON.Vector3(0.00, 0.02, 0.03);
+      CHEST.camPos   = new BABYLON.Vector3(0.00, 0.00, -0.07);
+      CHEST.pitch    = -0.20;
       CHEST.yaw      = 0.00;
 
       applyChestMount();
       setFreeLook(false);
 
       if(soldierContainer) playIdleAnimationsSlow(soldierContainer);
+
+      if(hipsBone && hipsBaseY !== null){
+        hipsBone.position.y = hipsBaseY;
+      }
     }
 
     function createScene(){
@@ -623,6 +695,13 @@
       engine.runRenderLoop(() => scene.render());
       window.addEventListener("resize", () => engine.resize());
 
+      /* Remove bob AFTER animation evaluation */
+      scene.onAfterAnimationsObservable.add(() => {
+        if(BOB.LOCK_HIPS_Y && hipsBone && hipsBaseY !== null){
+          hipsBone.position.y = hipsBaseY;
+        }
+      });
+
       scene.onBeforeRenderObservable.add(() => {
         if(!soldierRoot || !chestPivot) return;
 
@@ -635,6 +714,7 @@
         const lyRaw = applyDeadzone(lookState.dy);
         const ly = JOY.INVERT_Y ? -lyRaw : lyRaw;
 
+        /* Look */
         if(FREE_LOOK){
           CHEST.yaw += lx * JOY.LOOK_SENS * dt;
           CHEST.pitch += ly * JOY.LOOK_SENS * dt;
@@ -647,6 +727,7 @@
           applyChestMount();
         }
 
+        /* Move soldier relative to soldier facing */
         const forward = new BABYLON.Vector3(Math.sin(soldierRoot.rotation.y), 0, Math.cos(soldierRoot.rotation.y));
         const right = new BABYLON.Vector3(forward.z, 0, -forward.x);
 
