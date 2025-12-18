@@ -1,9 +1,9 @@
 <!doctype html>
 <html lang="en">
 <head>
-  <meta charset="utf-8">
+  <meta charset="utf-8" />
   <title>War Zone Test, FPS Viewmodel Tuner, Soldier Arms + Neon Marksman</title>
-  <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+  <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover" />
   <style>
     html,body{
       margin:0;
@@ -15,8 +15,24 @@
       touch-action:none;
       font-family: system-ui, -apple-system, Segoe UI, Roboto, Arial;
     }
-    #renderCanvas{
+
+    /* Rotating stage so portrait devices behave like Pi Browser manual rotation pages */
+    #stage{
       position:fixed;
+      left:0;
+      top:0;
+      width:100vw;
+      height:100vh;
+      overflow:hidden;
+      touch-action:none;
+      background:#000;
+    }
+    #stage.rotated{
+      transform-origin: 0 0;
+    }
+
+    #renderCanvas{
+      position:absolute;
       left:0;
       top:0;
       width:100%;
@@ -26,8 +42,9 @@
       outline:none;
       background:transparent;
     }
+
     #hud{
-      position:fixed;
+      position:absolute;
       left:10px;
       top:10px;
       z-index:9999;
@@ -38,17 +55,17 @@
       text-shadow: 0 0 10px rgba(0,0,0,.85);
       white-space:pre;
       pointer-events:none;
-      max-width: calc(100vw - 20px);
+      max-width: min(520px, calc(100% - 20px));
       overflow:hidden;
       background: rgba(0,0,0,.30);
       padding:8px 10px;
-      border: 1px solid rgba(53,255,107,.25);
+      border: 1px solid rgba(53,255,107,.22);
       border-radius: 10px;
       backdrop-filter: blur(4px);
     }
 
     .stick{
-      position:fixed;
+      position:absolute;
       width:140px;
       height:140px;
       border-radius:50%;
@@ -76,22 +93,23 @@
 
     /* Mobile tuning UI */
     #ui{
-      position: fixed;
-      top: 10px;
-      right: 10px;
-      z-index: 10000;
+      position:absolute;
+      top:10px;
+      right:10px;
+      z-index:10000;
       display:flex;
       flex-direction:column;
       gap:8px;
       align-items:flex-end;
       user-select:none;
       -webkit-user-select:none;
+      pointer-events:auto;
     }
     .btn{
       border: 1px solid rgba(127,209,255,.35);
       background: rgba(0,0,0,.45);
       color: #d9f3ff;
-      font: 600 12px/1 system-ui, -apple-system, Segoe UI, Roboto, Arial;
+      font: 700 12px/1 system-ui, -apple-system, Segoe UI, Roboto, Arial;
       padding: 10px 12px;
       border-radius: 12px;
       backdrop-filter: blur(4px);
@@ -101,7 +119,7 @@
 
     #pad{
       display:none;
-      width: 220px;
+      width: 240px;
       border: 1px solid rgba(127,209,255,.22);
       background: rgba(0,0,0,.35);
       border-radius: 14px;
@@ -110,16 +128,16 @@
     }
     #pad.show{ display:block; }
 
-    .row{ display:flex; gap:8px; justify-content:flex-end; }
+    .row{ display:flex; gap:8px; justify-content:flex-end; flex-wrap:wrap; }
     .pill{
-      min-width: 46px;
+      min-width: 52px;
       text-align:center;
       padding: 10px 10px;
       border-radius: 12px;
       border: 1px solid rgba(255,59,107,.30);
       background: rgba(0,0,0,.35);
       color:#ffd4df;
-      font: 700 12px/1 system-ui, -apple-system, Segoe UI, Roboto, Arial;
+      font: 800 12px/1 system-ui, -apple-system, Segoe UI, Roboto, Arial;
       touch-action: manipulation;
     }
     .pill.blue{
@@ -128,9 +146,9 @@
     }
     .label{
       color:#9fdcff;
-      font: 700 11px/1 system-ui, -apple-system, Segoe UI, Roboto, Arial;
+      font: 800 11px/1 system-ui, -apple-system, Segoe UI, Roboto, Arial;
       opacity:.85;
-      padding: 6px 0 2px 0;
+      padding: 8px 0 4px 0;
       text-align:right;
     }
   </style>
@@ -139,49 +157,82 @@
   <script src="https://cdn.babylonjs.com/loaders/babylonjs.loaders.min.js"></script>
 </head>
 <body>
-  <canvas id="renderCanvas"></canvas>
-  <div id="hud">Loading...</div>
+  <div id="stage">
+    <canvas id="renderCanvas"></canvas>
 
-  <div id="ui">
-    <button class="btn" id="toggleHudBtn">HUD, hide</button>
-    <button class="btn" id="togglePadBtn">Tuner, show</button>
+    <div id="hud">Loading...</div>
 
-    <div id="pad">
-      <div class="label">Mode</div>
-      <div class="row">
-        <button class="pill blue" data-act="modePrev">◀</button>
-        <button class="pill blue" data-act="modeNext">▶</button>
-      </div>
+    <div id="ui">
+      <button class="btn" id="toggleHudBtn">HUD, hide</button>
+      <button class="btn" id="togglePadBtn">Tuner, show</button>
+      <button class="btn" id="flipBtn">Flip, 180</button>
 
-      <div class="label">Step</div>
-      <div class="row">
-        <button class="pill" data-act="stepFine">fine</button>
-        <button class="pill" data-act="stepNorm">norm</button>
-        <button class="pill" data-act="stepFast">fast</button>
-      </div>
+      <div id="pad">
+        <div class="label">Mode</div>
+        <div class="row">
+          <button class="pill blue" data-act="modePrev">◀</button>
+          <button class="pill blue" data-act="modeNext">▶</button>
+        </div>
 
-      <div class="label">Adjust</div>
-      <div class="row">
-        <button class="pill blue" data-act="xNeg">X-</button>
-        <button class="pill blue" data-act="xPos">X+</button>
-        <button class="pill blue" data-act="yNeg">Y-</button>
-        <button class="pill blue" data-act="yPos">Y+</button>
-      </div>
-      <div class="row">
-        <button class="pill blue" data-act="zNeg">Z-</button>
-        <button class="pill blue" data-act="zPos">Z+</button>
-        <button class="pill" data-act="copy">copy</button>
-        <button class="pill" data-act="reload">reload</button>
+        <div class="label">Step</div>
+        <div class="row">
+          <button class="pill" data-act="stepFine">fine</button>
+          <button class="pill" data-act="stepNorm">norm</button>
+          <button class="pill" data-act="stepFast">fast</button>
+        </div>
+
+        <div class="label">Adjust</div>
+        <div class="row">
+          <button class="pill blue" data-act="xNeg">X-</button>
+          <button class="pill blue" data-act="xPos">X+</button>
+          <button class="pill blue" data-act="yNeg">Y-</button>
+          <button class="pill blue" data-act="yPos">Y+</button>
+        </div>
+        <div class="row">
+          <button class="pill blue" data-act="zNeg">Z-</button>
+          <button class="pill blue" data-act="zPos">Z+</button>
+          <button class="pill" data-act="copy">copy</button>
+          <button class="pill" data-act="reload">reload</button>
+        </div>
+
+        <div class="label">Camera</div>
+        <div class="row">
+          <button class="pill blue" data-act="camReset">reset</button>
+          <button class="pill blue" data-act="invY">invY</button>
+        </div>
       </div>
     </div>
+
+    <div class="stick left" id="moveStick"><div class="nub" id="moveNub"></div></div>
+    <div class="stick right" id="lookStick"><div class="nub" id="lookNub"></div></div>
   </div>
 
-  <div class="stick left" id="moveStick"><div class="nub" id="moveNub"></div></div>
-  <div class="stick right" id="lookStick"><div class="nub" id="lookNub"></div></div>
-
   <script>
+    const stage  = document.getElementById("stage");
     const canvas = document.getElementById("renderCanvas");
-    const hud = document.getElementById("hud");
+    const hud    = document.getElementById("hud");
+
+    function applyAutoRotate(){
+      const w = window.innerWidth;
+      const h = window.innerHeight;
+
+      const portrait = h > w;
+      if(!portrait){
+        stage.classList.remove("rotated");
+        stage.style.transform = "";
+        stage.style.width = "100vw";
+        stage.style.height = "100vh";
+        return;
+      }
+
+      // Rotate stage 90deg clockwise, translate into view
+      stage.classList.add("rotated");
+      stage.style.width = h + "px";
+      stage.style.height = w + "px";
+      stage.style.transform = `rotate(90deg) translate(0px, -${h}px)`;
+    }
+    window.addEventListener("resize", applyAutoRotate);
+    applyAutoRotate();
 
     canvas.tabIndex = 1;
     canvas.addEventListener("pointerdown", () => canvas.focus(), { passive:true });
@@ -192,10 +243,10 @@
     scene.clearColor = new BABYLON.Color4(0,0,0,0);
 
     const hemi = new BABYLON.HemisphericLight("h", new BABYLON.Vector3(0,1,0), scene);
-    hemi.intensity = 1.15;
+    hemi.intensity = 1.10;
 
     const dir = new BABYLON.DirectionalLight("d", new BABYLON.Vector3(-0.2,-1,-0.1), scene);
-    dir.intensity = 0.45;
+    dir.intensity = 0.55;
 
     const ground = BABYLON.MeshBuilder.CreateGround("g", { width: 220, height: 220 }, scene);
     const gmat = new BABYLON.StandardMaterial("gmat", scene);
@@ -208,18 +259,19 @@
     camera.minZ = 0.05;
     camera.maxZ = 5000;
     camera.fov = 1.0;
+    camera.rotation.set(0,0,0);
 
     engine.runRenderLoop(() => scene.render());
     window.addEventListener("resize", () => engine.resize());
 
-    // ---------- assets ----------
+    // Assets
     const SOLDIER_ROOT = "/assets/warzone3d/soldier_gltf_3/";
     const SOLDIER_FILE = "scene.gltf";
 
     const WEAPON_ROOT = "/assets/warzone3d/weapons/wz_neon_marksman/";
     const WEAPON_FILE = "scene.gltf";
 
-    // ---------- joystick tuning ----------
+    // Joystick tuning
     const JOY = {
       DEADZONE: 0.10,
       LOOK_SENS: 2.35,
@@ -295,11 +347,12 @@
       return Math.sign(x) * clamp(s, 0, 1);
     }
 
-    // ---------- viewmodel + weapon tuning ----------
+    // Tuning
     const TUNE = {
-      // start values that should visibly show something, then you tune from here
-      VM_POS:   new BABYLON.Vector3( 0.00, -1.25,  0.90),
-      VM_ROT:   new BABYLON.Vector3( 0.00,  Math.PI, 0.00),
+      // Start values meant to look FPS like right away
+      // If model faces wrong direction, press Flip 180
+      VM_POS:   new BABYLON.Vector3( 0.00, -1.45,  0.65),
+      VM_ROT:   new BABYLON.Vector3( 0.00,  0.00, 0.00),
       VM_SCALE: 0.78,
 
       WEAPON_SCALE: 0.03000,
@@ -312,6 +365,7 @@
     };
 
     let MODE = 1;
+    let STEP = 0.01;
 
     function modeName(){
       return (
@@ -331,8 +385,6 @@
       );
     }
 
-    // step control (mobile)
-    let STEP = 0.01; // norm
     function setStep(which){
       STEP = which === "fine" ? 0.001 : which === "fast" ? 0.05 : 0.01;
       logLine(`[step] ${which}, ${STEP}`);
@@ -368,7 +420,7 @@ const JOY_INVERT_Y = ${JOY.INVERT_Y};`;
       }
     }
 
-    // ---------- live refs ----------
+    // Refs
     let soldierContainer = null;
     let soldierRoot = null;
     let skinnedMesh = null;
@@ -378,7 +430,6 @@ const JOY_INVERT_Y = ${JOY.INVERT_Y};`;
     let weaponRoot = null;
     let weaponGrip = null;
     let weaponHold = null;
-    let mergedWeaponMesh = null;
 
     const logLines = [];
     function logLine(s){
@@ -414,10 +465,6 @@ const JOY_INVERT_Y = ${JOY.INVERT_Y};`;
     }
 
     function clearAll(){
-      try{ if(mergedWeaponMesh){ mergedWeaponMesh.dispose(false, true); mergedWeaponMesh = null; } }catch(e){}
-      try{ if(weaponHold){ weaponHold.dispose(true, false); weaponHold = null; } }catch(e){}
-      try{ if(weaponGrip){ weaponGrip.dispose(true, false); weaponGrip = null; } }catch(e){}
-      try{ if(weaponRoot){ weaponRoot.dispose(true, false); weaponRoot = null; } }catch(e){}
       try{
         if(weaponContainer){
           weaponContainer.removeAllFromScene();
@@ -425,8 +472,6 @@ const JOY_INVERT_Y = ${JOY.INVERT_Y};`;
           weaponContainer = null;
         }
       }catch(e){}
-
-      try{ if(soldierRoot){ soldierRoot.dispose(true, false); soldierRoot = null; } }catch(e){}
       try{
         if(soldierContainer){
           soldierContainer.removeAllFromScene();
@@ -434,6 +479,12 @@ const JOY_INVERT_Y = ${JOY.INVERT_Y};`;
           soldierContainer = null;
         }
       }catch(e){}
+
+      try{ if(weaponHold){ weaponHold.dispose(true, false); weaponHold = null; } }catch(e){}
+      try{ if(weaponGrip){ weaponGrip.dispose(true, false); weaponGrip = null; } }catch(e){}
+      try{ if(weaponRoot){ weaponRoot.dispose(true, false); weaponRoot = null; } }catch(e){}
+
+      try{ if(soldierRoot){ soldierRoot.dispose(true, false); soldierRoot = null; } }catch(e){}
 
       skinnedMesh = null;
       skeleton = null;
@@ -461,20 +512,6 @@ const JOY_INVERT_Y = ${JOY.INVERT_Y};`;
       weaponGrip.rotation.copyFrom(TUNE.WEAPON_GRIP_ROT);
     }
 
-    function tryMergeWeaponMeshes(meshes){
-      try{
-        const valid = (meshes || []).filter(m => m && m.getTotalVertices && m.getTotalVertices() > 0);
-        if (valid.length <= 1) return valid[0] || null;
-
-        valid.forEach(m => { try{ m.parent = null; }catch(e){} });
-
-        const merged = BABYLON.Mesh.MergeMeshes(valid, true, true, undefined, false, true);
-        return merged || null;
-      }catch(e){
-        return null;
-      }
-    }
-
     function forceVisible(container, groupId){
       const meshes = (container && container.meshes) ? container.meshes : [];
       meshes.forEach(m => {
@@ -488,6 +525,45 @@ const JOY_INVERT_Y = ${JOY.INVERT_Y};`;
       });
     }
 
+    function setViewmodelVisibilityArmsFirst(container){
+      const meshes = (container && container.meshes) ? container.meshes : [];
+      if(!meshes.length) return;
+
+      let shown = 0;
+      meshes.forEach(m => {
+        if(!m) return;
+        const nm = (m.name || "").toLowerCase();
+        const isArm =
+          nm.includes("arm") ||
+          nm.includes("forearm") ||
+          nm.includes("hand") ||
+          nm.includes("wrist") ||
+          nm.includes("glove") ||
+          nm.includes("sleeve");
+
+        try{
+          m.isPickable = false;
+          m.alwaysSelectAsActiveMesh = true;
+          m.renderingGroupId = 2;
+          m.visibility = isArm ? 1.0 : 0.0;
+          if(isArm) shown += 1;
+        }catch(e){}
+      });
+
+      if(shown === 0){
+        logLine("[vm] arms not detected by name, showing all meshes, tune VM_POS down and forward");
+        meshes.forEach(m => {
+          if(!m) return;
+          try{
+            m.visibility = 1.0;
+            m.renderingGroupId = 2;
+          }catch(e){}
+        });
+      } else {
+        logLine(`[vm] arms shown ${shown}`);
+      }
+    }
+
     async function loadFPSViewmodelAndWeapon(){
       clearAll();
 
@@ -499,22 +575,21 @@ const JOY_INVERT_Y = ${JOY.INVERT_Y};`;
       soldierRoot = new BABYLON.TransformNode("soldierRootFPS", scene);
       soldierRoot.parent = camera;
 
-      // SAFE, keep hierarchy, parent only root nodes
+      // Keep hierarchy, only parent rootNodes
       (sCont.rootNodes || []).forEach(rn => {
         if(!rn) return;
         try{ rn.parent = soldierRoot; }catch(e){}
       });
 
       applyViewmodelTune();
-      forceVisible(sCont, 2);
+      setViewmodelVisibilityArmsFirst(sCont);
 
       skinnedMesh = findSkinnedMeshFromContainer(sCont);
       skeleton = skinnedMesh?.skeleton || null;
-
-      if(!skinnedMesh || !skeleton){
-        logLine("[vm] skeleton not found");
-      } else {
+      if(skeleton){
         logLine(`[vm] bones ${skeleton.bones.length}`);
+      } else {
+        logLine("[vm] skeleton not found, gun will camera parent");
       }
 
       logLine("[boot] loading weapon");
@@ -523,9 +598,6 @@ const JOY_INVERT_Y = ${JOY.INVERT_Y};`;
       weaponContainer = wCont;
 
       const rightHand = findBoneSmart(skeleton);
-      if(!rightHand){
-        logLine("[gun] no right hand bone, camera parent fallback");
-      }
 
       weaponRoot = new BABYLON.TransformNode("weaponRoot", scene);
       weaponGrip = new BABYLON.TransformNode("weaponGrip", scene);
@@ -536,40 +608,24 @@ const JOY_INVERT_Y = ${JOY.INVERT_Y};`;
 
       if(rightHand && skinnedMesh){
         weaponRoot.attachToBone(rightHand, skinnedMesh);
-        logLine(`[gun] bone ${rightHand.name || "RightHand"}`);
+        logLine(`[gun] attached ${rightHand.name || "RightHand"}`);
       } else {
         weaponRoot.parent = camera;
         weaponRoot.position.copyFrom(TUNE.VM_POS);
+        logLine("[gun] camera parent fallback");
       }
 
-      // Attach weapon meshes (do NOT rely on rootNodes for this asset)
+      // Reliability over merging, just parent all weapon meshes to weaponHold
       const wMeshes = (wCont.meshes || []).filter(m => m && (m.name || "").toLowerCase() !== "__root__");
-      const merged = tryMergeWeaponMeshes(wMeshes);
-
-      if(merged){
-        mergedWeaponMesh = merged;
-        merged.parent = weaponHold;
-        logLine(`[gun] merged ${wMeshes.length} -> 1`);
-      } else {
-        wMeshes.forEach(m => { try{ m.parent = weaponHold; }catch(e){} });
-        logLine(`[gun] parts ${wMeshes.length}`);
-      }
-
+      wMeshes.forEach(m => { try{ m.parent = weaponHold; }catch(e){} });
       forceVisible(wCont, 2);
-      if(mergedWeaponMesh){
-        try{
-          mergedWeaponMesh.visibility = 1.0;
-          mergedWeaponMesh.renderingGroupId = 2;
-          mergedWeaponMesh.alwaysSelectAsActiveMesh = true;
-        }catch(e){}
-      }
+      logLine(`[gun] parts ${wMeshes.length}`);
 
       applyTuneToWeapon();
-      logLine("[ready] tuner ok");
+      logLine("[ready]");
     }
 
     function renderHud(){
-      // SHORT HUD so it doesn't cover the screen
       hud.textContent =
 `FPS tuner
 Mode ${MODE} ${modeName()}
@@ -629,7 +685,7 @@ log ${logLines.join(" , ")}`;
       renderHud();
     }
 
-    // Keyboard still works on desktop
+    // Desktop keyboard support too
     window.addEventListener("keydown", async (ev) => {
       if (["ArrowUp","ArrowDown","ArrowLeft","ArrowRight"," "].includes(ev.key)) ev.preventDefault();
 
@@ -654,11 +710,10 @@ log ${logLines.join(" , ")}`;
       if (ev.key.toLowerCase() === "e") return adjust(0, 0,  1);
     }, { passive:false });
 
-    // ---------- FPS movement loop using sticks ----------
+    // FPS movement loop
     scene.onBeforeRenderObservable.add(() => {
       const dt = scene.getEngine().getDeltaTime() * 0.001;
 
-      // move
       const mvX = applyDeadzone(moveState.dx);
       const mvY = applyDeadzone(moveState.dy);
 
@@ -672,7 +727,6 @@ log ${logLines.join(" , ")}`;
       const delta = forward.scale(moveF * spd).add(right.scale(moveS * spd));
       camera.position.addInPlace(new BABYLON.Vector3(delta.x, 0, delta.z));
 
-      // look
       const lx = applyDeadzone(lookState.dx);
       const lyRaw = applyDeadzone(lookState.dy);
       const ly = JOY.INVERT_Y ? -lyRaw : lyRaw;
@@ -682,10 +736,11 @@ log ${logLines.join(" , ")}`;
       camera.rotation.x = clamp(camera.rotation.x, -1.2, 1.2);
     });
 
-    // ---------- Mobile UI wiring ----------
+    // Mobile UI wiring
     const toggleHudBtn = document.getElementById("toggleHudBtn");
     const togglePadBtn = document.getElementById("togglePadBtn");
-    const pad = document.getElementById("pad");
+    const flipBtn      = document.getElementById("flipBtn");
+    const pad          = document.getElementById("pad");
 
     let hudShown = true;
     toggleHudBtn.addEventListener("click", () => {
@@ -698,6 +753,13 @@ log ${logLines.join(" , ")}`;
       const show = !pad.classList.contains("show");
       pad.classList.toggle("show", show);
       togglePadBtn.textContent = show ? "Tuner, hide" : "Tuner, show";
+    });
+
+    flipBtn.addEventListener("click", () => {
+      TUNE.VM_ROT.y += Math.PI;
+      applyViewmodelTune();
+      logLine("[vm] flip 180");
+      renderHud();
     });
 
     function modeClamp(m){ return clamp(m, 1, 13) | 0; }
@@ -719,6 +781,21 @@ log ${logLines.join(" , ")}`;
 
       if(act === "copy"){ copyLock(); logLine("[copied]"); renderHud(); return; }
       if(act === "reload"){ loadFPSViewmodelAndWeapon().then(renderHud); return; }
+
+      if(act === "camReset"){
+        camera.position.set(0,1.7,0);
+        camera.rotation.set(0,0,0);
+        logLine("[cam] reset");
+        renderHud();
+        return;
+      }
+
+      if(act === "invY"){
+        JOY.INVERT_Y = !JOY.INVERT_Y;
+        logLine(`[joy] invertY ${JOY.INVERT_Y}`);
+        renderHud();
+        return;
+      }
     }
 
     pad.addEventListener("click", (e) => {
@@ -727,7 +804,7 @@ log ${logLines.join(" , ")}`;
       doAction(btn.getAttribute("data-act"));
     });
 
-    // ---------- boot ----------
+    // Boot
     (async () => {
       try{
         logLine("[boot]");
