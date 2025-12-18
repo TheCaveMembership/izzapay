@@ -196,6 +196,40 @@
       line-height:1.1;
     }
 
+    /* Reticle */
+    .reticle{
+      position:absolute;
+      left:50%;
+      top:50%;
+      transform:translate(-50%,-50%);
+      width:18px;
+      height:18px;
+      z-index:24;
+      pointer-events:none;
+      opacity:0.92;
+      filter:drop-shadow(0 0 10px rgba(0,255,255,.10));
+    }
+    .reticle::before{
+      content:"";
+      position:absolute;
+      left:50%;
+      top:50%;
+      width:3px;
+      height:3px;
+      border-radius:50%;
+      background:rgba(255,255,255,.92);
+      transform:translate(-50%,-50%);
+    }
+    .reticle .h,.reticle .v{
+      position:absolute;
+      left:50%;
+      top:50%;
+      background:rgba(255,255,255,.85);
+      transform:translate(-50%,-50%);
+    }
+    .reticle .h{ width:18px; height:1px; opacity:.55; }
+    .reticle .v{ width:1px; height:18px; opacity:.55; }
+
     /* Hit marker */
     .hit{
       position:absolute;
@@ -236,14 +270,14 @@
         <div class="hud-box">
           <div class="hud-title">Chest Cam Align</div>
           <div class="hud-row">
-            <span class="tag" id="hudControl">CONTROL, SOLDIER</span>
+            <span class="tag" id="hudControl">CONTROL, FPS</span>
             <button class="tag btn" id="toggleFreeLookBtn" type="button">Free Look, off</button>
             <button class="tag btn" id="tuneCamBtn" type="button">Tune Cam, off</button>
             <button class="tag btn" id="weaponBtn" type="button">Weapon, pistol</button>
             <button class="tag btn" id="resetBtn" type="button">Reset</button>
           </div>
           <div class="hint" id="hintText">
-            Left stick moves soldier, right stick rotates soldier and aims camera together, fire button shoots
+            Left stick moves soldier, right stick looks around, both work at the same time, fire shoots
           </div>
         </div>
 
@@ -258,6 +292,7 @@
         </div>
       </div>
 
+      <div class="reticle" id="reticle"><div class="h"></div><div class="v"></div></div>
       <div class="hit" id="hitMarker"></div>
 
       <div class="touch-ui" id="touchUi">
@@ -357,10 +392,10 @@
       }
     };
 
-    /* LOCKED CHEST CAM, values from your screenshot */
+    /* LOCKED CHEST CAM, values from your latest screenshot */
     const CHEST_LOCK = {
       pivotPos: new BABYLON.Vector3(0.00, 0.22, 0.10),
-      camPos:   new BABYLON.Vector3(0.204, 0.792, 0.422),
+      camPos:   new BABYLON.Vector3(0.350, 1.010, -0.391),
       pitch:    -0.20,
       yaw:       0.00
     };
@@ -375,29 +410,29 @@
     const TUNE = {
       ENABLED: false,
       POS_SPEED: 0.28,
-      X_LIMIT: 0.35,
-      Y_LIMIT: 1.30,
-      Z_MIN:  -0.60,
+      X_LIMIT: 0.65,
+      Y_LIMIT: 1.80,
+      Z_MIN:  -1.20,
       Z_MAX:   1.60,
       PIVOT_Y_MIN: -0.20,
-      PIVOT_Y_MAX: 1.80
+      PIVOT_Y_MAX: 2.20
     };
 
     /* Idle slower */
-    const IDLE = { SPEED: 0.06, LOOP: true };
+    const IDLE = { SPEED: 0.05, LOOP: true };
     const BOB  = { LOCK_HIPS_Y: true };
 
     const JOY = {
       MOVE_SPEED: 4.2,
-      LOOK_SENS: 2.4,
+      LOOK_SENS: 2.6,
       DEADZONE: 0.10,
       INVERT_Y: false
     };
 
     /* Fire tuning */
     const FIRE = {
-      pistol: { rpm: 240, spread: 0.0035, maxDist: 120, tracerLife: 0.06 },
-      smg:    { rpm: 900, spread: 0.0070, maxDist: 120, tracerLife: 0.045 }
+      pistol: { rpm: 240, spread: 0.0035, maxDist: 120, tracerLife: 0.06, recoil: 0.020 },
+      smg:    { rpm: 900, spread: 0.0070, maxDist: 120, tracerLife: 0.045, recoil: 0.010 }
     };
 
     function applyDeadzone(x){
@@ -409,6 +444,25 @@
 
     const moveState = { active:false, id:null, dx:0, dy:0 };
     const lookState = { active:false, id:null, dx:0, dy:0 };
+
+    /* Desktop fallback controls */
+    const keys = { w:false,a:false,s:false,d:false, arrowup:false, arrowdown:false, arrowleft:false, arrowright:false };
+    window.addEventListener("keydown", (e) => {
+      const k = (e.key || "").toLowerCase();
+      if(k in keys){ keys[k] = true; }
+      if(k === "arrowup") keys.arrowup = true;
+      if(k === "arrowdown") keys.arrowdown = true;
+      if(k === "arrowleft") keys.arrowleft = true;
+      if(k === "arrowright") keys.arrowright = true;
+    });
+    window.addEventListener("keyup", (e) => {
+      const k = (e.key || "").toLowerCase();
+      if(k in keys){ keys[k] = false; }
+      if(k === "arrowup") keys.arrowup = false;
+      if(k === "arrowdown") keys.arrowdown = false;
+      if(k === "arrowleft") keys.arrowleft = false;
+      if(k === "arrowright") keys.arrowright = false;
+    });
 
     function setupStick(el, nub, state){
       const r = () => el.getBoundingClientRect();
@@ -479,6 +533,7 @@
     let weaponRoot = null;
     let weaponGrip = null;
 
+    /* Free look, optional toggle, default off */
     let FREE_LOOK = false;
 
     /* Firing state */
@@ -777,27 +832,29 @@
       FREE_LOOK = !!on;
       toggleFreeLookBtn.textContent = FREE_LOOK ? "Free Look, on" : "Free Look, off";
 
-      if(!TUNE.ENABLED){
-        hudControl.textContent = FREE_LOOK ? "CONTROL, CAMERA" : "CONTROL, SOLDIER";
+      if(TUNE.ENABLED){
+        hudControl.textContent = "CONTROL, TUNE CAM";
+      } else {
+        hudControl.textContent = FREE_LOOK ? "CONTROL, FREE LOOK" : "CONTROL, FPS";
       }
 
       hintText.textContent = TUNE.ENABLED
-        ? "TUNE MODE, position only"
+        ? "Tune mode, adjust camera offsets, reset returns to locked values"
         : (FREE_LOOK
-          ? "Left stick moves soldier, right stick aims camera only, soldier body does not rotate, fire button shoots"
-          : "Left stick moves soldier, right stick rotates soldier and aims camera together, fire button shoots");
+          ? "Left stick moves soldier, right stick looks around without rotating soldier body, fire shoots"
+          : "Left stick moves soldier, right stick looks around, soldier direction follows look, fire shoots");
     }
 
     function setTuneCam(on){
       TUNE.ENABLED = !!on;
       tuneCamBtn.textContent = TUNE.ENABLED ? "Tune Cam, on" : "Tune Cam, off";
-      hudControl.textContent = TUNE.ENABLED ? "CONTROL, TUNE CAM" : (FREE_LOOK ? "CONTROL, CAMERA" : "CONTROL, SOLDIER");
+      hudControl.textContent = TUNE.ENABLED ? "CONTROL, TUNE CAM" : (FREE_LOOK ? "CONTROL, FREE LOOK" : "CONTROL, FPS");
 
       hintText.textContent = TUNE.ENABLED
-        ? "TUNE MODE, left stick moves camera X Y, right stick up down moves camera Z, reset returns to locked screenshot values"
+        ? "Tune mode, left stick changes X Y, right stick up down changes Z, reset returns to locked values"
         : (FREE_LOOK
-          ? "Left stick moves soldier, right stick aims camera only, soldier body does not rotate, fire button shoots"
-          : "Left stick moves soldier, right stick rotates soldier and aims camera together, fire button shoots");
+          ? "Left stick moves soldier, right stick looks around without rotating soldier body, fire shoots"
+          : "Left stick moves soldier, right stick looks around, soldier direction follows look, fire shoots");
     }
 
     function resetAll(){
@@ -834,6 +891,7 @@
 
     function shootOnce(){
       if(!scene || !camera) return;
+      if(TUNE.ENABLED) return;
 
       const mode = (weaponSku === "wz_cityrunner_smg") ? "smg" : "pistol";
       const cfg = FIRE[mode];
@@ -863,10 +921,9 @@
       tracer.alpha = 0.9;
       tracer.color = new BABYLON.Color3(0.9, 0.95, 1.0);
       tracer.renderingGroupId = 3;
-
       setTimeout(() => { try{ tracer.dispose(); }catch(e){} }, Math.round(cfg.tracerLife * 1000));
 
-      /* tiny muzzle flash */
+      /* muzzle flash */
       const flash = BABYLON.MeshBuilder.CreateSphere("mf", { diameter: 0.06 }, scene);
       flash.isPickable = false;
       flash.renderingGroupId = 3;
@@ -878,12 +935,16 @@
       flash.position.copyFrom(origin);
       setTimeout(() => { try{ flash.dispose(); }catch(e){} }, 40);
 
+      /* recoil */
+      CHEST.pitch = clamp(CHEST.pitch - cfg.recoil, -1.10, 0.65);
+
       if(pick && pick.hit){
         flashHit();
       }
     }
 
     function startFiring(){
+      if(TUNE.ENABLED) return;
       isFiring = true;
       if(weaponSku === "wz_basic_pistol"){
         shootOnce();
@@ -937,41 +998,56 @@
         const dt = scene.getEngine().getDeltaTime() * 0.001;
         const now = performance.now() * 0.001;
 
-        const mvX = applyDeadzone(moveState.dx);
-        const mvY = applyDeadzone(moveState.dy);
+        /* Joystick input */
+        let mvX = applyDeadzone(moveState.dx);
+        let mvY = applyDeadzone(moveState.dy);
 
-        const lx = applyDeadzone(lookState.dx);
-        const lyRaw = applyDeadzone(lookState.dy);
-        const ly = JOY.INVERT_Y ? -lyRaw : lyRaw;
+        let lx = applyDeadzone(lookState.dx);
+        let lyRaw = applyDeadzone(lookState.dy);
+        let ly = JOY.INVERT_Y ? -lyRaw : lyRaw;
 
-        /* TUNE MODE */
+        /* Desktop fallback */
+        if(!moveState.active){
+          const kx = (keys.d ? 1 : 0) + (keys.a ? -1 : 0);
+          const ky = (keys.s ? 1 : 0) + (keys.w ? -1 : 0);
+          mvX = clamp(kx, -1, 1);
+          mvY = clamp(ky, -1, 1);
+        }
+        if(!lookState.active){
+          const kx = (keys.arrowright ? 1 : 0) + (keys.arrowleft ? -1 : 0);
+          const ky = (keys.arrowdown ? 1 : 0) + (keys.arrowup ? -1 : 0);
+          lx = clamp(kx, -1, 1) * 0.55;
+          ly = clamp(ky, -1, 1) * 0.55;
+        }
+
+        /* TUNE MODE, position only */
         if(TUNE.ENABLED){
           const sp = TUNE.POS_SPEED * dt;
 
           CHEST.camPos.x = clamp(CHEST.camPos.x + (mvX * sp), -TUNE.X_LIMIT, TUNE.X_LIMIT);
           CHEST.camPos.y = clamp(CHEST.camPos.y + (-mvY * sp), -TUNE.Y_LIMIT, TUNE.Y_LIMIT);
-
-          CHEST.pivotPos.y = clamp(CHEST.pivotPos.y + (-mvY * sp * 0.6), TUNE.PIVOT_Y_MIN, TUNE.PIVOT_Y_MAX);
-
           CHEST.camPos.z = clamp(CHEST.camPos.z + ((-ly) * sp), TUNE.Z_MIN, TUNE.Z_MAX);
 
           applyChestMount();
         } else {
-          /* NORMAL AIM */
-          if(FREE_LOOK){
-            CHEST.yaw += lx * JOY.LOOK_SENS * dt;
-            CHEST.pitch += ly * JOY.LOOK_SENS * dt;
-            CHEST.pitch = clamp(CHEST.pitch, -1.10, 0.65);
-            applyChestMount();
-          } else {
-            soldierRoot.rotation.y += lx * JOY.LOOK_SENS * dt;
-            CHEST.pitch += ly * JOY.LOOK_SENS * dt;
-            CHEST.pitch = clamp(CHEST.pitch, -1.10, 0.65);
-            applyChestMount();
+          /* PLAYSTATION STYLE FPS,
+             Right stick controls look (yaw, pitch),
+             Left stick moves soldier (legs) relative to look yaw,
+             Both can happen at the same time */
+          CHEST.yaw   += lx * JOY.LOOK_SENS * dt;
+          CHEST.pitch += ly * JOY.LOOK_SENS * dt;
+          CHEST.pitch = clamp(CHEST.pitch, -1.10, 0.65);
+
+          applyChestMount();
+
+          /* Soldier body follows look yaw unless Free Look is on */
+          if(!FREE_LOOK){
+            soldierRoot.rotation.y = CHEST.yaw;
           }
 
-          /* Move soldier */
-          const forward = new BABYLON.Vector3(Math.sin(soldierRoot.rotation.y), 0, Math.cos(soldierRoot.rotation.y));
+          /* Move uses camera yaw, so forward is where you are looking */
+          const yawForMove = CHEST.yaw;
+          const forward = new BABYLON.Vector3(Math.sin(yawForMove), 0, Math.cos(yawForMove));
           const right = new BABYLON.Vector3(forward.z, 0, -forward.x);
 
           const moveF = -mvY;
@@ -1022,12 +1098,6 @@
       fireBtn.addEventListener("pointercancel", end, { passive:true });
       fireBtn.addEventListener("pointerleave", end, { passive:true });
     })();
-
-    /* Desktop test, mouse */
-    window.addEventListener("mousedown", (e) => {
-      if(e.button !== 0) return;
-      if(e.target === fireBtn) return;
-    });
 
     toggleFreeLookBtn.addEventListener("click", () => setFreeLook(!FREE_LOOK));
     tuneCamBtn.addEventListener("click", () => setTuneCam(!TUNE.ENABLED));
