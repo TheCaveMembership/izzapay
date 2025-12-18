@@ -256,6 +256,7 @@
 
   <script src="https://cdn.babylonjs.com/babylon.js"></script>
   <script src="https://cdn.babylonjs.com/loaders/babylonjs.loaders.min.js"></script>
+  <script src="https://cdn.babylonjs.com/materialsLibrary/babylon.gridMaterial.min.js"></script>
 </head>
 
 <body>
@@ -421,8 +422,8 @@
       return Math.sign(x) * clamp(s, 0, 1);
     }
 
-    const moveState = { active:false, id:null, dx:0, dy:0, el:null, nub:null, max:1, cx:0, cy:0 };
-    const turnState = { active:false, id:null, dx:0, dy:0, el:null, nub:null, max:1, cx:0, cy:0 };
+    const moveState = { active:false, id:null, dx:0, dy:0, el:null, nub:null, max:1, cx:0, cy:0, recalc:null };
+    const turnState = { active:false, id:null, dx:0, dy:0, el:null, nub:null, max:1, cx:0, cy:0, recalc:null };
 
     function stickSetup(state, el, nub){
       state.el = el;
@@ -437,6 +438,10 @@
       state.recalc = recalc;
       recalc();
       window.addEventListener("resize", recalc);
+      if(window.visualViewport){
+        window.visualViewport.addEventListener("resize", recalc);
+        window.visualViewport.addEventListener("scroll", recalc);
+      }
     }
 
     stickSetup(moveState, moveStick, moveNub);
@@ -459,7 +464,7 @@
     function bindGlobalStick(state){
       state.el.addEventListener("pointerdown", (e) => {
         e.preventDefault();
-        state.recalc();
+        state.recalc && state.recalc();
         state.active = true;
         state.id = e.pointerId;
         stickSetFromClient(state, e.clientX, e.clientY);
@@ -489,7 +494,7 @@
       state.el.addEventListener("touchstart", (e) => {
         if(!e.changedTouches || !e.changedTouches.length) return;
         e.preventDefault();
-        state.recalc();
+        state.recalc && state.recalc();
         const t = e.changedTouches[0];
         state.active = true;
         state.id = t.identifier;
@@ -530,6 +535,17 @@
 
     bindGlobalStick(moveState);
     bindGlobalStick(turnState);
+
+    /* Desktop fallback controls */
+    const keys = { w:false,a:false,s:false,d:false };
+    window.addEventListener("keydown", (e) => {
+      const k = (e.key || "").toLowerCase();
+      if(k in keys){ keys[k] = true; }
+    });
+    window.addEventListener("keyup", (e) => {
+      const k = (e.key || "").toLowerCase();
+      if(k in keys){ keys[k] = false; }
+    });
 
     let scene;
     let camera;
@@ -716,7 +732,7 @@
       if(!chestPivot || !camera) return;
 
       chestPivot.position.copyFrom(CHEST_LOCK.pivotPos);
-      chestPivot.rotation.set(0, 0, 0);
+      chestPivot.rotation.set(0, CHEST_LOCK.yaw, 0);
 
       camera.position.copyFrom(CHEST_LOCK.camPos);
       camera.rotation.set(CHEST_LOCK.pitch, 0, 0);
@@ -929,14 +945,6 @@
       dir.intensity = 0.55;
 
       const ground = BABYLON.MeshBuilder.CreateGround("g", { width: 220, height: 220 }, scene);
-      const gmat = new BABYLON.StandardMaterial("gmat", scene);
-      gmat.diffuseColor = new BABYLON.Color3(0.03,0.04,0.07);
-      gmat.emissiveColor = new BABYLON.Color3(0.02,0.03,0.06);
-      gmat.specularColor = new BABYLON.Color3(0,0,0);
-      ground.material = gmat;
-      ground.isPickable = true;
-
-      /* grid lines so you can SEE movement immediately */
       const grid = new BABYLON.GridMaterial("grid", scene);
       grid.majorUnitFrequency = 5;
       grid.minorUnitVisibility = 0.25;
@@ -944,6 +952,7 @@
       grid.backFaceCulling = false;
       grid.opacity = 0.35;
       ground.material = grid;
+      ground.isPickable = true;
 
       camera = new BABYLON.UniversalCamera("chestCam", new BABYLON.Vector3(0,1.6,0), scene);
       camera.minZ = 0.02;
@@ -967,16 +976,23 @@
         const dt = scene.getEngine().getDeltaTime() * 0.001;
         const now = performance.now() * 0.001;
 
-        /* sticks, soldier only */
-        const mvX = applyDeadzone(moveState.dx);
-        const mvY = applyDeadzone(moveState.dy);
-
+        /* sticks */
+        let mvX = applyDeadzone(moveState.dx);
+        let mvY = applyDeadzone(moveState.dy);
         const tx = applyDeadzone(turnState.dx);
 
-        /* turn soldier with right stick, no camera yaw, no camera pitch */
+        /* desktop WASD adds movement */
+        if(!moveState.active){
+          const kx = (keys.d ? 1 : 0) + (keys.a ? -1 : 0);
+          const ky = (keys.s ? 1 : 0) + (keys.w ? -1 : 0);
+          mvX = clamp(kx, -1, 1);
+          mvY = clamp(ky, -1, 1);
+        }
+
+        /* right stick turns soldier only */
         soldierRoot.rotation.y += tx * JOY.TURN_SPEED * dt;
 
-        /* move soldier with left stick, relative to soldier facing */
+        /* move relative to soldier facing */
         const yaw = soldierRoot.rotation.y;
         const forward = new BABYLON.Vector3(Math.sin(yaw), 0, Math.cos(yaw));
         const right = new BABYLON.Vector3(forward.z, 0, -forward.x);
@@ -1013,17 +1029,13 @@
     }
 
     (function(){
-      let pid = null;
-
       fireBtn.addEventListener("pointerdown", (e) => {
         e.preventDefault();
-        pid = e.pointerId;
         startFiring();
       }, { passive:false });
 
       function end(){
         stopFiring();
-        pid = null;
       }
 
       fireBtn.addEventListener("pointerup", end, { passive:true });
