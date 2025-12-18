@@ -15,7 +15,15 @@
       --accent2:#ff3b6b;
       --accent3:#ffcf4d;
     }
-    *{box-sizing:border-box;margin:0;padding:0}
+    *{
+      box-sizing:border-box;
+      margin:0;
+      padding:0;
+      -webkit-tap-highlight-color: transparent;
+      -webkit-touch-callout: none;
+      -webkit-user-select:none;
+      user-select:none;
+    }
     html,body{
       width:100%;
       height:100%;
@@ -24,7 +32,6 @@
       font-family:system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;
       overflow:hidden;
       touch-action:none;
-      user-select:none;
     }
 
     .rot-wrapper{
@@ -112,6 +119,9 @@
       user-select:none;
       border-color:rgba(255,59,107,.55);
       background:linear-gradient(90deg,rgba(30,6,18,.75),rgba(80,10,30,.45));
+      appearance:none;
+      -webkit-appearance:none;
+      outline:none;
     }
     .tag.btn:active{ transform:scale(.98); }
 
@@ -176,7 +186,6 @@
       letter-spacing:.10em;
       text-transform:uppercase;
       color:#ffe7ef;
-      user-select:none;
       opacity:0.96;
     }
     .fire-btn:active{ transform:scale(.98); }
@@ -307,6 +316,13 @@
   </div>
 
   <script>
+    // Hard block text selection / context menus during play
+    document.addEventListener("selectstart", (e) => { e.preventDefault(); }, { passive:false });
+    document.addEventListener("contextmenu", (e) => { e.preventDefault(); }, { passive:false });
+
+    // Portrait rotation flag, used to rotate joystick input back into "game space"
+    let ROTATED_UI = true;
+
     (function(){
       const wrapper = document.getElementById("rotWrapper");
       function updateLayout(){
@@ -315,11 +331,14 @@
         const w = vv ? vv.width : window.innerWidth;
         const h = vv ? vv.height : window.innerHeight;
         const landscape = w >= h;
+
         if (landscape){
+          ROTATED_UI = false;
           wrapper.style.transform = "none";
           wrapper.style.width = "100%";
           wrapper.style.height = "100%";
         } else {
+          ROTATED_UI = true;
           wrapper.style.width = h + "px";
           wrapper.style.height = w + "px";
           wrapper.style.transform = "rotate(90deg) translateY(-100%)";
@@ -389,11 +408,11 @@
       }
     };
 
-    /* Chest mount stays constant relative to chest bone */
+    /* Recentered into the "old head space" */
     const CHEST_LOCK = {
-      pivotPos: new BABYLON.Vector3(0.00, 0.22, 0.10),
-      camPos:   new BABYLON.Vector3(-0.650, 1.640, -0.969),
-      pitch:    -0.30,
+      pivotPos: new BABYLON.Vector3(0.00, 0.30, 0.06),
+      camPos:   new BABYLON.Vector3(0.00, 1.72, -0.28),
+      pitch:    -0.10,
       yaw:       0.00
     };
 
@@ -412,17 +431,15 @@
       DEADZONE: 0.10
     };
 
-    // CHANGED, right stick is less touchy
     const LOOK = {
-      YAW_SPEED:  1.55,
-      PITCH_SPEED: 1.15,
+      YAW_SPEED:  1.75,
+      PITCH_SPEED: 1.25,
       PITCH_MIN: -1.05,
-      PITCH_MAX:  0.45
+      PITCH_MAX:  0.55
     };
 
-    // Optional extra scaling on touch devices
     const LOOK_SENS = {
-      TOUCH_MULT: 0.78
+      TOUCH_MULT: 0.90
     };
 
     const FIRE = {
@@ -462,13 +479,26 @@
     stickSetup(lookState, lookStick, lookNub);
     stickSetup(moveState, moveStick, moveNub);
 
+    // Rotate stick vector by -90 deg when UI is rotated in portrait
+    function rotateIfPortrait(nx, ny){
+      if(!ROTATED_UI) return { nx, ny };
+      // -90 degrees: (x, y) -> (y, -x)
+      return { nx: ny, ny: -nx };
+    }
+
     function stickSetFromClient(state, clientX, clientY){
-      const nx = clamp(clientX - state.cx, -state.max, state.max);
-      const ny = clamp(clientY - state.cy, -state.max, state.max);
+      let nx = clamp(clientX - state.cx, -state.max, state.max);
+      let ny = clamp(clientY - state.cy, -state.max, state.max);
+
+      const r = rotateIfPortrait(nx, ny);
+      nx = clamp(r.nx, -state.max, state.max);
+      ny = clamp(r.ny, -state.max, state.max);
+
       state.nub.style.transform = `translate(calc(-50% + ${nx}px), calc(-50% + ${ny}px))`;
       state.dx = nx / state.max;
       state.dy = ny / state.max;
     }
+
     function stickReset(state){
       state.nub.style.transform = "translate(-50%,-50%)";
       state.dx = 0;
@@ -663,17 +693,14 @@
       }catch(e){}
     }
 
-    // NEW, force hide head and neck, name based plus head zone fallback, arms protected
+    // Force hide head and neck, arms protected
     function hideHeadAndNeck(container){
       const meshes = (container && container.meshes) ? container.meshes : [];
 
       const keepRx = /(arm|forearm|hand|wrist|glove|sleeve|weapon|gun|pistol|smg)/i;
       const hideRx = /(head|neck|helmet|face|hair|ear|mask|hood|cap|hat|beard|brow|eye|teeth|tongue|jaw|cheek|skull|cranium|visor|goggles|glass|glasses|mouth|lip)/i;
 
-      const HEAD_ZONE = {
-        minY: 1.35,
-        minZ: -0.35
-      };
+      const HEAD_ZONE = { minY: 1.35, minZ: -0.35 };
 
       meshes.forEach(m => {
         if(!m) return;
@@ -683,7 +710,6 @@
         if(keepRx.test(nm)) return;
 
         let hide = false;
-
         if(hideRx.test(nm)) hide = true;
 
         if(!hide){
@@ -691,9 +717,7 @@
             const bi = m.getBoundingInfo && m.getBoundingInfo();
             if(bi){
               const c = bi.boundingBox.centerWorld;
-              if(c.y >= HEAD_ZONE.minY && c.z >= HEAD_ZONE.minZ){
-                hide = true;
-              }
+              if(c.y >= HEAD_ZONE.minY && c.z >= HEAD_ZONE.minZ) hide = true;
             }
           }catch(e){}
         }
@@ -764,7 +788,6 @@
         });
       }
 
-      // Always enforce head and neck invisibility, even if arms logic missed something
       hideHeadAndNeck(container);
     }
 
@@ -800,7 +823,6 @@
       }catch(e){}
     }
 
-    // IMPORTANT, chest pivot does NOT add yaw, yaw is on soldierRoot
     function applyChestMountAimed(){
       if(!chestPivot || !camera) return;
 
@@ -842,8 +864,6 @@
       soldierSkinned = findSkinnedMeshFromContainer(cont);
 
       playIdleAnimationsSlow(cont);
-
-      // Arms only plus force hide head and neck
       setArmsOnlyVisibility(cont);
 
       const sk = soldierSkinned && soldierSkinned.skeleton ? soldierSkinned.skeleton : null;
@@ -965,10 +985,16 @@
       const cfg = FIRE[mode];
 
       const origin = getMuzzleOrigin();
-      const baseDir = camera.getForwardRay(1).direction.clone();
+
+      // NEW: aim direction from muzzle toward the reticle ray target, so barrel aligns to crosshair
+      const camPos = camera.getAbsolutePosition();
+      const camDir = camera.getForwardRay(1).direction.clone();
+      const target = camPos.add(camDir.scale(cfg.maxDist));
+
+      let dir = target.subtract(origin).normalize();
 
       const s = randSpread(cfg.spread);
-      const dir = baseDir.add(new BABYLON.Vector3(s.x, s.y, 0)).normalize();
+      dir = dir.add(new BABYLON.Vector3(s.x, s.y, 0)).normalize();
 
       const ray = new BABYLON.Ray(origin, dir, cfg.maxDist);
 
@@ -1058,12 +1084,16 @@
         const dt = scene.getEngine().getDeltaTime() * 0.001;
         const now = performance.now() * 0.001;
 
-        // RIGHT stick LOOK, reduced sensitivity
+        // RIGHT stick LOOK
         const lookMult = isTouch ? LOOK_SENS.TOUCH_MULT : 1.0;
         const lookX = applyDeadzone(lookState.dx) * lookMult;
         const lookY = applyDeadzone(lookState.dy) * lookMult;
 
+        // Yaw: make right = turn right, left = turn left
         aimYaw   += (lookX * LOOK.YAW_SPEED * dt);
+
+        // Pitch: up = look up, down = look down
+        // In Babylon, positive rotation.x looks down, our stick dy is positive when finger goes down, so this is correct
         aimPitch += (lookY * LOOK.PITCH_SPEED * dt);
         aimPitch  = clamp(aimPitch, LOOK.PITCH_MIN, LOOK.PITCH_MAX);
 
@@ -1144,3 +1174,5 @@
       }
     })();
   </script>
+</body>
+</html>
