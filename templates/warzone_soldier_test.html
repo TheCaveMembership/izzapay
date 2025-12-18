@@ -173,6 +173,7 @@
           <div class="hud-row">
             <span class="tag" id="hudControl">CONTROL, SOLDIER</span>
             <button class="tag btn" id="toggleFreeLookBtn" type="button">Free Look, off</button>
+            <button class="tag btn" id="tuneCamBtn" type="button">Tune Cam, off</button>
             <button class="tag btn" id="weaponBtn" type="button">Weapon, pistol</button>
             <button class="tag btn" id="resetBtn" type="button">Reset</button>
           </div>
@@ -187,6 +188,7 @@
             <span class="tag" id="hudSoldier">SOLDIER, loading</span>
             <span class="tag warn" id="hudWeapon">WEAPON, pistol</span>
             <span class="tag" id="hudBone">CHEST, ?</span>
+            <span class="tag" id="hudCam">CAM, ?</span>
           </div>
         </div>
       </div>
@@ -235,9 +237,11 @@
     const hudSoldier = document.getElementById("hudSoldier");
     const hudWeapon  = document.getElementById("hudWeapon");
     const hudBone    = document.getElementById("hudBone");
+    const hudCam     = document.getElementById("hudCam");
     const hintText   = document.getElementById("hintText");
 
     const toggleFreeLookBtn = document.getElementById("toggleFreeLookBtn");
+    const tuneCamBtn = document.getElementById("tuneCamBtn");
     const weaponBtn = document.getElementById("weaponBtn");
     const resetBtn = document.getElementById("resetBtn");
 
@@ -275,26 +279,26 @@
       }
     };
 
-    /* Chest cam tuning (THIS is what you tune) */
+    /* Chest cam tuning */
     const CHEST = {
-      /* This is LOCAL offset from the chosen CHEST BONE (Spine2/Spine1/etc) */
       pivotPos: new BABYLON.Vector3(0.00, 0.02, 0.03),
-      /* Camera pushed slightly BACK into the torso so arms + gun fill view */
-      camPos:   new BABYLON.Vector3(0.00, 0.00, -0.07),
+      camPos:   new BABYLON.Vector3(0.00, 0.00, -0.07), /* <-- we will tune Z in/out */
       pitch:    -0.20,
       yaw:       0.00
     };
 
-    /* Idle animation control (keeps pose, avoids T stance) */
-    const IDLE = {
-      SPEED: 0.12,     /* 0.08 to 0.20 usually feels “almost stopped” */
-      LOOP: true
+    /* Camera tuning sensitivity + clamps */
+    const TUNE = {
+      ENABLED: false,
+      POS_SPEED: 0.22,          /* meters per second at full stick */
+      X_LIMIT: 0.25,
+      Y_LIMIT: 0.25,
+      Z_MIN:  -0.30,            /* deeper inside */
+      Z_MAX:   0.20             /* further out of chest */
     };
 
-    /* Anti-bob, keeps arms animation but removes the up/down bounce from hips */
-    const BOB = {
-      LOCK_HIPS_Y: true
-    };
+    const IDLE = { SPEED: 0.12, LOOP: true };
+    const BOB  = { LOCK_HIPS_Y: true };
 
     const JOY = {
       MOVE_SPEED: 4.2,
@@ -371,9 +375,8 @@
     let soldierRoot = null;
     let soldierSkinned = null;
 
-    /* Bone mounts */
-    let chestBoneNode = null;     /* attached to spine bone */
-    let chestPivot = null;        /* local tuning pivot under chestBoneNode */
+    let chestBoneNode = null;
+    let chestPivot = null;
 
     let hipsBone = null;
     let hipsBaseY = null;
@@ -384,6 +387,11 @@
     let weaponGrip = null;
 
     let FREE_LOOK = false;
+
+    function fmt(v){ return (Math.round(v*1000)/1000).toFixed(3); }
+    function updateCamHud(){
+      hudCam.textContent = `CAM, x ${fmt(CHEST.camPos.x)} y ${fmt(CHEST.camPos.y)} z ${fmt(CHEST.camPos.z)}`;
+    }
 
     function findSkinnedMeshFromContainer(container){
       try{
@@ -415,20 +423,16 @@
     function findChestBone(skeleton){
       if(!skeleton || !skeleton.bones || !skeleton.bones.length) return null;
 
-      /* Prefer Spine2 for chest, then Spine1, then Spine, then Neck */
       const prefer = [
         /mixamorig:Spine2/i,
         /mixamorig:Spine1/i,
         /mixamorig:Spine\b/i,
         /mixamorig:Neck/i
       ];
-
       for(const rx of prefer){
         const b = skeleton.bones.find(x => rx.test(x.name || ""));
         if(b) return b;
       }
-
-      /* Last resort: any spine */
       return skeleton.bones.find(x => /Spine/i.test(x.name || "")) || null;
     }
 
@@ -441,11 +445,10 @@
       try{
         const groups = (container && container.animationGroups) ? container.animationGroups : [];
         if(!groups.length) return;
-
         groups.forEach(g => {
           try{
-            g.stop();                 /* reset */
-            g.start(IDLE.LOOP, IDLE.SPEED); /* loop + slow, avoids T stance */
+            g.stop();
+            g.start(IDLE.LOOP, IDLE.SPEED);
           }catch(e){}
         });
       }catch(e){}
@@ -474,7 +477,6 @@
         }catch(e){}
       });
 
-      /* If your mesh naming doesn’t include arm keywords, don’t hide anything */
       if(shown === 0){
         meshes.forEach(m => {
           if(!m) return;
@@ -526,12 +528,15 @@
 
       camera.position.copyFrom(CHEST.camPos);
       camera.rotation.set(CHEST.pitch, 0, 0);
+
+      updateCamHud();
     }
 
     async function loadSoldierAndChestCam(){
       clearSoldier();
       hudSoldier.textContent = "SOLDIER, loading";
       hudBone.textContent = "CHEST, ?";
+      hudCam.textContent = "CAM, ?";
 
       const cont = await BABYLON.SceneLoader.LoadAssetContainerAsync(SOLDIER_ROOT, SOLDIER_FILE, scene);
       cont.addAllToScene();
@@ -549,13 +554,9 @@
 
       soldierSkinned = findSkinnedMeshFromContainer(cont);
 
-      /* Keep the base animation (no T stance), just slow it down heavily */
       playIdleAnimationsSlow(cont);
-
-      /* Arms only for alignment (you can remove this later) */
       setArmsOnlyVisibility(cont);
 
-      /* Attach a node to the CHEST bone, THEN put your tuning pivot under it */
       const sk = soldierSkinned && soldierSkinned.skeleton ? soldierSkinned.skeleton : null;
       const chestBone = findChestBone(sk);
 
@@ -566,7 +567,6 @@
         chestBoneNode.attachToBone(chestBone, soldierSkinned);
         hudBone.textContent = "CHEST, " + (chestBone.name || "bone");
       } else {
-        /* Fallback: still works, but not true chest mounting */
         chestBoneNode.parent = soldierRoot;
         chestBoneNode.position.set(0, 1.52, 0.06);
         hudBone.textContent = "CHEST, fallback";
@@ -577,7 +577,6 @@
       camera.parent = chestPivot;
       applyChestMount();
 
-      /* Setup hips anti-bob (lock local Y to base) */
       hipsBone = findHipsBone(sk);
       if(hipsBone && BOB.LOCK_HIPS_Y){
         hipsBaseY = hipsBone.position.y;
@@ -641,10 +640,27 @@
     function setFreeLook(on){
       FREE_LOOK = !!on;
       toggleFreeLookBtn.textContent = FREE_LOOK ? "Free Look, on" : "Free Look, off";
-      hudControl.textContent = FREE_LOOK ? "CONTROL, CAMERA" : "CONTROL, SOLDIER";
-      hintText.textContent = FREE_LOOK
-        ? "Left stick moves soldier, right stick aims camera only, soldier body does not rotate"
-        : "Left stick moves soldier, right stick rotates soldier and aims camera together";
+
+      if(!TUNE.ENABLED){
+        hudControl.textContent = FREE_LOOK ? "CONTROL, CAMERA" : "CONTROL, SOLDIER";
+      }
+
+      hintText.textContent = TUNE.ENABLED
+        ? "TUNE MODE, left stick moves camera x y z, right stick aims, reset to save base"
+        : (FREE_LOOK
+          ? "Left stick moves soldier, right stick aims camera only, soldier body does not rotate"
+          : "Left stick moves soldier, right stick rotates soldier and aims camera together");
+    }
+
+    function setTuneCam(on){
+      TUNE.ENABLED = !!on;
+      tuneCamBtn.textContent = TUNE.ENABLED ? "Tune Cam, on" : "Tune Cam, off";
+      hudControl.textContent = TUNE.ENABLED ? "CONTROL, TUNE CAM" : (FREE_LOOK ? "CONTROL, CAMERA" : "CONTROL, SOLDIER");
+      hintText.textContent = TUNE.ENABLED
+        ? "TUNE MODE, left stick adjusts camera, up down is Y, left right is X, forward back is Z"
+        : (FREE_LOOK
+          ? "Left stick moves soldier, right stick aims camera only, soldier body does not rotate"
+          : "Left stick moves soldier, right stick rotates soldier and aims camera together");
     }
 
     function resetAll(){
@@ -659,13 +675,11 @@
       CHEST.yaw      = 0.00;
 
       applyChestMount();
+      setTuneCam(false);
       setFreeLook(false);
 
       if(soldierContainer) playIdleAnimationsSlow(soldierContainer);
-
-      if(hipsBone && hipsBaseY !== null){
-        hipsBone.position.y = hipsBaseY;
-      }
+      if(hipsBone && hipsBaseY !== null){ hipsBone.position.y = hipsBaseY; }
     }
 
     function createScene(){
@@ -695,7 +709,6 @@
       engine.runRenderLoop(() => scene.render());
       window.addEventListener("resize", () => engine.resize());
 
-      /* Remove bob AFTER animation evaluation */
       scene.onAfterAnimationsObservable.add(() => {
         if(BOB.LOCK_HIPS_Y && hipsBone && hipsBaseY !== null){
           hipsBone.position.y = hipsBaseY;
@@ -714,8 +727,8 @@
         const lyRaw = applyDeadzone(lookState.dy);
         const ly = JOY.INVERT_Y ? -lyRaw : lyRaw;
 
-        /* Look */
-        if(FREE_LOOK){
+        /* Right stick: aim */
+        if(FREE_LOOK || TUNE.ENABLED){
           CHEST.yaw += lx * JOY.LOOK_SENS * dt;
           CHEST.pitch += ly * JOY.LOOK_SENS * dt;
           CHEST.pitch = clamp(CHEST.pitch, -1.10, 0.65);
@@ -727,7 +740,21 @@
           applyChestMount();
         }
 
-        /* Move soldier relative to soldier facing */
+        /* Left stick: either tune camera, or move soldier */
+        if(TUNE.ENABLED){
+          const sp = TUNE.POS_SPEED * dt;
+
+          /* left/right -> camera X, up/down -> camera Y, forward/back -> camera Z */
+          CHEST.camPos.x = clamp(CHEST.camPos.x + (mvX * sp), -TUNE.X_LIMIT, TUNE.X_LIMIT);
+          CHEST.camPos.y = clamp(CHEST.camPos.y + (-mvY * sp), -TUNE.Y_LIMIT, TUNE.Y_LIMIT);
+
+          /* Use magnitude of forward/back (mvY) to move Z, but keep it separate feel */
+          CHEST.camPos.z = clamp(CHEST.camPos.z + ((-mvY) * sp), TUNE.Z_MIN, TUNE.Z_MAX);
+
+          applyChestMount();
+          return;
+        }
+
         const forward = new BABYLON.Vector3(Math.sin(soldierRoot.rotation.y), 0, Math.cos(soldierRoot.rotation.y));
         const right = new BABYLON.Vector3(forward.z, 0, -forward.x);
 
@@ -743,6 +770,7 @@
     }
 
     toggleFreeLookBtn.addEventListener("click", () => setFreeLook(!FREE_LOOK));
+    tuneCamBtn.addEventListener("click", () => setTuneCam(!TUNE.ENABLED));
     resetBtn.addEventListener("click", resetAll);
 
     weaponBtn.addEventListener("click", async () => {
@@ -757,6 +785,7 @@
     (async function(){
       createScene();
       setFreeLook(false);
+      setTuneCam(false);
 
       try{
         await loadSoldierAndChestCam();
