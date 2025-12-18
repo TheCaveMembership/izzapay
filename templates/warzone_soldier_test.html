@@ -279,10 +279,12 @@
       }
     };
 
-    /* Chest cam tuning, moved up so more weapon shows */
+    /* Chest cam tuning,
+       Higher start, like a taller person,
+       Keep aim forward, only position changes */
     const CHEST = {
-      pivotPos: new BABYLON.Vector3(0.00, 0.02, 0.10),
-      camPos:   new BABYLON.Vector3(0.00, 0.10, 0.55),
+      pivotPos: new BABYLON.Vector3(0.00, 0.12, 0.10),
+      camPos:   new BABYLON.Vector3(0.00, 0.22, 0.55),
       pitch:    -0.20,
       yaw:       0.00
     };
@@ -291,7 +293,7 @@
       ENABLED: false,
       POS_SPEED: 0.22,
       X_LIMIT: 0.25,
-      Y_LIMIT: 0.25,
+      Y_LIMIT: 0.45,
       Z_MIN:  -0.30,
       Z_MAX:   1.20
     };
@@ -662,7 +664,7 @@
       }
 
       hintText.textContent = TUNE.ENABLED
-        ? "TUNE MODE, left stick moves camera x y z, right stick aims, reset to save base"
+        ? "TUNE MODE, left stick moves camera X Y, right stick up down moves camera Z, aim does not change"
         : (FREE_LOOK
           ? "Left stick moves soldier, right stick aims camera only, soldier body does not rotate"
           : "Left stick moves soldier, right stick rotates soldier and aims camera together");
@@ -672,8 +674,9 @@
       TUNE.ENABLED = !!on;
       tuneCamBtn.textContent = TUNE.ENABLED ? "Tune Cam, on" : "Tune Cam, off";
       hudControl.textContent = TUNE.ENABLED ? "CONTROL, TUNE CAM" : (FREE_LOOK ? "CONTROL, CAMERA" : "CONTROL, SOLDIER");
+
       hintText.textContent = TUNE.ENABLED
-        ? "TUNE MODE, left stick adjusts camera, up down is Y, left right is X, forward back is Z"
+        ? "TUNE MODE, left stick moves camera X Y, right stick up down moves camera Z, aim does not change"
         : (FREE_LOOK
           ? "Left stick moves soldier, right stick aims camera only, soldier body does not rotate"
           : "Left stick moves soldier, right stick rotates soldier and aims camera together");
@@ -685,8 +688,8 @@
       soldierRoot.position.set(0,0,0);
       soldierRoot.rotation.set(0,0,0);
 
-      CHEST.pivotPos = new BABYLON.Vector3(0.00, 0.02, 0.10);
-      CHEST.camPos   = new BABYLON.Vector3(0.00, 0.10, 0.55);
+      CHEST.pivotPos = new BABYLON.Vector3(0.00, 0.12, 0.10);
+      CHEST.camPos   = new BABYLON.Vector3(0.00, 0.22, 0.55);
       CHEST.pitch    = -0.20;
       CHEST.yaw      = 0.00;
 
@@ -743,7 +746,23 @@
         const lyRaw = applyDeadzone(lookState.dy);
         const ly = JOY.INVERT_Y ? -lyRaw : lyRaw;
 
-        if(FREE_LOOK || TUNE.ENABLED){
+        /* TUNE MODE, position only, do not change yaw or pitch */
+        if(TUNE.ENABLED){
+          const sp = TUNE.POS_SPEED * dt;
+
+          /* left stick, X and Y */
+          CHEST.camPos.x = clamp(CHEST.camPos.x + (mvX * sp), -TUNE.X_LIMIT, TUNE.X_LIMIT);
+          CHEST.camPos.y = clamp(CHEST.camPos.y + (-mvY * sp), -TUNE.Y_LIMIT, TUNE.Y_LIMIT);
+
+          /* right stick up down, Z in out */
+          CHEST.camPos.z = clamp(CHEST.camPos.z + ((-ly) * sp), TUNE.Z_MIN, TUNE.Z_MAX);
+
+          applyChestMount();
+          return;
+        }
+
+        /* NORMAL AIM, right stick controls aim, or rotates soldier + aim */
+        if(FREE_LOOK){
           CHEST.yaw += lx * JOY.LOOK_SENS * dt;
           CHEST.pitch += ly * JOY.LOOK_SENS * dt;
           CHEST.pitch = clamp(CHEST.pitch, -1.10, 0.65);
@@ -755,17 +774,7 @@
           applyChestMount();
         }
 
-        if(TUNE.ENABLED){
-          const sp = TUNE.POS_SPEED * dt;
-
-          CHEST.camPos.x = clamp(CHEST.camPos.x + (mvX * sp), -TUNE.X_LIMIT, TUNE.X_LIMIT);
-          CHEST.camPos.y = clamp(CHEST.camPos.y + (-mvY * sp), -TUNE.Y_LIMIT, TUNE.Y_LIMIT);
-          CHEST.camPos.z = clamp(CHEST.camPos.z + ((-mvY) * sp), TUNE.Z_MIN, TUNE.Z_MAX);
-
-          applyChestMount();
-          return;
-        }
-
+        /* Move soldier */
         const forward = new BABYLON.Vector3(Math.sin(soldierRoot.rotation.y), 0, Math.cos(soldierRoot.rotation.y));
         const right = new BABYLON.Vector3(forward.z, 0, -forward.x);
 
