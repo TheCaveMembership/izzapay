@@ -83,7 +83,7 @@
       box-shadow:0 0 26px rgba(0,255,255,.10), 0 0 30px rgba(255,59,107,.08);
       padding:10px 12px;
       backdrop-filter:blur(8px);
-      max-width:56vw;
+      max-width:60vw;
       pointer-events:auto;
     }
     .hud-title{
@@ -131,6 +131,35 @@
       line-height:1.35;
       color:#c3cff5;
       margin-top:6px;
+    }
+
+    .tuner{
+      margin-top:8px;
+      display:flex;
+      align-items:center;
+      gap:10px;
+      font-size:11px;
+      color:#cfe0ff;
+    }
+    .tuner label{
+      opacity:.9;
+      letter-spacing:.06em;
+      text-transform:uppercase;
+      font-size:10px;
+      color:rgba(159,176,214,.95);
+      white-space:nowrap;
+    }
+    .tuner input[type="range"]{
+      width:180px;
+      max-width:34vw;
+      accent-color: rgba(0,255,255,.9);
+      touch-action:none;
+    }
+    .tuner .val{
+      min-width:54px;
+      text-align:right;
+      font-variant-numeric: tabular-nums;
+      opacity:.95;
     }
 
     .touch-ui{
@@ -281,8 +310,15 @@
             <button class="tag btn" id="weaponBtn" type="button">Weapon, pistol</button>
             <button class="tag btn" id="resetBtn" type="button">Reset</button>
           </div>
+
+          <div class="tuner">
+            <label for="gripYaw">Grip yaw</label>
+            <input id="gripYaw" type="range" min="-0.80" max="0.80" step="0.01" value="0">
+            <div class="val" id="gripYawVal">0.00</div>
+          </div>
+
           <div class="hint" id="hintText">
-            Left stick moves, right stick looks, camera stays chest mounted, fire shoots
+            Left stick moves, right stick looks, grip yaw tunes barrel left or right, fire shoots
           </div>
         </div>
 
@@ -319,6 +355,7 @@
     // Hard block text selection / context menus during play
     document.addEventListener("selectstart", (e) => { e.preventDefault(); }, { passive:false });
     document.addEventListener("contextmenu", (e) => { e.preventDefault(); }, { passive:false });
+    document.addEventListener("gesturestart", (e) => { e.preventDefault(); }, { passive:false });
 
     // Portrait rotation flag, used to rotate joystick input back into "game space"
     let ROTATED_UI = true;
@@ -367,17 +404,18 @@
     const weaponBtn = document.getElementById("weaponBtn");
     const resetBtn  = document.getElementById("resetBtn");
 
-    // LEFT stick = MOVE
     const moveStick = document.getElementById("moveStick");
     const moveNub   = document.getElementById("moveNub");
 
-    // RIGHT stick = LOOK
     const lookStick = document.getElementById("turnStick");
     const lookNub   = document.getElementById("turnNub");
 
     const fireBtn = document.getElementById("fireBtn");
     const fireModeText = document.getElementById("fireModeText");
     const hitMarker = document.getElementById("hitMarker");
+
+    const gripYawSlider = document.getElementById("gripYaw");
+    const gripYawVal = document.getElementById("gripYawVal");
 
     function clamp(v,a,b){ return Math.max(a, Math.min(b, v)); }
 
@@ -438,9 +476,7 @@
       PITCH_MAX:  0.55
     };
 
-    const LOOK_SENS = {
-      TOUCH_MULT: 0.90
-    };
+    const LOOK_SENS = { TOUCH_MULT: 0.90 };
 
     const FIRE = {
       pistol: { rpm: 240, spread: 0.0035, maxDist: 120, tracerLife: 0.06, recoil: 0.020 },
@@ -495,8 +531,10 @@
       ny = clamp(r.ny, -state.max, state.max);
 
       state.nub.style.transform = `translate(calc(-50% + ${nx}px), calc(-50% + ${ny}px))`;
-      state.dx = nx / state.max;
-      state.dy = ny / state.max;
+
+      // FIX, left and right were reversed, invert X only, keep Y as is
+      state.dx = -(nx / state.max);
+      state.dy =  (ny / state.max);
     }
 
     function stickReset(state){
@@ -614,6 +652,58 @@
     /* Look state */
     let aimYaw = 0.0;
     let aimPitch = CHEST_LOCK.pitch;
+
+    // Grip yaw tuner, stored per weapon
+    const GRIP_TUNER = {
+      wz_basic_pistol: 0.0,
+      wz_cityrunner_smg: 0.0
+    };
+
+    function loadGripTuner(){
+      try{
+        const raw = localStorage.getItem("izza_grip_tuner");
+        if(!raw) return;
+        const obj = JSON.parse(raw);
+        if(obj && typeof obj === "object"){
+          if(typeof obj.wz_basic_pistol === "number") GRIP_TUNER.wz_basic_pistol = obj.wz_basic_pistol;
+          if(typeof obj.wz_cityrunner_smg === "number") GRIP_TUNER.wz_cityrunner_smg = obj.wz_cityrunner_smg;
+        }
+      }catch(e){}
+    }
+    function saveGripTuner(){
+      try{
+        localStorage.setItem("izza_grip_tuner", JSON.stringify(GRIP_TUNER));
+      }catch(e){}
+    }
+    function currentGripYaw(){
+      return (weaponSku === "wz_cityrunner_smg") ? GRIP_TUNER.wz_cityrunner_smg : GRIP_TUNER.wz_basic_pistol;
+    }
+    function setCurrentGripYaw(v){
+      v = clamp(v, -0.80, 0.80);
+      if(weaponSku === "wz_cityrunner_smg") GRIP_TUNER.wz_cityrunner_smg = v;
+      else GRIP_TUNER.wz_basic_pistol = v;
+      saveGripTuner();
+      syncGripYawUi();
+      applyGripYawToWeapon();
+    }
+    function syncGripYawUi(){
+      const v = currentGripYaw();
+      gripYawSlider.value = String(v);
+      gripYawVal.textContent = (Math.round(v * 100) / 100).toFixed(2);
+    }
+    function applyGripYawToWeapon(){
+      if(!weaponGrip) return;
+      const T = (weaponSku === "wz_cityrunner_smg") ? WEAPON_TUNING.wz_cityrunner_smg : WEAPON_TUNING.wz_basic_pistol;
+      const base = T.WEAPON_GRIP_ROT || new BABYLON.Vector3(0,0,0);
+
+      // Add yaw offset here, this rotates the gun left or right in the hands
+      weaponGrip.rotation.set(base.x, base.y + currentGripYaw(), base.z);
+    }
+
+    gripYawSlider.addEventListener("input", (e) => {
+      e.preventDefault();
+      setCurrentGripYaw(parseFloat(gripYawSlider.value || "0") || 0);
+    }, { passive:false });
 
     function fmt(v){ return (Math.round(v*1000)/1000).toFixed(3); }
 
@@ -946,9 +1036,14 @@
       });
 
       weaponSku = sku;
+
+      // Sync tuner UI and apply yaw tuner immediately for this weapon
+      syncGripYawUi();
+      applyGripYawToWeapon();
+
       hudWeapon.textContent = (weaponSku === "wz_cityrunner_smg") ? "WEAPON, SMG" : "WEAPON, pistol";
       weaponBtn.textContent = (weaponSku === "wz_cityrunner_smg") ? "Weapon, SMG" : "Weapon, pistol";
-      fireModeText.textContent = (weaponSku === "wz_cityrunner_smg") ? "hold" : "tap";
+      setFireModeLabel();
     }
 
     function resetAll(){
@@ -986,7 +1081,7 @@
 
       const origin = getMuzzleOrigin();
 
-      // NEW: aim direction from muzzle toward the reticle ray target, so barrel aligns to crosshair
+      // Aim direction from muzzle toward the reticle ray target, so bullets line up with the crosshair
       const camPos = camera.getAbsolutePosition();
       const camDir = camera.getForwardRay(1).direction.clone();
       const target = camPos.add(camDir.scale(cfg.maxDist));
@@ -1035,7 +1130,8 @@
         shootOnce();
         isFiring = false;
       } else {
-        nextShotAt = 0;
+        // Set next shot time immediately, avoids backlog loops and prevents freezes
+        nextShotAt = performance.now() * 0.001;
       }
     }
     function stopFiring(){ isFiring = false; }
@@ -1089,11 +1185,10 @@
         const lookX = applyDeadzone(lookState.dx) * lookMult;
         const lookY = applyDeadzone(lookState.dy) * lookMult;
 
-        // Yaw: make right = turn right, left = turn left
+        // Yaw, right = turn right, left = turn left
         aimYaw   += (lookX * LOOK.YAW_SPEED * dt);
 
-        // Pitch: up = look up, down = look down
-        // In Babylon, positive rotation.x looks down, our stick dy is positive when finger goes down, so this is correct
+        // Pitch, up = look up, down = look down
         aimPitch += (lookY * LOOK.PITCH_SPEED * dt);
         aimPitch  = clamp(aimPitch, LOOK.PITCH_MIN, LOOK.PITCH_MAX);
 
@@ -1123,17 +1218,13 @@
 
         applyChestMountAimed();
 
+        // SMG firing, single shot per interval, no while loop backlog, prevents screen freeze
         if(isFiring && weaponSku === "wz_cityrunner_smg"){
           const cfg = FIRE.smg;
           const interval = 60.0 / cfg.rpm;
-          if(nextShotAt === 0) nextShotAt = now;
-          while(now >= nextShotAt){
+          if(now >= nextShotAt){
             shootOnce();
-            nextShotAt += interval;
-            if(now - nextShotAt > 0.2){
-              nextShotAt = now + interval;
-              break;
-            }
+            nextShotAt = now + interval;
           }
         }
 
@@ -1152,6 +1243,9 @@
       function end(){ stopFiring(); }
       fireBtn.addEventListener("pointerup", end, { passive:true });
       fireBtn.addEventListener("pointercancel", end, { passive:true });
+
+      // Prevent any stray selection gestures from the fire button
+      fireBtn.addEventListener("touchstart", (e) => { e.preventDefault(); }, { passive:false });
     })();
 
     resetBtn.addEventListener("click", resetAll);
@@ -1162,11 +1256,13 @@
     });
 
     (async function(){
+      loadGripTuner();
       createScene();
       try{
         await loadSoldierAndChestCam();
         await loadWeaponToRightHand("wz_basic_pistol");
         applyChestMountAimed();
+        syncGripYawUi();
         setFireModeLabel();
       }catch(e){
         console.error("[CHEST CAM TEST] boot failed", e);
@@ -1174,5 +1270,13 @@
       }
     })();
   </script>
+
+  <!--
+    What I adjusted, in plain terms,
+    1, Fixed left and right being reversed on BOTH sticks by inverting only the X axis after the portrait rotation mapping,
+    2, Added a Grip yaw slider that rotates the weaponGrip left or right, per weapon, it is saved in localStorage, so you can tune pistol and SMG separately,
+    3, Fixed SMG fire freeze by removing the while loop backlog, now it fires one shot per interval, no catch up loops, much lighter on pickWithRay and mesh creation,
+    4, Kept hard blocks against text selection and context menus so moving and aiming never highlights page UI
+  -->
 </body>
 </html>
