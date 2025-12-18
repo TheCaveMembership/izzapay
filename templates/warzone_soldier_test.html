@@ -273,7 +273,7 @@
             <button class="tag btn" id="resetBtn" type="button">Reset</button>
           </div>
           <div class="hint" id="hintText">
-            Left stick moves soldier, right stick turns soldier, camera is locked, fire shoots
+            Left stick moves soldier, right stick aims, camera is locked to chest, fire shoots
           </div>
         </div>
 
@@ -346,7 +346,7 @@
     const hudPos     = document.getElementById("hudPos");
 
     const weaponBtn = document.getElementById("weaponBtn");
-    const resetBtn = document.getElementById("resetBtn");
+    const resetBtn  = document.getElementById("resetBtn");
 
     const moveStick = document.getElementById("moveStick");
     const moveNub   = document.getElementById("moveNub");
@@ -386,11 +386,11 @@
       }
     };
 
-    /* LOCKED CHEST CAM, your screenshot */
+    /* LOCKED CHEST CAM, tuned down a bit so gun is visible */
     const CHEST_LOCK = {
       pivotPos: new BABYLON.Vector3(0.00, 0.22, 0.10),
-      camPos:   new BABYLON.Vector3(-0.650, 1.800, -0.969),
-      pitch:    -0.20,
+      camPos:   new BABYLON.Vector3(-0.650, 1.640, -0.969), /* was y 1.800 */
+      pitch:    -0.30, /* slightly more down */
       yaw:       0.00
     };
 
@@ -406,8 +406,14 @@
 
     const JOY = {
       MOVE_SPEED: 5.5,
-      TURN_SPEED: 2.8,
       DEADZONE: 0.10
+    };
+
+    const AIM = {
+      YAW_SPEED: 2.8,
+      PITCH_SPEED: 2.1,
+      PITCH_MIN: -1.05, /* down */
+      PITCH_MAX:  0.45  /* up */
     };
 
     const FIRE = {
@@ -460,7 +466,6 @@
       state.dy = 0;
     }
 
-    /* GLOBAL MOVE, no losing the stick when finger drifts */
     function bindGlobalStick(state){
       state.el.addEventListener("pointerdown", (e) => {
         e.preventDefault();
@@ -490,7 +495,6 @@
         stickReset(state);
       }, { passive:true });
 
-      /* Touch fallback */
       state.el.addEventListener("touchstart", (e) => {
         if(!e.changedTouches || !e.changedTouches.length) return;
         e.preventDefault();
@@ -536,7 +540,7 @@
     bindGlobalStick(moveState);
     bindGlobalStick(turnState);
 
-    /* Desktop fallback controls */
+    /* Desktop fallback movement (WASD) */
     const keys = { w:false,a:false,s:false,d:false };
     window.addEventListener("keydown", (e) => {
       const k = (e.key || "").toLowerCase();
@@ -567,6 +571,10 @@
 
     let isFiring = false;
     let nextShotAt = 0;
+
+    /* aim state, right stick controls this */
+    let aimYaw = 0.0;
+    let aimPitch = CHEST_LOCK.pitch;
 
     function fmt(v){ return (Math.round(v*1000)/1000).toFixed(3); }
 
@@ -727,20 +735,20 @@
       }catch(e){}
     }
 
-    /* CAMERA IS LOCKED, never changes from CHEST_LOCK */
-    function applyChestMountLocked(){
+    /* camera stays on chest, but right stick controls yaw + pitch aim */
+    function applyChestMountAimed(){
       if(!chestPivot || !camera) return;
 
       chestPivot.position.copyFrom(CHEST_LOCK.pivotPos);
-      chestPivot.rotation.set(0, CHEST_LOCK.yaw, 0);
+      chestPivot.rotation.set(0, aimYaw, 0);
 
       camera.position.copyFrom(CHEST_LOCK.camPos);
-      camera.rotation.set(CHEST_LOCK.pitch, 0, 0);
+      camera.rotation.set(aimPitch, 0, 0);
 
       CHEST.pivotPos.copyFrom(CHEST_LOCK.pivotPos);
       CHEST.camPos.copyFrom(CHEST_LOCK.camPos);
-      CHEST.pitch = CHEST_LOCK.pitch;
-      CHEST.yaw = CHEST_LOCK.yaw;
+      CHEST.pitch = aimPitch;
+      CHEST.yaw = aimYaw;
 
       updateCamHud();
     }
@@ -789,7 +797,11 @@
       chestPivot.parent = chestBoneNode;
 
       camera.parent = chestPivot;
-      applyChestMountLocked();
+
+      /* init aim */
+      aimYaw = 0.0;
+      aimPitch = CHEST_LOCK.pitch;
+      applyChestMountAimed();
 
       hipsBone = findHipsBone(sk);
       if(hipsBone && BOB.LOCK_HIPS_Y){
@@ -857,7 +869,9 @@
       if(!soldierRoot) return;
       soldierRoot.position.set(0,0,0);
       soldierRoot.rotation.set(0,0,0);
-      applyChestMountLocked();
+      aimYaw = 0.0;
+      aimPitch = CHEST_LOCK.pitch;
+      applyChestMountAimed();
       if(soldierContainer) playIdleAnimationsSlow(soldierContainer);
       if(hipsBone && hipsBaseY !== null){ hipsBone.position.y = hipsBaseY; }
       updatePosHud();
@@ -912,11 +926,11 @@
       const flash = BABYLON.MeshBuilder.CreateSphere("mf", { diameter: 0.06 }, scene);
       flash.isPickable = false;
       flash.renderingGroupId = 3;
-      const m = new BABYLON.StandardMaterial("mfm", scene);
-      m.emissiveColor = new BABYLON.Color3(1.0, 0.85, 0.35);
-      m.diffuseColor = new BABYLON.Color3(0,0,0);
-      m.specularColor = new BABYLON.Color3(0,0,0);
-      flash.material = m;
+      const mm = new BABYLON.StandardMaterial("mfm", scene);
+      mm.emissiveColor = new BABYLON.Color3(1.0, 0.85, 0.35);
+      mm.diffuseColor = new BABYLON.Color3(0,0,0);
+      mm.specularColor = new BABYLON.Color3(0,0,0);
+      flash.material = mm;
       flash.position.copyFrom(origin);
       setTimeout(() => { try{ flash.dispose(); }catch(e){} }, 40);
 
@@ -976,10 +990,13 @@
         const dt = scene.getEngine().getDeltaTime() * 0.001;
         const now = performance.now() * 0.001;
 
-        /* sticks */
+        /* movement stick */
         let mvX = applyDeadzone(moveState.dx);
         let mvY = applyDeadzone(moveState.dy);
-        const tx = applyDeadzone(turnState.dx);
+
+        /* right stick aims: fix reversed L/R and add up/down */
+        const aimX = applyDeadzone(turnState.dx);
+        const aimY = applyDeadzone(turnState.dy);
 
         /* desktop WASD adds movement */
         if(!moveState.active){
@@ -989,10 +1006,14 @@
           mvY = clamp(ky, -1, 1);
         }
 
-        /* right stick turns soldier only */
-        soldierRoot.rotation.y += tx * JOY.TURN_SPEED * dt;
+        /* update aim */
+        aimYaw   += (aimX * AIM.YAW_SPEED * dt);      /* NOT reversed */
+        aimPitch += (aimY * AIM.PITCH_SPEED * dt);    /* up/down */
+        aimPitch = clamp(aimPitch, AIM.PITCH_MIN, AIM.PITCH_MAX);
 
-        /* move relative to soldier facing */
+        /* move soldier relative to aim yaw (feels like FPS) */
+        soldierRoot.rotation.y = aimYaw;
+
         const yaw = soldierRoot.rotation.y;
         const forward = new BABYLON.Vector3(Math.sin(yaw), 0, Math.cos(yaw));
         const right = new BABYLON.Vector3(forward.z, 0, -forward.x);
@@ -1004,8 +1025,8 @@
         const delta = forward.scale(moveF * spd).add(right.scale(moveS * spd));
         soldierRoot.position.addInPlace(new BABYLON.Vector3(delta.x, 0, delta.z));
 
-        /* camera always locked */
-        applyChestMountLocked();
+        /* camera locked to chest, but aimed */
+        applyChestMountAimed();
 
         /* SMG hold */
         if(isFiring && weaponSku === "wz_cityrunner_smg"){
@@ -1034,10 +1055,7 @@
         startFiring();
       }, { passive:false });
 
-      function end(){
-        stopFiring();
-      }
-
+      function end(){ stopFiring(); }
       fireBtn.addEventListener("pointerup", end, { passive:true });
       fireBtn.addEventListener("pointercancel", end, { passive:true });
     })();
@@ -1054,7 +1072,7 @@
       try{
         await loadSoldierAndChestCam();
         await loadWeaponToRightHand("wz_basic_pistol");
-        applyChestMountLocked();
+        applyChestMountAimed();
         setFireModeLabel();
       }catch(e){
         console.error("[CHEST CAM TEST] boot failed", e);
