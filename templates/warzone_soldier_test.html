@@ -412,11 +412,17 @@
       DEADZONE: 0.10
     };
 
+    // CHANGED, right stick is less touchy
     const LOOK = {
-      YAW_SPEED:  2.8,
-      PITCH_SPEED: 2.1,
+      YAW_SPEED:  1.55,
+      PITCH_SPEED: 1.15,
       PITCH_MIN: -1.05,
       PITCH_MAX:  0.45
+    };
+
+    // Optional extra scaling on touch devices
+    const LOOK_SENS = {
+      TOUCH_MULT: 0.78
     };
 
     const FIRE = {
@@ -657,6 +663,53 @@
       }catch(e){}
     }
 
+    // NEW, force hide head and neck, name based plus head zone fallback, arms protected
+    function hideHeadAndNeck(container){
+      const meshes = (container && container.meshes) ? container.meshes : [];
+
+      const keepRx = /(arm|forearm|hand|wrist|glove|sleeve|weapon|gun|pistol|smg)/i;
+      const hideRx = /(head|neck|helmet|face|hair|ear|mask|hood|cap|hat|beard|brow|eye|teeth|tongue|jaw|cheek|skull|cranium|visor|goggles|glass|glasses|mouth|lip)/i;
+
+      const HEAD_ZONE = {
+        minY: 1.35,
+        minZ: -0.35
+      };
+
+      meshes.forEach(m => {
+        if(!m) return;
+
+        const nm = (m.name || "").toLowerCase();
+        if(nm === "__root__") return;
+        if(keepRx.test(nm)) return;
+
+        let hide = false;
+
+        if(hideRx.test(nm)) hide = true;
+
+        if(!hide){
+          try{
+            const bi = m.getBoundingInfo && m.getBoundingInfo();
+            if(bi){
+              const c = bi.boundingBox.centerWorld;
+              if(c.y >= HEAD_ZONE.minY && c.z >= HEAD_ZONE.minZ){
+                hide = true;
+              }
+            }
+          }catch(e){}
+        }
+
+        if(!hide) return;
+
+        try{
+          m.isPickable = false;
+          m.visibility = 0.0;
+          m.setEnabled(false);
+        }catch(e){
+          try{ m.visibility = 0.0; }catch(_){}
+        }
+      });
+    }
+
     function setArmsOnlyVisibility(container){
       const meshes = (container && container.meshes) ? container.meshes : [];
       let shown = 0;
@@ -676,6 +729,7 @@
           m.isPickable = false;
           m.renderingGroupId = 2;
           m.visibility = isArms ? 1.0 : 0.0;
+          m.setEnabled(isArms);
           if(isArms) shown += 1;
         }catch(e){}
       });
@@ -691,6 +745,10 @@
             nm.includes("spine") ||
             nm.includes("chest") ||
             nm.includes("body") ||
+            nm.includes("neck") ||
+            nm.includes("face") ||
+            nm.includes("hair") ||
+            nm.includes("ear") ||
             nm.includes("hip") ||
             nm.includes("leg") ||
             nm.includes("thigh") ||
@@ -701,9 +759,13 @@
             m.isPickable = false;
             m.renderingGroupId = 2;
             m.visibility = hideBody ? 0.0 : 1.0;
+            m.setEnabled(!hideBody);
           }catch(e){}
         });
       }
+
+      // Always enforce head and neck invisibility, even if arms logic missed something
+      hideHeadAndNeck(container);
     }
 
     function clearWeapon(){
@@ -738,7 +800,7 @@
       }catch(e){}
     }
 
-    // IMPORTANT: chest pivot does NOT add yaw, yaw is on soldierRoot
+    // IMPORTANT, chest pivot does NOT add yaw, yaw is on soldierRoot
     function applyChestMountAimed(){
       if(!chestPivot || !camera) return;
 
@@ -780,6 +842,8 @@
       soldierSkinned = findSkinnedMeshFromContainer(cont);
 
       playIdleAnimationsSlow(cont);
+
+      // Arms only plus force hide head and neck
       setArmsOnlyVisibility(cont);
 
       const sk = soldierSkinned && soldierSkinned.skeleton ? soldierSkinned.skeleton : null;
@@ -857,6 +921,7 @@
           m.isPickable = false;
           m.renderingGroupId = 2;
           m.visibility = 1.0;
+          m.setEnabled(true);
         }catch(e){}
       });
 
@@ -985,25 +1050,27 @@
         }
       });
 
+      const isTouch = ("ontouchstart" in window) || (navigator.maxTouchPoints > 0);
+
       scene.onBeforeRenderObservable.add(() => {
         if(!soldierRoot || !chestPivot) return;
 
         const dt = scene.getEngine().getDeltaTime() * 0.001;
         const now = performance.now() * 0.001;
 
-        // RIGHT stick LOOK
-        const lookX = applyDeadzone(lookState.dx);
-        const lookY = applyDeadzone(lookState.dy);
+        // RIGHT stick LOOK, reduced sensitivity
+        const lookMult = isTouch ? LOOK_SENS.TOUCH_MULT : 1.0;
+        const lookX = applyDeadzone(lookState.dx) * lookMult;
+        const lookY = applyDeadzone(lookState.dy) * lookMult;
 
         aimYaw   += (lookX * LOOK.YAW_SPEED * dt);
         aimPitch += (lookY * LOOK.PITCH_SPEED * dt);
         aimPitch  = clamp(aimPitch, LOOK.PITCH_MIN, LOOK.PITCH_MAX);
 
         // LEFT stick MOVE
-        let mvX = applyDeadzone(moveState.dx);  // strafe
-        let mvY = applyDeadzone(moveState.dy);  // forward/back
+        let mvX = applyDeadzone(moveState.dx);
+        let mvY = applyDeadzone(moveState.dy);
 
-        // Desktop WASD when not moving via left stick
         if(!moveState.active){
           const kx = (keys.d ? 1 : 0) + (keys.a ? -1 : 0);
           const ky = (keys.s ? 1 : 0) + (keys.w ? -1 : 0);
@@ -1011,24 +1078,21 @@
           mvY = clamp(ky, -1, 1);
         }
 
-        // Body follows yaw, movement is relative to yaw
         soldierRoot.rotation.y = aimYaw;
 
         const yaw = soldierRoot.rotation.y;
         const forward = new BABYLON.Vector3(Math.sin(yaw), 0, Math.cos(yaw));
         const right   = new BABYLON.Vector3(forward.z, 0, -forward.x);
 
-        const moveF = -mvY; // up = forward
+        const moveF = -mvY;
         const moveS = mvX;
 
         const spd = JOY.MOVE_SPEED * dt;
         const delta = forward.scale(moveF * spd).add(right.scale(moveS * spd));
         soldierRoot.position.addInPlace(new BABYLON.Vector3(delta.x, 0, delta.z));
 
-        // Camera stays chest mounted, pitch only, yaw handled by soldierRoot rotation
         applyChestMountAimed();
 
-        // SMG hold
         if(isFiring && weaponSku === "wz_cityrunner_smg"){
           const cfg = FIRE.smg;
           const interval = 60.0 / cfg.rpm;
@@ -1080,5 +1144,3 @@
       }
     })();
   </script>
-</body>
-</html>
