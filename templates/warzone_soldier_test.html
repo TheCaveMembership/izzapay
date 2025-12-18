@@ -27,7 +27,6 @@
       user-select:none;
     }
 
-    /* SAME MANUAL ROTATION MODEL AS YOUR FPS SCREEN */
     .rot-wrapper{
       position:fixed;
       top:0;
@@ -124,7 +123,6 @@
       margin-top:6px;
     }
 
-    /* Touch controls */
     .touch-ui{
       position:absolute;
       inset:0;
@@ -200,7 +198,6 @@
   </div>
 
   <script>
-    /* Rotation wrapper, same behavior as lobby and current FPS */
     (function(){
       const wrapper = document.getElementById("rotWrapper");
       function updateLayout(){
@@ -249,7 +246,6 @@
 
     function clamp(v,a,b){ return Math.max(a, Math.min(b, v)); }
 
-    /* Assets */
     const SOLDIER_ROOT = "/assets/warzone3d/soldier_gltf_3/";
     const SOLDIER_FILE = "scene.gltf";
 
@@ -258,7 +254,6 @@
       return { rootUrl:"/assets/warzone3d/weapons/wz_basic_pistol/", fileName:"scene.gltf" };
     }
 
-    /* Weapon tuning, copied from your FPS file */
     const WEAPON_TUNING = {
       wz_basic_pistol: {
         WEAPON_SCALE: 0.06000,
@@ -278,15 +273,20 @@
       }
     };
 
-    /* Chest cam tuning, this is the only camera alignment you tune */
+    /* Chest cam tuning, now INSIDE the torso like a real FPS */
     const CHEST = {
-      pivotPos: new BABYLON.Vector3(0.00, 1.45, 0.18),  // on chest, slightly forward
-      camPos:   new BABYLON.Vector3(0.00, 0.00, 0.00),
-      pitch:    -0.05,                                  // tiny down tilt so arms are visible
+      pivotPos: new BABYLON.Vector3(0.00, 1.52, 0.06),   /* closer to chest center */
+      camPos:   new BABYLON.Vector3(0.00, 0.00, -0.10),  /* push camera back INTO the body */
+      pitch:    -0.22,
       yaw:       0.00
     };
 
-    /* Movement and look */
+    /* Idle animation control */
+    const IDLE = {
+      SPEED: 0.18,          /* lower = less bounce, try 0.10 to 0.25 */
+      LOOP: true
+    };
+
     const JOY = {
       MOVE_SPEED: 4.2,
       LOOK_SENS: 2.4,
@@ -301,7 +301,6 @@
       return Math.sign(x) * clamp(s, 0, 1);
     }
 
-    /* Stick state */
     const moveState = { active:false, id:null, dx:0, dy:0 };
     const lookState = { active:false, id:null, dx:0, dy:0 };
 
@@ -356,19 +355,15 @@
     setupStick(moveStick, moveNub, moveState);
     setupStick(lookStick, lookNub, lookState);
 
-    /* Scene */
     let scene;
     let camera;
 
-    /* Soldier */
     let soldierContainer = null;
     let soldierRoot = null;
     let soldierSkinned = null;
 
-    /* Chest cam mount */
     let chestPivot = null;
 
-    /* Weapon */
     let weaponSku = "wz_basic_pistol";
     let weaponContainer = null;
     let weaponRoot = null;
@@ -376,13 +371,16 @@
 
     let FREE_LOOK = false;
 
-    function stopAllAnimations(container){
+    function playIdleAnimationsSlow(container){
       try{
         const groups = (container && container.animationGroups) ? container.animationGroups : [];
+        if(!groups.length) return;
+
         groups.forEach(g => {
           try{
             g.stop();
-            g.speedRatio = 0.0;
+            g.speedRatio = IDLE.SPEED;
+            g.start(IDLE.LOOP);
           }catch(e){}
         });
       }catch(e){}
@@ -476,7 +474,7 @@
     }
 
     function applyChestMount(){
-      if(!soldierRoot || !chestPivot || !camera) return;
+      if(!chestPivot || !camera) return;
 
       chestPivot.position.copyFrom(CHEST.pivotPos);
       chestPivot.rotation.set(0, CHEST.yaw, 0);
@@ -493,8 +491,6 @@
       cont.addAllToScene();
       soldierContainer = cont;
 
-      stopAllAnimations(cont);
-
       soldierRoot = new BABYLON.TransformNode("soldierRoot", scene);
       (cont.rootNodes || []).forEach(rn => {
         if(!rn) return;
@@ -505,13 +501,18 @@
       soldierRoot.rotation.set(0, 0, 0);
       soldierRoot.scaling.set(1, 1, 1);
 
-      setArmsOnlyVisibility(cont);
-
       soldierSkinned = findSkinnedMeshFromContainer(cont);
+
+      /* keep base animation but slow it down heavily */
+      playIdleAnimationsSlow(cont);
+
+      /* arms only for alignment */
+      setArmsOnlyVisibility(cont);
 
       chestPivot = new BABYLON.TransformNode("chestPivot", scene);
       chestPivot.parent = soldierRoot;
 
+      camera.parent = chestPivot;
       applyChestMount();
 
       hudSoldier.textContent = "SOLDIER, loaded";
@@ -584,13 +585,15 @@
       soldierRoot.position.set(0,0,0);
       soldierRoot.rotation.set(0,0,0);
 
-      CHEST.pivotPos = new BABYLON.Vector3(0.00, 1.45, 0.18);
-      CHEST.camPos   = new BABYLON.Vector3(0.00, 0.00, 0.00);
-      CHEST.pitch    = -0.05;
+      CHEST.pivotPos = new BABYLON.Vector3(0.00, 1.52, 0.06);
+      CHEST.camPos   = new BABYLON.Vector3(0.00, 0.00, -0.10);
+      CHEST.pitch    = -0.22;
       CHEST.yaw      = 0.00;
 
       applyChestMount();
       setFreeLook(false);
+
+      if(soldierContainer) playIdleAnimationsSlow(soldierContainer);
     }
 
     function createScene(){
@@ -610,7 +613,7 @@
       gmat.specularColor = new BABYLON.Color3(0,0,0);
       ground.material = gmat;
 
-      camera = new BABYLON.UniversalCamera("chestCam", new BABYLON.Vector3(0,1.45,0.18), scene);
+      camera = new BABYLON.UniversalCamera("chestCam", new BABYLON.Vector3(0,1.6,0), scene);
       camera.minZ = 0.05;
       camera.maxZ = 5000;
       camera.fov = 1.0;
@@ -632,7 +635,6 @@
         const lyRaw = applyDeadzone(lookState.dy);
         const ly = JOY.INVERT_Y ? -lyRaw : lyRaw;
 
-        /* Look */
         if(FREE_LOOK){
           CHEST.yaw += lx * JOY.LOOK_SENS * dt;
           CHEST.pitch += ly * JOY.LOOK_SENS * dt;
@@ -645,7 +647,6 @@
           applyChestMount();
         }
 
-        /* Move soldier relative to soldier facing */
         const forward = new BABYLON.Vector3(Math.sin(soldierRoot.rotation.y), 0, Math.cos(soldierRoot.rotation.y));
         const right = new BABYLON.Vector3(forward.z, 0, -forward.x);
 
@@ -655,10 +656,6 @@
         const spd = JOY.MOVE_SPEED * dt;
         const delta = forward.scale(moveF * spd).add(right.scale(moveS * spd));
         soldierRoot.position.addInPlace(new BABYLON.Vector3(delta.x, 0, delta.z));
-
-        /* Keep camera parented to chest */
-        camera.parent = chestPivot;
-        camera.rotation.set(CHEST.pitch, 0, 0);
       });
 
       return scene;
@@ -676,14 +673,12 @@
       }
     });
 
-    /* Boot */
     (async function(){
       createScene();
       setFreeLook(false);
 
       try{
         await loadSoldierAndChestCam();
-        camera.parent = chestPivot;
         await loadWeaponToRightHand("wz_basic_pistol");
       }catch(e){
         console.error("[CHEST CAM TEST] boot failed", e);
