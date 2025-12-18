@@ -279,10 +279,10 @@
       }
     };
 
-    /* Chest cam tuning */
+    /* Chest cam tuning, IMPORTANT, push camera just outside chest by default */
     const CHEST = {
-      pivotPos: new BABYLON.Vector3(0.00, 0.02, 0.03),
-      camPos:   new BABYLON.Vector3(0.00, 0.00, -0.07), /* <-- we will tune Z in/out */
+      pivotPos: new BABYLON.Vector3(0.00, 0.02, 0.10),
+      camPos:   new BABYLON.Vector3(0.00, 0.00, 0.55),
       pitch:    -0.20,
       yaw:       0.00
     };
@@ -290,11 +290,11 @@
     /* Camera tuning sensitivity + clamps */
     const TUNE = {
       ENABLED: false,
-      POS_SPEED: 0.22,          /* meters per second at full stick */
+      POS_SPEED: 0.22,
       X_LIMIT: 0.25,
       Y_LIMIT: 0.25,
-      Z_MIN:  -0.30,            /* deeper inside */
-      Z_MAX:   0.40             /* further out of chest */
+      Z_MIN:  -0.30,
+      Z_MAX:   1.20
     };
 
     const IDLE = { SPEED: 0.12, LOOP: true };
@@ -461,6 +461,7 @@
       meshes.forEach(m => {
         if(!m) return;
         const nm = (m.name || "").toLowerCase();
+
         const isArms =
           nm.includes("arm") ||
           nm.includes("forearm") ||
@@ -477,12 +478,29 @@
         }catch(e){}
       });
 
+      /* If naming is weird and we did not detect arms, still hide common body parts */
       if(shown === 0){
         meshes.forEach(m => {
           if(!m) return;
+          const nm = (m.name || "").toLowerCase();
+          const hideBody =
+            nm.includes("head") ||
+            nm.includes("helmet") ||
+            nm.includes("torso") ||
+            nm.includes("spine") ||
+            nm.includes("chest") ||
+            nm.includes("body") ||
+            nm.includes("hip") ||
+            nm.includes("leg") ||
+            nm.includes("thigh") ||
+            nm.includes("calf") ||
+            nm.includes("foot") ||
+            nm.includes("boot");
+
           try{
-            m.visibility = 1.0;
+            m.isPickable = false;
             m.renderingGroupId = 2;
+            m.visibility = hideBody ? 0.0 : 1.0;
           }catch(e){}
         });
       }
@@ -669,8 +687,8 @@
       soldierRoot.position.set(0,0,0);
       soldierRoot.rotation.set(0,0,0);
 
-      CHEST.pivotPos = new BABYLON.Vector3(0.00, 0.02, 0.03);
-      CHEST.camPos   = new BABYLON.Vector3(0.00, 0.00, -0.07);
+      CHEST.pivotPos = new BABYLON.Vector3(0.00, 0.02, 0.10);
+      CHEST.camPos   = new BABYLON.Vector3(0.00, 0.00, 0.55);
       CHEST.pitch    = -0.20;
       CHEST.yaw      = 0.00;
 
@@ -700,7 +718,7 @@
       ground.material = gmat;
 
       camera = new BABYLON.UniversalCamera("chestCam", new BABYLON.Vector3(0,1.6,0), scene);
-      camera.minZ = 0.05;
+      camera.minZ = 0.02;
       camera.maxZ = 5000;
       camera.fov = 1.0;
       camera.inputs.clear();
@@ -727,7 +745,6 @@
         const lyRaw = applyDeadzone(lookState.dy);
         const ly = JOY.INVERT_Y ? -lyRaw : lyRaw;
 
-        /* Right stick: aim */
         if(FREE_LOOK || TUNE.ENABLED){
           CHEST.yaw += lx * JOY.LOOK_SENS * dt;
           CHEST.pitch += ly * JOY.LOOK_SENS * dt;
@@ -740,15 +757,11 @@
           applyChestMount();
         }
 
-        /* Left stick: either tune camera, or move soldier */
         if(TUNE.ENABLED){
           const sp = TUNE.POS_SPEED * dt;
 
-          /* left/right -> camera X, up/down -> camera Y, forward/back -> camera Z */
           CHEST.camPos.x = clamp(CHEST.camPos.x + (mvX * sp), -TUNE.X_LIMIT, TUNE.X_LIMIT);
           CHEST.camPos.y = clamp(CHEST.camPos.y + (-mvY * sp), -TUNE.Y_LIMIT, TUNE.Y_LIMIT);
-
-          /* Use magnitude of forward/back (mvY) to move Z, but keep it separate feel */
           CHEST.camPos.z = clamp(CHEST.camPos.z + ((-mvY) * sp), TUNE.Z_MIN, TUNE.Z_MAX);
 
           applyChestMount();
