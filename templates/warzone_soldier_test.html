@@ -466,8 +466,15 @@
       const nx = clamp(clientX - state.cx, -state.max, state.max);
       const ny = clamp(clientY - state.cy, -state.max, state.max);
       state.nub.style.transform = `translate(calc(-50% + ${nx}px), calc(-50% + ${ny}px))`;
-      state.dx = nx / state.max;
-      state.dy = ny / state.max;
+
+      // MOVE stick stays the same, LOOK stick X is inverted so left is left, right is right
+      if(state === lookState){
+        state.dx = -(nx / state.max);
+        state.dy =  (ny / state.max);
+      } else {
+        state.dx =  (nx / state.max);
+        state.dy =  (ny / state.max);
+      }
     }
     function stickReset(state){
       state.nub.style.transform = "translate(-50%,-50%)";
@@ -1144,3 +1151,5 @@
       }
     })();
   </script>
+</body>
+</html>
