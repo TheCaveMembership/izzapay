@@ -23,8 +23,16 @@
       color:var(--txt);
       font-family:system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;
       overflow:hidden;
+
       touch-action:none;
       user-select:none;
+
+      /* SURGICAL FIX: prevent page scroll, highlight, selection while using controls */
+      -webkit-user-select:none;
+      -webkit-touch-callout:none;
+      -webkit-tap-highlight-color:transparent;
+      -webkit-user-drag:none;
+      overscroll-behavior:none;
     }
 
     .rot-wrapper{
@@ -467,13 +475,12 @@
       const ny = clamp(clientY - state.cy, -state.max, state.max);
       state.nub.style.transform = `translate(calc(-50% + ${nx}px), calc(-50% + ${ny}px))`;
 
-      // MOVE stick stays the same, LOOK stick X is inverted so left is left, right is right
+      state.dx = nx / state.max;
+      state.dy = ny / state.max;
+
+      // SURGICAL FIX: invert ONLY the RIGHT stick horizontal direction
       if(state === lookState){
-        state.dx = -(nx / state.max);
-        state.dy =  (ny / state.max);
-      } else {
-        state.dx =  (nx / state.max);
-        state.dy =  (ny / state.max);
+        state.dx = -state.dx;
       }
     }
     function stickReset(state){
