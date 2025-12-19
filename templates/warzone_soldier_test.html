@@ -15,15 +15,7 @@
       --accent2:#ff3b6b;
       --accent3:#ffcf4d;
     }
-    *{
-      box-sizing:border-box;
-      margin:0;
-      padding:0;
-      -webkit-tap-highlight-color: transparent;
-      -webkit-touch-callout: none;
-      -webkit-user-select:none;
-      user-select:none;
-    }
+    *{box-sizing:border-box;margin:0;padding:0}
     html,body{
       width:100%;
       height:100%;
@@ -32,7 +24,9 @@
       font-family:system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;
       overflow:hidden;
       touch-action:none;
+      user-select:none;
     }
+
     .rot-wrapper{
       position:fixed;
       top:0;
@@ -44,6 +38,7 @@
       transition:transform .15s ease,width .15s ease,height .15s ease;
       background:#000;
     }
+
     .fps-root{
       width:100%;
       height:100%;
@@ -51,6 +46,7 @@
       background:radial-gradient(circle at top,#15192e 0,#02030a 55%,#000 100%);
       overflow:hidden;
     }
+
     #renderCanvas{
       position:absolute;
       inset:0;
@@ -61,6 +57,7 @@
       touch-action:none;
       outline:none;
     }
+
     .hud-top{
       position:absolute;
       left:10px;
@@ -79,7 +76,7 @@
       box-shadow:0 0 26px rgba(0,255,255,.10), 0 0 30px rgba(255,59,107,.08);
       padding:10px 12px;
       backdrop-filter:blur(8px);
-      max-width:60vw;
+      max-width:56vw;
       pointer-events:auto;
     }
     .hud-title{
@@ -115,11 +112,9 @@
       user-select:none;
       border-color:rgba(255,59,107,.55);
       background:linear-gradient(90deg,rgba(30,6,18,.75),rgba(80,10,30,.45));
-      appearance:none;
-      -webkit-appearance:none;
-      outline:none;
     }
     .tag.btn:active{ transform:scale(.98); }
+
     .hint{
       opacity:.9;
       font-size:11px;
@@ -127,38 +122,7 @@
       color:#c3cff5;
       margin-top:6px;
     }
-    .tuner{
-      margin-top:8px;
-      display:flex;
-      align-items:center;
-      gap:10px;
-      font-size:11px;
-      color:#cfe0ff;
-    }
-    .tuner label{
-      opacity:.9;
-      letter-spacing:.06em;
-      text-transform:uppercase;
-      font-size:10px;
-      color:rgba(159,176,214,.95);
-      white-space:nowrap;
-    }
-    .tuner input[type="range"]{
-      width:180px;
-      max-width:34vw;
-      accent-color: rgba(0,255,255,.9);
-      touch-action:none;
-    }
-    .tuner input[type="range"]:disabled{
-      opacity:0.55;
-      filter:saturate(.6);
-    }
-    .tuner .val{
-      min-width:54px;
-      text-align:right;
-      font-variant-numeric: tabular-nums;
-      opacity:.95;
-    }
+
     .touch-ui{
       position:absolute;
       inset:0;
@@ -192,6 +156,7 @@
       box-shadow:0 0 18px rgba(255,59,107,.10);
       pointer-events:none;
     }
+
     .fire-btn{
       position:absolute;
       right:182px;
@@ -211,6 +176,7 @@
       letter-spacing:.10em;
       text-transform:uppercase;
       color:#ffe7ef;
+      user-select:none;
       opacity:0.96;
     }
     .fire-btn:active{ transform:scale(.98); }
@@ -228,6 +194,7 @@
       justify-content:center;
       line-height:1.1;
     }
+
     .reticle{
       position:absolute;
       left:50%;
@@ -260,6 +227,7 @@
     }
     .reticle .h{ width:18px; height:1px; opacity:.55; }
     .reticle .v{ width:1px; height:18px; opacity:.55; }
+
     .hit{
       position:absolute;
       left:50%;
@@ -288,7 +256,6 @@
 
   <script src="https://cdn.babylonjs.com/babylon.js"></script>
   <script src="https://cdn.babylonjs.com/loaders/babylonjs.loaders.min.js"></script>
-  <script src="https://cdn.babylonjs.com/materialsLibrary/babylon.gridMaterial.min.js"></script>
 </head>
 
 <body>
@@ -304,15 +271,8 @@
             <button class="tag btn" id="weaponBtn" type="button">Weapon, pistol</button>
             <button class="tag btn" id="resetBtn" type="button">Reset</button>
           </div>
-
-          <div class="tuner">
-            <label for="gripYaw">Grip yaw</label>
-            <input id="gripYaw" type="range" min="-0.80" max="0.80" step="0.01" value="0">
-            <div class="val" id="gripYawVal">0.00</div>
-          </div>
-
           <div class="hint" id="hintText">
-            Left stick moves, right stick looks, grip yaw tunes barrel left or right, fire shoots
+            Left stick moves soldier, right stick turns soldier, camera is locked, fire shoots
           </div>
         </div>
 
@@ -346,12 +306,6 @@
   </div>
 
   <script>
-    document.addEventListener("selectstart", (e) => { e.preventDefault(); }, { passive:false });
-    document.addEventListener("contextmenu", (e) => { e.preventDefault(); }, { passive:false });
-    document.addEventListener("gesturestart", (e) => { e.preventDefault(); }, { passive:false });
-
-    let ROTATED_UI = true;
-
     (function(){
       const wrapper = document.getElementById("rotWrapper");
       function updateLayout(){
@@ -360,14 +314,11 @@
         const w = vv ? vv.width : window.innerWidth;
         const h = vv ? vv.height : window.innerHeight;
         const landscape = w >= h;
-
         if (landscape){
-          ROTATED_UI = false;
           wrapper.style.transform = "none";
           wrapper.style.width = "100%";
           wrapper.style.height = "100%";
         } else {
-          ROTATED_UI = true;
           wrapper.style.width = h + "px";
           wrapper.style.height = w + "px";
           wrapper.style.transform = "rotate(90deg) translateY(-100%)";
@@ -394,20 +345,16 @@
     const hudPos     = document.getElementById("hudPos");
 
     const weaponBtn = document.getElementById("weaponBtn");
-    const resetBtn  = document.getElementById("resetBtn");
+    const resetBtn = document.getElementById("resetBtn");
 
     const moveStick = document.getElementById("moveStick");
     const moveNub   = document.getElementById("moveNub");
-
-    const lookStick = document.getElementById("turnStick");
-    const lookNub   = document.getElementById("turnNub");
+    const turnStick = document.getElementById("turnStick");
+    const turnNub   = document.getElementById("turnNub");
 
     const fireBtn = document.getElementById("fireBtn");
     const fireModeText = document.getElementById("fireModeText");
     const hitMarker = document.getElementById("hitMarker");
-
-    const gripYawSlider = document.getElementById("gripYaw");
-    const gripYawVal = document.getElementById("gripYawVal");
 
     function clamp(v,a,b){ return Math.max(a, Math.min(b, v)); }
 
@@ -438,10 +385,11 @@
       }
     };
 
+    /* LOCKED CHEST CAM, your screenshot */
     const CHEST_LOCK = {
-      pivotPos: new BABYLON.Vector3(0.00, 0.30, 0.06),
-      camPos:   new BABYLON.Vector3(0.00, 1.72, -0.28),
-      pitch:    -0.10,
+      pivotPos: new BABYLON.Vector3(0.00, 0.22, 0.10),
+      camPos:   new BABYLON.Vector3(-0.650, 1.800, -0.969),
+      pitch:    -0.20,
       yaw:       0.00
     };
 
@@ -457,25 +405,14 @@
 
     const JOY = {
       MOVE_SPEED: 5.5,
+      TURN_SPEED: 2.8,
       DEADZONE: 0.10
     };
 
-    const LOOK = {
-      YAW_SPEED:  1.75,
-      PITCH_SPEED: 1.25,
-      PITCH_MIN: -1.05,
-      PITCH_MAX:  0.55
-    };
-
-    const LOOK_SENS = { TOUCH_MULT: 0.90 };
-
     const FIRE = {
-      pistol: { rpm: 240, spread: 0.0035, maxDist: 120, tracerLife: 0.09, recoil: 0.020 },
-      smg:    { rpm: 900, spread: 0.0070, maxDist: 120, tracerLife: 0.06, recoil: 0.010 }
+      pistol: { rpm: 240, spread: 0.0035, maxDist: 120, tracerLife: 0.06, recoil: 0.020 },
+      smg:    { rpm: 900, spread: 0.0070, maxDist: 120, tracerLife: 0.045, recoil: 0.010 }
     };
-
-    // LOCK pistol yaw far-left
-    const PISTOL_YAW_LOCK = -0.80;
 
     function applyDeadzone(x){
       const ax = Math.abs(x);
@@ -484,8 +421,8 @@
       return Math.sign(x) * clamp(s, 0, 1);
     }
 
-    const lookState = { active:false, id:null, dx:0, dy:0, el:null, nub:null, max:1, cx:0, cy:0, recalc:null };
-    const moveState = { active:false, id:null, dx:0, dy:0, el:null, nub:null, max:1, cx:0, cy:0, recalc:null };
+    const moveState = { active:false, id:null, dx:0, dy:0, el:null, nub:null, max:1, cx:0, cy:0 };
+    const turnState = { active:false, id:null, dx:0, dy:0, el:null, nub:null, max:1, cx:0, cy:0 };
 
     function stickSetup(state, el, nub){
       state.el = el;
@@ -500,44 +437,29 @@
       state.recalc = recalc;
       recalc();
       window.addEventListener("resize", recalc);
-      if(window.visualViewport){
-        window.visualViewport.addEventListener("resize", recalc);
-        window.visualViewport.addEventListener("scroll", recalc);
-      }
     }
 
-    stickSetup(lookState, lookStick, lookNub);
     stickSetup(moveState, moveStick, moveNub);
-
-    function rotateIfPortrait(nx, ny){
-      if(!ROTATED_UI) return { nx, ny };
-      return { nx: ny, ny: -nx };
-    }
+    stickSetup(turnState, turnStick, turnNub);
 
     function stickSetFromClient(state, clientX, clientY){
-      let nx = clamp(clientX - state.cx, -state.max, state.max);
-      let ny = clamp(clientY - state.cy, -state.max, state.max);
-
-      const r = rotateIfPortrait(nx, ny);
-      nx = clamp(r.nx, -state.max, state.max);
-      ny = clamp(r.ny, -state.max, state.max);
-
+      const nx = clamp(clientX - state.cx, -state.max, state.max);
+      const ny = clamp(clientY - state.cy, -state.max, state.max);
       state.nub.style.transform = `translate(calc(-50% + ${nx}px), calc(-50% + ${ny}px))`;
-
-      state.dx = -(nx / state.max);
-      state.dy =  (ny / state.max);
+      state.dx = nx / state.max;
+      state.dy = ny / state.max;
     }
-
     function stickReset(state){
       state.nub.style.transform = "translate(-50%,-50%)";
       state.dx = 0;
       state.dy = 0;
     }
 
+    /* GLOBAL MOVE, no losing the stick when finger drifts */
     function bindGlobalStick(state){
       state.el.addEventListener("pointerdown", (e) => {
         e.preventDefault();
-        state.recalc && state.recalc();
+        state.recalc();
         state.active = true;
         state.id = e.pointerId;
         stickSetFromClient(state, e.clientX, e.clientY);
@@ -563,10 +485,11 @@
         stickReset(state);
       }, { passive:true });
 
+      /* Touch fallback */
       state.el.addEventListener("touchstart", (e) => {
         if(!e.changedTouches || !e.changedTouches.length) return;
         e.preventDefault();
-        state.recalc && state.recalc();
+        state.recalc();
         const t = e.changedTouches[0];
         state.active = true;
         state.id = t.identifier;
@@ -605,18 +528,8 @@
       }, { passive:true });
     }
 
-    bindGlobalStick(lookState);
     bindGlobalStick(moveState);
-
-    const keys = { w:false,a:false,s:false,d:false };
-    window.addEventListener("keydown", (e) => {
-      const k = (e.key || "").toLowerCase();
-      if(k in keys){ keys[k] = true; }
-    });
-    window.addEventListener("keyup", (e) => {
-      const k = (e.key || "").toLowerCase();
-      if(k in keys){ keys[k] = false; }
-    });
+    bindGlobalStick(turnState);
 
     let scene;
     let camera;
@@ -634,87 +547,13 @@
     let weaponSku = "wz_basic_pistol";
     let weaponContainer = null;
     let weaponRoot = null;
-
-    let weaponYaw = null;
     let weaponGrip = null;
-
-    // barrel tip node
-    let muzzleNode = null;
 
     let isFiring = false;
     let nextShotAt = 0;
 
-    let aimYaw = 0.0;
-    let aimPitch = CHEST_LOCK.pitch;
-
-    const GRIP_TUNER = {
-      wz_basic_pistol: PISTOL_YAW_LOCK,
-      wz_cityrunner_smg: 0.0
-    };
-
-    function loadGripTuner(){
-      try{
-        const raw = localStorage.getItem("izza_grip_tuner");
-        if(raw){
-          const obj = JSON.parse(raw);
-          if(obj && typeof obj === "object"){
-            if(typeof obj.wz_cityrunner_smg === "number") GRIP_TUNER.wz_cityrunner_smg = obj.wz_cityrunner_smg;
-          }
-        }
-      }catch(e){}
-      // always enforce pistol lock
-      GRIP_TUNER.wz_basic_pistol = PISTOL_YAW_LOCK;
-      saveGripTuner();
-    }
-
-    function saveGripTuner(){
-      try{
-        localStorage.setItem("izza_grip_tuner", JSON.stringify(GRIP_TUNER));
-      }catch(e){}
-    }
-
-    function currentGripYaw(){
-      return (weaponSku === "wz_cityrunner_smg") ? GRIP_TUNER.wz_cityrunner_smg : GRIP_TUNER.wz_basic_pistol;
-    }
-
-    function setCurrentGripYaw(v){
-      // pistol is locked far-left
-      if(weaponSku === "wz_basic_pistol"){
-        GRIP_TUNER.wz_basic_pistol = PISTOL_YAW_LOCK;
-        saveGripTuner();
-        syncGripYawUi();
-        applyGripYawToWeapon();
-        return;
-      }
-
-      v = clamp(v, -0.80, 0.80);
-      GRIP_TUNER.wz_cityrunner_smg = v;
-      saveGripTuner();
-      syncGripYawUi();
-      applyGripYawToWeapon();
-    }
-
-    function syncGripYawUi(){
-      const v = currentGripYaw();
-      gripYawSlider.value = String(v);
-      gripYawVal.textContent = (Math.round(v * 100) / 100).toFixed(2);
-
-      const pistol = (weaponSku === "wz_basic_pistol");
-      gripYawSlider.disabled = pistol;
-      gripYawSlider.title = pistol ? "Pistol yaw is locked" : "";
-    }
-
-    function applyGripYawToWeapon(){
-      if(!weaponYaw) return;
-      weaponYaw.rotation.set(0, currentGripYaw(), 0);
-    }
-
-    gripYawSlider.addEventListener("input", (e) => {
-      e.preventDefault();
-      setCurrentGripYaw(parseFloat(gripYawSlider.value || "0") || 0);
-    }, { passive:false });
-
     function fmt(v){ return (Math.round(v*1000)/1000).toFixed(3); }
+
     function updateCamHud(){
       hudCam.textContent = `CAM, x ${fmt(CHEST.camPos.x)} y ${fmt(CHEST.camPos.y)} z ${fmt(CHEST.camPos.z)}`;
     }
@@ -785,47 +624,10 @@
         groups.forEach(g => {
           try{
             g.stop();
-            g.start(true, IDLE.SPEED);
+            g.start(IDLE.LOOP, IDLE.SPEED);
           }catch(e){}
         });
       }catch(e){}
-    }
-
-    function hideHeadAndNeck(container){
-      const meshes = (container && container.meshes) ? container.meshes : [];
-      const keepRx = /(arm|forearm|hand|wrist|glove|sleeve|weapon|gun|pistol|smg)/i;
-      const hideRx = /(head|neck|helmet|face|hair|ear|mask|hood|cap|hat|beard|brow|eye|teeth|tongue|jaw|cheek|skull|cranium|visor|goggles|glass|glasses|mouth|lip)/i;
-      const HEAD_ZONE = { minY: 1.35, minZ: -0.35 };
-
-      meshes.forEach(m => {
-        if(!m) return;
-        const nm = (m.name || "").toLowerCase();
-        if(nm === "__root__") return;
-        if(keepRx.test(nm)) return;
-
-        let hide = false;
-        if(hideRx.test(nm)) hide = true;
-
-        if(!hide){
-          try{
-            const bi = m.getBoundingInfo && m.getBoundingInfo();
-            if(bi){
-              const c = bi.boundingBox.centerWorld;
-              if(c.y >= HEAD_ZONE.minY && c.z >= HEAD_ZONE.minZ) hide = true;
-            }
-          }catch(e){}
-        }
-
-        if(!hide) return;
-
-        try{
-          m.isPickable = false;
-          m.visibility = 0.0;
-          m.setEnabled(false);
-        }catch(e){
-          try{ m.visibility = 0.0; }catch(_){}
-        }
-      });
     }
 
     function setArmsOnlyVisibility(container){
@@ -847,7 +649,6 @@
           m.isPickable = false;
           m.renderingGroupId = 2;
           m.visibility = isArms ? 1.0 : 0.0;
-          m.setEnabled(isArms);
           if(isArms) shown += 1;
         }catch(e){}
       });
@@ -863,10 +664,6 @@
             nm.includes("spine") ||
             nm.includes("chest") ||
             nm.includes("body") ||
-            nm.includes("neck") ||
-            nm.includes("face") ||
-            nm.includes("hair") ||
-            nm.includes("ear") ||
             nm.includes("hip") ||
             nm.includes("leg") ||
             nm.includes("thigh") ||
@@ -877,18 +674,13 @@
             m.isPickable = false;
             m.renderingGroupId = 2;
             m.visibility = hideBody ? 0.0 : 1.0;
-            m.setEnabled(!hideBody);
           }catch(e){}
         });
       }
-
-      hideHeadAndNeck(container);
     }
 
     function clearWeapon(){
-      try{ if(muzzleNode){ muzzleNode.dispose(true,false); muzzleNode = null; } }catch(e){}
       try{ if(weaponGrip){ weaponGrip.dispose(true,false); weaponGrip = null; } }catch(e){}
-      try{ if(weaponYaw){ weaponYaw.dispose(true,false); weaponYaw = null; } }catch(e){}
       try{ if(weaponRoot){ weaponRoot.dispose(true,false); weaponRoot = null; } }catch(e){}
       try{
         if(weaponContainer){
@@ -919,19 +711,20 @@
       }catch(e){}
     }
 
-    function applyChestMountAimed(){
+    /* CAMERA IS LOCKED, never changes from CHEST_LOCK */
+    function applyChestMountLocked(){
       if(!chestPivot || !camera) return;
 
       chestPivot.position.copyFrom(CHEST_LOCK.pivotPos);
       chestPivot.rotation.set(0, 0, 0);
 
       camera.position.copyFrom(CHEST_LOCK.camPos);
-      camera.rotation.set(aimPitch, 0, 0);
+      camera.rotation.set(CHEST_LOCK.pitch, 0, 0);
 
       CHEST.pivotPos.copyFrom(CHEST_LOCK.pivotPos);
       CHEST.camPos.copyFrom(CHEST_LOCK.camPos);
-      CHEST.pitch = aimPitch;
-      CHEST.yaw = soldierRoot ? soldierRoot.rotation.y : aimYaw;
+      CHEST.pitch = CHEST_LOCK.pitch;
+      CHEST.yaw = CHEST_LOCK.yaw;
 
       updateCamHud();
     }
@@ -978,11 +771,9 @@
       }
 
       chestPivot.parent = chestBoneNode;
-      camera.parent = chestPivot;
 
-      aimYaw = 0.0;
-      aimPitch = CHEST_LOCK.pitch;
-      applyChestMountAimed();
+      camera.parent = chestPivot;
+      applyChestMountLocked();
 
       hipsBone = findHipsBone(sk);
       if(hipsBone && BOB.LOCK_HIPS_Y){
@@ -991,58 +782,6 @@
 
       hudSoldier.textContent = "SOLDIER, loaded";
       updatePosHud();
-    }
-
-    // compute a barrel tip point from weapon meshes, in weaponGrip local space
-    function computeMuzzleNodeFromBounds(){
-      try{
-        if(!weaponGrip || !weaponContainer) return null;
-
-        const invGripWorld = weaponGrip.getWorldMatrix().clone();
-        invGripWorld.invert();
-
-        let min = new BABYLON.Vector3(+1e9,+1e9,+1e9);
-        let max = new BABYLON.Vector3(-1e9,-1e9,-1e9);
-        let any = false;
-
-        const meshes = weaponContainer.meshes || [];
-        for(const m of meshes){
-          if(!m) continue;
-          const nm = (m.name || "").toLowerCase();
-          if(nm === "__root__") continue;
-          if(m.getTotalVertices && m.getTotalVertices() === 0) continue;
-
-          const bi = m.getBoundingInfo && m.getBoundingInfo();
-          if(!bi) continue;
-
-          const bb = bi.boundingBox;
-          const corners = bb.vectorsWorld;
-          if(!corners || !corners.length) continue;
-
-          for(const cw of corners){
-            const cl = BABYLON.Vector3.TransformCoordinates(cw, invGripWorld);
-            min.x = Math.min(min.x, cl.x); min.y = Math.min(min.y, cl.y); min.z = Math.min(min.z, cl.z);
-            max.x = Math.max(max.x, cl.x); max.y = Math.max(max.y, cl.y); max.z = Math.max(max.z, cl.z);
-            any = true;
-          }
-        }
-
-        if(!any) return null;
-
-        const centerX = (min.x + max.x) * 0.5;
-        const centerY = (min.y + max.y) * 0.5;
-
-        // assume forward is toward negative Z in grip local space, choose minZ as barrel end
-        const depth = Math.max(0.0001, (max.z - min.z));
-        const tipZ = min.z - depth * 0.06;
-
-        const node = new BABYLON.TransformNode("muzzleNode", scene);
-        node.parent = weaponGrip;
-        node.position.set(centerX, centerY, tipZ);
-        return node;
-      }catch(e){
-        return null;
-      }
     }
 
     async function loadWeaponToRightHand(sku){
@@ -1056,12 +795,8 @@
       weaponContainer = w;
 
       weaponRoot = new BABYLON.TransformNode("weaponRoot", scene);
-
-      weaponYaw = new BABYLON.TransformNode("weaponYaw", scene);
-      weaponYaw.parent = weaponRoot;
-
       weaponGrip = new BABYLON.TransformNode("weaponGrip", scene);
-      weaponGrip.parent = weaponYaw;
+      weaponGrip.parent = weaponRoot;
 
       const sk = soldierSkinned && soldierSkinned.skeleton ? soldierSkinned.skeleton : null;
       const rh = findRightHandBone(sk);
@@ -1093,24 +828,10 @@
           m.isPickable = false;
           m.renderingGroupId = 2;
           m.visibility = 1.0;
-          m.setEnabled(true);
         }catch(e){}
       });
 
       weaponSku = sku;
-
-      // enforce pistol yaw lock every swap
-      if(weaponSku === "wz_basic_pistol"){
-        GRIP_TUNER.wz_basic_pistol = PISTOL_YAW_LOCK;
-        saveGripTuner();
-      }
-
-      // build muzzle node from real model bounds
-      muzzleNode = computeMuzzleNodeFromBounds();
-
-      syncGripYawUi();
-      applyGripYawToWeapon();
-
       hudWeapon.textContent = (weaponSku === "wz_cityrunner_smg") ? "WEAPON, SMG" : "WEAPON, pistol";
       weaponBtn.textContent = (weaponSku === "wz_cityrunner_smg") ? "Weapon, SMG" : "Weapon, pistol";
       setFireModeLabel();
@@ -1119,10 +840,8 @@
     function resetAll(){
       if(!soldierRoot) return;
       soldierRoot.position.set(0,0,0);
-      soldierRoot.rotation.y = 0;
-      aimYaw = 0.0;
-      aimPitch = CHEST_LOCK.pitch;
-      applyChestMountAimed();
+      soldierRoot.rotation.set(0,0,0);
+      applyChestMountLocked();
       if(soldierContainer) playIdleAnimationsSlow(soldierContainer);
       if(hipsBone && hipsBaseY !== null){ hipsBone.position.y = hipsBaseY; }
       updatePosHud();
@@ -1135,13 +854,12 @@
     }
 
     function getMuzzleOrigin(){
-      if(muzzleNode){
-        return muzzleNode.getAbsolutePosition().clone();
+      if(weaponGrip){
+        try{ return weaponGrip.getAbsolutePosition().clone(); }catch(e){}
       }
-      // fallback, never invisible
       const p = camera.getAbsolutePosition();
       const dir = camera.getForwardRay(1).direction;
-      return p.add(dir.scale(0.55));
+      return p.add(dir.scale(0.35));
     }
 
     function shootOnce(){
@@ -1151,61 +869,40 @@
       const cfg = FIRE[mode];
 
       const origin = getMuzzleOrigin();
+      const baseDir = camera.getForwardRay(1).direction.clone();
 
-      const camPos = camera.getAbsolutePosition();
-      const camDir = camera.getForwardRay(1).direction.clone();
-      const target = camPos.add(camDir.scale(cfg.maxDist));
-
-      let dir = target.subtract(origin).normalize();
       const s = randSpread(cfg.spread);
-      dir = dir.add(new BABYLON.Vector3(s.x, s.y, 0)).normalize();
+      const dir = baseDir.add(new BABYLON.Vector3(s.x, s.y, 0)).normalize();
 
       const ray = new BABYLON.Ray(origin, dir, cfg.maxDist);
 
       const pick = scene.pickWithRay(ray, (m) => {
         if(!m) return false;
         if(m === weaponRoot) return false;
-        if(m === weaponYaw) return false;
         if(m === weaponGrip) return false;
         if(m.parent === weaponGrip) return false;
-        if(m === muzzleNode) return false;
         return true;
       });
 
       const hitPoint = (pick && pick.hit && pick.pickedPoint) ? pick.pickedPoint.clone() : origin.add(dir.scale(cfg.maxDist));
 
-      // TRACER, tube so it is visible on mobile
-      const tube = BABYLON.MeshBuilder.CreateTube("trTube", {
-        path: [origin, hitPoint],
-        radius: 0.010,
-        tessellation: 6,
-        cap: BABYLON.Mesh.CAP_ALL
-      }, scene);
-      tube.isPickable = false;
-      tube.renderingGroupId = 3;
+      const tracer = BABYLON.MeshBuilder.CreateLines("tr", { points: [origin, hitPoint] }, scene);
+      tracer.isPickable = false;
+      tracer.alpha = 0.9;
+      tracer.color = new BABYLON.Color3(0.9, 0.95, 1.0);
+      tracer.renderingGroupId = 3;
+      setTimeout(() => { try{ tracer.dispose(); }catch(e){} }, Math.round(cfg.tracerLife * 1000));
 
-      const tm = new BABYLON.StandardMaterial("trMat", scene);
-      tm.emissiveColor = new BABYLON.Color3(0.35, 0.95, 1.00);
-      tm.disableLighting = true;
-      tm.alpha = 0.90;
-      tube.material = tm;
-
-      setTimeout(() => { try{ tube.dispose(); }catch(e){} }, Math.round(cfg.tracerLife * 1000));
-
-      // MUZZLE FLASH, from barrel tip
-      const flash = BABYLON.MeshBuilder.CreatePlane("mfPlane", { size: 0.18 }, scene);
+      const flash = BABYLON.MeshBuilder.CreateSphere("mf", { diameter: 0.06 }, scene);
       flash.isPickable = false;
       flash.renderingGroupId = 3;
-      flash.billboardMode = BABYLON.Mesh.BILLBOARDMODE_ALL;
+      const m = new BABYLON.StandardMaterial("mfm", scene);
+      m.emissiveColor = new BABYLON.Color3(1.0, 0.85, 0.35);
+      m.diffuseColor = new BABYLON.Color3(0,0,0);
+      m.specularColor = new BABYLON.Color3(0,0,0);
+      flash.material = m;
       flash.position.copyFrom(origin);
-
-      const fm = new BABYLON.StandardMaterial("mfMat", scene);
-      fm.emissiveColor = new BABYLON.Color3(1.00, 0.85, 0.30);
-      fm.disableLighting = true;
-      fm.alpha = 0.95;
-      flash.material = fm;
-
-      setTimeout(() => { try{ flash.dispose(); }catch(e){} }, 45);
+      setTimeout(() => { try{ flash.dispose(); }catch(e){} }, 40);
 
       if(pick && pick.hit) flashHit();
     }
@@ -1216,7 +913,7 @@
         shootOnce();
         isFiring = false;
       } else {
-        nextShotAt = performance.now() * 0.001;
+        nextShotAt = 0;
       }
     }
     function stopFiring(){ isFiring = false; }
@@ -1232,6 +929,14 @@
       dir.intensity = 0.55;
 
       const ground = BABYLON.MeshBuilder.CreateGround("g", { width: 220, height: 220 }, scene);
+      const gmat = new BABYLON.StandardMaterial("gmat", scene);
+      gmat.diffuseColor = new BABYLON.Color3(0.03,0.04,0.07);
+      gmat.emissiveColor = new BABYLON.Color3(0.02,0.03,0.06);
+      gmat.specularColor = new BABYLON.Color3(0,0,0);
+      ground.material = gmat;
+      ground.isPickable = true;
+
+      /* grid lines so you can SEE movement immediately */
       const grid = new BABYLON.GridMaterial("grid", scene);
       grid.majorUnitFrequency = 5;
       grid.minorUnitVisibility = 0.25;
@@ -1239,7 +944,6 @@
       grid.backFaceCulling = false;
       grid.opacity = 0.35;
       ground.material = grid;
-      ground.isPickable = true;
 
       camera = new BABYLON.UniversalCamera("chestCam", new BABYLON.Vector3(0,1.6,0), scene);
       camera.minZ = 0.02;
@@ -1257,37 +961,25 @@
         }
       });
 
-      const isTouch = ("ontouchstart" in window) || (navigator.maxTouchPoints > 0);
-
       scene.onBeforeRenderObservable.add(() => {
         if(!soldierRoot || !chestPivot) return;
 
         const dt = scene.getEngine().getDeltaTime() * 0.001;
         const now = performance.now() * 0.001;
 
-        const lookMult = isTouch ? LOOK_SENS.TOUCH_MULT : 1.0;
-        const lookX = applyDeadzone(lookState.dx) * lookMult;
-        const lookY = applyDeadzone(lookState.dy) * lookMult;
+        /* sticks, soldier only */
+        const mvX = applyDeadzone(moveState.dx);
+        const mvY = applyDeadzone(moveState.dy);
 
-        aimYaw   += (lookX * LOOK.YAW_SPEED * dt);
-        aimPitch += (lookY * LOOK.PITCH_SPEED * dt);
-        aimPitch  = clamp(aimPitch, LOOK.PITCH_MIN, LOOK.PITCH_MAX);
+        const tx = applyDeadzone(turnState.dx);
 
-        let mvX = applyDeadzone(moveState.dx);
-        let mvY = applyDeadzone(moveState.dy);
+        /* turn soldier with right stick, no camera yaw, no camera pitch */
+        soldierRoot.rotation.y += tx * JOY.TURN_SPEED * dt;
 
-        if(!moveState.active){
-          const kx = (keys.d ? 1 : 0) + (keys.a ? -1 : 0);
-          const ky = (keys.s ? 1 : 0) + (keys.w ? -1 : 0);
-          mvX = clamp(kx, -1, 1);
-          mvY = clamp(ky, -1, 1);
-        }
-
-        soldierRoot.rotation.y = aimYaw;
-
+        /* move soldier with left stick, relative to soldier facing */
         const yaw = soldierRoot.rotation.y;
         const forward = new BABYLON.Vector3(Math.sin(yaw), 0, Math.cos(yaw));
-        const right   = new BABYLON.Vector3(forward.z, 0, -forward.x);
+        const right = new BABYLON.Vector3(forward.z, 0, -forward.x);
 
         const moveF = -mvY;
         const moveS = mvX;
@@ -1296,13 +988,21 @@
         const delta = forward.scale(moveF * spd).add(right.scale(moveS * spd));
         soldierRoot.position.addInPlace(new BABYLON.Vector3(delta.x, 0, delta.z));
 
-        applyChestMountAimed();
+        /* camera always locked */
+        applyChestMountLocked();
 
+        /* SMG hold */
         if(isFiring && weaponSku === "wz_cityrunner_smg"){
-          const interval = 60.0 / FIRE.smg.rpm;
-          if(now >= nextShotAt){
+          const cfg = FIRE.smg;
+          const interval = 60.0 / cfg.rpm;
+          if(nextShotAt === 0) nextShotAt = now;
+          while(now >= nextShotAt){
             shootOnce();
-            nextShotAt = now + interval;
+            nextShotAt += interval;
+            if(now - nextShotAt > 0.2){
+              nextShotAt = now + interval;
+              break;
+            }
           }
         }
 
@@ -1313,15 +1013,21 @@
     }
 
     (function(){
+      let pid = null;
+
       fireBtn.addEventListener("pointerdown", (e) => {
         e.preventDefault();
+        pid = e.pointerId;
         startFiring();
       }, { passive:false });
 
-      function end(){ stopFiring(); }
+      function end(){
+        stopFiring();
+        pid = null;
+      }
+
       fireBtn.addEventListener("pointerup", end, { passive:true });
       fireBtn.addEventListener("pointercancel", end, { passive:true });
-      fireBtn.addEventListener("touchstart", (e) => { e.preventDefault(); }, { passive:false });
     })();
 
     resetBtn.addEventListener("click", resetAll);
@@ -1332,13 +1038,11 @@
     });
 
     (async function(){
-      loadGripTuner();
       createScene();
       try{
         await loadSoldierAndChestCam();
         await loadWeaponToRightHand("wz_basic_pistol");
-        applyChestMountAimed();
-        syncGripYawUi();
+        applyChestMountLocked();
         setFireModeLabel();
       }catch(e){
         console.error("[CHEST CAM TEST] boot failed", e);
