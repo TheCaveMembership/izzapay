@@ -278,7 +278,6 @@
           <div class="hud-row">
             <span class="tag" id="hudControl">CONTROL, SOLDIER</span>
             <button class="tag btn" id="weaponBtn" type="button">Weapon, pistol</button>
-            <button class="tag btn" id="yawBtn" type="button">Barrel, left 0.00</button>
             <button class="tag btn" id="resetBtn" type="button">Reset</button>
           </div>
           <div class="hint" id="hintText">
@@ -355,7 +354,6 @@
     const hudPos     = document.getElementById("hudPos");
 
     const weaponBtn = document.getElementById("weaponBtn");
-    const yawBtn    = document.getElementById("yawBtn");
     const resetBtn  = document.getElementById("resetBtn");
 
     // LEFT stick = MOVE
@@ -398,15 +396,6 @@
         WEAPON_GRIP_ROT: new BABYLON.Vector3(-0.05000, -0.22000,  0.01000),
       }
     };
-
-    /* SURGICAL: global barrel yaw offset (negative = point more LEFT) */
-    let BARREL_YAW_OFFSET = -0.25;
-
-    function updateYawBtn(){
-      if(!yawBtn) return;
-      yawBtn.textContent = `Barrel, left ${BARREL_YAW_OFFSET.toFixed(2)}`;
-    }
-    updateYawBtn();
 
     /* Chest mount stays constant relative to chest bone */
     const CHEST_LOCK = {
@@ -609,6 +598,58 @@
     /* Look state */
     let aimYaw = 0.0;
     let aimPitch = CHEST_LOCK.pitch;
+
+    /* SURGICAL FIX: shift arms + gun left without touching weapon grip */
+    const ARM_SHIFT = {
+      enabled: true,
+      rightShoulderYaw: -0.22,
+      rightUpperArmYaw: -0.12,
+      rightUpperArmRoll: 0.06,
+      leftShoulderYaw:  -0.10,
+      leftUpperArmYaw:  -0.06,
+      leftUpperArmRoll: 0.04
+    };
+    const ARM_BONES = { rs:null, ra:null, ls:null, la:null };
+
+    function _boneFind(sk, rxList){
+      if(!sk || !sk.bones || !sk.bones.length) return null;
+      for(const rx of rxList){
+        const b = sk.bones.find(x => rx.test(x.name || ""));
+        if(b) return b;
+      }
+      return null;
+    }
+    function bindArmBones(){
+      const sk = soldierSkinned && soldierSkinned.skeleton ? soldierSkinned.skeleton : null;
+      ARM_BONES.rs = _boneFind(sk, [/mixamorig:RightShoulder/i, /RightShoulder/i, /RShoulder/i]);
+      ARM_BONES.ra = _boneFind(sk, [/mixamorig:RightArm/i, /RightArm/i, /RArm/i]);
+      ARM_BONES.ls = _boneFind(sk, [/mixamorig:LeftShoulder/i, /LeftShoulder/i, /LShoulder/i]);
+      ARM_BONES.la = _boneFind(sk, [/mixamorig:LeftArm/i, /LeftArm/i, /LArm/i]);
+    }
+    function applyArmShift(){
+      if(!ARM_SHIFT.enabled) return;
+      if(!soldierSkinned) return;
+
+      const mesh = soldierSkinned;
+
+      function applyToBone(bone, yaw, roll){
+        if(!bone) return;
+        try{
+          const qAnim = bone.getRotationQuaternion(BABYLON.Space.LOCAL, mesh) || bone.rotationQuaternion || BABYLON.Quaternion.Identity();
+          const qYaw  = BABYLON.Quaternion.RotationAxis(BABYLON.Axis.Y, yaw || 0);
+          const qRoll = BABYLON.Quaternion.RotationAxis(BABYLON.Axis.Z, roll || 0);
+          const qOff  = qYaw.multiply(qRoll);
+          const qFinal = qAnim.multiply(qOff);
+          bone.setRotationQuaternion(qFinal, BABYLON.Space.LOCAL, mesh);
+        }catch(e){}
+      }
+
+      applyToBone(ARM_BONES.rs, ARM_SHIFT.rightShoulderYaw, 0);
+      applyToBone(ARM_BONES.ra, ARM_SHIFT.rightUpperArmYaw, ARM_SHIFT.rightUpperArmRoll);
+
+      applyToBone(ARM_BONES.ls, ARM_SHIFT.leftShoulderYaw, 0);
+      applyToBone(ARM_BONES.la, ARM_SHIFT.leftUpperArmYaw, ARM_SHIFT.leftUpperArmRoll);
+    }
 
     function fmt(v){ return (Math.round(v*1000)/1000).toFixed(3); }
 
@@ -898,6 +939,9 @@
         hipsBaseY = hipsBone.position.y;
       }
 
+      /* SURGICAL FIX: bind arm bones once soldier loads */
+      bindArmBones();
+
       hudSoldier.textContent = "SOLDIER, loaded";
       updatePosHud();
     }
@@ -929,7 +973,7 @@
       weaponRoot.position.copyFrom(T.WEAPON_POS);
       weaponRoot.rotation.set(
         (T.WEAPON_PITCH_FIX || 0.0),
-        Math.PI + (T.WEAPON_YAW_FIX || 0.0) + BARREL_YAW_OFFSET,
+        Math.PI + (T.WEAPON_YAW_FIX || 0.0),
         0
       );
       weaponRoot.scaling.set(T.WEAPON_SCALE, T.WEAPON_SCALE, T.WEAPON_SCALE);
@@ -1073,6 +1117,9 @@
         if(BOB.LOCK_HIPS_Y && hipsBone && hipsBaseY !== null){
           hipsBone.position.y = hipsBaseY;
         }
+
+        /* SURGICAL FIX: apply arm shift after animations so it sticks */
+        applyArmShift();
       });
 
       const isTouch = ("ontouchstart" in window) || (navigator.maxTouchPoints > 0);
@@ -1154,15 +1201,6 @@
     weaponBtn.addEventListener("click", async () => {
       const next = (weaponSku === "wz_basic_pistol") ? "wz_cityrunner_smg" : "wz_basic_pistol";
       try{ await loadWeaponToRightHand(next); }catch(e){ console.warn("weapon swap failed", e); }
-    });
-
-    yawBtn.addEventListener("click", async () => {
-      BARREL_YAW_OFFSET -= 0.05;
-      if(BARREL_YAW_OFFSET < -0.80) BARREL_YAW_OFFSET = 0.00;
-      updateYawBtn();
-      if(weaponSku){
-        try{ await loadWeaponToRightHand(weaponSku); }catch(e){ console.warn("yaw retune reload failed", e); }
-      }
     });
 
     (async function(){
