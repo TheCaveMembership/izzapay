@@ -321,7 +321,6 @@
             Left stick moves, right stick looks, camera stays chest mounted, fire shoots
           </div>
 
-          <!-- NEW: live tuners -->
           <div class="tune" id="tunePanel">
             <div class="hud-title" style="margin-bottom:2px;">Tuners</div>
 
@@ -432,7 +431,6 @@
     const weaponBtn = document.getElementById("weaponBtn");
     const resetBtn  = document.getElementById("resetBtn");
 
-    // TUNERS (new)
     const armYawEl = document.getElementById("armYaw");
     const armRollEl = document.getElementById("armRoll");
     const armYawValEl = document.getElementById("armYawVal");
@@ -446,11 +444,9 @@
     const muzzleZValEl = document.getElementById("muzzleZVal");
     const tuneResetBtn = document.getElementById("tuneResetBtn");
 
-    // LEFT stick = MOVE
     const moveStick = document.getElementById("moveStick");
     const moveNub   = document.getElementById("moveNub");
 
-    // RIGHT stick = LOOK
     const lookStick = document.getElementById("turnStick");
     const lookNub   = document.getElementById("turnNub");
 
@@ -487,7 +483,6 @@
       }
     };
 
-    /* Chest mount stays constant relative to chest bone */
     const CHEST_LOCK = {
       pivotPos: new BABYLON.Vector3(0.00, 0.22, 0.10),
       camPos:   new BABYLON.Vector3(-0.650, 1.640, -0.969),
@@ -510,7 +505,6 @@
       DEADZONE: 0.10
     };
 
-    // CHANGED, right stick is less touchy
     const LOOK = {
       YAW_SPEED:  1.55,
       PITCH_SPEED: 1.15,
@@ -518,7 +512,6 @@
       PITCH_MAX:  0.45
     };
 
-    // Optional extra scaling on touch devices
     const LOOK_SENS = {
       TOUCH_MULT: 0.78
     };
@@ -568,7 +561,6 @@
       state.dx = nx / state.max;
       state.dy = ny / state.max;
 
-      // SURGICAL FIX: invert ONLY the RIGHT stick horizontal direction
       if(state === lookState){
         state.dx = -state.dx;
       }
@@ -653,7 +645,6 @@
     bindGlobalStick(lookState);
     bindGlobalStick(moveState);
 
-    /* Desktop fallback movement */
     const keys = { w:false,a:false,s:false,d:false };
     window.addEventListener("keydown", (e) => {
       const k = (e.key || "").toLowerCase();
@@ -685,18 +676,15 @@
     let isFiring = false;
     let nextShotAt = 0;
 
-    /* Look state */
     let aimYaw = 0.0;
     let aimPitch = CHEST_LOCK.pitch;
 
-    /* Arms tuner (live) */
     const ARM_TUNE = {
       enabled: true,
       yaw: parseFloat(armYawEl.value || "-0.22"),
       roll: parseFloat(armRollEl.value || "0.06")
     };
 
-    /* Muzzle tuner (local offset in weaponGrip space) */
     const MUZZLE_TUNE = {
       local: new BABYLON.Vector3(
         parseFloat(muzzleXEl.value || "0"),
@@ -705,7 +693,6 @@
       )
     };
 
-    /* Arm bones */
     const ARM_BONES = { rs:null, ra:null, ls:null, la:null };
 
     function _boneFind(sk, rxList){
@@ -724,26 +711,49 @@
       ARM_BONES.la = _boneFind(sk, [/mixamorig:LeftArm/i, /LeftArm/i, /LArm/i]);
     }
 
+    /* FIXED: supports Euler driven bones, forces quaternion, works live */
     function applyArmTune(){
       if(!ARM_TUNE.enabled) return;
       if(!soldierSkinned) return;
 
       const mesh = soldierSkinned;
 
-      // Use animation pose as base, then apply small offsets after animations tick
-      function applyToBone(bone, yaw, roll){
-        if(!bone) return;
-        try{
-          const qAnim = bone.getRotationQuaternion(BABYLON.Space.LOCAL, mesh) || bone.rotationQuaternion || BABYLON.Quaternion.Identity();
-          const qYaw  = BABYLON.Quaternion.RotationAxis(BABYLON.Axis.Y, yaw || 0);
-          const qRoll = BABYLON.Quaternion.RotationAxis(BABYLON.Axis.Z, roll || 0);
-          const qOff  = qYaw.multiply(qRoll);
-          bone.setRotationQuaternion(qAnim.multiply(qOff), BABYLON.Space.LOCAL, mesh);
-        }catch(e){}
+      function getLocalQuat(bone){
+        if(!bone) return null;
+
+        let q = null;
+        try{ q = bone.getRotationQuaternion(BABYLON.Space.LOCAL, mesh); }catch(e){}
+
+        if(!q){
+          try{
+            const e = bone.getRotation(BABYLON.Space.LOCAL, mesh);
+            q = BABYLON.Quaternion.FromEulerAngles(e.x, e.y, e.z);
+          }catch(e){
+            q = BABYLON.Quaternion.Identity();
+          }
+        }
+
+        return q.clone();
       }
 
-      // Keep it symmetric so grip attachment stays stable
-      // Shoulders get ~60% of yaw, upper arms get 100% yaw + roll
+      function applyToBone(bone, yaw, roll){
+        if(!bone) return;
+
+        const qAnim = getLocalQuat(bone);
+        const qYaw  = BABYLON.Quaternion.RotationAxis(BABYLON.Axis.Y, yaw || 0);
+        const qRoll = BABYLON.Quaternion.RotationAxis(BABYLON.Axis.Z, roll || 0);
+
+        const qOut = qAnim.multiply(qYaw).multiply(qRoll);
+
+        bone.rotationQuaternion = bone.rotationQuaternion || BABYLON.Quaternion.Identity();
+
+        try{
+          bone.setRotationQuaternion(qOut, BABYLON.Space.LOCAL, mesh);
+        }catch(e){
+          try{ bone.rotationQuaternion.copyFrom(qOut); }catch(_){}
+        }
+      }
+
       const y = ARM_TUNE.yaw;
       const r = ARM_TUNE.roll;
 
@@ -836,7 +846,6 @@
       }catch(e){}
     }
 
-    // force hide head and neck, name based plus head zone fallback, arms protected
     function hideHeadAndNeck(container){
       const meshes = (container && container.meshes) ? container.meshes : [];
 
@@ -972,7 +981,6 @@
       }catch(e){}
     }
 
-    // IMPORTANT, chest pivot does NOT add yaw, yaw is on soldierRoot
     function applyChestMountAimed(){
       if(!chestPivot || !camera) return;
 
@@ -1048,6 +1056,8 @@
 
       hudSoldier.textContent = "SOLDIER, loaded";
       updatePosHud();
+
+      applyArmTune();
     }
 
     async function loadWeaponToRightHand(sku){
@@ -1114,6 +1124,7 @@
       if(soldierContainer) playIdleAnimationsSlow(soldierContainer);
       if(hipsBone && hipsBaseY !== null){ hipsBone.position.y = hipsBaseY; }
       updatePosHud();
+      applyArmTune();
     }
 
     function randSpread(spread){
@@ -1123,7 +1134,6 @@
     }
 
     function getMuzzleOrigin(){
-      // NEW: muzzle offset in weaponGrip local space
       if(weaponGrip){
         try{
           const wm = weaponGrip.getWorldMatrix();
@@ -1271,6 +1281,7 @@
         soldierRoot.position.addInPlace(new BABYLON.Vector3(delta.x, 0, delta.z));
 
         applyChestMountAimed();
+        applyArmTune();
 
         if(isFiring && weaponSku === "wz_cityrunner_smg"){
           const cfg = FIRE.smg;
@@ -1292,7 +1303,6 @@
       return scene;
     }
 
-    // TUNER WIRING (new)
     function _setText(el, v){ el.textContent = (Math.round(v*100)/100).toFixed(2); }
     function syncTuners(){
       ARM_TUNE.yaw = parseFloat(armYawEl.value || "0");
@@ -1308,6 +1318,8 @@
       _setText(muzzleZValEl, MUZZLE_TUNE.local.z);
 
       updateMuzzleHud();
+
+      applyArmTune();
     }
     [armYawEl, armRollEl, muzzleXEl, muzzleYEl, muzzleZEl].forEach(el => {
       el.addEventListener("input", syncTuners);
@@ -1348,6 +1360,7 @@
         await loadWeaponToRightHand("wz_basic_pistol");
         applyChestMountAimed();
         setFireModeLabel();
+        applyArmTune();
       }catch(e){
         console.error("[CHEST CAM TEST] boot failed", e);
         hudSoldier.textContent = "SOLDIER, failed";
