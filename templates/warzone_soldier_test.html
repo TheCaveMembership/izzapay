@@ -65,17 +65,23 @@
       outline:none;
     }
 
-    /* FIX 1, keep HUD above touch controls */
+    /* HUD, mobile safe, never blocks joysticks */
     .hud-top{
       position:absolute;
       left:10px;
       top:10px;
       right:10px;
-      z-index:40;
+
+      z-index:60;
       display:flex;
       justify-content:space-between;
       gap:10px;
-      pointer-events:none;
+
+      pointer-events:auto;
+      max-height:38vh;
+      overflow:auto;
+      overscroll-behavior:contain;
+      -webkit-overflow-scrolling:touch;
     }
     .hud-box{
       border-radius:14px;
@@ -84,7 +90,8 @@
       box-shadow:0 0 26px rgba(0,255,255,.10), 0 0 30px rgba(255,59,107,.08);
       padding:10px 12px;
       backdrop-filter:blur(8px);
-      max-width:56vw;
+
+      max-width:48vw;
       pointer-events:auto;
     }
     .hud-title{
@@ -170,7 +177,7 @@
     .touch-ui{
       position:absolute;
       inset:0;
-      z-index:20;
+      z-index:50;
       pointer-events:none;
     }
     .stick{
@@ -336,6 +343,24 @@
             </div>
 
             <div class="tune-row">
+              <label for="gunYaw">Gun yaw</label>
+              <input id="gunYaw" type="range" min="-1.20" max="1.20" step="0.01" value="0.00">
+              <div class="tune-val" id="gunYawVal">0.00</div>
+            </div>
+
+            <div class="tune-row">
+              <label for="gunPitch">Gun pitch</label>
+              <input id="gunPitch" type="range" min="-1.20" max="1.20" step="0.01" value="0.00">
+              <div class="tune-val" id="gunPitchVal">0.00</div>
+            </div>
+
+            <div class="tune-row">
+              <label for="gunRoll">Gun roll</label>
+              <input id="gunRoll" type="range" min="-1.20" max="1.20" step="0.01" value="0.00">
+              <div class="tune-val" id="gunRollVal">0.00</div>
+            </div>
+
+            <div class="tune-row">
               <label for="muzzleX">Muzzle X</label>
               <input id="muzzleX" type="range" min="-1.50" max="1.50" step="0.01" value="0.00">
               <div class="tune-val" id="muzzleXVal">0.00</div>
@@ -434,6 +459,13 @@
     const armRollEl = document.getElementById("armRoll");
     const armYawValEl = document.getElementById("armYawVal");
     const armRollValEl = document.getElementById("armRollVal");
+
+    const gunYawEl = document.getElementById("gunYaw");
+    const gunPitchEl = document.getElementById("gunPitch");
+    const gunRollEl = document.getElementById("gunRoll");
+    const gunYawValEl = document.getElementById("gunYawVal");
+    const gunPitchValEl = document.getElementById("gunPitchVal");
+    const gunRollValEl = document.getElementById("gunRollVal");
 
     const muzzleXEl = document.getElementById("muzzleX");
     const muzzleYEl = document.getElementById("muzzleY");
@@ -684,6 +716,12 @@
       roll: parseFloat(armRollEl.value || "0.06")
     };
 
+    const GUN_TUNE = {
+      yaw: parseFloat(gunYawEl.value || "0.00"),
+      pitch: parseFloat(gunPitchEl.value || "0.00"),
+      roll: parseFloat(gunRollEl.value || "0.00")
+    };
+
     const MUZZLE_TUNE = {
       local: new BABYLON.Vector3(
         parseFloat(muzzleXEl.value || "0"),
@@ -885,7 +923,7 @@
       });
     }
 
-    /* FIX 2, never disable skeleton meshes, keep them enabled so bones always work */
+    /* never disable skeleton meshes, keep them enabled so bones always work */
     function setArmsOnlyVisibility(container){
       const meshes = (container && container.meshes) ? container.meshes : [];
       let shown = 0;
@@ -1062,6 +1100,24 @@
       applyArmTune();
     }
 
+    function applyWeaponPoseFromTuners(){
+      if(!weaponRoot) return;
+      const T = (weaponSku === "wz_cityrunner_smg") ? WEAPON_TUNING.wz_cityrunner_smg : WEAPON_TUNING.wz_basic_pistol;
+
+      weaponRoot.position.copyFrom(T.WEAPON_POS);
+      weaponRoot.rotation.set(
+        (T.WEAPON_PITCH_FIX || 0.0) + GUN_TUNE.pitch,
+        Math.PI + (T.WEAPON_YAW_FIX || 0.0) + GUN_TUNE.yaw,
+        0 + GUN_TUNE.roll
+      );
+      weaponRoot.scaling.set(T.WEAPON_SCALE, T.WEAPON_SCALE, T.WEAPON_SCALE);
+
+      if(weaponGrip){
+        weaponGrip.position.copyFrom(T.WEAPON_GRIP_POS);
+        weaponGrip.rotation.copyFrom(T.WEAPON_GRIP_ROT);
+      }
+    }
+
     async function loadWeaponToRightHand(sku){
       try{ if(weaponGrip){ weaponGrip.dispose(true,false); weaponGrip = null; } }catch(e){}
       try{ if(weaponRoot){ weaponRoot.dispose(true,false); weaponRoot = null; } }catch(e){}
@@ -1094,13 +1150,7 @@
         weaponRoot.position.set(0.35, 1.10, 0.25);
       }
 
-      weaponRoot.position.copyFrom(T.WEAPON_POS);
-      weaponRoot.rotation.set(
-        (T.WEAPON_PITCH_FIX || 0.0),
-        Math.PI + (T.WEAPON_YAW_FIX || 0.0),
-        0
-      );
-      weaponRoot.scaling.set(T.WEAPON_SCALE, T.WEAPON_SCALE, T.WEAPON_SCALE);
+      weaponSku = sku;
 
       weaponGrip.position.copyFrom(T.WEAPON_GRIP_POS);
       weaponGrip.rotation.copyFrom(T.WEAPON_GRIP_ROT);
@@ -1118,7 +1168,8 @@
         }catch(e){}
       });
 
-      weaponSku = sku;
+      applyWeaponPoseFromTuners();
+
       hudWeapon.textContent = (weaponSku === "wz_cityrunner_smg") ? "WEAPON, SMG" : "WEAPON, pistol";
       weaponBtn.textContent = (weaponSku === "wz_cityrunner_smg") ? "Weapon, SMG" : "Weapon, pistol";
       fireModeText.textContent = (weaponSku === "wz_cityrunner_smg") ? "hold" : "tap";
@@ -1135,6 +1186,7 @@
       if(hipsBone && hipsBaseY !== null){ hipsBone.position.y = hipsBaseY; }
       updatePosHud();
       applyArmTune();
+      applyWeaponPoseFromTuners();
     }
 
     function randSpread(spread){
@@ -1165,10 +1217,17 @@
       const cfg = FIRE[mode];
 
       const origin = getMuzzleOrigin();
-      const baseDir = camera.getForwardRay(1).direction.clone();
+
+      /* IMPORTANT FIX,
+         direction is now muzzle -> reticle aim point,
+         so chest cam offsets cannot cause side shooting */
+      const camRay = camera.getForwardRay(cfg.maxDist);
 
       const s = randSpread(cfg.spread);
-      const dir = baseDir.add(new BABYLON.Vector3(s.x, s.y, 0)).normalize();
+      const spreadDir = camRay.direction.add(new BABYLON.Vector3(s.x, s.y, 0)).normalize();
+      const aimPoint = camRay.origin.add(spreadDir.scale(cfg.maxDist));
+
+      const dir = aimPoint.subtract(origin).normalize();
 
       const ray = new BABYLON.Ray(origin, dir, cfg.maxDist);
 
@@ -1313,34 +1372,54 @@
     }
 
     function _setText(el, v){ el.textContent = (Math.round(v*100)/100).toFixed(2); }
+
     function syncTuners(){
       ARM_TUNE.yaw = parseFloat(armYawEl.value || "0");
       ARM_TUNE.roll = parseFloat(armRollEl.value || "0");
+
+      GUN_TUNE.yaw = parseFloat(gunYawEl.value || "0");
+      GUN_TUNE.pitch = parseFloat(gunPitchEl.value || "0");
+      GUN_TUNE.roll = parseFloat(gunRollEl.value || "0");
+
       MUZZLE_TUNE.local.x = parseFloat(muzzleXEl.value || "0");
       MUZZLE_TUNE.local.y = parseFloat(muzzleYEl.value || "0");
       MUZZLE_TUNE.local.z = parseFloat(muzzleZEl.value || "0");
 
       _setText(armYawValEl, ARM_TUNE.yaw);
       _setText(armRollValEl, ARM_TUNE.roll);
+
+      _setText(gunYawValEl, GUN_TUNE.yaw);
+      _setText(gunPitchValEl, GUN_TUNE.pitch);
+      _setText(gunRollValEl, GUN_TUNE.roll);
+
       _setText(muzzleXValEl, MUZZLE_TUNE.local.x);
       _setText(muzzleYValEl, MUZZLE_TUNE.local.y);
       _setText(muzzleZValEl, MUZZLE_TUNE.local.z);
 
       updateMuzzleHud();
       applyArmTune();
+      applyWeaponPoseFromTuners();
     }
-    [armYawEl, armRollEl, muzzleXEl, muzzleYEl, muzzleZEl].forEach(el => {
+
+    [armYawEl, armRollEl, gunYawEl, gunPitchEl, gunRollEl, muzzleXEl, muzzleYEl, muzzleZEl].forEach(el => {
       el.addEventListener("input", syncTuners);
       el.addEventListener("change", syncTuners);
     });
+
     tuneResetBtn.addEventListener("click", () => {
       armYawEl.value = "-0.22";
       armRollEl.value = "0.06";
+
+      gunYawEl.value = "0.00";
+      gunPitchEl.value = "0.00";
+      gunRollEl.value = "0.00";
+
       muzzleXEl.value = "0.00";
       muzzleYEl.value = "0.00";
       muzzleZEl.value = "0.00";
       syncTuners();
     });
+
     syncTuners();
 
     (function(){
@@ -1369,6 +1448,7 @@
         applyChestMountAimed();
         setFireModeLabel();
         applyArmTune();
+        applyWeaponPoseFromTuners();
       }catch(e){
         console.error("[CHEST CAM TEST] boot failed", e);
         hudSoldier.textContent = "SOLDIER, failed";
