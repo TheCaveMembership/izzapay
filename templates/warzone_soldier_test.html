@@ -131,6 +131,43 @@
       margin-top:6px;
     }
 
+    /* ---- TUNERS (new, minimal) ---- */
+    .tune{
+      margin-top:8px;
+      padding-top:8px;
+      border-top:1px solid rgba(127,209,255,.18);
+    }
+    .tune-row{
+      display:flex;
+      align-items:center;
+      gap:8px;
+      margin-top:6px;
+      font-size:11px;
+      color:#d8e5ff;
+    }
+    .tune-row label{
+      min-width:86px;
+      opacity:.9;
+    }
+    .tune-row input[type="range"]{
+      flex:1;
+      height:22px;
+      accent-color: rgba(0,255,255,.85);
+    }
+    .tune-val{
+      min-width:66px;
+      text-align:right;
+      color:#e7f0ff;
+      font-variant-numeric: tabular-nums;
+      opacity:.95;
+    }
+    .tune-mini{
+      display:flex;
+      gap:8px;
+      flex-wrap:wrap;
+      margin-top:8px;
+    }
+
     .touch-ui{
       position:absolute;
       inset:0;
@@ -283,6 +320,44 @@
           <div class="hint" id="hintText">
             Left stick moves, right stick looks, camera stays chest mounted, fire shoots
           </div>
+
+          <!-- NEW: live tuners -->
+          <div class="tune" id="tunePanel">
+            <div class="hud-title" style="margin-bottom:2px;">Tuners</div>
+
+            <div class="tune-row">
+              <label for="armYaw">Arms yaw</label>
+              <input id="armYaw" type="range" min="-0.80" max="0.80" step="0.01" value="-0.22">
+              <div class="tune-val" id="armYawVal">-0.22</div>
+            </div>
+
+            <div class="tune-row">
+              <label for="armRoll">Arms roll</label>
+              <input id="armRoll" type="range" min="-0.60" max="0.60" step="0.01" value="0.06">
+              <div class="tune-val" id="armRollVal">0.06</div>
+            </div>
+
+            <div class="tune-row">
+              <label for="muzzleX">Muzzle X</label>
+              <input id="muzzleX" type="range" min="-1.50" max="1.50" step="0.01" value="0.00">
+              <div class="tune-val" id="muzzleXVal">0.00</div>
+            </div>
+            <div class="tune-row">
+              <label for="muzzleY">Muzzle Y</label>
+              <input id="muzzleY" type="range" min="-1.50" max="1.50" step="0.01" value="0.00">
+              <div class="tune-val" id="muzzleYVal">0.00</div>
+            </div>
+            <div class="tune-row">
+              <label for="muzzleZ">Muzzle Z</label>
+              <input id="muzzleZ" type="range" min="-2.50" max="2.50" step="0.01" value="0.00">
+              <div class="tune-val" id="muzzleZVal">0.00</div>
+            </div>
+
+            <div class="tune-mini">
+              <button class="tag btn" id="tuneResetBtn" type="button">Tune, reset</button>
+              <span class="tag" id="hudMuzzle">MUZZLE, 0 0 0</span>
+            </div>
+          </div>
         </div>
 
         <div class="hud-box" style="text-align:right;">
@@ -352,9 +427,24 @@
     const hudBone    = document.getElementById("hudBone");
     const hudCam     = document.getElementById("hudCam");
     const hudPos     = document.getElementById("hudPos");
+    const hudMuzzle  = document.getElementById("hudMuzzle");
 
     const weaponBtn = document.getElementById("weaponBtn");
     const resetBtn  = document.getElementById("resetBtn");
+
+    // TUNERS (new)
+    const armYawEl = document.getElementById("armYaw");
+    const armRollEl = document.getElementById("armRoll");
+    const armYawValEl = document.getElementById("armYawVal");
+    const armRollValEl = document.getElementById("armRollVal");
+
+    const muzzleXEl = document.getElementById("muzzleX");
+    const muzzleYEl = document.getElementById("muzzleY");
+    const muzzleZEl = document.getElementById("muzzleZ");
+    const muzzleXValEl = document.getElementById("muzzleXVal");
+    const muzzleYValEl = document.getElementById("muzzleYVal");
+    const muzzleZValEl = document.getElementById("muzzleZVal");
+    const tuneResetBtn = document.getElementById("tuneResetBtn");
 
     // LEFT stick = MOVE
     const moveStick = document.getElementById("moveStick");
@@ -599,16 +689,23 @@
     let aimYaw = 0.0;
     let aimPitch = CHEST_LOCK.pitch;
 
-    /* SURGICAL FIX: shift arms + gun left without touching weapon grip */
-    const ARM_SHIFT = {
+    /* Arms tuner (live) */
+    const ARM_TUNE = {
       enabled: true,
-      rightShoulderYaw: -0.22,
-      rightUpperArmYaw: -0.12,
-      rightUpperArmRoll: 0.06,
-      leftShoulderYaw:  -0.10,
-      leftUpperArmYaw:  -0.06,
-      leftUpperArmRoll: 0.04
+      yaw: parseFloat(armYawEl.value || "-0.22"),
+      roll: parseFloat(armRollEl.value || "0.06")
     };
+
+    /* Muzzle tuner (local offset in weaponGrip space) */
+    const MUZZLE_TUNE = {
+      local: new BABYLON.Vector3(
+        parseFloat(muzzleXEl.value || "0"),
+        parseFloat(muzzleYEl.value || "0"),
+        parseFloat(muzzleZEl.value || "0")
+      )
+    };
+
+    /* Arm bones */
     const ARM_BONES = { rs:null, ra:null, ls:null, la:null };
 
     function _boneFind(sk, rxList){
@@ -626,12 +723,14 @@
       ARM_BONES.ls = _boneFind(sk, [/mixamorig:LeftShoulder/i, /LeftShoulder/i, /LShoulder/i]);
       ARM_BONES.la = _boneFind(sk, [/mixamorig:LeftArm/i, /LeftArm/i, /LArm/i]);
     }
-    function applyArmShift(){
-      if(!ARM_SHIFT.enabled) return;
+
+    function applyArmTune(){
+      if(!ARM_TUNE.enabled) return;
       if(!soldierSkinned) return;
 
       const mesh = soldierSkinned;
 
+      // Use animation pose as base, then apply small offsets after animations tick
       function applyToBone(bone, yaw, roll){
         if(!bone) return;
         try{
@@ -639,16 +738,20 @@
           const qYaw  = BABYLON.Quaternion.RotationAxis(BABYLON.Axis.Y, yaw || 0);
           const qRoll = BABYLON.Quaternion.RotationAxis(BABYLON.Axis.Z, roll || 0);
           const qOff  = qYaw.multiply(qRoll);
-          const qFinal = qAnim.multiply(qOff);
-          bone.setRotationQuaternion(qFinal, BABYLON.Space.LOCAL, mesh);
+          bone.setRotationQuaternion(qAnim.multiply(qOff), BABYLON.Space.LOCAL, mesh);
         }catch(e){}
       }
 
-      applyToBone(ARM_BONES.rs, ARM_SHIFT.rightShoulderYaw, 0);
-      applyToBone(ARM_BONES.ra, ARM_SHIFT.rightUpperArmYaw, ARM_SHIFT.rightUpperArmRoll);
+      // Keep it symmetric so grip attachment stays stable
+      // Shoulders get ~60% of yaw, upper arms get 100% yaw + roll
+      const y = ARM_TUNE.yaw;
+      const r = ARM_TUNE.roll;
 
-      applyToBone(ARM_BONES.ls, ARM_SHIFT.leftShoulderYaw, 0);
-      applyToBone(ARM_BONES.la, ARM_SHIFT.leftUpperArmYaw, ARM_SHIFT.leftUpperArmRoll);
+      applyToBone(ARM_BONES.rs, y * 0.60, 0);
+      applyToBone(ARM_BONES.ra, y * 1.00, r);
+
+      applyToBone(ARM_BONES.ls, y * 0.45, 0);
+      applyToBone(ARM_BONES.la, y * 0.80, r * 0.70);
     }
 
     function fmt(v){ return (Math.round(v*1000)/1000).toFixed(3); }
@@ -659,6 +762,10 @@
     function updatePosHud(){
       if(!soldierRoot) return;
       hudPos.textContent = `POS, x ${fmt(soldierRoot.position.x)} z ${fmt(soldierRoot.position.z)}`;
+    }
+    function updateMuzzleHud(){
+      const v = MUZZLE_TUNE.local;
+      hudMuzzle.textContent = `MUZZLE, ${fmt(v.x)} ${fmt(v.y)} ${fmt(v.z)}`;
     }
 
     function setFireModeLabel(){
@@ -729,7 +836,7 @@
       }catch(e){}
     }
 
-    // NEW, force hide head and neck, name based plus head zone fallback, arms protected
+    // force hide head and neck, name based plus head zone fallback, arms protected
     function hideHeadAndNeck(container){
       const meshes = (container && container.meshes) ? container.meshes : [];
 
@@ -830,7 +937,6 @@
         });
       }
 
-      // Always enforce head and neck invisibility, even if arms logic missed something
       hideHeadAndNeck(container);
     }
 
@@ -909,7 +1015,6 @@
 
       playIdleAnimationsSlow(cont);
 
-      // Arms only plus force hide head and neck
       setArmsOnlyVisibility(cont);
 
       const sk = soldierSkinned && soldierSkinned.skeleton ? soldierSkinned.skeleton : null;
@@ -939,7 +1044,6 @@
         hipsBaseY = hipsBone.position.y;
       }
 
-      /* SURGICAL FIX: bind arm bones once soldier loads */
       bindArmBones();
 
       hudSoldier.textContent = "SOLDIER, loaded";
@@ -1019,7 +1123,14 @@
     }
 
     function getMuzzleOrigin(){
+      // NEW: muzzle offset in weaponGrip local space
       if(weaponGrip){
+        try{
+          const wm = weaponGrip.getWorldMatrix();
+          const local = MUZZLE_TUNE.local;
+          const worldPoint = BABYLON.Vector3.TransformCoordinates(local, wm);
+          return worldPoint.clone();
+        }catch(e){}
         try{ return weaponGrip.getAbsolutePosition().clone(); }catch(e){}
       }
       const p = camera.getAbsolutePosition();
@@ -1117,9 +1228,7 @@
         if(BOB.LOCK_HIPS_Y && hipsBone && hipsBaseY !== null){
           hipsBone.position.y = hipsBaseY;
         }
-
-        /* SURGICAL FIX: apply arm shift after animations so it sticks */
-        applyArmShift();
+        applyArmTune();
       });
 
       const isTouch = ("ontouchstart" in window) || (navigator.maxTouchPoints > 0);
@@ -1130,7 +1239,6 @@
         const dt = scene.getEngine().getDeltaTime() * 0.001;
         const now = performance.now() * 0.001;
 
-        // RIGHT stick LOOK, reduced sensitivity
         const lookMult = isTouch ? LOOK_SENS.TOUCH_MULT : 1.0;
         const lookX = applyDeadzone(lookState.dx) * lookMult;
         const lookY = applyDeadzone(lookState.dy) * lookMult;
@@ -1139,7 +1247,6 @@
         aimPitch += (lookY * LOOK.PITCH_SPEED * dt);
         aimPitch  = clamp(aimPitch, LOOK.PITCH_MIN, LOOK.PITCH_MAX);
 
-        // LEFT stick MOVE
         let mvX = applyDeadzone(moveState.dx);
         let mvY = applyDeadzone(moveState.dy);
 
@@ -1184,6 +1291,37 @@
 
       return scene;
     }
+
+    // TUNER WIRING (new)
+    function _setText(el, v){ el.textContent = (Math.round(v*100)/100).toFixed(2); }
+    function syncTuners(){
+      ARM_TUNE.yaw = parseFloat(armYawEl.value || "0");
+      ARM_TUNE.roll = parseFloat(armRollEl.value || "0");
+      MUZZLE_TUNE.local.x = parseFloat(muzzleXEl.value || "0");
+      MUZZLE_TUNE.local.y = parseFloat(muzzleYEl.value || "0");
+      MUZZLE_TUNE.local.z = parseFloat(muzzleZEl.value || "0");
+
+      _setText(armYawValEl, ARM_TUNE.yaw);
+      _setText(armRollValEl, ARM_TUNE.roll);
+      _setText(muzzleXValEl, MUZZLE_TUNE.local.x);
+      _setText(muzzleYValEl, MUZZLE_TUNE.local.y);
+      _setText(muzzleZValEl, MUZZLE_TUNE.local.z);
+
+      updateMuzzleHud();
+    }
+    [armYawEl, armRollEl, muzzleXEl, muzzleYEl, muzzleZEl].forEach(el => {
+      el.addEventListener("input", syncTuners);
+      el.addEventListener("change", syncTuners);
+    });
+    tuneResetBtn.addEventListener("click", () => {
+      armYawEl.value = "-0.22";
+      armRollEl.value = "0.06";
+      muzzleXEl.value = "0.00";
+      muzzleYEl.value = "0.00";
+      muzzleZEl.value = "0.00";
+      syncTuners();
+    });
+    syncTuners();
 
     (function(){
       fireBtn.addEventListener("pointerdown", (e) => {
