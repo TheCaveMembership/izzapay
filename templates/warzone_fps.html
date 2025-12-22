@@ -25,6 +25,12 @@
       overflow:hidden;
       touch-action:none;
       user-select:none;
+
+      -webkit-user-select:none;
+      -webkit-touch-callout:none;
+      -webkit-tap-highlight-color:transparent;
+      -webkit-user-drag:none;
+      overscroll-behavior:none;
     }
 
     /* SAME MANUAL ROTATION MODEL AS YOUR LOBBY */
@@ -37,6 +43,7 @@
       transform-origin:top left;
       transform:rotate(90deg) translateY(-100%);
       transition:transform .15s ease,width .15s ease,height .15s ease;
+      background:#000;
     }
 
     .fps-root{
@@ -54,6 +61,8 @@
       height:100%;
       display:block;
       background:transparent;
+      touch-action:none;
+      outline:none;
     }
 
     /* HUD */
@@ -76,7 +85,7 @@
       padding:10px 12px;
       backdrop-filter:blur(8px);
       max-width:49vw;
-      pointer-events:auto; /* allow the Exit button to be clickable */
+      pointer-events:auto;
     }
     .hud-title{
       font-size:10px;
@@ -205,6 +214,7 @@
       border:1px solid rgba(255,59,107,.35);
       background:radial-gradient(circle at 30% 30%,rgba(255,59,107,.22),rgba(0,0,0,.10));
       box-shadow:0 0 18px rgba(255,59,107,.10);
+      pointer-events:none;
     }
 
     .fireBtn{
@@ -287,24 +297,31 @@
   </div>
 
   <script>
-    // Rotation wrapper, same behavior as lobby
+    // Rotation wrapper, upgraded to match the test page behavior (visualViewport aware)
     (function(){
       const wrapper = document.getElementById("rotWrapper");
       function updateLayout(){
         if (!wrapper) return;
-        const landscape = window.innerWidth >= window.innerHeight;
+        const vv = window.visualViewport;
+        const w = vv ? vv.width : window.innerWidth;
+        const h = vv ? vv.height : window.innerHeight;
+        const landscape = w >= h;
         if (landscape){
           wrapper.style.transform = "none";
           wrapper.style.width = "100%";
           wrapper.style.height = "100%";
         } else {
-          wrapper.style.width = window.innerHeight + "px";
-          wrapper.style.height = window.innerWidth + "px";
+          wrapper.style.width = h + "px";
+          wrapper.style.height = w + "px";
           wrapper.style.transform = "rotate(90deg) translateY(-100%)";
         }
       }
       window.addEventListener("resize", updateLayout);
-      window.addEventListener("orientationchange", updateLayout);
+      window.addEventListener("orientationchange", () => setTimeout(updateLayout, 150));
+      if (window.visualViewport){
+        window.visualViewport.addEventListener("resize", updateLayout);
+        window.visualViewport.addEventListener("scroll", updateLayout);
+      }
       updateLayout();
     })();
 
@@ -374,7 +391,7 @@
       return t.replaceAll("_", " ");
     }
 
-    // LEVEL system (replaces ZOMBIES HUD)
+    // LEVEL system
     let level = 1;
     let killsThisLevel = 0;
 
@@ -391,6 +408,8 @@
 
     // Babylon setup
     const canvas = document.getElementById("renderCanvas");
+    canvas.tabIndex = 1;
+
     const engine = new BABYLON.Engine(canvas, true, {
       preserveDrawingBuffer:true,
       stencil:true
@@ -408,6 +427,20 @@
     let weaponContainer = null;
     let weaponRoot = null;
     let weaponGrip = null;
+
+    // NEW, locked muzzle origin anchor, same as test page
+    let rightHandAnchor = null;
+
+    // NEW, locked muzzle settings from the test page
+    const MUZZLE_LOCK = {
+      forward: 0.73,
+      up: 0.08,
+      right: 0.31,
+      flashSize: 0.05
+    };
+
+    // NEW, single FX cleanup loop, no per shot setTimeout
+    const fxLive = [];
 
     // Zombies
     const zombies = [];
@@ -496,6 +529,92 @@
       return (nowMs - FIRE.lastShotAt) >= FIRE.pistolCooldownMs;
     }
 
+    // FX helpers
+    function fxRegister(mesh, lifeSeconds){
+      try{
+        mesh.isPickable = false;
+        mesh.renderingGroupId = 3;
+      }catch(e){}
+      fxLive.push({ mesh, dieAt: performance.now() * 0.001 + lifeSeconds });
+    }
+
+    function cleanupFx(nowSeconds){
+      for(let i = fxLive.length - 1; i >= 0; i--){
+        const fx = fxLive[i];
+        if(!fx || !fx.mesh){
+          fxLive.splice(i, 1);
+          continue;
+        }
+        if(nowSeconds >= fx.dieAt){
+          try{ fx.mesh.dispose(); }catch(e){}
+          fxLive.splice(i, 1);
+        }
+      }
+    }
+
+    function findSkinnedMeshFromContainer(container){
+      try{
+        const meshes = (container && container.meshes) ? container.meshes : [];
+        return meshes.find(m => m && m.skeleton) || null;
+      }catch(e){
+        return null;
+      }
+    }
+
+    function findRightHandBone(skeleton){
+      if(!skeleton || !skeleton.bones || !skeleton.bones.length) return null;
+      const exact = skeleton.bones.find(b => (b.name || "") === "mixamorig:RightHand.209_221");
+      if(exact) return exact;
+      const rx = skeleton.bones.find(b => /mixamorig:RightHand/i.test(b.name || ""));
+      if(rx) return rx;
+      const generic = skeleton.bones.find(b => /RightHand/i.test(b.name || ""));
+      if(generic) return generic;
+      const anyHand = skeleton.bones.find(b => /Hand/i.test(b.name || ""));
+      if(anyHand) return anyHand;
+      return null;
+    }
+
+    function ensureRightHandAnchor(){
+      if(rightHandAnchor) return;
+      if(!soldierSkinned || !soldierSkinned.skeleton) return;
+
+      const rh = findRightHandBone(soldierSkinned.skeleton);
+      if(!rh) return;
+
+      rightHandAnchor = new BABYLON.TransformNode("rightHandAnchorFPS", scene);
+      try{
+        rightHandAnchor.attachToBone(rh, soldierSkinned);
+        rightHandAnchor.position.set(0,0,0);
+        rightHandAnchor.rotation.set(0,0,0);
+      }catch(e){}
+    }
+
+    function getMuzzleOrigin(){
+      let base = null;
+
+      if(rightHandAnchor){
+        try{ base = rightHandAnchor.getAbsolutePosition().clone(); }catch(e){}
+      }
+      if(!base && weaponGrip){
+        try{ base = weaponGrip.getAbsolutePosition().clone(); }catch(e){}
+      }
+      if(!base){
+        const p = camera.getAbsolutePosition();
+        const dir = camera.getForwardRay(1).direction;
+        base = p.add(dir.scale(0.35));
+      }
+
+      const fwd = camera.getForwardRay(1).direction;
+      const up  = camera.getDirection(BABYLON.Axis.Y).normalize();
+      const rt  = camera.getDirection(BABYLON.Axis.X).normalize();
+
+      base.addInPlace(fwd.scale(MUZZLE_LOCK.forward));
+      base.addInPlace(up.scale(MUZZLE_LOCK.up));
+      base.addInPlace(rt.scale(MUZZLE_LOCK.right));
+
+      return base;
+    }
+
     function shootOnce(){
       const nowMs = performance.now();
       if(!canShoot(nowMs)) return;
@@ -504,12 +623,30 @@
       ammo = Math.max(0, ammo - 1);
       hudAmmo.textContent = `AMMO, ${ammo}`;
 
-      // Raycast from camera forward
-      const origin = camera.position.clone();
+      if(!scene || !camera) return;
+
+      const origin = getMuzzleOrigin();
       const forward = camera.getForwardRay(200).direction;
 
       const ray = new BABYLON.Ray(origin, forward, 200);
       const hit = scene.pickWithRay(ray, (m) => m && m.metadata && m.metadata.isZombie);
+
+      // Tracer + muzzle flash, locked cleanup loop
+      const hitPoint = (hit && hit.hit && hit.pickedPoint) ? hit.pickedPoint.clone() : origin.add(forward.scale(200));
+
+      const tracer = BABYLON.MeshBuilder.CreateLines("tr", { points: [origin, hitPoint] }, scene);
+      tracer.alpha = 0.9;
+      tracer.color = new BABYLON.Color3(0.9, 0.95, 1.0);
+      fxRegister(tracer, 0.05);
+
+      const flash = BABYLON.MeshBuilder.CreateSphere("mf", { diameter: Math.max(0.01, MUZZLE_LOCK.flashSize) }, scene);
+      const mm = new BABYLON.StandardMaterial("mfm", scene);
+      mm.emissiveColor = new BABYLON.Color3(1.0, 0.85, 0.35);
+      mm.diffuseColor = new BABYLON.Color3(0,0,0);
+      mm.specularColor = new BABYLON.Color3(0,0,0);
+      flash.material = mm;
+      flash.position.copyFrom(origin);
+      fxRegister(flash, 0.04);
 
       if(hit && hit.pickedMesh){
         const z = hit.pickedMesh;
@@ -521,17 +658,12 @@
 
           killsThisLevel += 1;
 
-          // Advance level when we hit the required kills
           const target = targetKillsForLevel(level);
           if(killsThisLevel >= target){
             level += 1;
             killsThisLevel = 0;
             setHudLevel();
             spawnLevel(level);
-          } else {
-            // keep pressure, replace a killed zombie if you want constant action
-            // (optional) spawn one to maintain count:
-            // createZombie(randomX, randomZ);
           }
         }
       }
@@ -564,8 +696,7 @@
       return { rootUrl:"/assets/warzone3d/weapons/wz_basic_pistol/", fileName:"scene.gltf" };
     }
 
-    // IMPORTANT: use the same "weapon in hand" attach logic as lobby
-    // These tuning numbers are copied from your lobby weapon attach (not the old FPS viewmodel)
+    // Weapon tuning, unchanged
     const WEAPON_TUNING = {
       wz_basic_pistol: {
         WEAPON_SCALE: 0.06000,
@@ -632,15 +763,6 @@
       }
     }
 
-    // --- soldier + weapon attach helpers (same pattern as lobby) ---
-    function findSkinnedMeshFromContainer(container){
-      try{
-        const meshes = (container && container.meshes) ? container.meshes : [];
-        return meshes.find(m => m && m.skeleton) || null;
-      }catch(e){
-        return null;
-      }
-    }
     function findBoneByNameOrIncludes(skeleton, want){
       if (!skeleton || !skeleton.bones) return null;
       const exact = skeleton.bones.find(b => (b.name || "") === want);
@@ -664,6 +786,9 @@
     function clearSoldier(){
       clearWeapon();
       soldierSkinned = null;
+
+      try{ if(rightHandAnchor){ rightHandAnchor.dispose(true,false); rightHandAnchor = null; } }catch(e){}
+
       try{ if(soldierRoot){ soldierRoot.dispose(true,false); soldierRoot = null; } }catch(e){}
       try{
         if(soldierContainer){
@@ -675,7 +800,6 @@
     }
 
     function setArmsOnlyVisibility(container){
-      // Show only arm/hand meshes so the player sees their equipped skin in FPS
       const meshes = (container && container.meshes) ? container.meshes : [];
       meshes.forEach(m => {
         if(!m) return;
@@ -685,7 +809,8 @@
           nm.includes("forearm") ||
           nm.includes("hand") ||
           nm.includes("wrist") ||
-          nm.includes("glove");
+          nm.includes("glove") ||
+          nm.includes("sleeve");
 
         try{
           m.isPickable = false;
@@ -696,8 +821,6 @@
     }
 
     async function loadSoldierArmsInFPS(skinSku){
-      // Right now the soldier skin variants are handled by your lobby texture override system.
-      // FPS uses the same base model and shows arms from that model (so skins appear in FPS).
       clearSoldier();
 
       const asset = getSkinAsset();
@@ -707,7 +830,6 @@
 
       soldierRoot = new BABYLON.TransformNode("soldierRootFPS", scene);
 
-      // Parent all nodes to soldierRoot
       const nodes = []
         .concat(cont.meshes || [])
         .concat(cont.transformNodes || []);
@@ -716,17 +838,15 @@
         try{ n.parent = soldierRoot; }catch(e){}
       });
 
-      // Put the arms in first-person space (parented to camera)
       soldierRoot.parent = camera;
       soldierRoot.position = new BABYLON.Vector3(0.00, -1.72, 0.00);
       soldierRoot.rotation = new BABYLON.Vector3(0, Math.PI, 0);
-
-      // Slightly scale so hands/arms feel right in view
       soldierRoot.scaling = new BABYLON.Vector3(0.72, 0.72, 0.72);
 
       setArmsOnlyVisibility(cont);
 
       soldierSkinned = findSkinnedMeshFromContainer(cont);
+      ensureRightHandAnchor();
     }
 
     async function attachWeaponToSoldierHandFPS(sku){
@@ -776,6 +896,8 @@
           m.renderingGroupId = 2;
         }catch(e){}
       });
+
+      ensureRightHandAnchor();
     }
 
     function createZombie(x, z){
@@ -799,7 +921,6 @@
     function spawnLevel(lv){
       clearZombies();
 
-      // Spawn count equals the required kills for this level (simple, clean, matches your example)
       const n = targetKillsForLevel(lv);
 
       for(let i=0;i<n;i++){
@@ -821,7 +942,6 @@
       const dir = new BABYLON.DirectionalLight("d", new BABYLON.Vector3(-0.2,-1,-0.15), scene);
       dir.intensity = 0.55;
 
-      // Simple ground
       const ground = BABYLON.MeshBuilder.CreateGround("g", { width: 220, height: 220 }, scene);
       const gmat = new BABYLON.StandardMaterial("gmat", scene);
       gmat.diffuseColor = new BABYLON.Color3(0.03,0.04,0.07);
@@ -830,12 +950,10 @@
       ground.material = gmat;
       ground.isPickable = true;
 
-      // Camera, true FPS
       camera = new BABYLON.UniversalCamera("fpsCam", new BABYLON.Vector3(0,1.7,0), scene);
       camera.minZ = 0.05;
       camera.speed = 0.15;
       camera.angularSensibility = 2500;
-
       camera.inputs.clear();
 
       engine.runRenderLoop(() => {
@@ -843,11 +961,12 @@
       });
       window.addEventListener("resize", () => engine.resize());
 
-      // Per frame update, movement, aiming, zombies, SMG auto fire
       scene.onBeforeRenderObservable.add(() => {
+        const nowS = performance.now() * 0.001;
+        cleanupFx(nowS);
+
         const dt = scene.getEngine().getDeltaTime() * 0.001;
 
-        // Move, left stick
         const forward = camera.getDirection(new BABYLON.Vector3(0,0,1));
         const right = camera.getDirection(new BABYLON.Vector3(1,0,0));
 
@@ -861,7 +980,6 @@
         const delta = forward.scale(moveF * spd).add(right.scale(moveS * spd));
         camera.position.addInPlace(new BABYLON.Vector3(delta.x, 0, delta.z));
 
-        // Look, right stick
         const lx = lookState.dx;
         const ly = lookState.dy;
 
@@ -870,7 +988,6 @@
         camera.rotation.x += ly * lookSpeed * dt;
         camera.rotation.x = clamp(camera.rotation.x, -1.2, 1.2);
 
-        // Zombies chase
         for(const z of zombies){
           const m = z.mesh;
           if(!m) continue;
@@ -884,7 +1001,6 @@
           m.rotation.y = Math.atan2(dirv.x, dirv.z);
         }
 
-        // SMG auto fire if holding
         if(isSMG() && FIRE.holding){
           shootOnce();
         }
@@ -906,11 +1022,9 @@
 
       const skinSku = await fetchEquippedSkinSku();
 
-      // Load arms + attach weapon to hand bone (so it matches lobby pointing/hand position)
       await loadSoldierArmsInFPS(skinSku);
       await attachWeaponToSoldierHandFPS(weaponSku);
 
-      // Start at level 1
       level = 1;
       killsThisLevel = 0;
       setHudLevel();
