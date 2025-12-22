@@ -65,7 +65,6 @@
       outline:none;
     }
 
-    /* HUD, mobile safe, never blocks joysticks */
     .hud-top{
       position:absolute;
       left:10px;
@@ -152,7 +151,7 @@
       color:#d8e5ff;
     }
     .tune-row label{
-      min-width:96px;
+      min-width:150px;
       opacity:.9;
     }
     .tune-row input[type="range"]{
@@ -328,35 +327,21 @@
           </div>
 
           <div class="tune" id="tunePanel">
-            <div class="hud-title" style="margin-bottom:2px;">Muzzle tuners</div>
+            <div class="hud-title" style="margin-bottom:2px;">Muzzle tuner</div>
 
             <div class="tune-row">
-              <label for="mzF">Forward</label>
-              <input id="mzF" type="range" min="-2.00" max="2.00" step="0.01" value="0.00">
-              <div class="tune-val" id="mzFVal">0.00</div>
-            </div>
-
-            <div class="tune-row">
-              <label for="mzU">Up</label>
-              <input id="mzU" type="range" min="-1.00" max="1.00" step="0.01" value="0.00">
-              <div class="tune-val" id="mzUVal">0.00</div>
-            </div>
-
-            <div class="tune-row">
-              <label for="mzR">Right</label>
-              <input id="mzR" type="range" min="-1.00" max="1.00" step="0.01" value="0.00">
-              <div class="tune-val" id="mzRVal">0.00</div>
-            </div>
-
-            <div class="tune-row">
-              <label for="flashSize">Flash size</label>
-              <input id="flashSize" type="range" min="0.02" max="0.18" step="0.01" value="0.06">
-              <div class="tune-val" id="flashSizeVal">0.06</div>
+              <label for="mzF">Barrel tip, forward</label>
+              <input id="mzF" type="range" min="-2.00" max="2.00" step="0.01" value="0.73">
+              <div class="tune-val" id="mzFVal">0.73</div>
             </div>
 
             <div class="tune-mini">
               <button class="tag btn" id="tuneResetBtn" type="button">Tune, reset</button>
               <span class="tag" id="hudMuzzle">MUZZLE, right hand</span>
+            </div>
+
+            <div class="hint" style="margin-top:8px;">
+              Locked, Up 0.08, Right 0.31, Flash 0.05
             </div>
           </div>
         </div>
@@ -434,15 +419,7 @@
     const resetBtn  = document.getElementById("resetBtn");
 
     const mzFEl = document.getElementById("mzF");
-    const mzUEl = document.getElementById("mzU");
-    const mzREl = document.getElementById("mzR");
-    const flashSizeEl = document.getElementById("flashSize");
-
     const mzFValEl = document.getElementById("mzFVal");
-    const mzUValEl = document.getElementById("mzUVal");
-    const mzRValEl = document.getElementById("mzRVal");
-    const flashSizeValEl = document.getElementById("flashSizeVal");
-
     const tuneResetBtn = document.getElementById("tuneResetBtn");
 
     const moveStick = document.getElementById("moveStick");
@@ -674,7 +651,6 @@
     let weaponRoot = null;
     let weaponGrip = null;
 
-    /* FIX, anchor bullets to the RIGHT HAND bone (so they come from the hand) */
     let rightHandAnchor = null;
 
     let isFiring = false;
@@ -683,12 +659,18 @@
     let aimYaw = 0.0;
     let aimPitch = CHEST_LOCK.pitch;
 
+    /* LOCKED screenshot values */
+    const LOCKED_UP = 0.08;
+    const LOCKED_RIGHT = 0.31;
+    const LOCKED_FLASH_SIZE = 0.05;
+
+    /* ONE tuner only, barrel tip forward */
     const MUZZLE_TUNE = {
-      f: parseFloat(mzFEl.value || "0"),
-      u: parseFloat(mzUEl.value || "0"),
-      r: parseFloat(mzREl.value || "0"),
-      flashSize: parseFloat(flashSizeEl.value || "0.06")
+      f: 0.73
     };
+
+    /* Single FX cleanup list, no per shot setTimeout */
+    const fxLive = [];
 
     function fmt(v){ return (Math.round(v*1000)/1000).toFixed(3); }
     function _setText(el, v){ el.textContent = (Math.round(v*100)/100).toFixed(2); }
@@ -702,7 +684,7 @@
     }
 
     function updateMuzzleHud(){
-      hudMuzzle.textContent = `MUZZLE, right hand, F ${fmt(MUZZLE_TUNE.f)} U ${fmt(MUZZLE_TUNE.u)} R ${fmt(MUZZLE_TUNE.r)}`;
+      hudMuzzle.textContent = `MUZZLE, right hand, F ${fmt(MUZZLE_TUNE.f)} U ${fmt(LOCKED_UP)} R ${fmt(LOCKED_RIGHT)}`;
     }
 
     function setFireModeLabel(){
@@ -811,7 +793,6 @@
       });
     }
 
-    /* never disable skeleton meshes, keep them enabled so bones always work */
     function setArmsOnlyVisibility(container){
       const meshes = (container && container.meshes) ? container.meshes : [];
       let shown = 0;
@@ -999,6 +980,7 @@
 
       hudSoldier.textContent = "SOLDIER, loaded";
       updatePosHud();
+      updateMuzzleHud();
     }
 
     async function loadWeaponToRightHand(sku){
@@ -1054,7 +1036,6 @@
       weaponBtn.textContent = (weaponSku === "wz_cityrunner_smg") ? "Weapon, SMG" : "Weapon, pistol";
       setFireModeLabel();
 
-      /* make sure anchor exists even if soldier loaded without it */
       ensureRightHandAnchor();
       updateMuzzleHud();
     }
@@ -1079,7 +1060,6 @@
     }
 
     function getMuzzleOrigin(){
-      /* FIX: start from RIGHT HAND, then apply tuners in camera-space */
       let base = null;
 
       if(rightHandAnchor){
@@ -1096,15 +1076,23 @@
         base = p.add(dir.scale(0.35));
       }
 
-      const fwd = camera.getForwardRay(1).direction;                 // forward
-      const up  = camera.getDirection(BABYLON.Axis.Y).normalize();    // up
-      const rt  = camera.getDirection(BABYLON.Axis.X).normalize();    // right
+      const fwd = camera.getForwardRay(1).direction;
+      const up  = camera.getDirection(BABYLON.Axis.Y).normalize();
+      const rt  = camera.getDirection(BABYLON.Axis.X).normalize();
 
       base.addInPlace(fwd.scale(MUZZLE_TUNE.f));
-      base.addInPlace(up.scale(MUZZLE_TUNE.u));
-      base.addInPlace(rt.scale(MUZZLE_TUNE.r));
+      base.addInPlace(up.scale(LOCKED_UP));
+      base.addInPlace(rt.scale(LOCKED_RIGHT));
 
       return base;
+    }
+
+    function fxRegister(mesh, lifeSeconds){
+      try{
+        mesh.isPickable = false;
+        mesh.renderingGroupId = 3;
+      }catch(e){}
+      fxLive.push({ mesh, dieAt: performance.now() * 0.001 + lifeSeconds });
     }
 
     function shootOnce(){
@@ -1115,7 +1103,6 @@
 
       const origin = getMuzzleOrigin();
 
-      /* direction is muzzle -> reticle aim point */
       const camRay = camera.getForwardRay(cfg.maxDist);
 
       const s = randSpread(cfg.spread);
@@ -1136,22 +1123,18 @@
       const hitPoint = (pick && pick.hit && pick.pickedPoint) ? pick.pickedPoint.clone() : origin.add(dir.scale(cfg.maxDist));
 
       const tracer = BABYLON.MeshBuilder.CreateLines("tr", { points: [origin, hitPoint] }, scene);
-      tracer.isPickable = false;
       tracer.alpha = 0.9;
       tracer.color = new BABYLON.Color3(0.9, 0.95, 1.0);
-      tracer.renderingGroupId = 3;
-      setTimeout(() => { try{ tracer.dispose(); }catch(e){} }, Math.round(cfg.tracerLife * 1000));
+      fxRegister(tracer, cfg.tracerLife);
 
-      const flash = BABYLON.MeshBuilder.CreateSphere("mf", { diameter: Math.max(0.01, MUZZLE_TUNE.flashSize) }, scene);
-      flash.isPickable = false;
-      flash.renderingGroupId = 3;
+      const flash = BABYLON.MeshBuilder.CreateSphere("mf", { diameter: Math.max(0.01, LOCKED_FLASH_SIZE) }, scene);
       const mm = new BABYLON.StandardMaterial("mfm", scene);
       mm.emissiveColor = new BABYLON.Color3(1.0, 0.85, 0.35);
       mm.diffuseColor = new BABYLON.Color3(0,0,0);
       mm.specularColor = new BABYLON.Color3(0,0,0);
       flash.material = mm;
       flash.position.copyFrom(origin);
-      setTimeout(() => { try{ flash.dispose(); }catch(e){} }, 40);
+      fxRegister(flash, 0.04);
 
       if(pick && pick.hit) flashHit();
     }
@@ -1200,10 +1183,24 @@
       const isTouch = ("ontouchstart" in window) || (navigator.maxTouchPoints > 0);
 
       scene.onBeforeRenderObservable.add(() => {
+        const now = performance.now() * 0.001;
+
+        /* single FX cleanup loop */
+        for(let i = fxLive.length - 1; i >= 0; i--){
+          const fx = fxLive[i];
+          if(!fx || !fx.mesh){
+            fxLive.splice(i,1);
+            continue;
+          }
+          if(now >= fx.dieAt){
+            try{ fx.mesh.dispose(); }catch(e){}
+            fxLive.splice(i,1);
+          }
+        }
+
         if(!soldierRoot || !chestPivot) return;
 
         const dt = scene.getEngine().getDeltaTime() * 0.001;
-        const now = performance.now() * 0.001;
 
         const lookMult = isTouch ? LOOK_SENS.TOUCH_MULT : 1.0;
         const lookX = applyDeadzone(lookState.dx) * lookMult;
@@ -1258,34 +1255,21 @@
       return scene;
     }
 
-    function syncTuners(){
-      MUZZLE_TUNE.f = parseFloat(mzFEl.value || "0");
-      MUZZLE_TUNE.u = parseFloat(mzUEl.value || "0");
-      MUZZLE_TUNE.r = parseFloat(mzREl.value || "0");
-      MUZZLE_TUNE.flashSize = parseFloat(flashSizeEl.value || "0.06");
-
+    function syncTuner(){
+      MUZZLE_TUNE.f = parseFloat(mzFEl.value || "0.73");
       _setText(mzFValEl, MUZZLE_TUNE.f);
-      _setText(mzUValEl, MUZZLE_TUNE.u);
-      _setText(mzRValEl, MUZZLE_TUNE.r);
-      _setText(flashSizeValEl, MUZZLE_TUNE.flashSize);
-
       updateMuzzleHud();
     }
 
-    [mzFEl, mzUEl, mzREl, flashSizeEl].forEach(el => {
-      el.addEventListener("input", syncTuners);
-      el.addEventListener("change", syncTuners);
-    });
+    mzFEl.addEventListener("input", syncTuner);
+    mzFEl.addEventListener("change", syncTuner);
 
     tuneResetBtn.addEventListener("click", () => {
-      mzFEl.value = "0.00";
-      mzUEl.value = "0.00";
-      mzREl.value = "0.00";
-      flashSizeEl.value = "0.06";
-      syncTuners();
+      mzFEl.value = "0.73";
+      syncTuner();
     });
 
-    syncTuners();
+    syncTuner();
 
     (function(){
       fireBtn.addEventListener("pointerdown", (e) => {
@@ -1304,7 +1288,7 @@
       const next = (weaponSku === "wz_basic_pistol") ? "wz_cityrunner_smg" : "wz_basic_pistol";
       try{
         await loadWeaponToRightHand(next);
-        syncTuners();
+        syncTuner();
       }catch(e){
         console.warn("weapon swap failed", e);
       }
@@ -1317,7 +1301,7 @@
         await loadWeaponToRightHand("wz_basic_pistol");
         applyChestMountAimed();
         setFireModeLabel();
-        syncTuners();
+        syncTuner();
       }catch(e){
         console.error("[CHEST CAM TEST] boot failed", e);
         hudSoldier.textContent = "SOLDIER, failed";
