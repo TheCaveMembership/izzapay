@@ -356,7 +356,7 @@
 
             <div class="tune-mini">
               <button class="tag btn" id="tuneResetBtn" type="button">Tune, reset</button>
-              <span class="tag" id="hudMuzzle">MUZZLE, auto</span>
+              <span class="tag" id="hudMuzzle">MUZZLE, right hand</span>
             </div>
           </div>
         </div>
@@ -674,11 +674,8 @@
     let weaponRoot = null;
     let weaponGrip = null;
 
-    /* NEW, muzzle anchor that actually sits at the FRONT of the gun */
-    let muzzleNode = null;
-    let muzzleBaseLocal = new BABYLON.Vector3(0,0,0);
-    let muzzleForwardAxis = "z";   /* "x" or "z" */
-    let muzzleForwardSign = 1;     /* +1 or -1 */
+    /* FIX, anchor bullets to the RIGHT HAND bone (so they come from the hand) */
+    let rightHandAnchor = null;
 
     let isFiring = false;
     let nextShotAt = 0;
@@ -705,9 +702,7 @@
     }
 
     function updateMuzzleHud(){
-      const ax = muzzleForwardAxis.toUpperCase();
-      const sg = muzzleForwardSign > 0 ? "+" : "-";
-      hudMuzzle.textContent = `MUZZLE, base auto, F ${fmt(MUZZLE_TUNE.f)} U ${fmt(MUZZLE_TUNE.u)} R ${fmt(MUZZLE_TUNE.r)}, axis ${sg}${ax}`;
+      hudMuzzle.textContent = `MUZZLE, right hand, F ${fmt(MUZZLE_TUNE.f)} U ${fmt(MUZZLE_TUNE.u)} R ${fmt(MUZZLE_TUNE.r)}`;
     }
 
     function setFireModeLabel(){
@@ -883,7 +878,6 @@
     }
 
     function clearWeapon(){
-      try{ if(muzzleNode){ muzzleNode.dispose(true,false); muzzleNode = null; } }catch(e){}
       try{ if(weaponGrip){ weaponGrip.dispose(true,false); weaponGrip = null; } }catch(e){}
       try{ if(weaponRoot){ weaponRoot.dispose(true,false); weaponRoot = null; } }catch(e){}
       try{
@@ -899,6 +893,8 @@
       clearWeapon();
       hipsBone = null;
       hipsBaseY = null;
+
+      try{ if(rightHandAnchor){ rightHandAnchor.dispose(true,false); rightHandAnchor = null; } }catch(e){}
 
       try{ if(chestPivot){ chestPivot.dispose(true,false); chestPivot = null; } }catch(e){}
       try{ if(chestBoneNode){ chestBoneNode.dispose(true,false); chestBoneNode = null; } }catch(e){}
@@ -932,23 +928,19 @@
       updateCamHud();
     }
 
-    function applyMuzzleTuners(){
-      if(!muzzleNode || !weaponGrip) return;
+    function ensureRightHandAnchor(){
+      if(rightHandAnchor) return;
+      if(!soldierSkinned || !soldierSkinned.skeleton) return;
 
-      const local = muzzleBaseLocal.clone();
+      const rh = findRightHandBone(soldierSkinned.skeleton);
+      if(!rh) return;
 
-      const forwardDelta = MUZZLE_TUNE.f * muzzleForwardSign;
-      if(muzzleForwardAxis === "z"){
-        local.z += forwardDelta;
-      } else {
-        local.x += forwardDelta;
-      }
-
-      local.y += MUZZLE_TUNE.u;
-      local.x += MUZZLE_TUNE.r;
-
-      muzzleNode.position.copyFrom(local);
-      muzzleNode.rotation.set(0,0,0);
+      rightHandAnchor = new BABYLON.TransformNode("rightHandAnchor", scene);
+      try{
+        rightHandAnchor.attachToBone(rh, soldierSkinned);
+        rightHandAnchor.position.set(0,0,0);
+        rightHandAnchor.rotation.set(0,0,0);
+      }catch(e){}
     }
 
     async function loadSoldierAndChestCam(){
@@ -1003,80 +995,10 @@
         hipsBaseY = hipsBone.position.y;
       }
 
+      ensureRightHandAnchor();
+
       hudSoldier.textContent = "SOLDIER, loaded";
       updatePosHud();
-    }
-
-    function buildAutoMuzzleBase(){
-      if(!weaponGrip) return;
-
-      muzzleBaseLocal.set(0,0,0);
-      muzzleForwardAxis = "z";
-      muzzleForwardSign = 1;
-
-      const inv = weaponGrip.getWorldMatrix().clone();
-      inv.invert();
-
-      let minX=Infinity,minY=Infinity,minZ=Infinity;
-      let maxX=-Infinity,maxY=-Infinity,maxZ=-Infinity;
-      let any = false;
-
-      const meshes = scene.meshes || [];
-      for(const m of meshes){
-        if(!m || m === weaponRoot || m === weaponGrip) continue;
-        if(m.parent !== weaponGrip) continue;
-
-        try{
-          const bi = m.getBoundingInfo && m.getBoundingInfo();
-          if(!bi) continue;
-          const bb = bi.boundingBox;
-          const pts = bb.vectorsWorld || [];
-          for(const p of pts){
-            const lp = BABYLON.Vector3.TransformCoordinates(p, inv);
-            if(!isFinite(lp.x) || !isFinite(lp.y) || !isFinite(lp.z)) continue;
-            any = true;
-            minX = Math.min(minX, lp.x); maxX = Math.max(maxX, lp.x);
-            minY = Math.min(minY, lp.y); maxY = Math.max(maxY, lp.y);
-            minZ = Math.min(minZ, lp.z); maxZ = Math.max(maxZ, lp.z);
-          }
-        }catch(e){}
-      }
-
-      if(!any){
-        muzzleBaseLocal.set(0,0,0);
-        muzzleForwardAxis = "z";
-        muzzleForwardSign = 1;
-        return;
-      }
-
-      const lenX = maxX - minX;
-      const lenZ = maxZ - minZ;
-
-      muzzleForwardAxis = (lenZ >= lenX) ? "z" : "x";
-
-      if(muzzleForwardAxis === "z"){
-        const distMax = Math.abs(maxZ);
-        const distMin = Math.abs(minZ);
-        const useMax = distMax >= distMin;
-        muzzleForwardSign = useMax ? 1 : -1;
-
-        const z = useMax ? maxZ : minZ;
-        const xMid = (minX + maxX) * 0.5;
-        const yMid = (minY + maxY) * 0.5;
-
-        muzzleBaseLocal.set(xMid, yMid, z + (0.02 * muzzleForwardSign));
-      } else {
-        const distMax = Math.abs(maxX);
-        const distMin = Math.abs(minX);
-        const useMax = distMax >= distMin;
-        muzzleForwardSign = useMax ? 1 : -1;
-
-        const x = useMax ? maxX : minX;
-        const zMid = (minZ + maxZ) * 0.5;
-        const yMid = (minY + maxY) * 0.5;
-
-        muzzleBaseLocal.set(x + (0.02 * muzzleForwardSign), yMid, zMid);
-      }
     }
 
     async function loadWeaponToRightHand(sku){
@@ -1127,18 +1049,14 @@
         }catch(e){}
       });
 
-      /* NEW, muzzle node sits on weaponGrip */
-      muzzleNode = new BABYLON.TransformNode("muzzleNode", scene);
-      muzzleNode.parent = weaponGrip;
-
-      buildAutoMuzzleBase();
-      applyMuzzleTuners();
-      updateMuzzleHud();
-
       weaponSku = sku;
       hudWeapon.textContent = (weaponSku === "wz_cityrunner_smg") ? "WEAPON, SMG" : "WEAPON, pistol";
       weaponBtn.textContent = (weaponSku === "wz_cityrunner_smg") ? "Weapon, SMG" : "Weapon, pistol";
       setFireModeLabel();
+
+      /* make sure anchor exists even if soldier loaded without it */
+      ensureRightHandAnchor();
+      updateMuzzleHud();
     }
 
     function resetAll(){
@@ -1151,13 +1069,7 @@
       if(soldierContainer) playIdleAnimationsSlow(soldierContainer);
       if(hipsBone && hipsBaseY !== null){ hipsBone.position.y = hipsBaseY; }
       updatePosHud();
-
-      /* rebuild muzzle base on reset too (safe) */
-      if(weaponGrip){
-        buildAutoMuzzleBase();
-        applyMuzzleTuners();
-        updateMuzzleHud();
-      }
+      updateMuzzleHud();
     }
 
     function randSpread(spread){
@@ -1167,15 +1079,32 @@
     }
 
     function getMuzzleOrigin(){
-      if(muzzleNode){
-        try{ return muzzleNode.getAbsolutePosition().clone(); }catch(e){}
+      /* FIX: start from RIGHT HAND, then apply tuners in camera-space */
+      let base = null;
+
+      if(rightHandAnchor){
+        try{ base = rightHandAnchor.getAbsolutePosition().clone(); }catch(e){}
       }
-      if(weaponGrip){
-        try{ return weaponGrip.getAbsolutePosition().clone(); }catch(e){}
+
+      if(!base && weaponGrip){
+        try{ base = weaponGrip.getAbsolutePosition().clone(); }catch(e){}
       }
-      const p = camera.getAbsolutePosition();
-      const dir = camera.getForwardRay(1).direction;
-      return p.add(dir.scale(0.35));
+
+      if(!base){
+        const p = camera.getAbsolutePosition();
+        const dir = camera.getForwardRay(1).direction;
+        base = p.add(dir.scale(0.35));
+      }
+
+      const fwd = camera.getForwardRay(1).direction;                 // forward
+      const up  = camera.getDirection(BABYLON.Axis.Y).normalize();    // up
+      const rt  = camera.getDirection(BABYLON.Axis.X).normalize();    // right
+
+      base.addInPlace(fwd.scale(MUZZLE_TUNE.f));
+      base.addInPlace(up.scale(MUZZLE_TUNE.u));
+      base.addInPlace(rt.scale(MUZZLE_TUNE.r));
+
+      return base;
     }
 
     function shootOnce(){
@@ -1340,7 +1269,6 @@
       _setText(mzRValEl, MUZZLE_TUNE.r);
       _setText(flashSizeValEl, MUZZLE_TUNE.flashSize);
 
-      applyMuzzleTuners();
       updateMuzzleHud();
     }
 
@@ -1376,7 +1304,7 @@
       const next = (weaponSku === "wz_basic_pistol") ? "wz_cityrunner_smg" : "wz_basic_pistol";
       try{
         await loadWeaponToRightHand(next);
-        syncTuners(); /* re-apply offsets after swap */
+        syncTuners();
       }catch(e){
         console.warn("weapon swap failed", e);
       }
