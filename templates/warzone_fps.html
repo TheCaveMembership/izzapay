@@ -34,7 +34,7 @@
       overscroll-behavior:none;
     }
 
-    /* SAME MANUAL ROTATION MODEL AS YOUR LOBBY */
+    /* ROTATION WRAPPER */
     .rot-wrapper{
       position:fixed;
       top:0;
@@ -189,11 +189,11 @@
     }
     .countdown.show{ opacity:1; }
 
-    /* Touch controls */
+    /* Touch UI from test page */
     .touch-ui{
       position:absolute;
       inset:0;
-      z-index:20;
+      z-index:50;
       pointer-events:none;
     }
     .stick{
@@ -224,34 +224,111 @@
       pointer-events:none;
     }
 
-    .fireBtn{
+    .fire-btn{
       position:absolute;
-      right:18px;
-      bottom:176px;
-      width:92px;
-      height:92px;
+      right:182px;
+      bottom:46px;
+      width:110px;
+      height:110px;
       border-radius:50%;
-      border:none;
+      border:1px solid rgba(255,59,107,.55);
+      background:radial-gradient(circle at 30% 30%,rgba(255,59,107,.28),rgba(0,0,0,.22));
+      box-shadow:0 0 28px rgba(255,59,107,.14), 0 0 26px rgba(0,255,255,.08);
       pointer-events:auto;
       touch-action:none;
-      cursor:pointer;
-      background:linear-gradient(145deg,rgba(0,255,255,.95),rgba(255,59,107,.92));
-      color:#001520;
-      font-weight:900;
-      letter-spacing:.12em;
+      display:flex;
+      align-items:center;
+      justify-content:center;
+      font-weight:700;
+      letter-spacing:.10em;
       text-transform:uppercase;
-      box-shadow:0 0 26px rgba(0,255,255,.32), 0 0 32px rgba(255,59,107,.22);
+      color:#ffe7ef;
+      user-select:none;
+      opacity:0.96;
     }
-    .fireBtn:active{ transform:scale(.98); }
+    .fire-btn:active{ transform:scale(.98); }
+    .fire-sub{
+      font-size:10px;
+      opacity:.85;
+      margin-top:2px;
+      letter-spacing:.12em;
+      color:#ffd2de;
+    }
+    .fire-wrap{
+      display:flex;
+      flex-direction:column;
+      align-items:center;
+      justify-content:center;
+      line-height:1.1;
+    }
+
+    .reticle{
+      position:absolute;
+      left:50%;
+      top:50%;
+      transform:translate(-50%,-50%);
+      width:18px;
+      height:18px;
+      z-index:24;
+      pointer-events:none;
+      opacity:0.92;
+      filter:drop-shadow(0 0 10px rgba(0,255,255,.10));
+    }
+    .reticle::before{
+      content:"";
+      position:absolute;
+      left:50%;
+      top:50%;
+      width:3px;
+      height:3px;
+      border-radius:50%;
+      background:rgba(255,255,255,.92);
+      transform:translate(-50%,-50%);
+    }
+    .reticle .h,.reticle .v{
+      position:absolute;
+      left:50%;
+      top:50%;
+      background:rgba(255,255,255,.85);
+      transform:translate(-50%,-50%);
+    }
+    .reticle .h{ width:18px; height:1px; opacity:.55; }
+    .reticle .v{ width:1px; height:18px; opacity:.55; }
+
+    .hit{
+      position:absolute;
+      left:50%;
+      top:50%;
+      transform:translate(-50%,-50%);
+      width:28px;
+      height:28px;
+      z-index:25;
+      pointer-events:none;
+      opacity:0;
+    }
+    .hit::before,.hit::after{
+      content:"";
+      position:absolute;
+      left:50%;
+      top:50%;
+      width:28px;
+      height:2px;
+      background:rgba(255,255,255,.9);
+      transform-origin:center;
+      box-shadow:0 0 10px rgba(0,255,255,.18);
+    }
+    .hit::before{ transform:translate(-50%,-50%) rotate(45deg); }
+    .hit::after{ transform:translate(-50%,-50%) rotate(-45deg); }
 
     @media (min-width:900px){
       .stick{ width:160px; height:160px; }
-      .fireBtn{ width:100px; height:100px; }
+      .fire-btn{ width:120px; height:120px; }
     }
   </style>
 
   <script src="https://cdn.babylonjs.com/babylon.js"></script>
   <script src="https://cdn.babylonjs.com/loaders/babylonjs.loaders.min.js"></script>
+  <script src="https://cdn.babylonjs.com/materialsLibrary/babylon.gridMaterial.min.js"></script>
 </head>
 
 <body>
@@ -289,22 +366,25 @@
 
       <div class="countdown" id="countdownText">3</div>
 
+      <div class="reticle"><div class="h"></div><div class="v"></div></div>
+      <div class="hit" id="hitMarker"></div>
+
       <div class="touch-ui" id="touchUi">
-        <div class="stick left" id="moveStick">
-          <div class="nub" id="moveNub"></div>
-        </div>
+        <div class="stick left" id="moveStick"><div class="nub" id="moveNub"></div></div>
+        <div class="stick right" id="turnStick"><div class="nub" id="turnNub"></div></div>
 
-        <div class="stick right" id="lookStick">
-          <div class="nub" id="lookNub"></div>
+        <div class="fire-btn" id="fireBtn" role="button" aria-label="Fire">
+          <div class="fire-wrap">
+            <div>FIRE</div>
+            <div class="fire-sub" id="fireModeText">tap</div>
+          </div>
         </div>
-
-        <button class="fireBtn" id="fireBtn" type="button">Fire</button>
       </div>
     </div>
   </div>
 
   <script>
-    /* Rotation wrapper, locked to the more robust test page behavior */
+    /* Rotation wrapper, same behavior as test page */
     (function(){
       const wrapper = document.getElementById("rotWrapper");
       function updateLayout(){
@@ -368,7 +448,7 @@
       }catch(e){}
     }
 
-    /* HUD elements */
+    /* HUD */
     const hudUser = document.getElementById("hudUser");
     const hudWeapon = document.getElementById("hudWeapon");
     const hudAmmo = document.getElementById("hudAmmo");
@@ -376,6 +456,8 @@
     const enterOverlay = document.getElementById("enterOverlay");
     const countdownText = document.getElementById("countdownText");
     const exitBtn = document.getElementById("exitBtn");
+    const hitMarker = document.getElementById("hitMarker");
+    const fireModeText = document.getElementById("fireModeText");
 
     hudUser.textContent = USER_CANON || "Operator";
 
@@ -384,7 +466,7 @@
       window.location.href = "/warzone/" + qs;
     });
 
-    /* Helpers for weapon sku consistency */
+    /* Weapon sku helpers */
     function normalizeWeaponSku(s){
       const sku = (s || "").toString().trim();
       if (!sku) return "wz_basic_pistol";
@@ -398,7 +480,7 @@
       return t.replaceAll("_", " ");
     }
 
-    /* Level system */
+    /* LEVEL logic (KEEP) */
     let level = 1;
     let killsThisLevel = 0;
 
@@ -413,23 +495,21 @@
     }
     setHudLevel();
 
-    /* Babylon setup */
+    /* Babylon */
     const canvas = document.getElementById("renderCanvas");
     canvas.tabIndex = 1;
 
-    const engine = new BABYLON.Engine(canvas, true, {
-      preserveDrawingBuffer:true,
-      stencil:true
-    });
+    const engine = new BABYLON.Engine(canvas, true, { preserveDrawingBuffer:true, stencil:true });
 
     let scene, camera;
-    let weaponSku = "wz_basic_pistol";
-    let ammo = 0;
 
-    /* Soldier (arms view) + weapon attached to hand bone */
+    /* Soldier + weapon (from test page, locked) */
     let soldierContainer = null;
     let soldierRoot = null;
     let soldierSkinned = null;
+
+    let chestBoneNode = null;
+    let chestPivot = null;
 
     let weaponContainer = null;
     let weaponRoot = null;
@@ -437,41 +517,33 @@
 
     let rightHandAnchor = null;
 
-    /* Zombies */
-    const zombies = [];
+    let weaponSku = "wz_basic_pistol";
+    let ammo = 0;
 
-    /* Fire behavior, keep your original cadence logic */
-    const FIRE = {
-      pistolCooldownMs: 220,
-      smgIntervalMs: 95,
-      lastShotAt: 0,
-      holding: false,
-      maxDist: 200
+    /* Chest cam lock from test */
+    const CHEST_LOCK = {
+      pivotPos: new BABYLON.Vector3(0.00, 0.22, 0.10),
+      camPos:   new BABYLON.Vector3(-0.650, 1.640, -0.969),
+      pitch:    -0.30
     };
 
-    /* Joystick system, locked to the test page style */
-    const JOY = {
-      MOVE_SPEED: 4.2,
-      DEADZONE: 0.10
-    };
-    const LOOK = {
-      YAW_SPEED:  2.4,
-      PITCH_SPEED: 2.4,
-      PITCH_MIN: -1.2,
-      PITCH_MAX:  1.2
-    };
-    const LOOK_SENS = {
-      TOUCH_MULT: 0.78
+    /* Locked muzzle offsets from test, no tuning UI */
+    const MUZZLE_LOCK = {
+      forward: 0.73,
+      up: 0.08,
+      right: 0.31,
+      flashSize: 0.05
     };
 
-    const moveStick = document.getElementById("moveStick");
-    const moveNub   = document.getElementById("moveNub");
-    const lookStick = document.getElementById("lookStick");
-    const lookNub   = document.getElementById("lookNub");
-    const fireBtn   = document.getElementById("fireBtn");
+    /* Movement + look from test */
+    const JOY = { MOVE_SPEED: 5.5, DEADZONE: 0.10 };
+    const LOOK = { YAW_SPEED: 1.55, PITCH_SPEED: 1.15, PITCH_MIN: -1.05, PITCH_MAX: 0.45 };
+    const LOOK_SENS = { TOUCH_MULT: 0.78 };
 
-    function clamp(v, a, b){ return Math.max(a, Math.min(b, v)); }
+    let aimYaw = 0.0;
+    let aimPitch = CHEST_LOCK.pitch;
 
+    function clamp(v,a,b){ return Math.max(a, Math.min(b, v)); }
     function applyDeadzone(x){
       const ax = Math.abs(x);
       if(ax < JOY.DEADZONE) return 0;
@@ -479,123 +551,19 @@
       return Math.sign(x) * clamp(s, 0, 1);
     }
 
-    const lookState = { active:false, id:null, dx:0, dy:0, el:null, nub:null, max:1, cx:0, cy:0, recalc:null };
-    const moveState = { active:false, id:null, dx:0, dy:0, el:null, nub:null, max:1, cx:0, cy:0, recalc:null };
+    /* Fire logic (KEEP ammo + cooldown behavior), but bullet origin + spread from test */
+    const FIRE = {
+      pistolCooldownMs: 220,
+      smgIntervalMs: 95,
+      lastShotAt: 0,
+      holding: false,
+      maxDist: 200,
+      spreadPistol: 0.0035,
+      spreadSmg: 0.0070
+    };
 
-    function stickSetup(state, el, nub, invertX){
-      state.el = el;
-      state.nub = nub;
-      function recalc(){
-        const box = el.getBoundingClientRect();
-        state.cx = box.left + box.width/2;
-        state.cy = box.top + box.height/2;
-        state.max = (box.width/2) - (nub.getBoundingClientRect().width/2);
-        if(state.max < 10) state.max = 10;
-      }
-      state.recalc = recalc;
-      recalc();
-      window.addEventListener("resize", recalc);
-      if(window.visualViewport){
-        window.visualViewport.addEventListener("resize", recalc);
-        window.visualViewport.addEventListener("scroll", recalc);
-      }
+    function isSMG(){ return weaponSku === "wz_cityrunner_smg"; }
 
-      function setFromClient(clientX, clientY){
-        const nx = clamp(clientX - state.cx, -state.max, state.max);
-        const ny = clamp(clientY - state.cy, -state.max, state.max);
-        nub.style.transform = `translate(calc(-50% + ${nx}px), calc(-50% + ${ny}px))`;
-
-        state.dx = nx / state.max;
-        state.dy = ny / state.max;
-
-        if(invertX) state.dx = -state.dx;
-      }
-
-      function reset(){
-        nub.style.transform = "translate(-50%,-50%)";
-        state.dx = 0;
-        state.dy = 0;
-      }
-
-      el.addEventListener("pointerdown", (e) => {
-        e.preventDefault();
-        recalc();
-        state.active = true;
-        state.id = e.pointerId;
-        setFromClient(e.clientX, e.clientY);
-      }, { passive:false });
-
-      window.addEventListener("pointermove", (e) => {
-        if(!state.active || e.pointerId !== state.id) return;
-        e.preventDefault();
-        setFromClient(e.clientX, e.clientY);
-      }, { passive:false });
-
-      window.addEventListener("pointerup", (e) => {
-        if(!state.active || e.pointerId !== state.id) return;
-        state.active = false;
-        state.id = null;
-        reset();
-      }, { passive:true });
-
-      window.addEventListener("pointercancel", (e) => {
-        if(!state.active || e.pointerId !== state.id) return;
-        state.active = false;
-        state.id = null;
-        reset();
-      }, { passive:true });
-
-      el.addEventListener("touchstart", (e) => {
-        if(!e.changedTouches || !e.changedTouches.length) return;
-        e.preventDefault();
-        recalc();
-        const t = e.changedTouches[0];
-        state.active = true;
-        state.id = t.identifier;
-        setFromClient(t.clientX, t.clientY);
-      }, { passive:false });
-
-      window.addEventListener("touchmove", (e) => {
-        if(!state.active) return;
-        if(!e.changedTouches || !e.changedTouches.length) return;
-        for(const t of e.changedTouches){
-          if(t.identifier === state.id){
-            setFromClient(t.clientX, t.clientY);
-            break;
-          }
-        }
-      }, { passive:false });
-
-      window.addEventListener("touchend", (e) => {
-        if(!state.active) return;
-        if(!e.changedTouches || !e.changedTouches.length) return;
-        for(const t of e.changedTouches){
-          if(t.identifier === state.id){
-            state.active = false;
-            state.id = null;
-            reset();
-            break;
-          }
-        }
-      }, { passive:true });
-
-      window.addEventListener("touchcancel", () => {
-        if(!state.active) return;
-        state.active = false;
-        state.id = null;
-        reset();
-      }, { passive:true });
-
-      return { reset };
-    }
-
-    stickSetup(moveState, moveStick, moveNub, false);
-    stickSetup(lookState, lookStick, lookNub, true);
-
-    /* Fire button, pistol tap, SMG hold */
-    function isSMG(){
-      return weaponSku === "wz_cityrunner_smg";
-    }
     function canShoot(nowMs){
       if(ammo <= 0) return false;
       if(isSMG()){
@@ -604,131 +572,51 @@
       return (nowMs - FIRE.lastShotAt) >= FIRE.pistolCooldownMs;
     }
 
-    /* Locked test page muzzle settings */
-    const LOCKED_UP = 0.08;
-    const LOCKED_RIGHT = 0.31;
-    const LOCKED_FLASH_SIZE = 0.05;
-    const MUZZLE_TUNE = { f: 0.73 };
-
-    /* Single FX cleanup loop */
-    const fxLive = [];
-    function fxRegister(mesh, lifeSeconds){
-      try{
-        mesh.isPickable = false;
-        mesh.renderingGroupId = 3;
-      }catch(e){}
-      fxLive.push({ mesh, dieAt: performance.now() * 0.001 + lifeSeconds });
+    function setFireModeLabel(){
+      fireModeText.textContent = isSMG() ? "hold" : "tap";
     }
 
-    function ensureRightHandAnchor(){
-      if(rightHandAnchor) return;
-      if(!soldierSkinned || !soldierSkinned.skeleton) return;
-
-      const sk = soldierSkinned.skeleton;
-      const exact = sk.bones.find(b => (b.name || "") === "mixamorig:RightHand.209_221");
-      const rh = exact || sk.bones.find(b => /mixamorig:RightHand/i.test(b.name || "")) || sk.bones.find(b => /RightHand/i.test(b.name || "")) || null;
-      if(!rh) return;
-
-      rightHandAnchor = new BABYLON.TransformNode("rightHandAnchorFPS", scene);
-      try{
-        rightHandAnchor.attachToBone(rh, soldierSkinned);
-        rightHandAnchor.position.set(0,0,0);
-        rightHandAnchor.rotation.set(0,0,0);
-      }catch(e){}
+    function flashHit(){
+      hitMarker.style.opacity = "1";
+      hitMarker.style.transition = "none";
+      requestAnimationFrame(() => {
+        hitMarker.style.transition = "opacity 120ms ease";
+        hitMarker.style.opacity = "0";
+      });
     }
 
-    function getMuzzleOrigin(){
-      let base = null;
+    /* Zombies (KEEP) */
+    const zombies = [];
 
-      if(rightHandAnchor){
-        try{ base = rightHandAnchor.getAbsolutePosition().clone(); }catch(e){}
-      }
-      if(!base && weaponGrip){
-        try{ base = weaponGrip.getAbsolutePosition().clone(); }catch(e){}
-      }
-      if(!base){
-        const p = camera.getAbsolutePosition();
-        const dir = camera.getForwardRay(1).direction;
-        base = p.add(dir.scale(0.35));
-      }
-
-      const fwd = camera.getForwardRay(1).direction;
-      const up  = camera.getDirection(BABYLON.Axis.Y).normalize();
-      const rt  = camera.getDirection(BABYLON.Axis.X).normalize();
-
-      base.addInPlace(fwd.scale(MUZZLE_TUNE.f));
-      base.addInPlace(up.scale(LOCKED_UP));
-      base.addInPlace(rt.scale(LOCKED_RIGHT));
-
-      return base;
+    function createZombie(x, z){
+      const body = BABYLON.MeshBuilder.CreateBox("z", { size: 1.0 }, scene);
+      body.position.set(x, 0.5, z);
+      body.metadata = { isZombie:true, hp:2 };
+      const mat = new BABYLON.StandardMaterial("zm", scene);
+      mat.emissiveColor = new BABYLON.Color3(0.1, 0.9, 0.4);
+      mat.diffuseColor = new BABYLON.Color3(0.1, 0.2, 0.1);
+      body.material = mat;
+      zombies.push({ mesh: body, speed: 1.2 + Math.random()*0.8 });
     }
 
-    function shootOnce(){
-      const nowMs = performance.now();
-      if(!canShoot(nowMs)) return;
-      FIRE.lastShotAt = nowMs;
-
-      ammo = Math.max(0, ammo - 1);
-      hudAmmo.textContent = `AMMO, ${ammo}`;
-
-      /* Keep your firing distance, use locked test muzzle origin */
-      const origin = getMuzzleOrigin();
-      const forward = camera.getForwardRay(FIRE.maxDist).direction;
-
-      const ray = new BABYLON.Ray(origin, forward, FIRE.maxDist);
-      const hit = scene.pickWithRay(ray, (m) => m && m.metadata && m.metadata.isZombie);
-
-      /* Tracer + flash, no setTimeout */
-      const endPoint = (hit && hit.hit && hit.pickedPoint) ? hit.pickedPoint.clone() : origin.add(forward.scale(FIRE.maxDist));
-
-      const tracer = BABYLON.MeshBuilder.CreateLines("tr", { points: [origin, endPoint] }, scene);
-      tracer.alpha = 0.9;
-      tracer.color = new BABYLON.Color3(0.9, 0.95, 1.0);
-      fxRegister(tracer, isSMG() ? 0.045 : 0.06);
-
-      const flash = BABYLON.MeshBuilder.CreateSphere("mf", { diameter: Math.max(0.01, LOCKED_FLASH_SIZE) }, scene);
-      const mm = new BABYLON.StandardMaterial("mfm", scene);
-      mm.emissiveColor = new BABYLON.Color3(1.0, 0.85, 0.35);
-      mm.diffuseColor = new BABYLON.Color3(0,0,0);
-      mm.specularColor = new BABYLON.Color3(0,0,0);
-      flash.material = mm;
-      flash.position.copyFrom(origin);
-      fxRegister(flash, 0.04);
-
-      /* Kill logic, unchanged */
-      if(hit && hit.pickedMesh){
-        const z = hit.pickedMesh;
-        z.metadata.hp = (z.metadata.hp || 1) - 1;
-        if(z.metadata.hp <= 0){
-          const idx = zombies.findIndex(x => x.mesh === z);
-          if(idx >= 0) zombies.splice(idx, 1);
-          try{ z.dispose(); }catch(e){}
-
-          killsThisLevel += 1;
-
-          const target = targetKillsForLevel(level);
-          if(killsThisLevel >= target){
-            level += 1;
-            killsThisLevel = 0;
-            setHudLevel();
-            spawnLevel(level);
-          }
-        }
+    function clearZombies(){
+      while(zombies.length){
+        const z = zombies.pop();
+        try{ z.mesh && z.mesh.dispose(); }catch(e){}
       }
-
-      camera.rotation.x = clamp(camera.rotation.x - 0.02, -1.25, 1.25);
     }
 
-    fireBtn.addEventListener("pointerdown", (e) => {
-      e.preventDefault();
-      FIRE.holding = true;
-      if(!isSMG()) shootOnce();
-    }, { passive:false });
-
-    function stopHold(){ FIRE.holding = false; }
-    fireBtn.addEventListener("pointerup", stopHold, { passive:true });
-    fireBtn.addEventListener("pointercancel", stopHold, { passive:true });
-    fireBtn.addEventListener("pointerleave", stopHold, { passive:true });
+    function spawnLevel(lv){
+      clearZombies();
+      const n = targetKillsForLevel(lv);
+      for(let i=0;i<n;i++){
+        const angle = (i / n) * Math.PI * 2;
+        const r = 18 + Math.random()*10;
+        const x = Math.cos(angle) * r;
+        const z = Math.sin(angle) * r;
+        createZombie(x, z);
+      }
+    }
 
     /* Assets */
     function getSkinAsset(){
@@ -774,6 +662,7 @@
       return WEAPON_TUNING[s] || WEAPON_TUNING.wz_basic_pistol;
     }
 
+    /* Shop fetch (KEEP) */
     async function fetchEquippedSkinSku(){
       try{
         const res = await fetch("/warzone/api/shop?slot=skins" + uQS(), { credentials:"include" });
@@ -809,7 +698,141 @@
       }
     }
 
-    /* Soldier + weapon attach helpers */
+    /* Stick controls from test page */
+    const moveStick = document.getElementById("moveStick");
+    const moveNub   = document.getElementById("moveNub");
+    const lookStick = document.getElementById("turnStick");
+    const lookNub   = document.getElementById("turnNub");
+    const fireBtn   = document.getElementById("fireBtn");
+
+    const lookState = { active:false, id:null, dx:0, dy:0, el:null, nub:null, max:1, cx:0, cy:0, recalc:null };
+    const moveState = { active:false, id:null, dx:0, dy:0, el:null, nub:null, max:1, cx:0, cy:0, recalc:null };
+
+    function stickSetup(state, el, nub){
+      state.el = el;
+      state.nub = nub;
+      function recalc(){
+        const box = el.getBoundingClientRect();
+        state.cx = box.left + box.width/2;
+        state.cy = box.top + box.height/2;
+        state.max = (box.width/2) - (nub.getBoundingClientRect().width/2);
+        if(state.max < 10) state.max = 10;
+      }
+      state.recalc = recalc;
+      recalc();
+      window.addEventListener("resize", recalc);
+      if(window.visualViewport){
+        window.visualViewport.addEventListener("resize", recalc);
+        window.visualViewport.addEventListener("scroll", recalc);
+      }
+    }
+
+    stickSetup(lookState, lookStick, lookNub);
+    stickSetup(moveState, moveStick, moveNub);
+
+    function stickSetFromClient(state, clientX, clientY){
+      const nx = clamp(clientX - state.cx, -state.max, state.max);
+      const ny = clamp(clientY - state.cy, -state.max, state.max);
+      state.nub.style.transform = `translate(calc(-50% + ${nx}px), calc(-50% + ${ny}px))`;
+
+      state.dx = nx / state.max;
+      state.dy = ny / state.max;
+
+      if(state === lookState){
+        state.dx = -state.dx;
+      }
+    }
+    function stickReset(state){
+      state.nub.style.transform = "translate(-50%,-50%)";
+      state.dx = 0;
+      state.dy = 0;
+    }
+
+    function bindGlobalStick(state){
+      state.el.addEventListener("pointerdown", (e) => {
+        e.preventDefault();
+        state.recalc && state.recalc();
+        state.active = true;
+        state.id = e.pointerId;
+        stickSetFromClient(state, e.clientX, e.clientY);
+      }, { passive:false });
+
+      window.addEventListener("pointermove", (e) => {
+        if(!state.active || e.pointerId !== state.id) return;
+        e.preventDefault();
+        stickSetFromClient(state, e.clientX, e.clientY);
+      }, { passive:false });
+
+      window.addEventListener("pointerup", (e) => {
+        if(!state.active || e.pointerId !== state.id) return;
+        state.active = false;
+        state.id = null;
+        stickReset(state);
+      }, { passive:true });
+
+      window.addEventListener("pointercancel", (e) => {
+        if(!state.active || e.pointerId !== state.id) return;
+        state.active = false;
+        state.id = null;
+        stickReset(state);
+      }, { passive:true });
+
+      state.el.addEventListener("touchstart", (e) => {
+        if(!e.changedTouches || !e.changedTouches.length) return;
+        e.preventDefault();
+        state.recalc && state.recalc();
+        const t = e.changedTouches[0];
+        state.active = true;
+        state.id = t.identifier;
+        stickSetFromClient(state, t.clientX, t.clientY);
+      }, { passive:false });
+
+      window.addEventListener("touchmove", (e) => {
+        if(!state.active) return;
+        if(!e.changedTouches || !e.changedTouches.length) return;
+        for(const t of e.changedTouches){
+          if(t.identifier === state.id){
+            stickSetFromClient(state, t.clientX, t.clientY);
+            break;
+          }
+        }
+      }, { passive:false });
+
+      window.addEventListener("touchend", (e) => {
+        if(!state.active) return;
+        if(!e.changedTouches || !e.changedTouches.length) return;
+        for(const t of e.changedTouches){
+          if(t.identifier === state.id){
+            state.active = false;
+            state.id = null;
+            stickReset(state);
+            break;
+          }
+        }
+      }, { passive:true });
+
+      window.addEventListener("touchcancel", () => {
+        if(!state.active) return;
+        state.active = false;
+        state.id = null;
+        stickReset(state);
+      }, { passive:true });
+    }
+
+    bindGlobalStick(lookState);
+    bindGlobalStick(moveState);
+
+    /* FX cleanup list (no setTimeout) */
+    const fxLive = [];
+    function fxRegister(mesh, lifeSeconds){
+      try{
+        mesh.isPickable = false;
+        mesh.renderingGroupId = 3;
+      }catch(e){}
+      fxLive.push({ mesh, dieAt: performance.now() * 0.001 + lifeSeconds });
+    }
+
+    /* Soldier helpers from test */
     function findSkinnedMeshFromContainer(container){
       try{
         const meshes = (container && container.meshes) ? container.meshes : [];
@@ -818,37 +841,45 @@
         return null;
       }
     }
-    function findBoneByNameOrIncludes(skeleton, want){
-      if (!skeleton || !skeleton.bones) return null;
-      const exact = skeleton.bones.find(b => (b.name || "") === want);
-      if (exact) return exact;
-      const wantLow = (want || "").toLowerCase();
-      return skeleton.bones.find(b => ((b.name || "").toLowerCase().includes(wantLow))) || null;
+
+    function findRightHandBone(skeleton){
+      if(!skeleton || !skeleton.bones || !skeleton.bones.length) return null;
+      const exact = skeleton.bones.find(b => (b.name || "") === "mixamorig:RightHand.209_221");
+      if(exact) return exact;
+      const rx = skeleton.bones.find(b => /mixamorig:RightHand/i.test(b.name || ""));
+      if(rx) return rx;
+      const generic = skeleton.bones.find(b => /RightHand/i.test(b.name || ""));
+      if(generic) return generic;
+      const anyHand = skeleton.bones.find(b => /Hand/i.test(b.name || ""));
+      if(anyHand) return anyHand;
+      return null;
     }
 
-    function clearWeapon(){
-      try{ if(weaponGrip){ weaponGrip.dispose(true,false); weaponGrip = null; } }catch(e){}
-      try{ if(weaponRoot){ weaponRoot.dispose(true,false); weaponRoot = null; } }catch(e){}
-      try{
-        if(weaponContainer){
-          weaponContainer.removeAllFromScene();
-          weaponContainer.dispose();
-          weaponContainer = null;
-        }
-      }catch(e){}
+    function findChestBone(skeleton){
+      if(!skeleton || !skeleton.bones || !skeleton.bones.length) return null;
+      const prefer = [
+        /mixamorig:Spine2/i,
+        /mixamorig:Spine1/i,
+        /mixamorig:Spine\b/i,
+        /mixamorig:Neck/i
+      ];
+      for(const rx of prefer){
+        const b = skeleton.bones.find(x => rx.test(x.name || ""));
+        if(b) return b;
+      }
+      return skeleton.bones.find(x => /Spine/i.test(x.name || "")) || null;
     }
 
-    function clearSoldier(){
-      clearWeapon();
-      soldierSkinned = null;
-      try{ if(rightHandAnchor){ rightHandAnchor.dispose(true,false); rightHandAnchor = null; } }catch(e){}
-      try{ if(soldierRoot){ soldierRoot.dispose(true,false); soldierRoot = null; } }catch(e){}
+    function playIdleAnimationsSlow(container){
       try{
-        if(soldierContainer){
-          soldierContainer.removeAllFromScene();
-          soldierContainer.dispose();
-          soldierContainer = null;
-        }
+        const groups = (container && container.animationGroups) ? container.animationGroups : [];
+        if(!groups.length) return;
+        groups.forEach(g => {
+          try{
+            g.stop();
+            g.start(true, 0.05);
+          }catch(e){}
+        });
       }catch(e){}
     }
 
@@ -955,7 +986,63 @@
       hideHeadAndNeck(container);
     }
 
-    async function loadSoldierArmsInFPS(skinSku){
+    function clearWeapon(){
+      try{ if(weaponGrip){ weaponGrip.dispose(true,false); weaponGrip = null; } }catch(e){}
+      try{ if(weaponRoot){ weaponRoot.dispose(true,false); weaponRoot = null; } }catch(e){}
+      try{
+        if(weaponContainer){
+          weaponContainer.removeAllFromScene();
+          weaponContainer.dispose();
+          weaponContainer = null;
+        }
+      }catch(e){}
+    }
+
+    function clearSoldier(){
+      clearWeapon();
+
+      try{ if(rightHandAnchor){ rightHandAnchor.dispose(true,false); rightHandAnchor = null; } }catch(e){}
+      try{ if(chestPivot){ chestPivot.dispose(true,false); chestPivot = null; } }catch(e){}
+      try{ if(chestBoneNode){ chestBoneNode.dispose(true,false); chestBoneNode = null; } }catch(e){}
+      try{ if(soldierRoot){ soldierRoot.dispose(true,false); soldierRoot = null; } }catch(e){}
+
+      soldierSkinned = null;
+
+      try{
+        if(soldierContainer){
+          soldierContainer.removeAllFromScene();
+          soldierContainer.dispose();
+          soldierContainer = null;
+        }
+      }catch(e){}
+    }
+
+    function ensureRightHandAnchor(){
+      if(rightHandAnchor) return;
+      if(!soldierSkinned || !soldierSkinned.skeleton) return;
+
+      const rh = findRightHandBone(soldierSkinned.skeleton);
+      if(!rh) return;
+
+      rightHandAnchor = new BABYLON.TransformNode("rightHandAnchor", scene);
+      try{
+        rightHandAnchor.attachToBone(rh, soldierSkinned);
+        rightHandAnchor.position.set(0,0,0);
+        rightHandAnchor.rotation.set(0,0,0);
+      }catch(e){}
+    }
+
+    function applyChestMountAimed(){
+      if(!chestPivot || !camera) return;
+
+      chestPivot.position.copyFrom(CHEST_LOCK.pivotPos);
+      chestPivot.rotation.set(0, 0, 0);
+
+      camera.position.copyFrom(CHEST_LOCK.camPos);
+      camera.rotation.set(aimPitch, 0, 0);
+    }
+
+    async function loadSoldierAndChestCam(){
       clearSoldier();
 
       const asset = getSkinAsset();
@@ -963,50 +1050,67 @@
       cont.addAllToScene();
       soldierContainer = cont;
 
-      soldierRoot = new BABYLON.TransformNode("soldierRootFPS", scene);
-
-      const nodes = []
-        .concat(cont.meshes || [])
-        .concat(cont.transformNodes || []);
-      nodes.forEach(n => {
-        if(!n) return;
-        try{ n.parent = soldierRoot; }catch(e){}
+      soldierRoot = new BABYLON.TransformNode("soldierRoot", scene);
+      (cont.rootNodes || []).forEach(rn => {
+        if(!rn) return;
+        try{ rn.parent = soldierRoot; }catch(e){}
       });
 
-      /* Arms live in camera space */
-      soldierRoot.parent = camera;
-      soldierRoot.position = new BABYLON.Vector3(0.00, -1.72, 0.00);
-      soldierRoot.rotation = new BABYLON.Vector3(0, Math.PI, 0);
-      soldierRoot.scaling = new BABYLON.Vector3(0.72, 0.72, 0.72);
-
-      setArmsOnlyVisibility(cont);
+      soldierRoot.position.set(0, 0, 0);
+      soldierRoot.rotation.set(0, 0, 0);
+      soldierRoot.scaling.set(1, 1, 1);
 
       soldierSkinned = findSkinnedMeshFromContainer(cont);
+      playIdleAnimationsSlow(cont);
+      setArmsOnlyVisibility(cont);
+
+      const sk = (soldierSkinned && soldierSkinned.skeleton) ? soldierSkinned.skeleton : null;
+      const chestBone = findChestBone(sk);
+
+      chestBoneNode = new BABYLON.TransformNode("chestBoneNode", scene);
+      chestPivot = new BABYLON.TransformNode("chestPivot", scene);
+
+      if(chestBone && soldierSkinned){
+        chestBoneNode.attachToBone(chestBone, soldierSkinned);
+      } else {
+        chestBoneNode.parent = soldierRoot;
+        chestBoneNode.position.set(0, 1.52, 0.06);
+      }
+
+      chestPivot.parent = chestBoneNode;
+      camera.parent = chestPivot;
+
+      aimYaw = 0.0;
+      aimPitch = CHEST_LOCK.pitch;
+      applyChestMountAimed();
+
       ensureRightHandAnchor();
     }
 
-    async function attachWeaponToSoldierHandFPS(sku){
+    async function loadWeaponToRightHand(sku){
       clearWeapon();
+
       if(!soldierSkinned || !soldierSkinned.skeleton) return;
 
-      const skeleton = soldierSkinned.skeleton;
-
-      const boneNameExact = "mixamorig:RightHand.209_221";
-      let rightHand = findBoneByNameOrIncludes(skeleton, boneNameExact);
-      if(!rightHand){
-        rightHand = skeleton.bones.find(b => /RightHand/i.test(b.name || "")) || null;
-      }
-      if(!rightHand) return;
-
+      const T = getWeaponTune(sku);
       const asset = getWeaponAsset(sku);
+
       const w = await BABYLON.SceneLoader.LoadAssetContainerAsync(asset.rootUrl, asset.fileName, scene);
       w.addAllToScene();
       weaponContainer = w;
 
-      const T = getWeaponTune(sku);
+      weaponRoot = new BABYLON.TransformNode("weaponRoot", scene);
+      weaponGrip = new BABYLON.TransformNode("weaponGrip", scene);
+      weaponGrip.parent = weaponRoot;
 
-      weaponRoot = new BABYLON.TransformNode("weaponRootFPS", scene);
-      weaponRoot.attachToBone(rightHand, soldierSkinned);
+      const rh = findRightHandBone(soldierSkinned.skeleton);
+
+      if(rh){
+        weaponRoot.attachToBone(rh, soldierSkinned);
+      } else {
+        weaponRoot.parent = soldierRoot;
+        weaponRoot.position.set(0.35, 1.10, 0.25);
+      }
 
       weaponRoot.position.copyFrom(T.WEAPON_POS);
       weaponRoot.rotation.set(
@@ -1016,16 +1120,13 @@
       );
       weaponRoot.scaling.set(T.WEAPON_SCALE, T.WEAPON_SCALE, T.WEAPON_SCALE);
 
-      weaponGrip = new BABYLON.TransformNode("weaponGripFPS", scene);
-      weaponGrip.parent = weaponRoot;
       weaponGrip.position.copyFrom(T.WEAPON_GRIP_POS);
       weaponGrip.rotation.copyFrom(T.WEAPON_GRIP_ROT);
 
       (w.meshes || []).forEach(m => {
         if(!m) return;
         const nm = (m.name || "").toLowerCase();
-        const looksLikeRoot = (nm === "__root__" || nm === "root" || nm.includes("rootnode"));
-        if(looksLikeRoot) return;
+        if(nm === "__root__") return;
         try{
           m.parent = weaponGrip;
           m.isPickable = false;
@@ -1036,70 +1137,150 @@
       });
 
       weaponSku = normalizeWeaponSku(sku);
-      hudWeapon.textContent = `WEAPON, ${weaponLabelFromSku(weaponSku)}`;
-
-      ensureRightHandAnchor();
+      setFireModeLabel();
     }
 
-    function createZombie(x, z){
-      const body = BABYLON.MeshBuilder.CreateBox("z", { size: 1.0 }, scene);
-      body.position.set(x, 0.5, z);
-      body.metadata = { isZombie:true, hp:2 };
-      const mat = new BABYLON.StandardMaterial("zm", scene);
-      mat.emissiveColor = new BABYLON.Color3(0.1, 0.9, 0.4);
-      mat.diffuseColor = new BABYLON.Color3(0.1, 0.2, 0.1);
-      body.material = mat;
-      zombies.push({ mesh: body, speed: 1.2 + Math.random()*0.8 });
+    function randSpread(spread){
+      const a = (Math.random() * 2 - 1) * spread;
+      const b = (Math.random() * 2 - 1) * spread;
+      return new BABYLON.Vector3(a, b, 0);
     }
 
-    function clearZombies(){
-      while(zombies.length){
-        const z = zombies.pop();
-        try{ z.mesh && z.mesh.dispose(); }catch(e){}
+    function getMuzzleOrigin(){
+      let base = null;
+
+      if(rightHandAnchor){
+        try{ base = rightHandAnchor.getAbsolutePosition().clone(); }catch(e){}
+      }
+      if(!base && weaponGrip){
+        try{ base = weaponGrip.getAbsolutePosition().clone(); }catch(e){}
+      }
+      if(!base){
+        const p = camera.getAbsolutePosition();
+        const dir = camera.getForwardRay(1).direction;
+        base = p.add(dir.scale(0.35));
+      }
+
+      const fwd = camera.getForwardRay(1).direction;
+      const up  = camera.getDirection(BABYLON.Axis.Y).normalize();
+      const rt  = camera.getDirection(BABYLON.Axis.X).normalize();
+
+      base.addInPlace(fwd.scale(MUZZLE_LOCK.forward));
+      base.addInPlace(up.scale(MUZZLE_LOCK.up));
+      base.addInPlace(rt.scale(MUZZLE_LOCK.right));
+
+      return base;
+    }
+
+    function shootOnce(){
+      const nowMs = performance.now();
+      if(!canShoot(nowMs)) return;
+      FIRE.lastShotAt = nowMs;
+
+      ammo = Math.max(0, ammo - 1);
+      hudAmmo.textContent = `AMMO, ${ammo}`;
+
+      const origin = getMuzzleOrigin();
+
+      const spread = isSMG() ? FIRE.spreadSmg : FIRE.spreadPistol;
+      const camRay = camera.getForwardRay(FIRE.maxDist);
+
+      const s = randSpread(spread);
+      const spreadDir = camRay.direction.add(new BABYLON.Vector3(s.x, s.y, 0)).normalize();
+      const aimPoint = camRay.origin.add(spreadDir.scale(FIRE.maxDist));
+
+      const dir = aimPoint.subtract(origin).normalize();
+      const ray = new BABYLON.Ray(origin, dir, FIRE.maxDist);
+
+      const hit = scene.pickWithRay(ray, (m) => !!(m && m.metadata && m.metadata.isZombie));
+
+      const hitPoint = (hit && hit.hit && hit.pickedPoint) ? hit.pickedPoint.clone() : origin.add(dir.scale(FIRE.maxDist));
+
+      const tracer = BABYLON.MeshBuilder.CreateLines("tr", { points: [origin, hitPoint] }, scene);
+      tracer.alpha = 0.9;
+      tracer.color = new BABYLON.Color3(0.9, 0.95, 1.0);
+      fxRegister(tracer, 0.06);
+
+      const flash = BABYLON.MeshBuilder.CreateSphere("mf", { diameter: Math.max(0.01, MUZZLE_LOCK.flashSize) }, scene);
+      const mm = new BABYLON.StandardMaterial("mfm", scene);
+      mm.emissiveColor = new BABYLON.Color3(1.0, 0.85, 0.35);
+      mm.diffuseColor = new BABYLON.Color3(0,0,0);
+      mm.specularColor = new BABYLON.Color3(0,0,0);
+      flash.material = mm;
+      flash.position.copyFrom(origin);
+      fxRegister(flash, 0.04);
+
+      if(hit && hit.pickedMesh){
+        const z = hit.pickedMesh;
+        z.metadata.hp = (z.metadata.hp || 1) - 1;
+
+        flashHit();
+
+        if(z.metadata.hp <= 0){
+          const idx = zombies.findIndex(x => x.mesh === z);
+          if(idx >= 0) zombies.splice(idx, 1);
+          try{ z.dispose(); }catch(e){}
+
+          killsThisLevel += 1;
+          const target = targetKillsForLevel(level);
+          if(killsThisLevel >= target){
+            level += 1;
+            killsThisLevel = 0;
+            setHudLevel();
+            spawnLevel(level);
+          }
+        }
+      }
+
+      aimPitch = clamp(aimPitch - 0.02, LOOK.PITCH_MIN, LOOK.PITCH_MAX);
+    }
+
+    /* Fire button: pistol tap, smg hold */
+    function startFiring(){
+      FIRE.holding = true;
+      if(!isSMG()){
+        shootOnce();
+        FIRE.holding = false;
       }
     }
+    function stopFiring(){ FIRE.holding = false; }
 
-    function spawnLevel(lv){
-      clearZombies();
+    fireBtn.addEventListener("pointerdown", (e) => {
+      e.preventDefault();
+      startFiring();
+    }, { passive:false });
 
-      const n = targetKillsForLevel(lv);
-      for(let i=0;i<n;i++){
-        const angle = (i / n) * Math.PI * 2;
-        const r = 18 + Math.random()*10;
-        const x = Math.cos(angle) * r;
-        const z = Math.sin(angle) * r;
-        createZombie(x, z);
-      }
-    }
+    fireBtn.addEventListener("pointerup", stopFiring, { passive:true });
+    fireBtn.addEventListener("pointercancel", stopFiring, { passive:true });
 
     function createScene(){
       scene = new BABYLON.Scene(engine);
       scene.clearColor = new BABYLON.Color4(0,0,0,0);
 
-      const light = new BABYLON.HemisphericLight("h", new BABYLON.Vector3(0,1,0), scene);
-      light.intensity = 1.15;
+      const hemi = new BABYLON.HemisphericLight("h", new BABYLON.Vector3(0,1,0), scene);
+      hemi.intensity = 1.10;
 
-      const dir = new BABYLON.DirectionalLight("d", new BABYLON.Vector3(-0.2,-1,-0.15), scene);
+      const dir = new BABYLON.DirectionalLight("d", new BABYLON.Vector3(-0.2,-1,-0.1), scene);
       dir.intensity = 0.55;
 
       const ground = BABYLON.MeshBuilder.CreateGround("g", { width: 220, height: 220 }, scene);
-      const gmat = new BABYLON.StandardMaterial("gmat", scene);
-      gmat.diffuseColor = new BABYLON.Color3(0.03,0.04,0.07);
-      gmat.emissiveColor = new BABYLON.Color3(0.02,0.03,0.06);
-      gmat.specularColor = new BABYLON.Color3(0,0,0);
-      ground.material = gmat;
+      const grid = new BABYLON.GridMaterial("grid", scene);
+      grid.majorUnitFrequency = 5;
+      grid.minorUnitVisibility = 0.25;
+      grid.gridRatio = 1;
+      grid.backFaceCulling = false;
+      grid.opacity = 0.35;
+      ground.material = grid;
       ground.isPickable = true;
 
-      camera = new BABYLON.UniversalCamera("fpsCam", new BABYLON.Vector3(0,1.7,0), scene);
-      camera.minZ = 0.05;
+      camera = new BABYLON.UniversalCamera("chestCam", new BABYLON.Vector3(0,1.6,0), scene);
+      camera.minZ = 0.02;
       camera.maxZ = 5000;
       camera.fov = 1.0;
       camera.inputs.clear();
       scene.activeCamera = camera;
 
-      engine.runRenderLoop(() => {
-        if(scene) scene.render();
-      });
+      engine.runRenderLoop(() => scene.render());
       window.addEventListener("resize", () => engine.resize());
 
       const isTouch = ("ontouchstart" in window) || (navigator.maxTouchPoints > 0);
@@ -1107,7 +1288,7 @@
       scene.onBeforeRenderObservable.add(() => {
         const now = performance.now() * 0.001;
 
-        /* single FX cleanup loop */
+        /* FX cleanup */
         for(let i = fxLive.length - 1; i >= 0; i--){
           const fx = fxLive[i];
           if(!fx || !fx.mesh){
@@ -1120,37 +1301,45 @@
           }
         }
 
+        if(!soldierRoot || !chestPivot) return;
+
         const dt = scene.getEngine().getDeltaTime() * 0.001;
 
-        /* Move, left stick, with deadzone */
+        /* Look */
+        const lookMult = isTouch ? LOOK_SENS.TOUCH_MULT : 1.0;
+        const lookX = applyDeadzone(lookState.dx) * lookMult;
+        const lookY = applyDeadzone(lookState.dy) * lookMult;
+
+        aimYaw   += (lookX * LOOK.YAW_SPEED * dt);
+        aimPitch += (lookY * LOOK.PITCH_SPEED * dt);
+        aimPitch  = clamp(aimPitch, LOOK.PITCH_MIN, LOOK.PITCH_MAX);
+
+        /* Move */
         const mvX = applyDeadzone(moveState.dx);
         const mvY = applyDeadzone(moveState.dy);
 
-        const forward = camera.getDirection(new BABYLON.Vector3(0,0,1));
-        const right = camera.getDirection(new BABYLON.Vector3(1,0,0));
+        soldierRoot.rotation.y = aimYaw;
+
+        const yaw = soldierRoot.rotation.y;
+        const forward = new BABYLON.Vector3(Math.sin(yaw), 0, Math.cos(yaw));
+        const right   = new BABYLON.Vector3(forward.z, 0, -forward.x);
 
         const moveF = -mvY;
         const moveS = mvX;
 
         const spd = JOY.MOVE_SPEED * dt;
         const delta = forward.scale(moveF * spd).add(right.scale(moveS * spd));
-        camera.position.addInPlace(new BABYLON.Vector3(delta.x, 0, delta.z));
+        soldierRoot.position.addInPlace(new BABYLON.Vector3(delta.x, 0, delta.z));
 
-        /* Look, right stick, with deadzone and touch multiplier */
-        const lookMult = isTouch ? LOOK_SENS.TOUCH_MULT : 1.0;
-        const lx = applyDeadzone(lookState.dx) * lookMult;
-        const ly = applyDeadzone(lookState.dy) * lookMult;
+        applyChestMountAimed();
 
-        camera.rotation.y += lx * LOOK.YAW_SPEED * dt;
-        camera.rotation.x += ly * LOOK.PITCH_SPEED * dt;
-        camera.rotation.x = clamp(camera.rotation.x, LOOK.PITCH_MIN, LOOK.PITCH_MAX);
-
-        /* Zombies chase */
+        /* Zombies chase (KEEP) */
+        const chaseTarget = camera.getAbsolutePosition();
         for(const z of zombies){
           const m = z.mesh;
           if(!m) continue;
 
-          const to = camera.position.subtract(m.position);
+          const to = chaseTarget.subtract(m.position);
           const dist = Math.max(0.001, to.length());
           const dirv = to.scale(1.0 / dist);
 
@@ -1159,7 +1348,7 @@
           m.rotation.y = Math.atan2(dirv.x, dirv.z);
         }
 
-        /* SMG auto fire if holding */
+        /* SMG auto fire if holding (KEEP) */
         if(isSMG() && FIRE.holding){
           shootOnce();
         }
@@ -1178,11 +1367,12 @@
       hudWeapon.textContent = `WEAPON, ${weaponLabelFromSku(weaponSku)}`;
       hudAmmo.textContent = `AMMO, ${ammo}`;
       setHudLevel();
+      setFireModeLabel();
 
-      const skinSku = await fetchEquippedSkinSku();
+      await fetchEquippedSkinSku(); /* kept for future skin variants, model is the same */
 
-      await loadSoldierArmsInFPS(skinSku);
-      await attachWeaponToSoldierHandFPS(weaponSku);
+      await loadSoldierAndChestCam();
+      await loadWeaponToRightHand(weaponSku);
 
       level = 1;
       killsThisLevel = 0;
@@ -1190,7 +1380,6 @@
       spawnLevel(level);
 
       await new Promise(r => setTimeout(r, 750));
-
       enterOverlay.style.display = "none";
 
       const steps = ["3","2","1","GO"];
@@ -1206,7 +1395,6 @@
     /* Boot */
     (async function(){
       createScene();
-
       try{
         await runEnterSequence();
       }catch(e){
