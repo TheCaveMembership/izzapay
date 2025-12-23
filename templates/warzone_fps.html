@@ -186,6 +186,40 @@
     }
     .countdown.show{ opacity:1; }
 
+    /* Crosshair, matches test page */
+    .reticle{
+      position:absolute;
+      left:50%;
+      top:50%;
+      transform:translate(-50%,-50%);
+      width:18px;
+      height:18px;
+      z-index:64;
+      pointer-events:none;
+      opacity:0.92;
+      filter:drop-shadow(0 0 10px rgba(0,255,255,.10));
+    }
+    .reticle::before{
+      content:"";
+      position:absolute;
+      left:50%;
+      top:50%;
+      width:3px;
+      height:3px;
+      border-radius:50%;
+      background:rgba(255,255,255,.92);
+      transform:translate(-50%,-50%);
+    }
+    .reticle .h,.reticle .v{
+      position:absolute;
+      left:50%;
+      top:50%;
+      background:rgba(255,255,255,.85);
+      transform:translate(-50%,-50%);
+    }
+    .reticle .h{ width:18px; height:1px; opacity:.55; }
+    .reticle .v{ width:1px; height:18px; opacity:.55; }
+
     /* Touch controls */
     .touch-ui{
       position:absolute;
@@ -221,6 +255,7 @@
       pointer-events:none;
     }
 
+    /* Fire button, matches your test UI vibe, TAP for pistol, HOLD for SMG */
     .fireBtn{
       position:absolute;
       right:18px;
@@ -228,18 +263,36 @@
       width:92px;
       height:92px;
       border-radius:50%;
-      border:none;
+      border:1px solid rgba(255,59,107,.55);
       pointer-events:auto;
       touch-action:none;
       cursor:pointer;
-      background:linear-gradient(145deg,rgba(0,255,255,.95),rgba(255,59,107,.92));
-      color:#001520;
+      background:radial-gradient(circle at 30% 30%,rgba(255,59,107,.28),rgba(0,0,0,.22));
+      color:#ffe7ef;
       font-weight:900;
       letter-spacing:.12em;
       text-transform:uppercase;
-      box-shadow:0 0 26px rgba(0,255,255,.32), 0 0 32px rgba(255,59,107,.22);
+      box-shadow:0 0 28px rgba(255,59,107,.14), 0 0 26px rgba(0,255,255,.08);
+      display:flex;
+      align-items:center;
+      justify-content:center;
+      opacity:0.96;
     }
     .fireBtn:active{ transform:scale(.98); }
+    .fireWrap{
+      display:flex;
+      flex-direction:column;
+      align-items:center;
+      justify-content:center;
+      line-height:1.05;
+    }
+    .fireSub{
+      margin-top:2px;
+      font-size:10px;
+      letter-spacing:.14em;
+      opacity:.85;
+      color:#ffd2de;
+    }
 
     @media (min-width:900px){
       .stick{ width:160px; height:160px; }
@@ -263,7 +316,7 @@
           <div class="hud-row">
             <span class="tag" id="hudUser">loading</span>
             <button class="tag btn" id="exitBtn" type="button">Exit</button>
-            <span class="tag" id="hudWeapon">weapon</span>
+            <span class="tag" id="hudWeapon">WEAPON, pistol</span>
           </div>
         </div>
         <div class="hud-box" style="text-align:right;">
@@ -287,6 +340,9 @@
 
       <div class="countdown" id="countdownText">3</div>
 
+      <!-- Crosshair -->
+      <div class="reticle" id="reticle"><div class="h"></div><div class="v"></div></div>
+
       <div class="touch-ui">
         <div class="stick left" id="moveStick">
           <div class="nub" id="moveNub"></div>
@@ -296,7 +352,12 @@
           <div class="nub" id="lookNub"></div>
         </div>
 
-        <button class="fireBtn" id="fireBtn" type="button">Fire</button>
+        <button class="fireBtn" id="fireBtn" type="button">
+          <div class="fireWrap">
+            <div>FIRE</div>
+            <div class="fireSub" id="fireModeText">TAP</div>
+          </div>
+        </button>
       </div>
     </div>
   </div>
@@ -374,6 +435,7 @@
     const enterOverlay = document.getElementById("enterOverlay");
     const countdownText = document.getElementById("countdownText");
     const exitBtn = document.getElementById("exitBtn");
+    const fireModeText = document.getElementById("fireModeText");
 
     hudUser.textContent = USER_CANON || "Operator";
 
@@ -393,8 +455,11 @@
       return sku;
     }
     function weaponLabelFromSku(sku){
-      const t = (sku || "").toString().replace(/^wz_/, "").toUpperCase();
-      return t.replaceAll("_", " ");
+      const s = normalizeWeaponSku(sku);
+      return (s === "wz_cityrunner_smg") ? "SMG" : "pistol";
+    }
+    function setFireModeLabel(){
+      fireModeText.textContent = (weaponSku === "wz_cityrunner_smg") ? "HOLD" : "TAP";
     }
 
     /* LEVEL system */
@@ -462,27 +527,36 @@
 
     const IDLE = { SPEED: 0.05, LOOP: true };
 
+    /* Joystick tightening, less twitchy near center, still full range */
     const JOY = {
       MOVE_SPEED: 5.5,
-      DEADZONE: 0.10
+      DEADZONE: 0.12,
+      RESPONSE_POW: 1.55
     };
 
     const LOOK = {
       YAW_SPEED:  1.55,
       PITCH_SPEED: 1.15,
       PITCH_MIN: -1.05,
-      PITCH_MAX:  0.45
+      PITCH_MAX:  0.45,
+      RESPONSE_POW: 1.45
     };
 
     const LOOK_SENS = {
-      TOUCH_MULT: 0.78
+      TOUCH_MULT: 0.72
     };
 
-    /* Muzzle lock, from your tuned test page, no tuner UI */
+    /* Muzzle lock, EXACT from screenshots, pistol and SMG */
     const LOCKED_UP = 0.08;
     const LOCKED_RIGHT = 0.31;
     const LOCKED_FLASH_SIZE = 0.05;
     const MUZZLE_TUNE = { f: 0.73 };
+
+    function stickCurve(v, pow){
+      const a = Math.abs(v);
+      if(a <= 0) return 0;
+      return Math.sign(v) * Math.pow(a, pow);
+    }
 
     /* Soldier skin overrides, same system you already use */
     const TEXTURE_BASE = "/assets/warzone3d/soldier_gltf_3/textures/";
@@ -602,7 +676,7 @@
       }
     }
 
-    /* Stick system, mirrored from tuned test page */
+    /* Stick system */
     const moveStick = document.getElementById("moveStick");
     const moveNub = document.getElementById("moveNub");
     const lookStick = document.getElementById("lookStick");
@@ -770,7 +844,7 @@
       return (nowMs - FIREBTN.lastShotAt) >= FIREBTN.pistolCooldownMs;
     }
 
-    /* Minimal FX pool, same stability pattern as test page */
+    /* Minimal FX pool */
     const fxLive = [];
     function fxRegister(mesh, lifeSeconds){
       try{
@@ -1083,6 +1157,7 @@
 
       weaponSku = normalizeWeaponSku(sku);
       hudWeapon.textContent = `WEAPON, ${weaponLabelFromSku(weaponSku)}`;
+      setFireModeLabel();
     }
 
     /* Zombies, keep your green cube attackers */
@@ -1118,7 +1193,7 @@
       }
     }
 
-    /* Muzzle origin, from tuned test page */
+    /* Muzzle origin, EXACT locked tuning */
     function getMuzzleOrigin(){
       let base = null;
 
@@ -1160,7 +1235,7 @@
       const ray = new BABYLON.Ray(origin, forward, 200);
       const hit = scene.pickWithRay(ray, (m) => m && m.metadata && m.metadata.isZombie);
 
-      /* Simple tracer + muzzle flash, stable cleanup */
+      /* Simple tracer + muzzle flash */
       const endPoint = (hit && hit.hit && hit.pickedPoint) ? hit.pickedPoint.clone() : origin.add(forward.scale(120));
 
       const tracer = BABYLON.MeshBuilder.CreateLines("tr", { points: [origin, endPoint] }, scene);
@@ -1220,7 +1295,7 @@
       const dir = new BABYLON.DirectionalLight("d", new BABYLON.Vector3(-0.2,-1,-0.1), scene);
       dir.intensity = 0.55;
 
-      /* GRID FLOOR, as requested */
+      /* GRID FLOOR */
       const ground = BABYLON.MeshBuilder.CreateGround("g", { width: 220, height: 220 }, scene);
       const grid = new BABYLON.GridMaterial("grid", scene);
       grid.majorUnitFrequency = 5;
@@ -1231,7 +1306,7 @@
       ground.material = grid;
       ground.isPickable = true;
 
-      /* Camera is chest mounted, parented under chestPivot like tuned test */
+      /* Camera is chest mounted */
       camera = new BABYLON.UniversalCamera("chestCam", new BABYLON.Vector3(0,1.6,0), scene);
       camera.minZ = 0.02;
       camera.maxZ = 5000;
@@ -1264,18 +1339,22 @@
 
         const dt = scene.getEngine().getDeltaTime() * 0.001;
 
-        /* Look, tuned test style */
+        /* Look, tightened */
         const lookMult = isTouch ? LOOK_SENS.TOUCH_MULT : 1.0;
-        const lookX = applyDeadzone(lookState.dx) * lookMult;
-        const lookY = applyDeadzone(lookState.dy) * lookMult;
+        let lookX = applyDeadzone(lookState.dx);
+        let lookY = applyDeadzone(lookState.dy);
+        lookX = stickCurve(lookX, LOOK.RESPONSE_POW) * lookMult;
+        lookY = stickCurve(lookY, LOOK.RESPONSE_POW) * lookMult;
 
         aimYaw   += (lookX * LOOK.YAW_SPEED * dt);
         aimPitch += (lookY * LOOK.PITCH_SPEED * dt);
         aimPitch  = clamp(aimPitch, LOOK.PITCH_MIN, LOOK.PITCH_MAX);
 
-        /* Move, tuned test style */
-        const mvX = applyDeadzone(moveState.dx);
-        const mvY = applyDeadzone(moveState.dy);
+        /* Move, tightened */
+        let mvX = applyDeadzone(moveState.dx);
+        let mvY = applyDeadzone(moveState.dy);
+        mvX = stickCurve(mvX, JOY.RESPONSE_POW);
+        mvY = stickCurve(mvY, JOY.RESPONSE_POW);
 
         soldierRoot.rotation.y = aimYaw;
 
@@ -1292,7 +1371,7 @@
 
         applyChestMountAimed();
 
-        /* Zombies chase the player, not the old camera-only target */
+        /* Zombies chase the player */
         const targetPos = soldierRoot.getAbsolutePosition();
 
         for(const z of zombies){
@@ -1325,15 +1404,16 @@
       ammo = await fetchAmmoForCurrentWeapon();
 
       hudWeapon.textContent = `WEAPON, ${weaponLabelFromSku(weaponSku)}`;
+      setFireModeLabel();
       hudAmmo.textContent = `AMMO, ${ammo}`;
 
       const skinSku = await fetchEquippedSkinSku();
 
-      /* Critical: load the tuned soldier chest cam system, then attach tuned weapon */
+      /* load soldier chest cam, then attach weapon */
       await loadSoldierAndChestCam(skinSku);
       await loadWeaponToRightHand(weaponSku);
 
-      /* Start level and cubes */
+      /* Start level */
       level = 1;
       killsThisLevel = 0;
       setHudLevel();
