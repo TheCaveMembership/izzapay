@@ -837,8 +837,11 @@
     function dirToVec(dir){
       if(dir === "up") return { dx:0, dy:-1 };
       if(dir === "down") return { dx:0, dy: 1 };
-      if(dir === "left") return { dx:-1, dy:0 };
-      if(dir === "right") return { dx: 1, dy:0 };
+
+      /* FIX, swap left and right */
+      if(dir === "left") return { dx: 1, dy:0 };
+      if(dir === "right") return { dx:-1, dy:0 };
+
       return { dx:0, dy:0 };
     }
 
