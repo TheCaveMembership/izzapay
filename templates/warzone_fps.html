@@ -15,6 +15,10 @@
       --accent1:#0ff;
       --accent2:#ff3b6b;
       --accent3:#ffcf4d;
+
+      --hpBack: rgba(10,20,12,.55);
+      --hpLine: rgba(120,255,160,.35);
+      --hpFill: rgba(60,255,120,.95);
     }
     *{box-sizing:border-box;margin:0;padding:0}
     html,body{
@@ -124,6 +128,50 @@
       background:linear-gradient(90deg,rgba(30,6,18,.75),rgba(80,10,30,.45));
     }
     .tag.btn:active{ transform:scale(.98); }
+
+    /* Health bar */
+    .hp-wrap{
+      margin-top:8px;
+      display:flex;
+      align-items:center;
+      justify-content:flex-end;
+      gap:8px;
+      pointer-events:none;
+    }
+    .hp-label{
+      font-size:10px;
+      letter-spacing:.16em;
+      text-transform:uppercase;
+      color:rgba(159,176,214,.95);
+      pointer-events:none;
+      white-space:nowrap;
+    }
+    .hp-bar{
+      width:min(220px,42vw);
+      height:10px;
+      border-radius:999px;
+      border:1px solid var(--hpLine);
+      background:linear-gradient(90deg,rgba(0,0,0,.20),var(--hpBack));
+      overflow:hidden;
+      box-shadow:0 0 18px rgba(60,255,120,.10);
+    }
+    .hp-fill{
+      height:100%;
+      width:100%;
+      border-radius:999px;
+      background:linear-gradient(90deg,rgba(60,255,120,.95),rgba(40,255,110,.75));
+      box-shadow:0 0 18px rgba(60,255,120,.18);
+      transform-origin:left center;
+      transform:scaleX(1);
+      transition:transform .08s linear;
+    }
+    .hp-text{
+      font-size:11px;
+      color:#e7f0ff;
+      opacity:.92;
+      pointer-events:none;
+      white-space:nowrap;
+    }
 
     /* Center overlay, entering and countdown */
     .center-overlay{
@@ -319,20 +367,27 @@
             <span class="tag" id="hudWeapon">WEAPON, pistol</span>
           </div>
         </div>
+
         <div class="hud-box" style="text-align:right;">
           <div class="hud-title">Status</div>
           <div class="hud-row" style="justify-content:flex-end;">
             <span class="tag" id="hudAmmo">AMMO, --</span>
             <span class="tag warn" id="hudLevel">LEVEL, --</span>
           </div>
+
+          <div class="hp-wrap">
+            <div class="hp-label">HP</div>
+            <div class="hp-bar"><div class="hp-fill" id="hpFill"></div></div>
+            <div class="hp-text" id="hpText">100</div>
+          </div>
         </div>
       </div>
 
       <div class="center-overlay" id="enterOverlay">
         <div class="center-card">
-          <div class="center-title">IZZA WARZONE</div>
-          <div class="center-big">ENTERING IZZA WARZONE</div>
-          <div class="center-sub">
+          <div class="center-title" id="overlayTitle">IZZA WARZONE</div>
+          <div class="center-big" id="overlayBig">ENTERING IZZA WARZONE</div>
+          <div class="center-sub" id="overlaySub">
             Loading your equipped soldier skin and weapon, deploying into solo zombies mode.
           </div>
         </div>
@@ -432,10 +487,18 @@
     const hudWeapon = document.getElementById("hudWeapon");
     const hudAmmo = document.getElementById("hudAmmo");
     const hudLevel = document.getElementById("hudLevel");
+
     const enterOverlay = document.getElementById("enterOverlay");
+    const overlayTitle = document.getElementById("overlayTitle");
+    const overlayBig = document.getElementById("overlayBig");
+    const overlaySub = document.getElementById("overlaySub");
+
     const countdownText = document.getElementById("countdownText");
     const exitBtn = document.getElementById("exitBtn");
     const fireModeText = document.getElementById("fireModeText");
+
+    const hpFill = document.getElementById("hpFill");
+    const hpText = document.getElementById("hpText");
 
     hudUser.textContent = USER_CANON || "Operator";
 
@@ -462,6 +525,55 @@
       fireModeText.textContent = (weaponSku === "wz_cityrunner_smg") ? "HOLD" : "TAP";
     }
 
+    /* HEALTH system */
+    const PLAYER = {
+      HP_MAX: 100,
+      hp: 100,
+      alive: true,
+      invulnUntil: 0
+    };
+    function setHpUI(){
+      const p = clamp(PLAYER.hp / PLAYER.HP_MAX, 0, 1);
+      hpFill.style.transform = `scaleX(${p})`;
+      hpText.textContent = String(Math.round(PLAYER.hp));
+    }
+    function resetHp(){
+      PLAYER.hp = PLAYER.HP_MAX;
+      PLAYER.alive = true;
+      PLAYER.invulnUntil = performance.now() + 800;
+      setHpUI();
+    }
+    function damagePlayer(amount){
+      if(!PLAYER.alive) return;
+      const now = performance.now();
+      if(now < PLAYER.invulnUntil) return;
+
+      PLAYER.hp = clamp(PLAYER.hp - amount, 0, PLAYER.HP_MAX);
+      setHpUI();
+
+      PLAYER.invulnUntil = now + 450;
+
+      if(PLAYER.hp <= 0){
+        PLAYER.alive = false;
+        showEliminatedAndRespawn();
+      }
+    }
+
+    async function showEliminatedAndRespawn(){
+      try{
+        overlayTitle.textContent = "IZZA WARZONE";
+        overlayBig.textContent = "ELIMINATED";
+        overlaySub.textContent = "Respawning, get ready.";
+        enterOverlay.style.display = "flex";
+      }catch(e){}
+
+      await new Promise(r => setTimeout(r, 1100));
+
+      try{ enterOverlay.style.display = "none"; }catch(e){}
+
+      respawnNow();
+    }
+
     /* LEVEL system */
     let level = 1;
     let killsThisLevel = 0;
@@ -475,6 +587,7 @@
       hudLevel.textContent = `LEVEL, ${level}`;
     }
     setHudLevel();
+    setHpUI();
 
     /* Babylon setup */
     const canvas = document.getElementById("renderCanvas");
@@ -527,24 +640,25 @@
 
     const IDLE = { SPEED: 0.05, LOOP: true };
 
-    /* Joystick tightening, less twitchy near center, still full range */
+    /* Move joystick */
     const JOY = {
       MOVE_SPEED: 5.5,
       DEADZONE: 0.12,
       RESPONSE_POW: 1.55
     };
 
+    /* Look joystick, LESS sensitive, and D-pad behavior */
     const LOOK = {
-      YAW_SPEED:  1.55,
-      PITCH_SPEED: 1.15,
+      YAW_SPEED:  0.92,
+      PITCH_SPEED: 0.72,
       PITCH_MIN: -1.05,
       PITCH_MAX:  0.45,
-      RESPONSE_POW: 1.45
+      RESPONSE_POW: 1.15,
+      DEADZONE: 0.18,
+      DPAD: true
     };
 
-    const LOOK_SENS = {
-      TOUCH_MULT: 0.72
-    };
+    const LOOK_SENS = { TOUCH_MULT: 0.72 };
 
     /* Muzzle lock, EXACT from screenshots, pistol and SMG */
     const LOCKED_UP = 0.08;
@@ -683,10 +797,16 @@
     const lookNub = document.getElementById("lookNub");
     const fireBtn = document.getElementById("fireBtn");
 
-    function applyDeadzone(x){
+    function applyDeadzoneMove(x){
       const ax = Math.abs(x);
       if(ax < JOY.DEADZONE) return 0;
       const s = (ax - JOY.DEADZONE) / (1 - JOY.DEADZONE);
+      return Math.sign(x) * clamp(s, 0, 1);
+    }
+    function applyDeadzoneLook(x){
+      const ax = Math.abs(x);
+      if(ax < LOOK.DEADZONE) return 0;
+      const s = (ax - LOOK.DEADZONE) / (1 - LOOK.DEADZONE);
       return Math.sign(x) * clamp(s, 0, 1);
     }
 
@@ -718,14 +838,24 @@
     function stickSetFromClient(state, clientX, clientY){
       const nx = clamp(clientX - state.cx, -state.max, state.max);
       const ny = clamp(clientY - state.cy, -state.max, state.max);
+
       state.nub.style.transform = `translate(calc(-50% + ${nx}px), calc(-50% + ${ny}px))`;
 
-      state.dx = nx / state.max;
-      state.dy = ny / state.max;
+      let dx = nx / state.max;
+      let dy = ny / state.max;
 
-      if(state === lookState){
-        state.dx = -state.dx;
+      if(state === lookState && LOOK.DPAD){
+        if(Math.abs(dx) >= Math.abs(dy)){
+          dy = 0;
+          dx = Math.sign(dx) * Math.abs(dx);
+        } else {
+          dx = 0;
+          dy = Math.sign(dy) * Math.abs(dy);
+        }
       }
+
+      state.dx = dx;
+      state.dy = dy;
     }
     function stickReset(state){
       state.nub.style.transform = "translate(-50%,-50%)";
@@ -1171,7 +1301,7 @@
       mat.emissiveColor = new BABYLON.Color3(0.1, 0.9, 0.4);
       mat.diffuseColor = new BABYLON.Color3(0.1, 0.2, 0.1);
       body.material = mat;
-      zombies.push({ mesh: body, speed: 1.2 + Math.random()*0.8 });
+      zombies.push({ mesh: body, speed: 1.2 + Math.random()*0.8, lastHitAt: 0 });
     }
 
     function clearZombies(){
@@ -1285,6 +1415,21 @@
     fireBtn.addEventListener("pointercancel", () => { FIREBTN.holding = false; }, { passive:true });
     fireBtn.addEventListener("pointerleave", () => { FIREBTN.holding = false; }, { passive:true });
 
+    function respawnNow(){
+      if(!soldierRoot) return;
+
+      soldierRoot.position.set(0,0,0);
+      aimYaw = 0.0;
+      aimPitch = CHEST_LOCK.pitch;
+
+      level = 1;
+      killsThisLevel = 0;
+      setHudLevel();
+      spawnLevel(level);
+
+      resetHp();
+    }
+
     function createScene(){
       scene = new BABYLON.Scene(engine);
       scene.clearColor = new BABYLON.Color4(0,0,0,0);
@@ -1339,20 +1484,24 @@
 
         const dt = scene.getEngine().getDeltaTime() * 0.001;
 
-        /* Look, tightened */
+        /* LOOK, D-pad behavior, less sensitive */
         const lookMult = isTouch ? LOOK_SENS.TOUCH_MULT : 1.0;
-        let lookX = applyDeadzone(lookState.dx);
-        let lookY = applyDeadzone(lookState.dy);
+
+        let lookX = applyDeadzoneLook(lookState.dx);
+        let lookY = applyDeadzoneLook(lookState.dy);
+
         lookX = stickCurve(lookX, LOOK.RESPONSE_POW) * lookMult;
         lookY = stickCurve(lookY, LOOK.RESPONSE_POW) * lookMult;
 
-        aimYaw   += (lookX * LOOK.YAW_SPEED * dt);
-        aimPitch += (lookY * LOOK.PITCH_SPEED * dt);
-        aimPitch  = clamp(aimPitch, LOOK.PITCH_MIN, LOOK.PITCH_MAX);
+        if(PLAYER.alive){
+          aimYaw   += (lookX * LOOK.YAW_SPEED * dt);
+          aimPitch += (lookY * LOOK.PITCH_SPEED * dt);
+          aimPitch  = clamp(aimPitch, LOOK.PITCH_MIN, LOOK.PITCH_MAX);
+        }
 
         /* Move, tightened */
-        let mvX = applyDeadzone(moveState.dx);
-        let mvY = applyDeadzone(moveState.dy);
+        let mvX = applyDeadzoneMove(moveState.dx);
+        let mvY = applyDeadzoneMove(moveState.dy);
         mvX = stickCurve(mvX, JOY.RESPONSE_POW);
         mvY = stickCurve(mvY, JOY.RESPONSE_POW);
 
@@ -1365,14 +1514,19 @@
         const moveF = -mvY;
         const moveS = mvX;
 
-        const spd = JOY.MOVE_SPEED * dt;
-        const delta = forward.scale(moveF * spd).add(right.scale(moveS * spd));
-        soldierRoot.position.addInPlace(new BABYLON.Vector3(delta.x, 0, delta.z));
+        if(PLAYER.alive){
+          const spd = JOY.MOVE_SPEED * dt;
+          const delta = forward.scale(moveF * spd).add(right.scale(moveS * spd));
+          soldierRoot.position.addInPlace(new BABYLON.Vector3(delta.x, 0, delta.z));
+        }
 
         applyChestMountAimed();
 
-        /* Zombies chase the player */
+        /* Zombies chase player, and damage on touch */
         const targetPos = soldierRoot.getAbsolutePosition();
+        const touchDist = 1.05;
+        const hitCooldownMs = 520;
+        const touchDamage = 10;
 
         for(const z of zombies){
           const m = z.mesh;
@@ -1385,10 +1539,18 @@
           m.position.x += dirv.x * z.speed * dt;
           m.position.z += dirv.z * z.speed * dt;
           m.rotation.y = Math.atan2(dirv.x, dirv.z);
+
+          if(PLAYER.alive && dist <= touchDist){
+            const nowMs = performance.now();
+            if((nowMs - (z.lastHitAt || 0)) >= hitCooldownMs){
+              z.lastHitAt = nowMs;
+              damagePlayer(touchDamage);
+            }
+          }
         }
 
         /* SMG auto fire if holding */
-        if(isSMG() && FIREBTN.holding){
+        if(PLAYER.alive && isSMG() && FIREBTN.holding){
           shootOnce();
         }
       });
@@ -1397,6 +1559,10 @@
     }
 
     async function runEnterSequence(){
+      overlayTitle.textContent = "IZZA WARZONE";
+      overlayBig.textContent = "ENTERING IZZA WARZONE";
+      overlaySub.textContent = "Loading your equipped soldier skin and weapon, deploying into solo zombies mode.";
+
       enterOverlay.style.display = "flex";
       countdownText.classList.remove("show");
 
@@ -1418,6 +1584,8 @@
       killsThisLevel = 0;
       setHudLevel();
       spawnLevel(level);
+
+      resetHp();
 
       await new Promise(r => setTimeout(r, 650));
 
