@@ -19,6 +19,11 @@
       --hpBack: rgba(10,20,12,.55);
       --hpLine: rgba(120,255,160,.35);
       --hpFill: rgba(60,255,120,.95);
+
+      --dpadBack: rgba(0,0,0,.16);
+      --dpadLine: rgba(127,209,255,.35);
+      --dpadBtnLine: rgba(255,59,107,.35);
+      --dpadBtnBack: radial-gradient(circle at 30% 30%,rgba(255,59,107,.18),rgba(0,0,0,.10));
     }
     *{box-sizing:border-box;margin:0;padding:0}
     html,body{
@@ -234,7 +239,7 @@
     }
     .countdown.show{ opacity:1; }
 
-    /* Crosshair, matches test page */
+    /* Crosshair */
     .reticle{
       position:absolute;
       left:50%;
@@ -275,35 +280,65 @@
       z-index:65;
       pointer-events:none;
     }
-    .stick{
+
+    /* D-PADS */
+    .dpad{
       position:absolute;
       width:140px;
       height:140px;
-      border-radius:50%;
-      border:1px solid rgba(127,209,255,.35);
-      background:radial-gradient(circle at 30% 30%,rgba(0,255,255,.18),rgba(0,0,0,.15));
+      border-radius:18px;
+      border:1px solid var(--dpadLine);
+      background:radial-gradient(circle at 30% 30%,rgba(0,255,255,.14),var(--dpadBack));
       box-shadow:0 0 24px rgba(0,255,255,.08);
       pointer-events:auto;
       touch-action:none;
       opacity:0.95;
     }
-    .stick.left{ left:16px; bottom:18px; }
-    .stick.right{ right:16px; bottom:18px; }
-    .stick .nub{
+    .dpad.left{ left:16px; bottom:18px; }
+    .dpad.right{ right:16px; bottom:18px; }
+
+    .dpad-btn{
+      position:absolute;
+      width:46px;
+      height:46px;
+      border-radius:14px;
+      border:1px solid var(--dpadBtnLine);
+      background:var(--dpadBtnBack);
+      box-shadow:0 0 16px rgba(255,59,107,.10);
+      display:flex;
+      align-items:center;
+      justify-content:center;
+      color:#ffe7ef;
+      font-weight:1000;
+      font-size:16px;
+      line-height:1;
+      user-select:none;
+      -webkit-user-select:none;
+      touch-action:none;
+      cursor:pointer;
+    }
+    .dpad-btn:active{ transform:scale(.97); }
+
+    .dpad-btn.up{ left:50%; top:10px; transform:translateX(-50%); }
+    .dpad-btn.down{ left:50%; bottom:10px; transform:translateX(-50%); }
+    .dpad-btn.left{ top:50%; left:10px; transform:translateY(-50%); }
+    .dpad-btn.right{ top:50%; right:10px; transform:translateY(-50%); }
+
+    .dpad-center{
       position:absolute;
       left:50%;
       top:50%;
-      width:52px;
-      height:52px;
+      width:46px;
+      height:46px;
       transform:translate(-50%,-50%);
-      border-radius:50%;
-      border:1px solid rgba(255,59,107,.35);
-      background:radial-gradient(circle at 30% 30%,rgba(255,59,107,.22),rgba(0,0,0,.10));
-      box-shadow:0 0 18px rgba(255,59,107,.10);
+      border-radius:14px;
+      border:1px solid rgba(127,209,255,.25);
+      background:radial-gradient(circle at 30% 30%,rgba(0,255,255,.12),rgba(0,0,0,.12));
+      box-shadow:0 0 18px rgba(0,255,255,.06);
       pointer-events:none;
     }
 
-    /* Fire button, matches your test UI vibe, TAP for pistol, HOLD for SMG */
+    /* Fire button */
     .fireBtn{
       position:absolute;
       right:18px;
@@ -343,7 +378,13 @@
     }
 
     @media (min-width:900px){
-      .stick{ width:160px; height:160px; }
+      .dpad{ width:160px; height:160px; }
+      .dpad-btn{ width:52px; height:52px; border-radius:16px; font-size:18px; }
+      .dpad-btn.up{ top:12px; }
+      .dpad-btn.down{ bottom:12px; }
+      .dpad-btn.left{ left:12px; }
+      .dpad-btn.right{ right:12px; }
+      .dpad-center{ width:52px; height:52px; border-radius:16px; }
       .fireBtn{ width:100px; height:100px; }
     }
   </style>
@@ -395,16 +436,25 @@
 
       <div class="countdown" id="countdownText">3</div>
 
-      <!-- Crosshair -->
       <div class="reticle" id="reticle"><div class="h"></div><div class="v"></div></div>
 
       <div class="touch-ui">
-        <div class="stick left" id="moveStick">
-          <div class="nub" id="moveNub"></div>
+        <!-- MOVE D-PAD -->
+        <div class="dpad left" id="movePad">
+          <div class="dpad-center"></div>
+          <div class="dpad-btn up" data-dir="up">▲</div>
+          <div class="dpad-btn down" data-dir="down">▼</div>
+          <div class="dpad-btn left" data-dir="left">◀</div>
+          <div class="dpad-btn right" data-dir="right">▶</div>
         </div>
 
-        <div class="stick right" id="lookStick">
-          <div class="nub" id="lookNub"></div>
+        <!-- LOOK D-PAD -->
+        <div class="dpad right" id="lookPad">
+          <div class="dpad-center"></div>
+          <div class="dpad-btn up" data-dir="up">▲</div>
+          <div class="dpad-btn down" data-dir="down">▼</div>
+          <div class="dpad-btn left" data-dir="left">◀</div>
+          <div class="dpad-btn right" data-dir="right">▶</div>
         </div>
 
         <button class="fireBtn" id="fireBtn" type="button">
@@ -630,7 +680,7 @@
       return WEAPON_TUNING[s] || WEAPON_TUNING.wz_basic_pistol;
     }
 
-    /* Chest camera lock, from your tuned test page */
+    /* Chest camera lock */
     const CHEST_LOCK = {
       pivotPos: new BABYLON.Vector3(0.00, 0.22, 0.10),
       camPos:   new BABYLON.Vector3(-0.650, 1.640, -0.969),
@@ -640,39 +690,25 @@
 
     const IDLE = { SPEED: 0.05, LOOP: true };
 
-    /* Move joystick */
-    const JOY = {
-      MOVE_SPEED: 5.5,
-      DEADZONE: 0.12,
-      RESPONSE_POW: 1.55
-    };
+    /* MOVE and LOOK tuning */
+    const JOY = { MOVE_SPEED: 5.5 };
 
-    /* Look joystick, LESS sensitive, and D-pad behavior */
     const LOOK = {
       YAW_SPEED:  0.92,
       PITCH_SPEED: 0.72,
       PITCH_MIN: -1.05,
-      PITCH_MAX:  0.45,
-      RESPONSE_POW: 1.15,
-      DEADZONE: 0.18,
-      DPAD: true
+      PITCH_MAX:  0.45
     };
 
     const LOOK_SENS = { TOUCH_MULT: 0.72 };
 
-    /* Muzzle lock, EXACT from screenshots, pistol and SMG */
+    /* Muzzle lock */
     const LOCKED_UP = 0.08;
     const LOCKED_RIGHT = 0.31;
     const LOCKED_FLASH_SIZE = 0.05;
     const MUZZLE_TUNE = { f: 0.73 };
 
-    function stickCurve(v, pow){
-      const a = Math.abs(v);
-      if(a <= 0) return 0;
-      return Math.sign(v) * Math.pow(a, pow);
-    }
-
-    /* Soldier skin overrides, same system you already use */
+    /* Soldier skin overrides */
     const TEXTURE_BASE = "/assets/warzone3d/soldier_gltf_3/textures/";
     const SKU_TO_TEXTURE_FOLDER = {
       "wz_neon_edge": "neon_edge",
@@ -790,152 +826,89 @@
       }
     }
 
-    /* Stick system */
-    const moveStick = document.getElementById("moveStick");
-    const moveNub = document.getElementById("moveNub");
-    const lookStick = document.getElementById("lookStick");
-    const lookNub = document.getElementById("lookNub");
+    /* D-PAD input state */
+    const movePad = document.getElementById("movePad");
+    const lookPad = document.getElementById("lookPad");
     const fireBtn = document.getElementById("fireBtn");
 
-    function applyDeadzoneMove(x){
-      const ax = Math.abs(x);
-      if(ax < JOY.DEADZONE) return 0;
-      const s = (ax - JOY.DEADZONE) / (1 - JOY.DEADZONE);
-      return Math.sign(x) * clamp(s, 0, 1);
-    }
-    function applyDeadzoneLook(x){
-      const ax = Math.abs(x);
-      if(ax < LOOK.DEADZONE) return 0;
-      const s = (ax - LOOK.DEADZONE) / (1 - LOOK.DEADZONE);
-      return Math.sign(x) * clamp(s, 0, 1);
+    const moveState = { dx:0, dy:0, pointers:new Map() };
+    const lookState = { dx:0, dy:0, pointers:new Map() };
+
+    function dirToVec(dir){
+      if(dir === "up") return { dx:0, dy:-1 };
+      if(dir === "down") return { dx:0, dy: 1 };
+      if(dir === "left") return { dx:-1, dy:0 };
+      if(dir === "right") return { dx: 1, dy:0 };
+      return { dx:0, dy:0 };
     }
 
-    const lookState = { active:false, id:null, dx:0, dy:0, el:null, nub:null, max:1, cx:0, cy:0, recalc:null };
-    const moveState = { active:false, id:null, dx:0, dy:0, el:null, nub:null, max:1, cx:0, cy:0, recalc:null };
-
-    function stickSetup(state, el, nub){
-      state.el = el;
-      state.nub = nub;
-      function recalc(){
-        const box = el.getBoundingClientRect();
-        state.cx = box.left + box.width/2;
-        state.cy = box.top + box.height/2;
-        state.max = (box.width/2) - (nub.getBoundingClientRect().width/2);
-        if(state.max < 10) state.max = 10;
+    function recomputeDpad(state){
+      let dx = 0, dy = 0;
+      for(const dir of state.pointers.values()){
+        const v = dirToVec(dir);
+        dx += v.dx;
+        dy += v.dy;
       }
-      state.recalc = recalc;
-      recalc();
-      window.addEventListener("resize", recalc);
-      if(window.visualViewport){
-        window.visualViewport.addEventListener("resize", recalc);
-        window.visualViewport.addEventListener("scroll", recalc);
-      }
-    }
+      dx = clamp(dx, -1, 1);
+      dy = clamp(dy, -1, 1);
 
-    stickSetup(lookState, lookStick, lookNub);
-    stickSetup(moveState, moveStick, moveNub);
-
-    function stickSetFromClient(state, clientX, clientY){
-      const nx = clamp(clientX - state.cx, -state.max, state.max);
-      const ny = clamp(clientY - state.cy, -state.max, state.max);
-
-      state.nub.style.transform = `translate(calc(-50% + ${nx}px), calc(-50% + ${ny}px))`;
-
-      let dx = nx / state.max;
-      let dy = ny / state.max;
-
-      if(state === lookState && LOOK.DPAD){
+      /* Hard D-pad: no diagonal, snap to strongest axis */
+      if(dx !== 0 && dy !== 0){
         if(Math.abs(dx) >= Math.abs(dy)){
           dy = 0;
-          dx = Math.sign(dx) * Math.abs(dx);
         } else {
           dx = 0;
-          dy = Math.sign(dy) * Math.abs(dy);
         }
       }
 
       state.dx = dx;
       state.dy = dy;
     }
-    function stickReset(state){
-      state.nub.style.transform = "translate(-50%,-50%)";
-      state.dx = 0;
-      state.dy = 0;
-    }
 
-    function bindGlobalStick(state){
-      state.el.addEventListener("pointerdown", (e) => {
-        e.preventDefault();
-        state.recalc && state.recalc();
-        state.active = true;
-        state.id = e.pointerId;
-        stickSetFromClient(state, e.clientX, e.clientY);
-      }, { passive:false });
+    function bindDpad(padEl, state){
+      const buttons = Array.from(padEl.querySelectorAll(".dpad-btn[data-dir]"));
 
-      window.addEventListener("pointermove", (e) => {
-        if(!state.active || e.pointerId !== state.id) return;
-        e.preventDefault();
-        stickSetFromClient(state, e.clientX, e.clientY);
-      }, { passive:false });
+      buttons.forEach(btn => {
+        btn.addEventListener("pointerdown", (e) => {
+          e.preventDefault();
+          const dir = btn.getAttribute("data-dir") || "";
+          state.pointers.set(e.pointerId, dir);
+          recomputeDpad(state);
+          try{ btn.setPointerCapture(e.pointerId); }catch(_){}
+        }, { passive:false });
+
+        btn.addEventListener("pointerup", (e) => {
+          const had = state.pointers.delete(e.pointerId);
+          if(had) recomputeDpad(state);
+        }, { passive:true });
+
+        btn.addEventListener("pointercancel", (e) => {
+          const had = state.pointers.delete(e.pointerId);
+          if(had) recomputeDpad(state);
+        }, { passive:true });
+
+        btn.addEventListener("pointerleave", (e) => {
+          /* If finger slides off while holding, keep held until pointerup, do nothing here */
+        }, { passive:true });
+      });
 
       window.addEventListener("pointerup", (e) => {
-        if(!state.active || e.pointerId !== state.id) return;
-        state.active = false;
-        state.id = null;
-        stickReset(state);
+        if(state.pointers.has(e.pointerId)){
+          state.pointers.delete(e.pointerId);
+          recomputeDpad(state);
+        }
       }, { passive:true });
 
       window.addEventListener("pointercancel", (e) => {
-        if(!state.active || e.pointerId !== state.id) return;
-        state.active = false;
-        state.id = null;
-        stickReset(state);
-      }, { passive:true });
-
-      state.el.addEventListener("touchstart", (e) => {
-        if(!e.changedTouches || !e.changedTouches.length) return;
-        e.preventDefault();
-        state.recalc && state.recalc();
-        const t = e.changedTouches[0];
-        state.active = true;
-        state.id = t.identifier;
-        stickSetFromClient(state, t.clientX, t.clientY);
-      }, { passive:false });
-
-      window.addEventListener("touchmove", (e) => {
-        if(!state.active) return;
-        if(!e.changedTouches || !e.changedTouches.length) return;
-        for(const t of e.changedTouches){
-          if(t.identifier === state.id){
-            stickSetFromClient(state, t.clientX, t.clientY);
-            break;
-          }
+        if(state.pointers.has(e.pointerId)){
+          state.pointers.delete(e.pointerId);
+          recomputeDpad(state);
         }
-      }, { passive:false });
-
-      window.addEventListener("touchend", (e) => {
-        if(!state.active) return;
-        if(!e.changedTouches || !e.changedTouches.length) return;
-        for(const t of e.changedTouches){
-          if(t.identifier === state.id){
-            state.active = false;
-            state.id = null;
-            stickReset(state);
-            break;
-          }
-        }
-      }, { passive:true });
-
-      window.addEventListener("touchcancel", () => {
-        if(!state.active) return;
-        state.active = false;
-        state.id = null;
-        stickReset(state);
       }, { passive:true });
     }
 
-    bindGlobalStick(lookState);
-    bindGlobalStick(moveState);
+    bindDpad(movePad, moveState);
+    bindDpad(lookPad, lookState);
 
     /* FPS state */
     let weaponSku = "wz_basic_pistol";
@@ -954,7 +927,7 @@
 
     let rightHandAnchor = null;
 
-    /* Fire behavior, keep FPS ammo, tap pistol, hold SMG */
+    /* Fire behavior */
     const FIREBTN = {
       pistolCooldownMs: 220,
       smgIntervalMs: 95,
@@ -1290,7 +1263,7 @@
       setFireModeLabel();
     }
 
-    /* Zombies, keep your green cube attackers */
+    /* Zombies */
     const zombies = [];
 
     function createZombie(x, z){
@@ -1323,7 +1296,7 @@
       }
     }
 
-    /* Muzzle origin, EXACT locked tuning */
+    /* Muzzle origin */
     function getMuzzleOrigin(){
       let base = null;
 
@@ -1358,14 +1331,12 @@
       ammo = Math.max(0, ammo - 1);
       hudAmmo.textContent = `AMMO, ${ammo}`;
 
-      /* Raycast from tuned muzzle, direction from camera forward */
       const origin = getMuzzleOrigin();
       const forward = camera.getForwardRay(200).direction;
 
       const ray = new BABYLON.Ray(origin, forward, 200);
       const hit = scene.pickWithRay(ray, (m) => m && m.metadata && m.metadata.isZombie);
 
-      /* Simple tracer + muzzle flash */
       const endPoint = (hit && hit.hit && hit.pickedPoint) ? hit.pickedPoint.clone() : origin.add(forward.scale(120));
 
       const tracer = BABYLON.MeshBuilder.CreateLines("tr", { points: [origin, endPoint] }, scene);
@@ -1382,7 +1353,6 @@
       flash.position.copyFrom(origin);
       fxRegister(flash, 0.04);
 
-      /* Damage zombies */
       if(hit && hit.pickedMesh){
         const z = hit.pickedMesh;
         z.metadata.hp = (z.metadata.hp || 1) - 1;
@@ -1440,7 +1410,6 @@
       const dir = new BABYLON.DirectionalLight("d", new BABYLON.Vector3(-0.2,-1,-0.1), scene);
       dir.intensity = 0.55;
 
-      /* GRID FLOOR */
       const ground = BABYLON.MeshBuilder.CreateGround("g", { width: 220, height: 220 }, scene);
       const grid = new BABYLON.GridMaterial("grid", scene);
       grid.majorUnitFrequency = 5;
@@ -1451,7 +1420,6 @@
       ground.material = grid;
       ground.isPickable = true;
 
-      /* Camera is chest mounted */
       camera = new BABYLON.UniversalCamera("chestCam", new BABYLON.Vector3(0,1.6,0), scene);
       camera.minZ = 0.02;
       camera.maxZ = 5000;
@@ -1467,7 +1435,6 @@
       scene.onBeforeRenderObservable.add(() => {
         const now = performance.now() * 0.001;
 
-        /* FX cleanup */
         for(let i = fxLive.length - 1; i >= 0; i--){
           const fx = fxLive[i];
           if(!fx || !fx.mesh){
@@ -1484,14 +1451,10 @@
 
         const dt = scene.getEngine().getDeltaTime() * 0.001;
 
-        /* LOOK, D-pad behavior, less sensitive */
+        /* LOOK, true D-pad */
         const lookMult = isTouch ? LOOK_SENS.TOUCH_MULT : 1.0;
-
-        let lookX = applyDeadzoneLook(lookState.dx);
-        let lookY = applyDeadzoneLook(lookState.dy);
-
-        lookX = stickCurve(lookX, LOOK.RESPONSE_POW) * lookMult;
-        lookY = stickCurve(lookY, LOOK.RESPONSE_POW) * lookMult;
+        const lookX = lookState.dx * lookMult;
+        const lookY = lookState.dy * lookMult;
 
         if(PLAYER.alive){
           aimYaw   += (lookX * LOOK.YAW_SPEED * dt);
@@ -1499,11 +1462,9 @@
           aimPitch  = clamp(aimPitch, LOOK.PITCH_MIN, LOOK.PITCH_MAX);
         }
 
-        /* Move, tightened */
-        let mvX = applyDeadzoneMove(moveState.dx);
-        let mvY = applyDeadzoneMove(moveState.dy);
-        mvX = stickCurve(mvX, JOY.RESPONSE_POW);
-        mvY = stickCurve(mvY, JOY.RESPONSE_POW);
+        /* MOVE, true D-pad */
+        const mvX = moveState.dx;
+        const mvY = moveState.dy;
 
         soldierRoot.rotation.y = aimYaw;
 
@@ -1549,7 +1510,6 @@
           }
         }
 
-        /* SMG auto fire if holding */
         if(PLAYER.alive && isSMG() && FIREBTN.holding){
           shootOnce();
         }
@@ -1575,11 +1535,9 @@
 
       const skinSku = await fetchEquippedSkinSku();
 
-      /* load soldier chest cam, then attach weapon */
       await loadSoldierAndChestCam(skinSku);
       await loadWeaponToRightHand(weaponSku);
 
-      /* Start level */
       level = 1;
       killsThisLevel = 0;
       setHudLevel();
@@ -1601,7 +1559,6 @@
       }
     }
 
-    /* Boot */
     (async function(){
       createScene();
       try{
