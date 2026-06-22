@@ -1,10 +1,11 @@
+Here’s the fully updated first half, ending exactly where your first half ended:
+
 <!doctype html>
 <html>
 <head>
   <meta charset="utf-8">
   <title>Mini Game Arena — IZZA GAME</title>
   <meta name="viewport" content="width=device-width, initial-scale=1">
-
   <script>window.IZZA_PERSIST_BASE = 'https://izzagame.onrender.com';</script>
   <!-- Ensure username is known before izza-persist.js loads -->
 <script>
@@ -32,18 +33,61 @@
   })();
 </script>
 <script src="/static/game/js/izza-persist.js"></script>
-
   <link rel="stylesheet" href="/static/themes.css">
   <style>
-    :root{ --tile-bg: var(--card); --tile-line: var(--line); --tile-hover: rgba(255,255,255,.04); }
-    body{font-family:Arial,Helvetica,sans-serif;background:var(--bg);color:var(--txt);margin:0}
-    .wrap{max-width:1100px;margin:0 auto;padding:16px}
-    .card{background:var(--card);border:1px solid var(--line);border-radius:14px;padding:16px;margin-top:14px}
+    :root{
+      --tile-bg: var(--card);
+      --tile-line: var(--line);
+      --tile-hover: rgba(255,255,255,.04);
+      --piPurple1:#7a44ff;
+      --piPurple2:#b784ff;
+      --gold1:#ffcf4d;
+      --gold2:#ffb23a;
+      --glow-gold:0 0 26px rgba(255,207,77,.45),0 0 64px rgba(255,178,58,.25);
+      --glow-purple:0 0 28px rgba(183,132,255,.35),0 0 64px rgba(122,68,255,.25);
+    }
+    body{
+      font-family:Arial,Helvetica,sans-serif;
+      background:
+        radial-gradient(circle at 15% 5%,rgba(255,207,77,.12),transparent 28%),
+        radial-gradient(circle at 90% 15%,rgba(122,68,255,.18),transparent 32%),
+        var(--bg);
+      color:var(--txt);
+      margin:0;
+    }
+    .rail{position:fixed;top:0;bottom:0;width:12px;z-index:0;pointer-events:none}
+    .rail.left{left:0;background:linear-gradient(180deg,transparent,rgba(255,207,77,.22),transparent)}
+    .rail.right{right:0;background:linear-gradient(180deg,transparent,rgba(183,132,255,.22),transparent)}
+    .wrap{max-width:1100px;margin:0 auto;padding:16px;position:relative;z-index:1}
+    .card{
+      background:
+        radial-gradient(circle at 0% 0%,rgba(255,207,77,.10),transparent 34%),
+        radial-gradient(circle at 100% 100%,rgba(122,68,255,.16),transparent 42%),
+        var(--card);
+      border:1px solid var(--line);
+      border-radius:14px;
+      padding:16px;
+      margin-top:14px;
+      box-shadow:0 18px 44px rgba(0,0,0,.45),0 0 34px rgba(122,68,255,.12);
+    }
     .muted{color:var(--muted)}
     h1{margin:0 0 6px}
     .lead{margin:6px 0 0}
     .grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(240px,1fr));gap:12px;margin-top:12px}
-    .tile{background:var(--tile-bg);border:1px solid var(--tile-line);border-radius:12px;padding:12px;display:flex;flex-direction:column;gap:10px;transition:background .15s ease, transform .1s ease;}
+    .tile{
+      background:
+        radial-gradient(circle at 0% 0%,rgba(255,207,77,.08),transparent 34%),
+        radial-gradient(circle at 100% 100%,rgba(122,68,255,.13),transparent 42%),
+        var(--tile-bg);
+      border:1px solid var(--tile-line);
+      border-radius:12px;
+      padding:12px;
+      display:flex;
+      flex-direction:column;
+      gap:10px;
+      transition:background .15s ease, transform .1s ease;
+      box-shadow:0 0 22px rgba(122,68,255,.10);
+    }
     .tile:hover{background:var(--tile-hover); transform:translateY(-1px)}
     .tile .thumb{height:130px; border-radius:8px; border:1px solid var(--tile-line); display:flex;align-items:center;justify-content:center;overflow:hidden; background:linear-gradient(180deg, rgba(255,255,255,.04), rgba(0,0,0,.06)); position:relative;}
     /* ensure added thumbnails fill nicely */
@@ -55,96 +99,176 @@
     .btn{display:inline-flex;align-items:center;justify-content:center;padding:8px 12px;border-radius:10px;border:1px solid var(--line);background:var(--chip-bg);cursor:pointer;text-decoration:none;color:inherit; white-space:nowrap;}
     .btn:hover{filter:brightness(1.08)}
     .earn{font-size:12px;color:var(--muted)}
-
+    .btn.izza-gold{
+      background:linear-gradient(180deg,var(--gold1),var(--gold2));
+      color:#1a1400;
+      border-color:rgba(255,207,77,.35);
+      box-shadow:var(--glow-gold);
+      font-weight:800;
+    }
+    .btn.izza-purple{
+      background:linear-gradient(180deg,var(--piPurple1),var(--piPurple2));
+      color:#fff;
+      border-color:rgba(183,132,255,.35);
+      box-shadow:var(--glow-purple);
+      font-weight:800;
+    }
     /* top bar */
     .topbar{display:flex;align-items:flex-start;justify-content:space-between;gap:12px; margin-top:24px;}
     .topbar .left{display:flex;flex-direction:column;align-items:flex-start;gap:4px; position:relative;}
-    .brand-word{height:40px;filter:brightness(1.06) contrast(1.02);}
-
+    .brand-word{
+      height:40px;
+      filter:
+        brightness(3.3)
+        saturate(2)
+        contrast(1.45)
+        drop-shadow(0 0 18px rgba(255,255,255,.85))
+        drop-shadow(0 0 42px rgba(183,132,255,.75))
+        drop-shadow(0 0 58px rgba(255,207,77,.45));
+    }
     .wallet{display:flex;gap:8px;flex-wrap:wrap;align-items:center;justify-content:flex-end}
     .wallet .pill strong{font-weight:700}
-
     /* phone layout */
     @media (max-width: 640px){
       .topbar .left{ padding-top:96px; }
       .wallet{flex-direction:column; align-items:flex-end; margin-top:-10px;}
     }
-
     /* avatar cursor */
     .avatar-wrap{position:fixed; left:16px; top:16px; width:96px; height:96px; z-index:9999; pointer-events:none; transform:translate3d(0,0,0);}
     canvas#avatarCursor{width:96px;height:96px;image-rendering:pixelated;image-rendering:crisp-edges}
     .avatar-bounce{animation:bob .9s ease-in-out infinite}
     @keyframes bob{0%{transform:translateY(0)}50%{transform:translateY(-6px)}100%{transform:translateY(0)}}
-
     .draggable{pointer-events:auto; touch-action:none}
     .net{position:absolute;right:12px;top:12px;width:48px;height:48px;border-radius:6px;border:1px solid(var(--line));background:rgba(0,0,0,.15)}
     .road{position:absolute;left:0;right:0;bottom:0;height:36px;background:repeating-linear-gradient(90deg, rgba(255,255,255,.18) 0 10px, transparent 10px 20px)}
     .stars{position:absolute;inset:0;background:
       radial-gradient(circle at 20% 30%, rgba(255,255,255,.35) 1px, transparent 1px) 0 0/40px 40px,
       radial-gradient(circle at 70% 60%, rgba(255,255,255,.25) 1.5px, transparent 1.5px) 0 0/60px 60px}
-
     @media (pointer:fine){ body{ cursor:none; } a, button{ cursor:none; } }
-
     /* FIRST-PAINT gating */
     .val[data-loading="1"]{ opacity:.35 }
-
     /* Hidden iframe for silent priming */
     #izzaPrimeFrame{ position:fixed; width:0; height:0; opacity:0; pointer-events:none; inset:auto auto 0 0; border:0 }
-/* Lock the page when the modal is open */
-body.no-scroll { overflow: hidden; }
+    /* Lock the page when the modal is open */
+    body.no-scroll { overflow: hidden; }
+    /* ===== Arcade/Profile social controls ===== */
+    .social-actions{
+      justify-content:flex-end;
+      margin:8px 0 4px;
+      position:relative;
+    }
+    .notif-wrap{position:relative;display:inline-flex}
+    #notifyBadge{
+      position:absolute;
+      right:-6px;
+      top:-7px;
+      min-width:18px;
+      height:18px;
+      border-radius:999px;
+      background:#e11d48;
+      color:#fff;
+      font-size:11px;
+      font-weight:900;
+      display:none;
+      align-items:center;
+      justify-content:center;
+      padding:0 5px;
+      box-shadow:0 0 14px rgba(225,29,72,.55);
+    }
+    .social-panel{
+      display:none;
+      margin-top:10px;
+      border:1px solid var(--line);
+      border-radius:14px;
+      padding:12px;
+      background:
+        radial-gradient(circle at 0% 0%,rgba(255,207,77,.08),transparent 34%),
+        radial-gradient(circle at 100% 100%,rgba(122,68,255,.12),transparent 42%),
+        rgba(8,9,16,.92);
+      box-shadow:0 16px 34px rgba(0,0,0,.32),0 0 28px rgba(122,68,255,.10);
+    }
+    .social-panel.show{display:block}
+    .social-search{
+      display:flex;
+      gap:8px;
+      flex-wrap:wrap;
+      margin-bottom:10px;
+    }
+    .social-search input{
+      flex:1 1 180px;
+      min-width:0;
+      padding:10px 12px;
+      border-radius:10px;
+      border:1px solid var(--line);
+      background:rgba(255,255,255,.05);
+      color:var(--txt);
+    }
+    .friend-row{
+      display:flex;
+      justify-content:space-between;
+      gap:8px;
+      align-items:center;
+      border:1px solid var(--line);
+      border-radius:10px;
+      padding:9px;
+      margin-top:7px;
+      background:rgba(255,255,255,.035);
+    }
+    .friend-row strong{font-size:14px}
+    .friend-row small{color:var(--muted)}
     /* ===== Leaderboard modal styles (added) ===== */
-.lb-modal{position:fixed;inset:0;background:rgba(0,0,0,.5);display:none;z-index:9999;align-items:flex-end}
-.lb-modal.show{display:flex}
-
-/* ⬇ add these properties to make the sheet a flex column & height-capped */
-.lb-sheet{
-  width:100%;
-  max-width:1100px;
-  margin:0 auto;
-  background:var(--card);
-  border:1px solid var(--line);
-  border-radius:14px 14px 0 0;
-  padding:12px 12px 16px;
-  max-height:88vh;              /* NEW */
-  display:flex;                 /* NEW */
-  flex-direction:column;        /* NEW */
-}
-
-.lb-head{display:flex;align-items:center;justify-content:space-between;gap:8px}
-.lb-close{line-height:1;padding:6px 10px}
-.lb-controls{display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin:10px 0}
-.lb-label{font-size:12px;color:var(--muted)}
-.lb-select{padding:6px 10px;border-radius:8px;border:1px solid var(--line);background:var(--chip-bg);color:inherit}
-.lb-tabs{display:flex;gap:6px;flex-wrap:wrap}
-.lb-tab{border:1px solid var(--line);background:var(--chip-bg);padding:6px 10px;border-radius:999px;cursor:pointer}
-.lb-tab.is-active{outline:2px solid rgba(255,255,255,.1)}
-
-/* ⬇ make the table area scrollable inside the sheet */
-.lb-body{
-  margin-top:8px;
-  flex:1 1 auto;                /* NEW */
-  min-height:0;                 /* NEW */
-  overflow:auto;                /* NEW */
-  -webkit-overflow-scrolling:touch; /* NEW (iOS smooth) */
-}
-
-.lb-table{width:100%;border-collapse:collapse}
-.lb-table th,.lb-table td{padding:8px;border-bottom:1px solid var(--line);text-align:left;font-size:14px}
-.lb-table th{font-size:12px;color:var(--muted);font-weight:600}
-.lb-row-me{background:rgba(255,255,255,.03)}
-.lb-empty{border:1px dashed var(--line);border-radius:8px;padding:12px;text-align:center}
-
-/* Optional: if the chase section can grow tall, also constrain it */
-.lb-chase{
-  max-height:40vh;              /* NEW */
-  overflow:auto;                /* NEW */
-  -webkit-overflow-scrolling:touch; /* NEW */
-}
-
-.lb-extra{margin-top:12px;padding-top:8px;border-top:1px solid var(--line)}
+    .lb-modal{position:fixed;inset:0;background:rgba(0,0,0,.5);display:none;z-index:9999;align-items:flex-end}
+    .lb-modal.show{display:flex}
+    /* ⬇ add these properties to make the sheet a flex column & height-capped */
+    .lb-sheet{
+      width:100%;
+      max-width:1100px;
+      margin:0 auto;
+      background:
+        radial-gradient(circle at 0% 0%,rgba(255,207,77,.10),transparent 34%),
+        radial-gradient(circle at 100% 100%,rgba(122,68,255,.16),transparent 42%),
+        var(--card);
+      border:1px solid var(--line);
+      border-radius:14px 14px 0 0;
+      padding:12px 12px 16px;
+      max-height:88vh;              /* NEW */
+      display:flex;                 /* NEW */
+      flex-direction:column;        /* NEW */
+      box-shadow:0 18px 44px rgba(0,0,0,.45),0 0 34px rgba(122,68,255,.12);
+    }
+    .lb-head{display:flex;align-items:center;justify-content:space-between;gap:8px}
+    .lb-close{line-height:1;padding:6px 10px}
+    .lb-controls{display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin:10px 0}
+    .lb-label{font-size:12px;color:var(--muted)}
+    .lb-select{padding:6px 10px;border-radius:8px;border:1px solid var(--line);background:var(--chip-bg);color:inherit}
+    .lb-tabs{display:flex;gap:6px;flex-wrap:wrap}
+    .lb-tab{border:1px solid var(--line);background:var(--chip-bg);padding:6px 10px;border-radius:999px;cursor:pointer}
+    .lb-tab.is-active{outline:2px solid rgba(255,255,255,.1)}
+    /* ⬇ make the table area scrollable inside the sheet */
+    .lb-body{
+      margin-top:8px;
+      flex:1 1 auto;                /* NEW */
+      min-height:0;                 /* NEW */
+      overflow:auto;                /* NEW */
+      -webkit-overflow-scrolling:touch; /* NEW (iOS smooth) */
+    }
+    .lb-table{width:100%;border-collapse:collapse}
+    .lb-table th,.lb-table td{padding:8px;border-bottom:1px solid var(--line);text-align:left;font-size:14px}
+    .lb-table th{font-size:12px;color:var(--muted);font-weight:600}
+    .lb-row-me{background:rgba(255,255,255,.03)}
+    .lb-empty{border:1px dashed var(--line);border-radius:8px;padding:12px;text-align:center}
+    /* Optional: if the chase section can grow tall, also constrain it */
+    .lb-chase{
+      max-height:40vh;              /* NEW */
+      overflow:auto;                /* NEW */
+      -webkit-overflow-scrolling:touch; /* NEW */
+    }
+    .lb-extra{margin-top:12px;padding-top:8px;border-top:1px solid var(--line)}
   </style>
 </head>
 <body class="cw-blue theme-a">
+  <div class="rail left" id="railL" aria-hidden="true"></div>
+  <div class="rail right" id="railR" aria-hidden="true"></div>
   <div class="wrap">
     <div class="card">
       <div class="topbar">
@@ -158,15 +282,29 @@ body.no-scroll { overflow: hidden; }
           <a class="btn" id="enterCityBtn" href="/izza-game/play">Enter IZZA City</a>
         </div>
       </div>
-
       <h1>Pick a game</h1>
       <p class="lead muted">Earn IZZA Coins &amp; Item Crafting Credits by playing mini games. Your character is used as the player avatar.</p>
-
-      <!-- Leaderboard open button (moved to top of list) -->
-      <div class="row" style="justify-content:flex-end;margin:8px 0 4px">
-        <button id="openLbBtn" class="btn">🏆 IZZA Leaderboard</button>
+      <div class="row social-actions">
+        <button id="openFriendsBtn" class="btn izza-purple" type="button">👥 Friends</button>
+        <span class="notif-wrap">
+          <button id="openNotifyBtn" class="btn izza-purple" type="button">🔔 Notifications</button>
+          <span id="notifyBadge">0</span>
+        </span>
+        <button id="openLbBtn" class="btn izza-gold" type="button">🏆 IZZA Leaderboard</button>
       </div>
-
+      <div id="friendsPanel" class="social-panel">
+        <div class="social-search">
+          <input id="friendSearchInput" type="text" placeholder="Search players by username">
+          <button id="friendSearchBtn" class="btn izza-purple" type="button">Search</button>
+        </div>
+        <div id="friendSearchResults"></div>
+        <h3 style="margin:14px 0 6px">Friends</h3>
+        <div id="friendsListBox" class="muted">Loading friends…</div>
+      </div>
+      <div id="notifyPanel" class="social-panel">
+        <h3 style="margin:0 0 8px">Notifications</h3>
+        <div id="notifyListBox" class="muted">Loading notifications…</div>
+      </div>
       <div class="grid" id="gameGrid">
         <!-- 1) Jetman first, renamed -->
         <div class="tile" data-game="jetman">
@@ -179,7 +317,6 @@ body.no-scroll { overflow: hidden; }
             <a href="/izza-game/minigames/jetman" class="btn enter-btn">Enter to play</a>
           </div>
         </div>
-
         <!-- 2) Basketball second, renamed -->
         <div class="tile" data-game="basketball">
           <div class="thumb"><img src="/static/game/thumbs/basketball.jpg" alt="IZZA BASKETBALL"></div>
@@ -191,7 +328,6 @@ body.no-scroll { overflow: hidden; }
             <a href="/izza-game/minigames/basketball" class="btn enter-btn">Enter to play</a>
           </div>
         </div>
-
         <!-- 3) Racing third, renamed -->
         <div class="tile" data-game="racing">
           <div class="thumb"><img src="/static/game/thumbs/racing.jpg" alt="IZZA DRIVER"></div>
@@ -203,7 +339,6 @@ body.no-scroll { overflow: hidden; }
             <a href="/izza-game/minigames/race" class="btn enter-btn">Enter to play</a>
           </div>
         </div>
-
         <!-- Remaining games unchanged (now with thumbnails) -->
         <div class="tile" data-game="puzzle">
           <div class="thumb"><img src="/static/game/thumbs/puzzle.jpg" alt="Puzzle Dash"></div>
@@ -215,7 +350,6 @@ body.no-scroll { overflow: hidden; }
             <a href="/izza-game/minigames/izza-dash" class="btn enter-btn">Enter to play</a>
           </div>
         </div>
-
         <div class="tile" data-game="targets">
           <div class="thumb"><img src="/static/game/thumbs/targets.jpg" alt="Target Range"></div>
           <h3>IZZA SOLITAIRE </h3></h3>
@@ -226,7 +360,6 @@ body.no-scroll { overflow: hidden; }
             <a href="/izza-game/minigames/targets" class="btn enter-btn">Enter to play</a>
           </div>
         </div>
-
         <div class="tile" data-game="runner">
           <div class="thumb"><img src="/static/game/thumbs/runner.jpg" alt="Subway Runner"></div>
           <h3>IZZA RUNNER</h3>
@@ -238,17 +371,14 @@ body.no-scroll { overflow: hidden; }
           </div>
         </div>
       </div>
-
       <p class="muted" style="margin-top:10px;font-size:13px">
         Tip: On desktop, move your mouse — your character follows as the cursor. On mobile, drag your character around the screen.
       </p>
     </div>
   </div>
-
   <div class="avatar-wrap draggable" id="avatarWrap" aria-hidden="true">
     <canvas id="avatarCursor" width="96" height="96"></canvas>
   </div>
-
   <!-- Leaderboard modal (added) -->
   <div id="lbModal" class="lb-modal" aria-hidden="true">
     <div class="lb-sheet" role="dialog" aria-modal="true" aria-label="IZZA Leaderboard">
@@ -256,7 +386,6 @@ body.no-scroll { overflow: hidden; }
         <h3 style="margin:0">IZZA Leaderboard</h3>
         <button class="btn lb-close" id="lbCloseBtn" type="button">✕</button>
       </div>
-
       <div class="lb-controls">
         <label class="lb-label">Game</label>
         <select id="lbGameSel" class="lb-select">
@@ -265,11 +394,10 @@ body.no-scroll { overflow: hidden; }
           <option value="racing">IZZA DRIVER</option>
           <option value="puzzle">IZZA DASH</option>
           <!-- in the <select id="lbGameSel"> -->
-<option value="targets::d1">IZZA SOLITAIRE — DRAW-1</option>
-<option value="targets::d3">IZZA SOLITAIRE — DRAW-3</option>
+          <option value="targets::d1">IZZA SOLITAIRE — DRAW-1</option>
+          <option value="targets::d3">IZZA SOLITAIRE — DRAW-3</option>
           <option value="runner">IZZA RUNNER</option>
         </select>
-
         <div class="lb-tabs" id="lbTabs">
           <button data-period="day" class="lb-tab is-active" type="button">Daily</button>
           <button data-period="month" class="lb-tab" type="button">Monthly</button>
@@ -277,20 +405,17 @@ body.no-scroll { overflow: hidden; }
           <button data-period="alltime" class="lb-tab" type="button">All-Time</button>
         </div>
       </div>
-
       <div id="lbBody" class="lb-body">
         <!-- table renders here -->
       </div>
-
       <div class="lb-extra">
-  <h4 style="margin:12px 0 6px">IZZA City — Longest Police Chase</h4>
-  <div id="lbPoliceChase" class="lb-chase">
-    <div class="lb-empty muted">No data yet.</div>
-  </div>
-</div>
+        <h4 style="margin:12px 0 6px">IZZA City — Longest Police Chase</h4>
+        <div id="lbPoliceChase" class="lb-chase">
+          <div class="lb-empty muted">No data yet.</div>
+        </div>
+      </div>
     </div>
   </div>
-
   <script>
   (function(){
     /* --------- token param: save, restore, and attach where needed --------- */
@@ -309,14 +434,12 @@ body.no-scroll { overflow: hidden; }
         }
       }
     }catch(_){}
-
     function withAuth(path){
       const url = new URL(path, location.origin);
       if (T) url.searchParams.set('t', T);
       if (U) url.searchParams.set('u', U);
       return url.pathname + (url.search ? url.search : '');
     }
-
     // Username param (u): save/restore and publish to Persist hooks
     const U_KEY = 'izzaUserU';
     let U = new URLSearchParams(location.search).get('u') || '';
@@ -338,7 +461,6 @@ body.no-scroll { overflow: hidden; }
         window.izzaUserKey = { get: () => U };
       }
     }catch(_){}
-
     /* --- headers helper --- */
     function bearerHeaders(base = {}) {
       const headers = Object.assign({ 'content-type':'application/json' }, base || {});
@@ -348,7 +470,6 @@ body.no-scroll { overflow: hidden; }
       }catch(_){}
       return headers;
     }
-
     /* --- auth/character (server) --- */
     async function fetchCharacterFresh(){
       try{
@@ -363,7 +484,6 @@ body.no-scroll { overflow: hidden; }
       }catch(_){}
       return null;
     }
-
     async function ensureCharacter(){
       const lsProfile = (()=>{ try{ return JSON.parse(localStorage.getItem('izzaCharacter')||'null'); }catch(_){ return null; } })();
       const isAdminLocal = (()=> {
@@ -373,23 +493,19 @@ body.no-scroll { overflow: hidden; }
           return role === 'admin' || user === 'cammac';
         }catch(_){ return false; }
       })();
-
       const fresh = await fetchCharacterFresh();
       if (fresh && (fresh.hasCharacter || fresh.isAdmin || (fresh.user && fresh.user.isAdmin))) return fresh;
-
       if (isAdminLocal) {
         const fallback = lsProfile && typeof lsProfile === 'object'
           ? lsProfile
           : { hasCharacter:true, body_type:'male', skin_tone:'light', sprite_skin:'default' };
         return Object.assign({ hasCharacter:true }, fallback, { isAdmin:true });
       }
-
       // Truly first-time ever: go make a character (not silent)
       const next = encodeURIComponent(withAuth('/izza-game/minigames'));
       location.replace('/izza-game/create?next=' + next);
       throw new Error('redirecting');
     }
-
     /* --- avatar assets (unchanged) --- */
     const SPRITES = {
       body:{ default:"/static/game/sprites/body/default.png", street_a:"/static/game/sprites/body/street_a.png", street_b:"/static/game/sprites/body/street_b.png" },
@@ -401,12 +517,10 @@ body.no-scroll { overflow: hidden; }
     const FEMALE_DRESS_BASE=["#7AB6FF","#4E84E3","#2F5CB5"];
     const FEMALE_DRESS_TO={ blue:["#7AB6FF","#4E84E3","#2F5CB5"], red:["#FF7A7A","#E24C4C","#B12F2F"], green:["#7DD68A","#4CB56B","#2F7F47"], purple:["#B796FF","#8C6BE0","#6A49B8"], yellow:["#FFE08A","#E7C45A","#B89433"], pink:["#FFA6D6","#E57CB2","#C45C96"], black:["#3A3AD3","#232326","#0E0E10"], white:["#FFFFFF","#E6E6E6","#C9C9C9"], brown:["#A87854","#7C563A","#593D29"], orange:["#FFB46A","#E4873A","#B65E1F"] };
     const HAIR_TO={ black:["#2C2C31","#17171B","#0A0A0D"], brown:["#7A5336","#5C3E28","#3E2B1B"], blonde:["#FBE58F","#E5C35A","#B89433"], red:["#E65F35","#B54426","#8E321A"], white:["#FFFFFF","#E6E6E6","#C9C9C9"], blue:["#7AB6FF","#4E84E3","#2F5CB5"], green:["#7DD68A","#4CB56B","#2F7F47"], pink:["#FFA6D6","#E57CB2","#C45C96"] };
-
     function loadImg(src){ return new Promise(res=>{ const i=new Image(); i.crossOrigin='anonymous'; i.onload=()=>res(i); i.onerror=()=>res(null); i.src=src; }); }
     const hexToRgb=h=>{ const n=parseInt(h.replace('#',''),16); return {r:(n>>16)&255,g:(n>>8)&255,b:n&255}; };
     const dist2=(a,b)=>{const dr=a.r-b.r,dg=a.g-b.g,db=a.b-b.b;return dr*dr+dg*dg+db*db;};
     const lum=(r,g,b)=>0.2126*r+0.7152*g+0.0722*b;
-
     function extractThreeToneRamp(img){
       const w=img.width,h=img.height, oc=document.createElement('canvas'); oc.width=w; oc.height=h;
       const c=oc.getContext('2d',{willReadFrequently:true}); c.imageSmoothingEnabled=false; c.drawImage(img,0,0);
@@ -418,7 +532,6 @@ body.no-scroll { overflow: hidden; }
         return '#'+s.r.toString(16).padStart(2,'0')+s.g.toString(16).padStart(2,'0')+s.b.toString(16,'0'); };
       return [pick(0.2),pick(0.55),pick(0.85)];
     }
-
     function paletteSwap(img, fromRampHex, toRampHex, tolerance=2000){
       const from=fromRampHex.map(hexToRgb), to=toRampHex.map(hexToRgb);
       const w=img.width,h=img.height, oc=document.createElement('canvas'); oc.width=w; oc.height=h;
@@ -433,7 +546,6 @@ body.no-scroll { overflow: hidden; }
       c.putImageData(id,0,0);
       return {canvas:oc, changedPixels:changed};
     }
-
     function overlayTint(img, hex, strength=1.0){
       const w=img.width,h=img.height, oc=document.createElement('canvas'); oc.width=w; oc.height=h;
       const c=oc.getContext('2d',{willReadFrequently:true}); c.imageSmoothingEnabled=false; c.drawImage(img,0,0);
@@ -448,13 +560,11 @@ body.no-scroll { overflow: hidden; }
       c.putImageData(id,0,0);
       return oc;
     }
-
     async function buildAvatarCanvas(dstCtx, size, profile){
       const DW=size,DH=size,X=0,Y=0;
       const type=profile.body_type||'male', tone=profile.skin_tone||'light', theme=profile.sprite_skin||'default';
       const outfitKey=profile.outfit||'street', hairKey=profile.hair||'short', hairCol=profile.hair_color||'black';
       const femaleOut=profile.female_outfit_color||'blue';
-
       let body=null;
       if(type==='female'){
         const femaleWide=`/static/game/sprites/body/${theme}__female_wide.png`;
@@ -462,10 +572,8 @@ body.no-scroll { overflow: hidden; }
         body = await loadImg(femaleWide) || await loadImg(femaleSlim);
       }
       if(!body){ body = await loadImg(SPRITES.body[theme]||SPRITES.body.default); }
-
       const hair = await loadImg(SPRITES.hair[hairKey]||SPRITES.hair.short);
       const outfit = (type==='female') ? null : (await loadImg(SPRITES.outfit[outfitKey]||SPRITES.outfit.street));
-
       let bodyCanvas;
       if(body){
         const targetSkin=SKIN_TO[tone]||SKIN_TO.light;
@@ -473,14 +581,12 @@ body.no-scroll { overflow: hidden; }
         bodyCanvas=swapped.canvas;
         if(swapped.changedPixels<8){ bodyCanvas=overlayTint(body, targetSkin[1], 0.98); }
       }
-
       if(type==='female' && bodyCanvas){
         const targetDress=FEMALE_DRESS_TO[femaleOut]||FEMALE_DRESS_TO.blue;
         const reDress=paletteSwap(bodyCanvas, FEMALE_DRESS_BASE, targetDress, 4000);
         bodyCanvas=reDress.canvas;
         if(reDress.changedPixels<6){ bodyCanvas=overlayTint(bodyCanvas, targetDress[1], 0.85); }
       }
-
       dstCtx.clearRect(0,0,DW,DH);
       if(bodyCanvas) dstCtx.drawImage(bodyCanvas, X, Y, DW, DH);
       if(outfit) dstCtx.drawImage(outfit, X, Y, DW, DH);
@@ -493,10 +599,8 @@ body.no-scroll { overflow: hidden; }
         dstCtx.drawImage(hairCanvas, X, hairY, DW, DH);
       }
     }
-
     // Baseline authoring size for the boxes below
 const ARENA_BASE_SIZE = 96;
-
 function _arenaScaleBox(box, k){
   return {
     w:  Math.round((box.w  ||0) * k),
@@ -507,7 +611,6 @@ function _arenaScaleBox(box, k){
   };
 }
 // ======== EQUIPPED GEAR OVERLAY for 96×96 avatar cursor ========
-
 // Read the same inventory City uses
 function _arenaInvRead(){
   try{
@@ -516,7 +619,6 @@ function _arenaInvRead(){
   }catch(_){}
   try{ return JSON.parse(localStorage.getItem('izzaInventory')||'{}'); }catch(_){ return {}; }
 }
-
 // Is item equipped?
 function _arenaIsEquipped(entry){
   if(!entry) return false;
@@ -524,7 +626,6 @@ function _arenaIsEquipped(entry){
   if (typeof entry.equippedCount === 'number' && entry.equippedCount > 0) return true;
   return false;
 }
-
 // Find equipped item by slot
 function _arenaEquippedIn(slot){
   const inv = _arenaInvRead();
@@ -539,7 +640,6 @@ function _arenaEquippedIn(slot){
   }
   return null;
 }
-
 // Simple SVG -> <img> cache so overlays pop instantly once decoded
 const _arenaSvgImgCache = new Map();
 function _arenaSvgToImage(svg){
@@ -548,36 +648,27 @@ function _arenaSvgToImage(svg){
   const img = new Image();
   img.decoding = 'async';
   img.src = 'data:image/svg+xml;utf8,' + encodeURIComponent(svg);
-
   // ⬇⬇ ensure we repaint once the image is ready
   img.onload = () => { try { refreshArenaCursor(); } catch(_){} };
-
   _arenaSvgImgCache.set(svg, img);
   return img;
 }
-
 // Arena-only overlay boxes — surgical adjustments
 const ARENA_OVERLAY_BOX = Object.freeze({
   // slightly smaller helmet, moved down a touch
   head:  { w: 44, h: 44, ox: 48, oy: 24, scale: 1.12 },
-
   // vest moved further down
   chest: { w: 46, h: 46, ox: 48, oy: 56, scale: 1.15 },
-
   // arms a bit wider (not taller)
   arms:  { w: 56, h: 44, ox: 48, oy: 46, scale: 1.15 },
-
   // legs wider, keep lower position
   legs:  { w: 54, h: 46, ox: 48, oy: 74, scale: 1.18 },
-
   // weapon: shifted slightly left and lower
   hands: { w: 64, h: 46, ox: 60, oy: 64, scale: 1.34 }
 });
-
 // Crafted multipliers — keep 1:1 like City
 const CRAFTED_ARMOUR_SHRINK = 1.00;
 const CRAFTED_WEAPON_BOOST  = 1.00;
-
 // (optional safety) clamp per-item overlayScale so bad data can’t miniaturize items
 function _clampScale(x, lo=0.8, hi=1.25){
   x = Number(x);
@@ -588,10 +679,8 @@ function _arenaDrawOverlay(ctx, svg, box, perItemScale=1, flipX=false){
   if (!svg) return false;
   const img = _arenaSvgToImage(svg);
   if (!img || !img.complete) return false;
-
   const w = Math.max(8, box.w|0);
   const h = Math.max(8, box.h|0);
-
   ctx.save();
   ctx.imageSmoothingEnabled = false;
   ctx.translate(box.ox|0, box.oy|0);
@@ -602,25 +691,20 @@ function _arenaDrawOverlay(ctx, svg, box, perItemScale=1, flipX=false){
   ctx.restore();
   return true;
 }
-
 // Optional: nudge weapon position based on facing (if you store it)
 function _arenaWeaponFacingBox(base){
   // You can make this smarter. For now, bias to the right (like facing "right")
   return base;
 }
-
 // Main: build avatar + gear in one go (uses your existing base painter)
 async function buildAvatarCanvasWithGear(dstCtx, size, profile){
   await buildAvatarCanvas(dstCtx, size, profile);
-
   const k = (size > 0 ? size / ARENA_BASE_SIZE : 1); // <- scale factor
-
   const head  = _arenaEquippedIn('head');
   const chest = _arenaEquippedIn('chest');
   const arms  = _arenaEquippedIn('arms');
   const legs  = _arenaEquippedIn('legs');
   const hands = _arenaEquippedIn('hands');
-
   if (legs){
     const bx = _arenaScaleBox(ARENA_OVERLAY_BOX.legs, k);
     const per = Number.isFinite(legs.it?.overlayScale) ? (+legs.it.overlayScale) : 1;
@@ -653,7 +737,6 @@ async function buildAvatarCanvasWithGear(dstCtx, size, profile){
     _arenaDrawOverlay(dstCtx, hands.svg, bx, per * mul, /*flipX=*/false);
   }
 }
-
 // Small helper you can call whenever inventory changes to repaint the cursor
 async function refreshArenaCursor(){
   try{
@@ -673,7 +756,6 @@ window.addEventListener('izza-inventory-changed', refreshArenaCursor, { passive:
     const elCoins=document.getElementById('coins'); const elCraft=document.getElementById('craft');
     let isTouch=window.matchMedia('(pointer:coarse)').matches;
     function setAvatarPos(x,y){ avatarWrap.style.transform=`translate3d(${x}px,${y}px,0)`; }
-
     function animateAvatarTo(el,cb){
       const r=el.getBoundingClientRect();
       const targetX=r.left + r.width/2 - 48 + window.scrollX;
@@ -690,7 +772,6 @@ window.addEventListener('izza-inventory-changed', refreshArenaCursor, { passive:
       }
       requestAnimationFrame(tick);
     }
-
     function wirePointer(){
       if(!isTouch){
         document.addEventListener('mousemove',(e)=>{ setAvatarPos(e.clientX-48+window.scrollX, e.clientY-48+window.scrollY); },{passive:true});
@@ -702,7 +783,6 @@ window.addEventListener('izza-inventory-changed', refreshArenaCursor, { passive:
         avatarWrap.addEventListener('pointermove',(e)=>{ if(!active) return; setAvatarPos(e.clientX-startX+window.scrollX, e.clientY-startY+window.scrollY); });
         const stop=()=>{ active=false; }; avatarWrap.addEventListener('pointerup',stop); avatarWrap.addEventListener('pointercancel',stop);
       }
-
       // Ensure "enter" links carry t & u (and animate)
       document.querySelectorAll('.enter-btn').forEach(a=>{
         a.href = withAuth(a.getAttribute('href') || '#');
@@ -712,16 +792,13 @@ window.addEventListener('izza-inventory-changed', refreshArenaCursor, { passive:
           animateAvatarTo(a,()=>{ location.href = href; });
         });
       });
-
       const cityBtn = document.getElementById('enterCityBtn');
       if (cityBtn) {
         // rewrite the href to include both t & u
         cityBtn.href = withAuth(cityBtn.getAttribute('href') || '/izza-game/play');
-
         cityBtn.addEventListener('click', async (ev)=>{
           ev.preventDefault();
           const href = cityBtn.getAttribute('href'); // already includes t & u
-
           try {
             await hydrateFromSnapshot();
             try { writeCraftAll(readCraftAny()); } catch(_) {}
@@ -738,12 +815,10 @@ window.addEventListener('izza-inventory-changed', refreshArenaCursor, { passive:
               window._izzaForceSave();
             }
           } catch(_) {}
-
           setTimeout(()=>{ location.href = href; }, 120);
         }, {passive:false});
       }
     }
-
     /* ====== Wallet helpers ====== */
     const CRAFT_KEYS = ['izzaCrafting','craftingCredits','izzaCraftCredits'];
     function readCraftAny(){
@@ -759,7 +834,6 @@ window.addEventListener('izza-inventory-changed', refreshArenaCursor, { passive:
       try{ window.dispatchEvent(new Event('izza-crafting-changed')); }catch(_){}
     }
     (function normalizeCraft(){ writeCraftAll(readCraftAny()); })();
-
     // NEW: resilient coin reader so Arena shows coins even if visiting here first
     function readCoinsAny(){
       let n = parseInt(localStorage.getItem('izzaCoins')||'0',10) || 0;
@@ -1046,6 +1120,284 @@ window.addEventListener('izza-inventory-changed', refreshArenaCursor, { passive:
       }
     })();
 
+        /* ===== Friends + Notifications logic ===== */
+    (function(){
+      const friendsBtn = document.getElementById('openFriendsBtn');
+      const notifyBtn  = document.getElementById('openNotifyBtn');
+      const badge      = document.getElementById('notifyBadge');
+      const friendsPanel = document.getElementById('friendsPanel');
+      const notifyPanel  = document.getElementById('notifyPanel');
+      const searchInput  = document.getElementById('friendSearchInput');
+      const searchBtn    = document.getElementById('friendSearchBtn');
+      const searchBox    = document.getElementById('friendSearchResults');
+      const friendsBox   = document.getElementById('friendsListBox');
+      const notifyBox    = document.getElementById('notifyListBox');
+
+      if(!friendsBtn || !notifyBtn || !friendsPanel || !notifyPanel) return;
+
+      function me(){
+        return (window.izzaUserKey && window.izzaUserKey.get && window.izzaUserKey.get())
+          || (localStorage.getItem('izzaUserU')||'').replace(/^@+/,'').toLowerCase();
+      }
+
+      function esc(s){
+        return String(s ?? '').replace(/[&<>"']/g, m => ({
+          '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'
+        }[m]));
+      }
+
+      async function apiGet(paths){
+        for (const p of paths){
+          try{
+            const r = await fetch(withAuth(p), { credentials:'include', headers: bearerHeaders() });
+            if(r.ok) return await r.json();
+          }catch(_){}
+        }
+        return null;
+      }
+
+      async function apiPost(paths, body){
+        for (const p of paths){
+          try{
+            const r = await fetch(withAuth(p), {
+              method:'POST',
+              credentials:'include',
+              headers: bearerHeaders(),
+              body: JSON.stringify(body || {})
+            });
+            if(r.ok) return await r.json();
+          }catch(_){}
+        }
+        return null;
+      }
+
+      function normList(j){
+        if(!j) return [];
+        if(Array.isArray(j)) return j;
+        return j.rows || j.items || j.friends || j.notifications || j.results || j.data || [];
+      }
+
+      function updateBadge(n){
+        n = Math.max(0, Number(n)||0);
+        if(!badge) return;
+        if(n > 0){
+          badge.textContent = n > 99 ? '99+' : String(n);
+          badge.style.display = 'inline-flex';
+        } else {
+          badge.style.display = 'none';
+        }
+      }
+
+      async function loadFriends(){
+        if(friendsBox) friendsBox.innerHTML = `<div class="lb-empty muted">Loading friends…</div>`;
+
+        const j = await apiGet([
+          '/izza-game/api/friends',
+          '/izza-game/api/social/friends',
+          '/api/friends'
+        ]);
+
+        const rows = normList(j);
+        if(!friendsBox) return;
+
+        if(!rows.length){
+          friendsBox.innerHTML = `<div class="lb-empty muted">No friends yet. Search a username above.</div>`;
+          return;
+        }
+
+        friendsBox.innerHTML = rows.map(r=>{
+          const u = r.username || r.friend || r.user || r.u || r.name || 'Player';
+          const status = r.status || 'friend';
+          return `
+            <div class="friend-row">
+              <div>
+                <strong>@${esc(u)}</strong><br>
+                <small>${esc(status)}</small>
+              </div>
+              <button class="btn" type="button" data-friend-remove="${esc(u)}">Remove</button>
+            </div>
+          `;
+        }).join('');
+      }
+
+      async function searchFriends(){
+        const q = (searchInput && searchInput.value || '').trim().replace(/^@+/,'').toLowerCase();
+        if(!q){
+          if(searchBox) searchBox.innerHTML = `<div class="lb-empty muted">Type a username to search.</div>`;
+          return;
+        }
+
+        if(searchBox) searchBox.innerHTML = `<div class="lb-empty muted">Searching…</div>`;
+
+        const j = await apiGet([
+          `/izza-game/api/friends/search?q=${encodeURIComponent(q)}`,
+          `/izza-game/api/social/search?q=${encodeURIComponent(q)}`,
+          `/api/friends/search?q=${encodeURIComponent(q)}`
+        ]);
+
+        const rows = normList(j);
+        if(!searchBox) return;
+
+        if(!rows.length){
+          searchBox.innerHTML = `<div class="lb-empty muted">No players found.</div>`;
+          return;
+        }
+
+        const mine = me();
+        searchBox.innerHTML = rows.map(r=>{
+          const u = (r.username || r.user || r.u || r.name || '').replace(/^@+/,'').toLowerCase();
+          if(!u || u === mine) return '';
+          return `
+            <div class="friend-row">
+              <div>
+                <strong>@${esc(u)}</strong><br>
+                <small>${esc(r.status || 'Player')}</small>
+              </div>
+              <button class="btn izza-purple" type="button" data-friend-add="${esc(u)}">Add Friend</button>
+            </div>
+          `;
+        }).join('') || `<div class="lb-empty muted">No players found.</div>`;
+      }
+
+      async function sendFriendRequest(u){
+        if(!u) return;
+        await apiPost([
+          '/izza-game/api/friends/request',
+          '/izza-game/api/social/friends/request',
+          '/api/friends/request'
+        ], { username:u, to:u, friend:u });
+
+        if(searchBox) searchBox.innerHTML = `<div class="lb-empty muted">Friend request sent to @${esc(u)}.</div>`;
+        await loadNotifications();
+        await loadFriends();
+      }
+
+      async function removeFriend(u){
+        if(!u) return;
+        await apiPost([
+          '/izza-game/api/friends/remove',
+          '/izza-game/api/social/friends/remove',
+          '/api/friends/remove'
+        ], { username:u, friend:u });
+        await loadFriends();
+      }
+
+      async function loadNotifications(){
+        if(notifyBox) notifyBox.innerHTML = `<div class="lb-empty muted">Loading notifications…</div>`;
+
+        const j = await apiGet([
+          '/izza-game/api/notifications',
+          '/izza-game/api/social/notifications',
+          '/api/notifications'
+        ]);
+
+        const rows = normList(j);
+        const unread = Number(j && (j.unread ?? j.unread_count ?? j.count)) || rows.filter(x=>!x.read && !x.seen).length;
+        updateBadge(unread);
+
+        if(!notifyBox) return;
+
+        if(!rows.length){
+          notifyBox.innerHTML = `<div class="lb-empty muted">No notifications yet.</div>`;
+          return;
+        }
+
+        notifyBox.innerHTML = rows.map(n=>{
+          const id = n.id || n.notification_id || n.key || '';
+          const type = n.type || '';
+          const from = n.from || n.from_user || n.username || n.user || n.sender || '';
+          const msg = n.message || n.text || (type === 'friend_request' && from ? `@${from} sent you a friend request.` : 'Notification');
+
+          const actions = (type === 'friend_request' || n.kind === 'friend_request' || n.action === 'friend_request')
+            ? `
+              <div class="row" style="margin-top:8px">
+                <button class="btn izza-purple" type="button" data-notify-accept="${esc(id)}" data-from="${esc(from)}">Accept</button>
+                <button class="btn" type="button" data-notify-decline="${esc(id)}" data-from="${esc(from)}">Decline</button>
+              </div>
+            `
+            : `
+              <div class="row" style="margin-top:8px">
+                <button class="btn" type="button" data-notify-read="${esc(id)}">Mark read</button>
+              </div>
+            `;
+
+          return `
+            <div class="friend-row" style="display:block">
+              <strong>${esc(msg)}</strong>
+              ${actions}
+            </div>
+          `;
+        }).join('');
+      }
+
+      async function acceptRequest(id, from){
+        await apiPost([
+          '/izza-game/api/friends/accept',
+          '/izza-game/api/social/friends/accept',
+          '/api/friends/accept'
+        ], { id, from, username:from });
+        await loadFriends();
+        await loadNotifications();
+      }
+
+      async function declineRequest(id, from){
+        await apiPost([
+          '/izza-game/api/friends/decline',
+          '/izza-game/api/social/friends/decline',
+          '/api/friends/decline'
+        ], { id, from, username:from });
+        await loadNotifications();
+      }
+
+      async function markRead(id){
+        await apiPost([
+          '/izza-game/api/notifications/read',
+          '/izza-game/api/social/notifications/read',
+          '/api/notifications/read'
+        ], { id });
+        await loadNotifications();
+      }
+
+      friendsBtn.addEventListener('click', ()=>{
+        friendsPanel.classList.toggle('show');
+        notifyPanel.classList.remove('show');
+        if(friendsPanel.classList.contains('show')) loadFriends();
+      }, {passive:true});
+
+      notifyBtn.addEventListener('click', ()=>{
+        notifyPanel.classList.toggle('show');
+        friendsPanel.classList.remove('show');
+        if(notifyPanel.classList.contains('show')) loadNotifications();
+      }, {passive:true});
+
+      if(searchBtn) searchBtn.addEventListener('click', searchFriends, {passive:true});
+      if(searchInput) searchInput.addEventListener('keydown', e=>{
+        if(e.key === 'Enter'){ e.preventDefault(); searchFriends(); }
+      });
+
+      document.addEventListener('click', async e=>{
+        const add = e.target.closest('[data-friend-add]');
+        if(add){ await sendFriendRequest(add.getAttribute('data-friend-add')); return; }
+
+        const rem = e.target.closest('[data-friend-remove]');
+        if(rem){ await removeFriend(rem.getAttribute('data-friend-remove')); return; }
+
+        const acc = e.target.closest('[data-notify-accept]');
+        if(acc){ await acceptRequest(acc.getAttribute('data-notify-accept'), acc.getAttribute('data-from')); return; }
+
+        const dec = e.target.closest('[data-notify-decline]');
+        if(dec){ await declineRequest(dec.getAttribute('data-notify-decline'), dec.getAttribute('data-from')); return; }
+
+        const read = e.target.closest('[data-notify-read]');
+        if(read){ await markRead(read.getAttribute('data-notify-read')); return; }
+      });
+
+      setTimeout(loadNotifications, 900);
+      document.addEventListener('visibilitychange', ()=>{
+        if(!document.hidden) loadNotifications();
+      }, {passive:true});
+    })();
+
     /* ===== Leaderboard Modal logic (added) ===== */
     (function(){
       const elModal = document.getElementById('lbModal');
@@ -1058,42 +1410,41 @@ window.addEventListener('izza-inventory-changed', refreshArenaCursor, { passive:
       if(!elModal||!elOpen||!elClose||!elBody||!elTabs||!elGame) return;
 
       function open(){
-  elModal.classList.add('show');
-  document.body.classList.add('no-scroll');   // lock background scroll
-  loadAndRender(true);
-  renderPoliceChase();                        // IZZA City chase leaderboard
-}
+        elModal.classList.add('show');
+        document.body.classList.add('no-scroll');
+        loadAndRender(true);
+        renderPoliceChase();
+      }
 
-elTabs.addEventListener('click', (e)=>{
-  const b = e.target.closest('[data-period]'); if(!b) return;
-  period = b.getAttribute('data-period');
-  elTabs.querySelectorAll('.lb-tab').forEach(x=>x.classList.toggle('is-active', x===b));
-  loadAndRender();
-  renderPoliceChase();                        // refresh chase block when tabs change
-}, {passive:true});
+      function close(){
+        elModal.classList.remove('show');
+        document.body.classList.remove('no-scroll');
+      }
 
-// Also refresh when game dropdown changes
-elGame.addEventListener('change', ()=>{
-  loadAndRender();                            // reload leaderboard for the selected game
-}, {passive:true});
+      elOpen.addEventListener('click', open, {passive:true});
+      elClose.addEventListener('click', close, {passive:true});
+      elModal.addEventListener('click', (e)=>{ if(e.target===elModal) close(); }, {passive:true});
+      document.addEventListener('keydown', (e)=>{ if(e.key==='Escape') close(); }, {passive:true});
 
-function close(){
-  elModal.classList.remove('show');
-  document.body.classList.remove('no-scroll'); // unlock background scroll
-}
+      let period = 'day';
 
-elOpen.addEventListener('click', open, {passive:true});
-elClose.addEventListener('click', close, {passive:true});
-elModal.addEventListener('click', (e)=>{ if(e.target===elModal) close(); }, {passive:true});
-document.addEventListener('keydown', (e)=>{ if(e.key==='Escape') close(); }, {passive:true});
+      elTabs.addEventListener('click', (e)=>{
+        const b = e.target.closest('[data-period]'); if(!b) return;
+        period = b.getAttribute('data-period');
+        elTabs.querySelectorAll('.lb-tab').forEach(x=>x.classList.toggle('is-active', x===b));
+        loadAndRender();
+        renderPoliceChase();
+      }, {passive:true});
 
-let period = 'day'; // default
+      elGame.addEventListener('change', ()=>{
+        loadAndRender();
+      }, {passive:true});
 
-      /* ---------- Local ledger helpers: makes your own scores show up ---------- */
       function meUsername(){
         return (window.izzaUserKey && window.izzaUserKey.get && window.izzaUserKey.get())
           || (localStorage.getItem('izzaUserU')||'').toLowerCase();
       }
+
       function nowParts(){
         const d=new Date(); const z=n=>String(n).padStart(2,'0');
         return {
@@ -1102,43 +1453,40 @@ let period = 'day'; // default
           year: String(d.getFullYear())
         };
       }
-      function stampFor(period){
-  const p = nowParts();
-  if (period==='day')   return p.day;
-  if (period==='month') return p.month;
-  if (period==='year')  return p.year;
-  return ''; // alltime
-}
-      // replace in the leaderboard block
-function saveLocal(gameId, periodKey, stamp, rows){
-  // ✅ write under izza-prefixed keys so izza-persist keeps them
-  const key = periodKey==='alltime'
-    ? `izzaLb2::${gameId}::alltime`
-    : `izzaLb2::${gameId}::${periodKey}::${stamp}`;
-  try{ localStorage.setItem(key, JSON.stringify(rows||[])); }catch(_){}
-}
 
-function readLocal(gameId, periodKey){
-  // prefer new izza-prefixed keys; then lb2; then old lb (back-compat)
-  try{
-    const pick = (k)=>{ const v = localStorage.getItem(k); return v ? JSON.parse(v) : null; };
-    const stamps = (()=>{ const d=new Date(), z=n=>String(n).padStart(2,'0');
-      return { day:`${d.getFullYear()}-${z(d.getMonth()+1)}-${z(d.getDate())}`,
-               month:`${d.getFullYear()}-${z(d.getMonth()+1)}`,
-               year:String(d.getFullYear()) }; })();
-    if (periodKey==='alltime'){
-      return pick(`izzaLb2::${gameId}::alltime`)
-          || pick(`lb2::${gameId}::alltime`)
-          || pick(`lb::${gameId}::alltime`)
-          || [];
-    }
-    const stamp = periodKey==='day' ? stamps.day : periodKey==='month' ? stamps.month : stamps.year;
-    return pick(`izzaLb2::${gameId}::${periodKey}::${stamp}`)
-        || pick(`lb2::${gameId}::${periodKey}::${stamp}`)
-        || pick(`lb::${gameId}::${periodKey}::${stamp}`)
-        || [];
-  }catch(_){ return []; }
-}
+      function stampFor(periodKey){
+        const p = nowParts();
+        if (periodKey==='day') return p.day;
+        if (periodKey==='month') return p.month;
+        if (periodKey==='year') return p.year;
+        return '';
+      }
+
+      function saveLocal(gameId, periodKey, stamp, rows){
+        const key = periodKey==='alltime'
+          ? `izzaLb2::${gameId}::alltime`
+          : `izzaLb2::${gameId}::${periodKey}::${stamp}`;
+        try{ localStorage.setItem(key, JSON.stringify(rows||[])); }catch(_){}
+      }
+
+      function readLocal(gameId, periodKey){
+        try{
+          const pick = (k)=>{ const v = localStorage.getItem(k); return v ? JSON.parse(v) : null; };
+          const stamps = nowParts();
+          if (periodKey==='alltime'){
+            return pick(`izzaLb2::${gameId}::alltime`)
+                || pick(`lb2::${gameId}::alltime`)
+                || pick(`lb::${gameId}::alltime`)
+                || [];
+          }
+          const stamp = periodKey==='day' ? stamps.day : periodKey==='month' ? stamps.month : stamps.year;
+          return pick(`izzaLb2::${gameId}::${periodKey}::${stamp}`)
+              || pick(`lb2::${gameId}::${periodKey}::${stamp}`)
+              || pick(`lb::${gameId}::${periodKey}::${stamp}`)
+              || [];
+        }catch(_){ return []; }
+      }
+
       function dedupeAndSort(rows){
         const bestByUser = {};
         (rows||[]).forEach(r=>{
@@ -1148,30 +1496,25 @@ function readLocal(gameId, periodKey){
         });
         return Object.values(bestByUser).sort((a,b)=>b.s-a.s).slice(0,20);
       }
+
       function upsertLocalLedger(gameId, score){
         const u = meUsername(); if(!u) return;
         const row = { u, s: (score|0), ts: Date.now() };
         const stamps = nowParts();
 
-        // all-time
-        const all = dedupeAndSort([ ...(readLocal(gameId,'alltime')||[]), row ]);
-        saveLocal(gameId, 'alltime', '', all);
+        saveLocal(gameId, 'alltime', '', dedupeAndSort([ ...(readLocal(gameId,'alltime')||[]), row ]));
 
-        // daily / monthly / yearly
         ['day','month','year'].forEach(k=>{
-          const prior = readLocal(gameId,k)||[];
-          const merged = dedupeAndSort([ ...prior, row ]);
-          saveLocal(gameId, k, stamps[k], merged);
+          saveLocal(gameId, k, stamps[k], dedupeAndSort([ ...(readLocal(gameId,k)||[]), row ]));
         });
       }
-      // Try to discover a player's best score saved by older/other pages.
-            function harvestLegacyScores(gameId){
+
+      function harvestLegacyScores(gameId){
         let found = null;
         const num = v => {
           const n = typeof v==='string' ? parseInt(v,10) : (typeof v==='number'?v:NaN);
           return Number.isFinite(n) && n>0 ? n|0 : null;
         };
-        // 1) obvious keys
         const tryKeys = [
           `${gameId}HighScore`,`${gameId}:highscore`,`izza:${gameId}:highscore`,
           `izza:${gameId}:best`,`minigame:${gameId}:best`,`score:${gameId}`,
@@ -1179,295 +1522,187 @@ function readLocal(gameId, periodKey){
           `game:${gameId}:best`,`mg:${gameId}:best`
         ];
         for(const k of tryKeys){
-          const v = localStorage.getItem(k);
-          const n = num(v);
-          if(n!==null){ found = Math.max(found||0, n); }
+          const n = num(localStorage.getItem(k));
+          if(n!==null) found = Math.max(found||0, n);
         }
-        // 2) scan JSON blobs that might contain {game,score}
-        try{
-          for(let i=0;i<localStorage.length;i++){
-            const k = localStorage.key(i)||'';
-            if(!/score|best|high/i.test(k)) continue;
-            const raw = localStorage.getItem(k)||'';
-            if((raw && raw[0]==='{') || (raw && raw[0]==='[')){
-              try{
-                const j = JSON.parse(raw);
-                const maybe = Array.isArray(j) ? j : [j];
-                maybe.forEach(it=>{
-                  if(it && (it.game===gameId || it.g===gameId) && (num(it.score??it.s)!=null)){
-                    found = Math.max(found||0, num(it.score??it.s));
-                  }
-                });
-              }catch(_){}
-            }
-          }
-        }catch(_){}
-        if(found!==null){ upsertLocalLedger(gameId, found); }
+        if(found!==null) upsertLocalLedger(gameId, found);
       }
 
       async function fetchServerLeaders(gameId, periodKey){
-  try{
-    const p = (String(periodKey||'alltime').toLowerCase() === 'alltime')
-      ? 'all'
-      : String(periodKey||'day').toLowerCase();
-    if (window.IZZA_LEADERBOARD && typeof IZZA_LEADERBOARD.top === 'function'){
-      const r = await IZZA_LEADERBOARD.top({ game: gameId, limit: 20, period: p });
-      if (r && r.ok && r.data && Array.isArray(r.data.rows)){
-        return r.data.rows;
+        try{
+          const p = (String(periodKey||'alltime').toLowerCase() === 'alltime') ? 'all' : String(periodKey||'day').toLowerCase();
+          if (window.IZZA_LEADERBOARD && typeof IZZA_LEADERBOARD.top === 'function'){
+            const r = await IZZA_LEADERBOARD.top({ game: gameId, limit: 20, period: p });
+            if (r && r.ok && r.data && Array.isArray(r.data.rows)) return r.data.rows;
+          }
+        }catch(_){}
+        return null;
       }
-    }
-  }catch(_){}
-  // No server route on this origin; return null to avoid 404 noise
-  return null;
-}
 
-      // Normalize rows and KEEP ts for time filtering
-function normRows(rows){
-  return (rows||[]).map(r => ({
-    u: (r.u ?? r.user ?? '—'),
-    s: (r.s ?? r.score ?? 0)|0,
-    ts: (r.ts ?? r.timestamp ?? r.timeTs ?? null), // <— keep timestamp
-    t:  (r.t  ?? r.timeMs   ?? null),              // game-specific time (e.g., solitaire)
-    m:  (r.m  ?? r.moves    ?? null)
-  }));
-}
+      function normRows(rows){
+        return (rows||[]).map(r => ({
+          u: (r.u ?? r.user ?? '—'),
+          s: (r.s ?? r.score ?? 0)|0,
+          ts: (r.ts ?? r.timestamp ?? r.timeTs ?? null),
+          t:  (r.t  ?? r.timeMs   ?? null),
+          m:  (r.m  ?? r.moves    ?? null)
+        }));
+      }
 
-async function renderPoliceChase(){
-  const wrap = document.getElementById('lbPoliceChase');
-  if (!wrap) return;
+      async function renderPoliceChase(){
+        const wrap = document.getElementById('lbPoliceChase');
+        if (!wrap) return;
 
-  // Always show all-time for police chase (scores are seconds)
-  let rows = null;
-  try {
-    const r = await (window.IZZA_LEADERBOARD && IZZA_LEADERBOARD.top
-      ? IZZA_LEADERBOARD.top({ game: 'city_chase', limit: 20, period: 'all' })
-      : Promise.resolve({ ok:false }));
-    if (r && r.ok && r.data && Array.isArray(r.data.rows)) {
-      rows = r.data.rows;
-    }
-  } catch(_) { /* fall through to null */ }
+        let rows = null;
+        try {
+          const r = await (window.IZZA_LEADERBOARD && IZZA_LEADERBOARD.top
+            ? IZZA_LEADERBOARD.top({ game: 'city_chase', limit: 20, period: 'all' })
+            : Promise.resolve({ ok:false }));
+          if (r && r.ok && r.data && Array.isArray(r.data.rows)) rows = r.data.rows;
+        } catch(_) {}
 
-  if (!rows) {
-    // final fallback (same-origin, keeps existing behavior)
-    rows = await fetchServerLeaders('city_chase', 'alltime');
-  }
+        if (!rows) rows = await fetchServerLeaders('city_chase', 'alltime');
 
-  // Normalize: { u|user, s|score } -> {u,s}
-  rows = (rows || []).map(r => ({
-    u: (r.u ?? r.user ?? '—'),
-    s: (r.s ?? r.score ?? 0) | 0
-  })).filter(r => r.s > 0);
+        rows = (rows || []).map(r => ({
+          u: (r.u ?? r.user ?? '—'),
+          s: (r.s ?? r.score ?? 0) | 0
+        })).filter(r => r.s > 0);
 
-  // Sort best-first and cap to top 20
-  rows.sort((a,b) => b.s - a.s);
-  rows = rows.slice(0, 20);
+        rows.sort((a,b) => b.s - a.s);
+        rows = rows.slice(0, 20);
 
-  if (!rows.length){
-    wrap.innerHTML = `<div class="lb-empty muted">No data yet.</div>`;
-    return;
-  }
-
-  const fmt = s => `${(s|0)}s`;
-  const me =
-    (window.izzaUserKey && window.izzaUserKey.get && window.izzaUserKey.get())?.toLowerCase() ||
-    (localStorage.getItem('izzaUserU')||'').toLowerCase();
-
-  const html = [
-    `<table class="lb-table">
-       <thead>
-         <tr><th style="width:64px">#</th><th>Player</th><th>Time</th></tr>
-       </thead>
-       <tbody>`
-  ];
-  rows.forEach((r,i)=>{
-    const isMe = me && r.u && String(r.u).toLowerCase() === me;
-    html.push(
-      `<tr class="${isMe ? 'lb-row-me' : ''}">
-         <td>${i+1}</td>
-         <td>${r.u || '—'}</td>
-         <td>${fmt(r.s)}</td>
-       </tr>`
-    );
-  });
-  html.push(`</tbody></table>`);
-  wrap.innerHTML = html.join('');
-}
-
-function readLocalLeaders(gameId, periodKey){
-  return readLocal(gameId, periodKey).slice(0,20);
-}
-
-// [LB-SOL-HELPERS] — decode the packed Solitaire score for display
-const SOL_MAX_MS = 3_600_000; // 60 minutes
-
-function fmtMMSS(ms){
-  const s = Math.max(0, Math.floor(ms/1000));
-  const m = (s/60)|0;
-  const ss = String(s%60).padStart(2,'0');
-  return `${String(m).padStart(2,'0')}:${ss}`;
-}
-
-function sortSolitaireRows(rows){
-  return (rows||[]).slice().sort((a,b)=>{
-    const at = (a.t!=null)?a.t:decodeSolitaireScore(a.s).elapsedMs;
-    const bt = (b.t!=null)?b.t:decodeSolitaireScore(b.s).elapsedMs;
-    if(at!==bt) return at - bt;
-    const am = (a.m!=null)?a.m:decodeSolitaireScore(a.s).moves;
-    const bm = (b.m!=null)?b.m:decodeSolitaireScore(b.s).moves;
-    return am - bm;
-  });
-}
-      
-// DBs/mirrors sometimes return signed 32-bit. Recover unsigned if needed.
-function normalizeScore(x){
-  let n = Number(x);
-  if (!Number.isFinite(n)) return 0;
-  return (n < 0) ? (n >>> 0) : (n|0);
-}
-
-// Decode IZZA Solitaire packed score -> { elapsedMs, moves }
-function decodeSolitaireScore(raw){
-  const n    = normalizeScore(raw);
-  const tie  = n % 1000;         // 0..1000  (we store 1000 - moves)
-  const base = (n - tie) / 1000; // 0..3,600,000 (we store 3_600_000 - elapsedMs)
-  const elapsedMs = Math.max(0, SOL_MAX_MS - base);
-  const moves     = Math.max(0, 1000 - tie);
-  return { elapsedMs, moves };
-}
-// ---- Period helpers (UTC to avoid device TZ drift) ----
-function startOfUTCDay(d = new Date()){
-  const t = new Date(Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate()));
-  return t;
-}
-function endOfUTCDay(d = new Date()){
-  const e = startOfUTCDay(d);
-  e.setUTCDate(e.getUTCDate() + 1);
-  return e;
-}
-function startOfUTCMonth(d = new Date()){
-  return new Date(Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), 1));
-}
-function endOfUTCMonth(d = new Date()){
-  const e = startOfUTCMonth(d);
-  e.setUTCMonth(e.getUTCMonth() + 1);
-  return e;
-}
-function startOfUTCYear(d = new Date()){
-  return new Date(Date.UTC(d.getUTCFullYear(), 0, 1));
-}
-function endOfUTCYear(d = new Date()){
-  const e = startOfUTCYear(d);
-  e.setUTCFullYear(e.getUTCFullYear() + 1);
-  return e;
-}
-function filterByTsPeriod(rows, start, end){
-  const s = +start, e = +end;
-  return (rows||[]).filter(r => Number.isFinite(r.ts) && r.ts >= s && r.ts < e);
-}
-async function loadAndRender(seedFromLegacy=false){
-  const gameId = elGame.value || 'basketball';
-  const isSolitaire = String(gameId).startsWith('targets'); // targets::d1 / targets::d3
-
-  if (seedFromLegacy){ harvestLegacyScores(gameId); }
-  elBody.innerHTML = `<div class="lb-empty">Loading…</div>`;
-
-  // 1) Try server for the requested period (now via unified shim)
-  let rows = await fetchServerLeaders(gameId, period);
-
-  // 2) If server returned rows, cache them locally for persistence
-  if (rows && rows.length){
-    const norm = normRows(rows);
-    saveLocal(gameId, period, stampFor(period), norm);
-  } else {
-    // 3) If empty, fall back to our local cache for this period
-    rows = readLocalLeaders(gameId, period);
-
-    // 4) If still empty:
-//    - If the selected tab IS All-Time, try server All-Time once.
-//    - Otherwise, stay empty (don’t inject All-Time into Daily/Monthly/Annual).
-if (!rows || !rows.length){
-  if (period === 'alltime'){
-    const all = await fetchServerLeaders(gameId, 'alltime');
-    if (all && all.length){
-      const norm = normRows(all);
-      saveLocal(gameId, 'alltime', '', norm);
-      rows = norm;
-    }
-  }
-}
-
-    // 5) Last-ditch: seed from legacy “last score”
-    if ((!rows || !rows.length) && seedFromLegacy){
-      try{
-        const hint = JSON.parse(localStorage.getItem('izza:lastScore')||'null');
-        if (hint && (hint.game===gameId || hint.g===gameId) && Number.isFinite(hint.score||hint.s)){
-          upsertLocalLedger(gameId, (hint.score||hint.s)|0);
-          rows = readLocalLeaders(gameId, period);
+        if (!rows.length){
+          wrap.innerHTML = `<div class="lb-empty muted">No data yet.</div>`;
+          return;
         }
-      }catch(_){}
-    }
-  }
 
-  rows = normRows(rows||[]).map(r => ({
-  u: r.u,
-  s: normalizeScore(r.s),
-  t: (r.t ?? null),
-  m: (r.m ?? null)
-}));
-  if(!rows.length){
-    elBody.innerHTML = `<div class="lb-empty muted">No scores yet.</div>`;
-    return;
-  }
+        const fmt = s => `${(s|0)}s`;
+        const me = meUsername();
 
-  const me = meUsername();
-  const html = [];
+        wrap.innerHTML = `
+          <table class="lb-table">
+            <thead><tr><th style="width:64px">#</th><th>Player</th><th>Time</th></tr></thead>
+            <tbody>
+              ${rows.map((r,i)=>`
+                <tr class="${me && r.u && String(r.u).toLowerCase() === me ? 'lb-row-me' : ''}">
+                  <td>${i+1}</td>
+                  <td>${r.u || '—'}</td>
+                  <td>${fmt(r.s)}</td>
+                </tr>
+              `).join('')}
+            </tbody>
+          </table>
+        `;
+      }
 
-    if (isSolitaire){
-    // Solitaire: show "Score" only, where Score == Moves (visual change only)
-    html.push(
-      `<table class="lb-table">
-         <thead>
-           <tr><th style="width:64px">#</th><th>Player</th><th>Score</th></tr>
-         </thead><tbody>`
-    );
+      function readLocalLeaders(gameId, periodKey){
+        return readLocal(gameId, periodKey).slice(0,20);
+      }
 
-    // Keep the same sort (best by time, then by moves), only the display changes
-    sortSolitaireRows(rows).slice(0,20).forEach((r,i)=>{
-      const moves = (r.m!=null) ? r.m : decodeSolitaireScore(r.s).moves;
-      const isMe = me && r.u && String(r.u).toLowerCase()===me;
-      html.push(
-        `<tr class="${isMe ? 'lb-row-me' : ''}">
-           <td>${i+1}</td>
-           <td>${r.u || '—'}</td>
-           <td>${moves}</td>
-         </tr>`
-      );
-    });
+      const SOL_MAX_MS = 3_600_000;
 
-    html.push(`</tbody></table>`);
-  } else {
-    // Other games: raw Score
-    html.push(
-      `<table class="lb-table">
-         <thead>
-           <tr><th style="width:64px">#</th><th>Player</th><th>Score</th></tr>
-         </thead><tbody>`
-    );
-    rows.slice(0,20).forEach((r,i)=>{
-      const isMe = me && r.u && String(r.u).toLowerCase()===me;
-      html.push(
-        `<tr class="${isMe?'lb-row-me':''}">
-           <td>${i+1}</td>
-           <td>${r.u||'—'}</td>
-           <td>${r.s|0}</td>
-         </tr>`
-      );
-    });
-    html.push(`</tbody></table>`);
-  }
+      function normalizeScore(x){
+        let n = Number(x);
+        if (!Number.isFinite(n)) return 0;
+        return (n < 0) ? (n >>> 0) : (n|0);
+      }
 
-  elBody.innerHTML = html.join('');
-}
+      function decodeSolitaireScore(raw){
+        const n = normalizeScore(raw);
+        const tie = n % 1000;
+        const base = (n - tie) / 1000;
+        return {
+          elapsedMs: Math.max(0, SOL_MAX_MS - base),
+          moves: Math.max(0, 1000 - tie)
+        };
+      }
+
+      function sortSolitaireRows(rows){
+        return (rows||[]).slice().sort((a,b)=>{
+          const at = (a.t!=null)?a.t:decodeSolitaireScore(a.s).elapsedMs;
+          const bt = (b.t!=null)?b.t:decodeSolitaireScore(b.s).elapsedMs;
+          if(at!==bt) return at - bt;
+          const am = (a.m!=null)?a.m:decodeSolitaireScore(a.s).moves;
+          const bm = (b.m!=null)?b.m:decodeSolitaireScore(b.s).moves;
+          return am - bm;
+        });
+      }
+
+      async function loadAndRender(seedFromLegacy=false){
+        const gameId = elGame.value || 'basketball';
+        const isSolitaire = String(gameId).startsWith('targets');
+
+        if (seedFromLegacy) harvestLegacyScores(gameId);
+        elBody.innerHTML = `<div class="lb-empty">Loading…</div>`;
+
+        let rows = await fetchServerLeaders(gameId, period);
+
+        if (rows && rows.length){
+          rows = normRows(rows);
+          saveLocal(gameId, period, stampFor(period), rows);
+        } else {
+          rows = readLocalLeaders(gameId, period);
+
+          if ((!rows || !rows.length) && period === 'alltime'){
+            const all = await fetchServerLeaders(gameId, 'alltime');
+            if (all && all.length){
+              rows = normRows(all);
+              saveLocal(gameId, 'alltime', '', rows);
+            }
+          }
+
+          if ((!rows || !rows.length) && seedFromLegacy){
+            try{
+              const hint = JSON.parse(localStorage.getItem('izza:lastScore')||'null');
+              if (hint && (hint.game===gameId || hint.g===gameId) && Number.isFinite(hint.score||hint.s)){
+                upsertLocalLedger(gameId, (hint.score||hint.s)|0);
+                rows = readLocalLeaders(gameId, period);
+              }
+            }catch(_){}
+          }
+        }
+
+        rows = normRows(rows||[]).map(r => ({
+          u: r.u,
+          s: normalizeScore(r.s),
+          t: (r.t ?? null),
+          m: (r.m ?? null)
+        }));
+
+        if(!rows.length){
+          elBody.innerHTML = `<div class="lb-empty muted">No scores yet.</div>`;
+          return;
+        }
+
+        const me = meUsername();
+
+        if (isSolitaire){
+          elBody.innerHTML = `
+            <table class="lb-table">
+              <thead><tr><th style="width:64px">#</th><th>Player</th><th>Score</th></tr></thead>
+              <tbody>
+                ${sortSolitaireRows(rows).slice(0,20).map((r,i)=>{
+                  const moves = (r.m!=null) ? r.m : decodeSolitaireScore(r.s).moves;
+                  const mine = me && r.u && String(r.u).toLowerCase()===me;
+                  return `<tr class="${mine ? 'lb-row-me' : ''}"><td>${i+1}</td><td>${r.u || '—'}</td><td>${moves}</td></tr>`;
+                }).join('')}
+              </tbody>
+            </table>
+          `;
+        } else {
+          elBody.innerHTML = `
+            <table class="lb-table">
+              <thead><tr><th style="width:64px">#</th><th>Player</th><th>Score</th></tr></thead>
+              <tbody>
+                ${rows.slice(0,20).map((r,i)=>{
+                  const mine = me && r.u && String(r.u).toLowerCase()===me;
+                  return `<tr class="${mine ? 'lb-row-me' : ''}"><td>${i+1}</td><td>${r.u || '—'}</td><td>${r.s|0}</td></tr>`;
+                }).join('')}
+              </tbody>
+            </table>
+          `;
+        }
+      }
     })();
   })();
   </script>
