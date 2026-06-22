@@ -19,15 +19,15 @@
     body{
       font-family:Inter,Arial,Helvetica,sans-serif;background:#000;color:var(--txt);margin:0;
       text-align:center;
+      padding-bottom:92px;
     }
     .wrap{max-width:1100px;margin:0 auto;padding:16px 16px 160px}
     @media (min-width:720px){ .wrap{padding:24px 24px 180px} }
 
-    /* Tighten page bottom spacing */
-    .wrap{ padding-bottom:40px; }
-    @media (min-width:720px){ .wrap{ padding-bottom:60px; } }
+    /* Tighten page bottom spacing, but leave room for bottom app nav */
+    .wrap{ padding-bottom:110px; }
+    @media (min-width:720px){ .wrap{ padding-bottom:120px; } }
 
-    /* Top bar: centered buttons */
     .topbar{
       display:flex;align-items:center;justify-content:center;
       padding:12px 0; position:sticky; top:0; z-index:50;
@@ -35,7 +35,6 @@
       gap:12px;
     }
 
-    /* Buttons */
     .btn{
       display:inline-flex;align-items:center;justify-content:center;gap:8px;
       padding:14px 18px;border-radius:14px;font-weight:700;letter-spacing:.2px;cursor:pointer;text-decoration:none;
@@ -50,18 +49,9 @@
     .btn.ghost:hover{border-color:#3f4e79}
     .btn.upper{text-transform:uppercase;letter-spacing:.6px}
 
-    /* Stack for IZZA TOKEN + IZZA BOT in topbar */
-    .topbar-stack{
-      display:flex;
-      flex-direction:column;
-      gap:6px;
-    }
-    .topbar-stack .btn{
-      flex:0 0 auto;
-      width:100%;
-    }
+    .topbar-stack{display:flex;flex-direction:column;gap:6px}
+    .topbar-stack .btn{flex:0 0 auto;width:100%}
 
-    /* CREATURES special button: left→right gold to purple with pulse */
     .btn.creatures{
       background:linear-gradient(90deg,var(--gold1),var(--piPurple1));
       color:#1a1400;
@@ -72,12 +62,11 @@
     .btn.creatures:hover{ filter:saturate(1.05) brightness(1.02); }
 
     @keyframes izPulse{
-      0%   { box-shadow: 0 0 16px rgba(255,207,77,.20), 0 0 28px rgba(122,68,255,.12); transform:translateY(0); }
-      50%  { box-shadow: 0 0 30px rgba(255,207,77,.45), 0 0 60px rgba(122,68,255,.30); transform:translateY(-1px); }
-      100% { box-shadow: 0 0 16px rgba(255,207,77,.20), 0 0 28px rgba(122,68,255,.12); transform:translateY(0); }
+      0%{box-shadow:0 0 16px rgba(255,207,77,.20),0 0 28px rgba(122,68,255,.12);transform:translateY(0)}
+      50%{box-shadow:0 0 30px rgba(255,207,77,.45),0 0 60px rgba(122,68,255,.30);transform:translateY(-1px)}
+      100%{box-shadow:0 0 16px rgba(255,207,77,.20),0 0 28px rgba(122,68,255,.12);transform:translateY(0)}
     }
 
-    /* Headings & copy */
     h1{
       margin:16px 0 6px;
       font-size:clamp(26px,8.5vw,56px);
@@ -86,15 +75,12 @@
     h2{margin:28px 0 4px;font-size:22px}
     p{color:var(--muted);margin:8px 0 16px}
 
-    /* Sections */
     .section{padding:18px 0}
     .cta-row{display:flex;justify-content:center;gap:12px;flex-wrap:wrap}
 
-    /* Pills */
     .pillrow{display:flex;justify-content:center;gap:8px;flex-wrap:wrap;margin:10px 0}
     .pill{background:#0b0f1f;border:1px solid #222b4a;color:#cfe0ff;border-radius:999px;padding:6px 10px;font-size:12px}
 
-    /* Side rails + markers */
     .rail{position:fixed;top:0;bottom:0;width:12px;z-index:0;pointer-events:none}
     .rail.left{left:0;background:linear-gradient(180deg,transparent 0%,rgba(255,207,77,.18) 20%,rgba(255,178,58,.2) 55%,transparent 100%)}
     .rail.right{right:0;background:linear-gradient(180deg,transparent 0%,rgba(183,132,255,.16) 20%,rgba(122,68,255,.22) 55%,transparent 100%)}
@@ -111,24 +97,32 @@
     .mark.active.purple .dot{background:var(--piPurple2); box-shadow:0 0 14px 2px rgba(183,132,255,.55)}
     @media (max-width:980px){ .railNav{display:none} }
 
-    /* Reveal */
     .reveal{opacity:0;transform:translateY(18px);transition:opacity .5s ease,transform .5s ease}
     .reveal.show{opacity:1;transform:translateY(0)}
 
-    /* Bigger IZZA PAY logo under hero words */
-    .hero-logo{height:clamp(58px,12vw,110px);margin:10px auto 8px;display:block;filter:drop-shadow(0 0 10px rgba(255,255,255,.06))}
+    /* Bright IZZA PAY logo */
+    .hero-logo{
+      height:clamp(58px,12vw,110px);
+      margin:10px auto 8px;
+      display:block;
+      filter:
+        brightness(1.9)
+        saturate(1.45)
+        contrast(1.18)
+        drop-shadow(0 0 12px rgba(255,255,255,.45))
+        drop-shadow(0 0 28px rgba(183,132,255,.45))
+        drop-shadow(0 0 42px rgba(255,207,77,.24));
+      opacity:1;
+    }
 
-    /* Reduce space below main button sections */
     #s-city { margin-bottom: 0; padding-bottom: 0; }
     #s-store-cta { margin-bottom: 0; padding-bottom: 0; }
     #s-store-cta .cta-row { margin-bottom: 6px; }
     #s-city .cta-row { margin-bottom: 6px; }
 
-    /* NEW: ensure IZZA CREATURES row is not jammed against the row above */
     #s-creatures{ margin-top:14px; }
     @media (min-width:720px){ #s-creatures{ margin-top:16px; } }
 
-    /* Mobile: nudge the IZZA PAY logo */
     @media (max-width: 768px){
       #s-hero .hero-logo{
         display:block;
@@ -137,44 +131,73 @@
       }
     }
 
-    /* NEW: make topbar buttons fit on small screens without overflowing */
     @media (max-width: 640px){
-      .topbar{
-        flex-wrap:wrap;
-        padding:10px 6px;
-        gap:8px;
-      }
-      .topbar .btn{
-        flex:1 1 100px;
-        min-width:0;
-        font-size:13px;
-        padding:10px 10px;
-        white-space:normal;
-      }
-      .topbar-stack .btn{
-        flex:0 0 auto;
-        width:100%;
-      }
+      .topbar{flex-wrap:wrap;padding:10px 6px;gap:8px}
+      .topbar .btn{flex:1 1 100px;min-width:0;font-size:13px;padding:10px 10px;white-space:normal}
+      .topbar-stack .btn{flex:0 0 auto;width:100%}
+    }
+
+    /* Bottom app nav */
+    .bottomNav{
+      position:fixed;
+      left:50%;
+      bottom:10px;
+      transform:translateX(-50%);
+      z-index:9998;
+      width:min(96vw,760px);
+      min-height:74px;
+      border-radius:28px;
+      border:1px solid rgba(255,255,255,.14);
+      background:rgba(12,12,18,.88);
+      backdrop-filter:blur(18px);
+      display:grid;
+      grid-template-columns:repeat(6,1fr);
+      box-shadow:0 12px 38px rgba(0,0,0,.55), 0 0 28px rgba(122,68,255,.16);
+      overflow:hidden;
+    }
+    .bottomNav a,
+    .bottomNav button{
+      border:0;
+      background:transparent;
+      color:#aeb6cf;
+      text-decoration:none;
+      font-size:11px;
+      font-weight:800;
+      display:flex;
+      flex-direction:column;
+      align-items:center;
+      justify-content:center;
+      gap:4px;
+      padding:8px 2px;
+      font-family:Inter,Arial,Helvetica,sans-serif;
+      cursor:pointer;
+    }
+    .bottomNav a.active,
+    .bottomNav button.active{
+      color:#c17cff;
+      background:linear-gradient(180deg,rgba(122,68,255,.16),rgba(122,68,255,.04));
+    }
+    .bottomNav span{font-size:22px;line-height:1}
+    @media (max-width:420px){
+      .bottomNav a,.bottomNav button{font-size:10px}
+      .bottomNav span{font-size:20px}
     }
   </style>
   <script src="https://sdk.minepi.com/pi-sdk.js"></script>
 </head>
 <body>
-  <!-- electrified rails -->
-  <div class="rail left"  id="railL" aria-hidden="true"></div>
+  <div class="rail left" id="railL" aria-hidden="true"></div>
   <div class="rail right" id="railR" aria-hidden="true"></div>
 
-  <!-- LEFT rail markers -->
   <nav class="railNav left" aria-label="IZZA Play Steps">
-    <a class="mark gold"   data-target="#s-city"><span class="dot"></span><span class="label">IZZA City</span></a>
-    <a class="mark gold"   data-target="#s-arcade"><span class="dot"></span><span class="label">IZZA Arcade</span></a>
-    <a class="mark gold"   data-target="#s-build"><span class="dot"></span><span class="label">Build Character</span></a>
-    <a class="mark gold"   data-target="#s-craft"><span class="dot"></span><span class="label">Craft Items</span></a>
-    <a class="mark gold"   data-target="#s-missions"><span class="dot"></span><span class="label">Missions</span></a>
-    <a class="mark gold"   data-target="#s-battles"><span class="dot"></span><span class="label">Multiplayer Battles</span></a>
+    <a class="mark gold" data-target="#s-city"><span class="dot"></span><span class="label">IZZA City</span></a>
+    <a class="mark gold" data-target="#s-arcade"><span class="dot"></span><span class="label">IZZA Arcade</span></a>
+    <a class="mark gold" data-target="#s-build"><span class="dot"></span><span class="label">Build Character</span></a>
+    <a class="mark gold" data-target="#s-craft"><span class="dot"></span><span class="label">Craft Items</span></a>
+    <a class="mark gold" data-target="#s-missions"><span class="dot"></span><span class="label">Missions</span></a>
+    <a class="mark gold" data-target="#s-battles"><span class="dot"></span><span class="label">Multiplayer Battles</span></a>
   </nav>
 
-  <!-- RIGHT rail markers -->
   <nav class="railNav right" aria-label="IZZA Pay Steps">
     <a class="mark purple" data-target="#s-store-cta"><span class="dot"></span><span class="label">My Store & Transactions</span></a>
     <a class="mark purple" data-target="#s-sell"><span class="dot"></span><span class="label">Sell Any Item</span></a>
@@ -183,7 +206,6 @@
   </nav>
 
   <div class="wrap">
-    <!-- Topbar -->
     <div class="topbar">
       <div class="topbar-stack">
         <a class="btn purple upper" href="/airdrop" aria-label="IZZA Airdrop">IZZA AIRDROP</a>
@@ -196,7 +218,6 @@
       </div>
     </div>
 
-    <!-- HERO -->
     <section class="section" id="s-hero">
       <h1 class="reveal">BUILD • SELL • PLAY</h1>
       <img src="/static/izzapay-word.svg" alt="IZZA PAY" class="hero-logo reveal">
@@ -208,19 +229,16 @@
         <span class="pill">IZZA API</span>
       </div>
 
-      <!-- TOP ROW (City + Arcade) -->
       <div class="cta-row reveal" id="s-city">
         <a class="btn purple" href="/izza-game/auth?dest=city" aria-label="IZZA CITY">IZZA CITY</a>
-        <a class="btn gold"   href="/izza-game/auth?dest=minigames" aria-label="IZZA ARCADE" id="s-arcade">IZZA ARCADE</a>
+        <a class="btn gold" href="/izza-game/auth?dest=minigames" aria-label="IZZA ARCADE" id="s-arcade">IZZA ARCADE</a>
       </div>
 
-      <!-- NEW ROW: IZZA CREATURES (spaced down + ombré pulse) -->
       <div class="cta-row reveal" id="s-creatures">
         <a class="btn creatures upper" href="/creatures/auth" aria-label="IZZA CREATURES">IZZA CREATURES</a>
       </div>
     </section>
 
-    <!-- PLAY LOOP DETAILS -->
     <section class="section">
       <div class="reveal" id="s-build">
         <h2>Build your character</h2>
@@ -240,7 +258,6 @@
       </div>
     </section>
 
-    <!-- STORE CTA ROW -->
     <section class="section" id="s-store-cta">
       <div class="cta-row reveal">
         <button id="piSignInBtn_clone" class="btn purple">MY STORE</button>
@@ -250,7 +267,6 @@
       <div id="err" style="color:#ff9aa2;white-space:pre-wrap"></div>
     </section>
 
-    <!-- PAY LOOP DETAILS -->
     <section class="section">
       <div class="reveal" id="s-sell">
         <h2>Sell any item through your store</h2>
@@ -267,12 +283,21 @@
     </section>
   </div>
 
-  <!-- Pi SDK auth -->
+  <nav class="bottomNav" aria-label="IZZA Ecosystem Navigation">
+    <a class="active" href="/"><span>⌂</span>Home</a>
+    <a href="/izza-game/auth?dest=minigames"><span>🎮</span>Games</a>
+    <a href="/explore"><span>🛒</span>Market</a>
+    <a href="/live-auctions"><span>🔴</span>Auctions</a>
+    <button id="bottomStoreBtn" type="button"><span>🏬</span>Store</button>
+    <a href="/profile"><span>◎</span>Profile</a>
+  </nav>
+
   <script>
   (function(){
     const msg = document.getElementById('msg');
     const err = document.getElementById('err');
-    const btnClone = document.getElementById('piSignInBtn_clone'); // "MY STORE"
+    const btnClone = document.getElementById('piSignInBtn_clone');
+    const bottomStoreBtn = document.getElementById('bottomStoreBtn');
     const botNav = document.getElementById('izzaBotNav');
     const postUrl = "/auth/exchange";
     const sandbox = {{ 'true' if sandbox else 'false' }};
@@ -280,7 +305,6 @@
     function setMsg(t){ if(msg) msg.textContent = t || ''; }
     function setErr(t){ if(err) err.textContent = t || ''; }
 
-    // Home page Pi.init: uses app-level sandbox flag (mainnet / non-testnet)
     function initPi(){
       if (!window.Pi || !Pi.init) return false;
       try { Pi.init({ version:"2.0", sandbox:sandbox }); return true; }
@@ -288,7 +312,6 @@
     }
     if(!initPi()) setMsg("Open in Pi Browser or refresh. Pi SDK is initializing.");
 
-    // MY STORE (main app) → Pi auth here
     function doAuth(){
       setErr('');
       if (!window.Pi || !Pi.authenticate){ setMsg("Pi SDK not available. Open in Pi Browser or refresh."); return; }
@@ -304,15 +327,12 @@
         })
         .catch(function(e){ console.error(e); setMsg("Authorization failed. Please try again."); setErr(e?.message||String(e)); });
     }
-    btnClone?.addEventListener('click', doAuth);
 
-    // IZZA BOT button: no Pi auth on the home page.
-    // It just follows its href="/bot"; the bot page will handle Pi auth in TESTNET.
-    // No extra JS needed here; clicking the link navigates normally.
+    btnClone?.addEventListener('click', doAuth);
+    bottomStoreBtn?.addEventListener('click', doAuth);
   })();
   </script>
 
-  <!-- Scroll reveals + rail glow + marker activation -->
   <script>
   (function(){
     const io=new IntersectionObserver((entries)=>{
@@ -368,7 +388,6 @@
   })();
   </script>
 
-  <!-- Bottom chips + i18n (unchanged) -->
   <script>
   (function(){
     var KEY='izzaLang';
@@ -392,7 +411,7 @@
     }
 
     var wrap=document.createElement('div');
-    Object.assign(wrap.style,{position:'fixed',right:'10px',bottom:'10px',zIndex:'9999',display:'flex',gap:'8px',alignItems:'center'});
+    Object.assign(wrap.style,{position:'fixed',right:'10px',bottom:'92px',zIndex:'9999',display:'flex',gap:'8px',alignItems:'center'});
 
     var langChip=document.createElement('div');
     Object.assign(langChip.style,{background:'#121827',border:'1px solid #2a3550',borderRadius:'10px',padding:'6px 8px',font:'12px/1.2 system-ui,Arial,sans-serif',color:'#cfe0ff',boxShadow:'0 6px 18px rgba(0,0,0,.35)'});
