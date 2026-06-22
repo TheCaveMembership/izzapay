@@ -24,7 +24,6 @@
     .wrap{max-width:1100px;margin:0 auto;padding:16px 16px 160px}
     @media (min-width:720px){ .wrap{padding:24px 24px 180px} }
 
-    /* Tighten page bottom spacing, but leave room for bottom app nav */
     .wrap{ padding-bottom:110px; }
     @media (min-width:720px){ .wrap{ padding-bottom:120px; } }
 
@@ -100,7 +99,6 @@
     .reveal{opacity:0;transform:translateY(18px);transition:opacity .5s ease,transform .5s ease}
     .reveal.show{opacity:1;transform:translateY(0)}
 
-    /* Bright IZZA PAY logo */
     .hero-logo{
       height:clamp(58px,12vw,110px);
       margin:10px auto 8px;
@@ -135,6 +133,156 @@
       .topbar{flex-wrap:wrap;padding:10px 6px;gap:8px}
       .topbar .btn{flex:1 1 100px;min-width:0;font-size:13px;padding:10px 10px;white-space:normal}
       .topbar-stack .btn{flex:0 0 auto;width:100%}
+    }
+
+    /* Developer Picks / Home Discovery Carousel */
+    .homeDiscovery{
+      margin:10px auto 8px;
+      max-width:920px;
+      text-align:left;
+    }
+    .homeDiscoveryHead{
+      display:flex;
+      align-items:flex-end;
+      justify-content:space-between;
+      gap:12px;
+      padding:0 4px;
+      margin-bottom:10px;
+    }
+    .homeDiscoveryHead h2{
+      margin:0;
+      font-size:20px;
+      letter-spacing:.2px;
+    }
+    .homeDiscoveryHead p{
+      margin:4px 0 0;
+      font-size:13px;
+    }
+    .carouselShell{
+      position:relative;
+      border:1px solid rgba(255,255,255,.12);
+      border-radius:22px;
+      background:linear-gradient(180deg,rgba(16,18,32,.92),rgba(8,9,16,.92));
+      box-shadow:0 18px 44px rgba(0,0,0,.45), 0 0 34px rgba(122,68,255,.16);
+      overflow:hidden;
+    }
+    .carouselTrack{
+      display:flex;
+      transition:transform .45s ease;
+      will-change:transform;
+    }
+    .carouselSlide{
+      min-width:100%;
+      display:grid;
+      grid-template-columns:1.1fr .9fr;
+      gap:0;
+      min-height:260px;
+    }
+    .slideArt{
+      position:relative;
+      overflow:hidden;
+      min-height:240px;
+      background:#080914;
+    }
+    .slideArt img{
+      width:100%;
+      height:100%;
+      min-height:260px;
+      object-fit:cover;
+      display:block;
+      filter:saturate(1.08) contrast(1.05);
+    }
+    .slideArt:after{
+      content:"";
+      position:absolute;
+      inset:0;
+      background:linear-gradient(90deg,rgba(0,0,0,.08),rgba(0,0,0,.62));
+    }
+    .slideInfo{
+      padding:22px;
+      display:flex;
+      flex-direction:column;
+      justify-content:center;
+      gap:10px;
+      background:
+        radial-gradient(circle at 0% 0%,rgba(255,207,77,.12),transparent 36%),
+        radial-gradient(circle at 100% 100%,rgba(122,68,255,.22),transparent 42%);
+    }
+    .slideKicker{
+      color:#ffcf4d;
+      font-size:12px;
+      font-weight:900;
+      letter-spacing:.9px;
+      text-transform:uppercase;
+    }
+    .slideInfo h3{
+      margin:0;
+      font-size:clamp(24px,6vw,42px);
+      line-height:1;
+    }
+    .slideInfo p{
+      margin:0;
+      color:#b9c7ea;
+      font-size:14px;
+      line-height:1.45;
+    }
+    .slideActions{
+      display:flex;
+      gap:8px;
+      flex-wrap:wrap;
+      margin-top:6px;
+    }
+    .carouselDots{
+      display:flex;
+      justify-content:center;
+      gap:7px;
+      padding:12px;
+      border-top:1px solid rgba(255,255,255,.08);
+      background:rgba(0,0,0,.22);
+    }
+    .carouselDots button{
+      width:9px;
+      height:9px;
+      border-radius:999px;
+      border:0;
+      background:#4e5878;
+      padding:0;
+      cursor:pointer;
+    }
+    .carouselDots button.active{
+      width:24px;
+      background:linear-gradient(90deg,var(--gold1),var(--piPurple2));
+      box-shadow:0 0 14px rgba(183,132,255,.4);
+    }
+    .carouselArrows{
+      position:absolute;
+      left:10px;
+      right:10px;
+      top:50%;
+      transform:translateY(-50%);
+      display:flex;
+      justify-content:space-between;
+      pointer-events:none;
+    }
+    .carouselArrows button{
+      pointer-events:auto;
+      border:1px solid rgba(255,255,255,.16);
+      color:#fff;
+      background:rgba(0,0,0,.45);
+      backdrop-filter:blur(8px);
+      width:38px;
+      height:38px;
+      border-radius:999px;
+      font-size:22px;
+      line-height:1;
+      cursor:pointer;
+    }
+    @media (max-width:700px){
+      .carouselSlide{grid-template-columns:1fr;min-height:unset}
+      .slideArt img{min-height:190px}
+      .slideInfo{padding:16px}
+      .carouselArrows{display:none}
+      .homeDiscoveryHead{align-items:flex-start;flex-direction:column}
     }
 
     /* Bottom app nav */
@@ -239,6 +387,106 @@
       </div>
     </section>
 
+    <section class="section homeDiscovery reveal" id="s-developer-picks">
+      <div class="homeDiscoveryHead">
+        <div>
+          <h2>Developer Picks</h2>
+          <p>Arcade games, crafting, City, stores, auctions and the full IZZA ecosystem.</p>
+        </div>
+        <a class="btn ghost upper" href="/izza-game/auth?dest=minigames">View Arcade</a>
+      </div>
+
+      <div class="carouselShell" id="izzaHomeCarousel" aria-label="IZZA Developer Picks Carousel">
+        <div class="carouselTrack">
+          <article class="carouselSlide">
+            <div class="slideArt"><img src="/static/game/thumbs/jetman.jpg" alt="IZZA JET-MON"></div>
+            <div class="slideInfo">
+              <div class="slideKicker">Developer Pick</div>
+              <h3>IZZA JET-MON</h3>
+              <p>Tap to thrust, dodge neon towers, survive longer and earn IZZA rewards.</p>
+              <div class="slideActions">
+                <a class="btn purple" href="/izza-game/minigames/jetman">Play Now</a>
+                <a class="btn ghost" href="/izza-game/auth?dest=minigames">Arcade</a>
+              </div>
+            </div>
+          </article>
+
+          <article class="carouselSlide">
+            <div class="slideArt"><img src="/static/game/thumbs/basketball.jpg" alt="IZZA BASKETBALL"></div>
+            <div class="slideInfo">
+              <div class="slideKicker">Developer Pick</div>
+              <h3>IZZA BASKETBALL</h3>
+              <p>Time your shots, build combos, beat the buzzer and climb the leaderboard.</p>
+              <div class="slideActions">
+                <a class="btn purple" href="/izza-game/minigames/basketball">Play Now</a>
+                <a class="btn ghost" href="/izza-game/auth?dest=minigames">Arcade</a>
+              </div>
+            </div>
+          </article>
+
+          <article class="carouselSlide">
+            <div class="slideArt"><img src="/static/game/thumbs/racing.jpg" alt="IZZA DRIVER"></div>
+            <div class="slideInfo">
+              <div class="slideKicker">Developer Pick</div>
+              <h3>IZZA DRIVER</h3>
+              <p>Dodge traffic, hit boosts, set records and prove you own the road.</p>
+              <div class="slideActions">
+                <a class="btn purple" href="/izza-game/minigames/race">Play Now</a>
+                <a class="btn ghost" href="/izza-game/auth?dest=minigames">Arcade</a>
+              </div>
+            </div>
+          </article>
+
+          <article class="carouselSlide">
+            <div class="slideArt"><img src="/static/game/thumbs/puzzle.jpg" alt="Learn How To Craft"></div>
+            <div class="slideInfo">
+              <div class="slideKicker">Crafting Loop</div>
+              <h3>Learn How To Craft</h3>
+              <p>Create armour, weapons, collectibles and sell them through IZZA PAY.</p>
+              <div class="slideActions">
+                <a class="btn gold" href="/izza-game/play">Start Crafting</a>
+                <a class="btn ghost" href="/izza-game/auth?dest=city">Enter City</a>
+              </div>
+            </div>
+          </article>
+
+          <article class="carouselSlide">
+            <div class="slideArt"><img src="/static/game/thumbs/runner.jpg" alt="IZZA City"></div>
+            <div class="slideInfo">
+              <div class="slideKicker">Open World</div>
+              <h3>Enter IZZA City</h3>
+              <p>Complete missions, equip crafted items, chase records and build your IZZA character.</p>
+              <div class="slideActions">
+                <a class="btn purple" href="/izza-game/auth?dest=city">Enter IZZA City</a>
+                <a class="btn gold" href="/izza-game/play">Play</a>
+              </div>
+            </div>
+          </article>
+
+          <article class="carouselSlide">
+            <div class="slideArt"><img src="/static/game/thumbs/targets.jpg" alt="IZZA Ecosystem"></div>
+            <div class="slideInfo">
+              <div class="slideKicker">Ecosystem</div>
+              <h3>Stores, Auctions & Profile</h3>
+              <p>Browse stores, prepare for live auctions, view your profile and grow inside IZZA.</p>
+              <div class="slideActions">
+                <a class="btn purple" href="/explore">Market</a>
+                <a class="btn gold" href="/live-auctions">Auctions</a>
+                <a class="btn ghost" href="/profile">Profile</a>
+              </div>
+            </div>
+          </article>
+        </div>
+
+        <div class="carouselArrows" aria-hidden="false">
+          <button type="button" id="izzaCarouselPrev" aria-label="Previous slide">‹</button>
+          <button type="button" id="izzaCarouselNext" aria-label="Next slide">›</button>
+        </div>
+
+        <div class="carouselDots" id="izzaCarouselDots" aria-label="Carousel dots"></div>
+      </div>
+    </section>
+
     <section class="section">
       <div class="reveal" id="s-build">
         <h2>Build your character</h2>
@@ -335,6 +583,85 @@
 
   <script>
   (function(){
+    const shell = document.getElementById('izzaHomeCarousel');
+    if (!shell) return;
+
+    const track = shell.querySelector('.carouselTrack');
+    const slides = Array.from(shell.querySelectorAll('.carouselSlide'));
+    const dotsHost = document.getElementById('izzaCarouselDots');
+    const prev = document.getElementById('izzaCarouselPrev');
+    const next = document.getElementById('izzaCarouselNext');
+
+    if (!track || !slides.length || !dotsHost) return;
+
+    let index = 0;
+    let timer = null;
+    const intervalMs = 2000;
+
+    slides.forEach((_, i)=>{
+      const b = document.createElement('button');
+      b.type = 'button';
+      b.setAttribute('aria-label', 'Go to slide ' + (i + 1));
+      b.addEventListener('click', ()=>{
+        go(i);
+        restart();
+      });
+      dotsHost.appendChild(b);
+    });
+
+    const dots = Array.from(dotsHost.querySelectorAll('button'));
+
+    function paint(){
+      track.style.transform = 'translateX(' + (-index * 100) + '%)';
+      dots.forEach((d, i)=> d.classList.toggle('active', i === index));
+    }
+
+    function go(i){
+      index = (i + slides.length) % slides.length;
+      paint();
+    }
+
+    function step(){
+      go(index + 1);
+    }
+
+    function start(){
+      stop();
+      timer = setInterval(step, intervalMs);
+    }
+
+    function stop(){
+      if (timer) clearInterval(timer);
+      timer = null;
+    }
+
+    function restart(){
+      stop();
+      start();
+    }
+
+    prev?.addEventListener('click', ()=>{
+      go(index - 1);
+      restart();
+    });
+
+    next?.addEventListener('click', ()=>{
+      go(index + 1);
+      restart();
+    });
+
+    shell.addEventListener('mouseenter', stop);
+    shell.addEventListener('mouseleave', start);
+    shell.addEventListener('touchstart', stop, { passive:true });
+    shell.addEventListener('touchend', start, { passive:true });
+
+    paint();
+    start();
+  })();
+  </script>
+
+  <script>
+  (function(){
     const io=new IntersectionObserver((entries)=>{
       entries.forEach(e=>{ if(e.isIntersecting) e.target.classList.add('show'); });
     },{threshold:.15});
@@ -380,7 +707,7 @@
       });
     },{rootMargin:'-40% 0px -55% 0px', threshold:.05});
 
-    ['s-city','s-arcade','s-build','s-craft','s-missions','s-battles','s-store-cta','s-sell','s-custom','s-collect']
+    ['s-city','s-arcade','s-developer-picks','s-build','s-craft','s-missions','s-battles','s-store-cta','s-sell','s-custom','s-collect']
       .forEach(id=>{
         const el=document.getElementById(id);
         if(el) watch.observe(el);
