@@ -39,8 +39,8 @@
       text-align:center;
       padding-bottom:92px;
     }
-    .wrap{max-width:1100px;margin:0 auto;padding:16px 16px 120px}
-    @media (min-width:720px){ .wrap{padding:24px 24px 130px} }
+    .wrap{max-width:1100px;margin:0 auto;padding:0 16px 120px}
+    @media (min-width:720px){ .wrap{padding:0 24px 130px} }
 
 
 .ecosystemMenu{
@@ -116,14 +116,22 @@
     }
 
     h1{
-      margin:16px 0 6px;
-      font-size:clamp(26px,8.5vw,56px);
-      line-height:1.05; letter-spacing:.4px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;
-    }
+  margin:0 0 6px;
+  font-size:clamp(26px,8.5vw,56px);
+  line-height:1.05;
+  letter-spacing:.4px;
+  white-space:nowrap;
+  overflow:hidden;
+  text-overflow:ellipsis;
+}
     h2{margin:28px 0 4px;font-size:22px}
     p{color:var(--muted);margin:8px 0 16px}
 
-    .section{padding:18px 0}
+    .section{padding:8px 0}
+    #s-hero{
+  padding-top:0;
+  margin-top:0;
+}
     .cta-row{display:flex;justify-content:center;gap:12px;flex-wrap:wrap}
 
     .pillrow{display:flex;justify-content:center;gap:8px;flex-wrap:wrap;margin:10px 0}
