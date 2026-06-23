@@ -42,41 +42,25 @@
     .wrap{max-width:1100px;margin:0 auto;padding:16px 16px 120px}
     @media (min-width:720px){ .wrap{padding:24px 24px 130px} }
 
-    .topbar{
-      display:flex;align-items:center;justify-content:center;
-      padding:12px 0; position:sticky; top:0; z-index:50;
-      background:rgba(0,0,0,.9); backdrop-filter:blur(10px); border-bottom:1px solid var(--line);
-      gap:12px;
-    }
-    .hamburgerBtn{
-  width:46px;
-  height:46px;
-  border-radius:14px;
-  border:1px solid #2a3550;
-  background:linear-gradient(180deg,var(--piPurple1),var(--piPurple2));
-  color:#fff;
-  font-size:26px;
-  font-weight:900;
-  box-shadow:var(--glow-purple);
-  cursor:pointer;
-}
 
 .ecosystemMenu{
-  position:absolute;
-  top:64px;
+  position:fixed;
   left:50%;
+  bottom:92px;
   transform:translateX(-50%);
-  width:min(92vw,360px);
+  width:min(88vw,260px);
+  max-height:56vh;
+  overflow:auto;
   display:none;
   flex-direction:column;
-  gap:8px;
-  padding:12px;
-  border-radius:18px;
+  gap:4px;
+  padding:8px;
+  border-radius:16px;
   border:1px solid rgba(255,255,255,.14);
-  background:rgba(8,9,16,.96);
+  background:rgba(8,9,16,.97);
   backdrop-filter:blur(14px);
-  box-shadow:0 18px 44px rgba(0,0,0,.55),0 0 34px rgba(122,68,255,.2);
-  z-index:60;
+  box-shadow:0 -12px 34px rgba(0,0,0,.55),0 0 24px rgba(122,68,255,.18);
+  z-index:9999;
 }
 
 .ecosystemMenu.show{display:flex}
@@ -88,10 +72,10 @@
   background:#0b0f1f;
   color:#cfe0ff;
   text-decoration:none;
-  border-radius:12px;
-  padding:12px 14px;
-  font-weight:900;
-  font-size:14px;
+  border-radius:10px;
+  padding:8px 10px;
+  font-weight:800;
+  font-size:12px;
   text-align:left;
   font-family:Inter,Arial,Helvetica,sans-serif;
   cursor:pointer;
@@ -515,26 +499,7 @@
   </nav>
 
   <div class="wrap">
-    <div class="topbar">
-  <button class="hamburgerBtn" id="ecosystemMenuBtn" type="button" aria-label="Open IZZA ecosystem menu">
-    ☰
-  </button>
-
-  <div class="ecosystemMenu" id="ecosystemMenu" aria-hidden="true">
-    <a href="/izza-game/auth?dest=city">🏙️ IZZA CITY</a>
-    <a href="/izza-game/auth?dest=minigames">🎮 IZZA ARCADE</a>
-    <a href="/creatures/auth">🧬 IZZA CREATURES</a>
-    <a href="/explore">🛒 BROWSE STORES</a>
-    <a href="/live-auctions">🔴 LIVE AUCTIONS</a>
-    <button id="topStoreBtn" type="button">🏬 MY STORE</button>
-    <a href="/orders">📜 TRANSACTIONS</a>
-    <a href="/airdrop">💧 IZZA AIRDROP</a>
-    <a href="/token/auth?next=/token/izza">🪙 IZZA TOKEN</a>
-    <a href="/warzone/auth">⚔️ IZZA WARZONE</a>
-    <a href="/bot" id="izzaBotNav">🤖 IZZA BOT</a>
-    <a href="/izza-game/auth?dest=minigames">◎ PROFILE</a>
-  </div>
-</div>
+    
 
     <section class="section" id="s-hero">
       <h1 class="reveal">BUILD • SELL • PLAY</h1>
@@ -795,13 +760,29 @@
   </div>
 
   <nav class="bottomNav" aria-label="IZZA Ecosystem Navigation">
-  <a class="active" href="/"><span>⌂</span>Home</a>
+  <button class="active" id="ecosystemMenuBtn" type="button"><span>☰</span>Menu</button>
   <a href="/izza-game/auth?dest=minigames"><span>🎮</span>Games</a>
   <a href="/explore"><span>🛒</span>Market</a>
   <a href="/explore"><span>🔴</span>Auctions</a>
   <button id="bottomStoreBtn" type="button"><span>🏬</span>Store</button>
   <a href="/izza-game/auth?dest=minigames"><span>◎</span>Profile</a>
 </nav>
+
+  <div class="ecosystemMenu" id="ecosystemMenu" aria-hidden="true">
+  <a href="/">Home</a>
+  <a href="/izza-game/auth?dest=city">IZZA City</a>
+  <a href="/izza-game/auth?dest=minigames">IZZA Arcade</a>
+  <a href="/creatures/auth">IZZA Creatures</a>
+  <a href="/explore">Browse Stores</a>
+  <a href="/live-auctions">Live Auctions</a>
+  <button id="topStoreBtn" type="button">My Store</button>
+  <a href="/orders">Transactions</a>
+  <a href="/airdrop">IZZA Airdrop</a>
+  <a href="/token/auth?next=/token/izza">IZZA Token</a>
+  <a href="/warzone/auth">IZZA Warzone</a>
+  <a href="/bot" id="izzaBotNav">IZZA Bot</a>
+  <a href="/izza-game/auth?dest=minigames">Profile</a>
+</div>
 
   <script>
   (function(){
