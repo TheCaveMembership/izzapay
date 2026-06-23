@@ -48,6 +48,60 @@
       background:rgba(0,0,0,.9); backdrop-filter:blur(10px); border-bottom:1px solid var(--line);
       gap:12px;
     }
+    .hamburgerBtn{
+  width:46px;
+  height:46px;
+  border-radius:14px;
+  border:1px solid #2a3550;
+  background:linear-gradient(180deg,var(--piPurple1),var(--piPurple2));
+  color:#fff;
+  font-size:26px;
+  font-weight:900;
+  box-shadow:var(--glow-purple);
+  cursor:pointer;
+}
+
+.ecosystemMenu{
+  position:absolute;
+  top:64px;
+  left:50%;
+  transform:translateX(-50%);
+  width:min(92vw,360px);
+  display:none;
+  flex-direction:column;
+  gap:8px;
+  padding:12px;
+  border-radius:18px;
+  border:1px solid rgba(255,255,255,.14);
+  background:rgba(8,9,16,.96);
+  backdrop-filter:blur(14px);
+  box-shadow:0 18px 44px rgba(0,0,0,.55),0 0 34px rgba(122,68,255,.2);
+  z-index:60;
+}
+
+.ecosystemMenu.show{display:flex}
+
+.ecosystemMenu a,
+.ecosystemMenu button{
+  width:100%;
+  border:1px solid #2a3550;
+  background:#0b0f1f;
+  color:#cfe0ff;
+  text-decoration:none;
+  border-radius:12px;
+  padding:12px 14px;
+  font-weight:900;
+  font-size:14px;
+  text-align:left;
+  font-family:Inter,Arial,Helvetica,sans-serif;
+  cursor:pointer;
+}
+
+.ecosystemMenu a:hover,
+.ecosystemMenu button:hover{
+  border-color:#3f4e79;
+  filter:brightness(1.08);
+}
 
     .btn{
       display:inline-flex;align-items:center;justify-content:center;gap:8px;
@@ -462,16 +516,25 @@
 
   <div class="wrap">
     <div class="topbar">
-      <div class="topbar-stack">
-        <a class="btn purple upper" href="/airdrop" aria-label="IZZA Airdrop">IZZA AIRDROP</a>
-        <a class="btn purple upper" href="/warzone/auth" aria-label="IZZA WARZONE">IZZA WARZONE</a>
-      </div>
-      <a class="btn ghost upper" href="/explore">BROWSE STORES</a>
-      <div class="topbar-stack">
-        <a class="btn purple upper" href="/token/auth?next=/token/izza" aria-label="Authenticate for IZZA Token">IZZA TOKEN</a>
-        <a class="btn purple upper" href="/bot" id="izzaBotNav" aria-label="IZZA BOT Trading">IZZA BOT</a>
-      </div>
-    </div>
+  <button class="hamburgerBtn" id="ecosystemMenuBtn" type="button" aria-label="Open IZZA ecosystem menu">
+    ☰
+  </button>
+
+  <div class="ecosystemMenu" id="ecosystemMenu" aria-hidden="true">
+    <a href="/izza-game/auth?dest=city">🏙️ IZZA CITY</a>
+    <a href="/izza-game/auth?dest=minigames">🎮 IZZA ARCADE</a>
+    <a href="/creatures/auth">🧬 IZZA CREATURES</a>
+    <a href="/explore">🛒 BROWSE STORES</a>
+    <a href="/live-auctions">🔴 LIVE AUCTIONS</a>
+    <button id="topStoreBtn" type="button">🏬 MY STORE</button>
+    <a href="/orders">📜 TRANSACTIONS</a>
+    <a href="/airdrop">💧 IZZA AIRDROP</a>
+    <a href="/token/auth?next=/token/izza">🪙 IZZA TOKEN</a>
+    <a href="/warzone/auth">⚔️ IZZA WARZONE</a>
+    <a href="/bot" id="izzaBotNav">🤖 IZZA BOT</a>
+    <a href="/izza-game/auth?dest=minigames">◎ PROFILE</a>
+  </div>
+</div>
 
     <section class="section" id="s-hero">
       <h1 class="reveal">BUILD • SELL • PLAY</h1>
@@ -746,6 +809,7 @@
     const err = document.getElementById('err');
     const btnClone = document.getElementById('piSignInBtn_clone');
     const bottomStoreBtn = document.getElementById('bottomStoreBtn');
+    const topStoreBtn = document.getElementById('topStoreBtn');
     const botNav = document.getElementById('izzaBotNav');
     const postUrl = "/auth/exchange";
     const sandbox = {{ 'true' if sandbox else 'false' }};
@@ -778,6 +842,7 @@
 
     btnClone?.addEventListener('click', doAuth);
     bottomStoreBtn?.addEventListener('click', doAuth);
+    topStoreBtn?.addEventListener('click', doAuth);
   })();
   </script>
 
@@ -1001,5 +1066,25 @@
     }
   })();
   </script>
+  <script>
+(function(){
+  const btn = document.getElementById('ecosystemMenuBtn');
+  const menu = document.getElementById('ecosystemMenu');
+  if(!btn || !menu) return;
+
+  btn.addEventListener('click', function(e){
+    e.stopPropagation();
+    const open = menu.classList.toggle('show');
+    menu.setAttribute('aria-hidden', open ? 'false' : 'true');
+  });
+
+  document.addEventListener('click', function(e){
+    if(!menu.classList.contains('show')) return;
+    if(menu.contains(e.target) || btn.contains(e.target)) return;
+    menu.classList.remove('show');
+    menu.setAttribute('aria-hidden','true');
+  });
+})();
+</script>
 </body>
 </html>
