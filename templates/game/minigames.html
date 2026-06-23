@@ -110,7 +110,20 @@
       border-color:rgba(183,132,255,.35);
       box-shadow:var(--glow-purple);
       font-weight:800;
+  
     }
+    .btn.izza-home{
+  position:absolute;
+  left:50%;
+  transform:translateX(-50%);
+  top:24px;
+  background:linear-gradient(180deg,var(--gold1),var(--gold2));
+  color:#1a1400;
+  border-color:rgba(255,207,77,.35);
+  box-shadow:var(--glow-gold);
+  font-weight:900;
+  z-index:3;
+}
     /* top bar */
     .topbar{display:flex;align-items:flex-start;justify-content:space-between;gap:12px; margin-top:24px;}
     .topbar .left{display:flex;flex-direction:column;align-items:flex-start;gap:4px; position:relative;}
@@ -270,11 +283,14 @@
   <div class="wrap">
     <div class="card">
       <div class="topbar">
-        <div class="left">
-          <img src="/static/izzapay-word.svg" id="brandWord" class="brand-word" alt="IZZA wordmark">
-          <span class="muted">ARCADE</span>
-        </div>
-        <div class="wallet">
+  <div class="left">
+    <img src="/static/izzapay-word.svg" id="brandWord" class="brand-word" alt="IZZA wordmark">
+    <span class="muted">ARCADE</span>
+  </div>
+
+  <a class="btn izza-home" id="homeBtn" href="/">HOME</a>
+
+  <div class="wallet">
           <span class="pill">IZZA Coins: <strong id="coins" class="val" data-loading="1">{{ coins|default(0) }}</strong></span>
           <span class="pill">Craft Credits: <strong id="craft" class="val" data-loading="1">{{ crafting|default(0) }}</strong></span>
           <a class="btn" id="enterCityBtn" href="/izza-game/play">Enter IZZA City</a>
@@ -1118,283 +1134,288 @@ window.addEventListener('izza-inventory-changed', refreshArenaCursor, { passive:
       }
     })();
 
-        /* ===== Friends + Notifications logic ===== */
-    (function(){
-      const friendsBtn = document.getElementById('openFriendsBtn');
-      const notifyBtn  = document.getElementById('openNotifyBtn');
-      const badge      = document.getElementById('notifyBadge');
-      const friendsPanel = document.getElementById('friendsPanel');
-      const notifyPanel  = document.getElementById('notifyPanel');
-      const searchInput  = document.getElementById('friendSearchInput');
-      const searchBtn    = document.getElementById('friendSearchBtn');
-      const searchBox    = document.getElementById('friendSearchResults');
-      const friendsBox   = document.getElementById('friendsListBox');
-      const notifyBox    = document.getElementById('notifyListBox');
+        /* ===== Friends + Notifications logic — uses same MP routes as IZZA City ===== */
+(function(){
+  const friendsBtn = document.getElementById('openFriendsBtn');
+  const notifyBtn  = document.getElementById('openNotifyBtn');
+  const badge      = document.getElementById('notifyBadge');
+  const friendsPanel = document.getElementById('friendsPanel');
+  const notifyPanel  = document.getElementById('notifyPanel');
+  const searchInput  = document.getElementById('friendSearchInput');
+  const searchBtn    = document.getElementById('friendSearchBtn');
+  const searchBox    = document.getElementById('friendSearchResults');
+  const friendsBox   = document.getElementById('friendsListBox');
+  const notifyBox    = document.getElementById('notifyListBox');
 
-      if(!friendsBtn || !notifyBtn || !friendsPanel || !notifyPanel) return;
+  if(!friendsBtn || !notifyBtn || !friendsPanel || !notifyPanel) return;
 
-      function me(){
-        return (window.izzaUserKey && window.izzaUserKey.get && window.izzaUserKey.get())
-          || (localStorage.getItem('izzaUserU')||'').replace(/^@+/,'').toLowerCase();
-      }
+  const MP_BASE = '/izza-game/api/mp';
 
-      function esc(s){
-        return String(s ?? '').replace(/[&<>"']/g, m => ({
-          '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'
-        }[m]));
-      }
+  function esc(s){
+    return String(s ?? '').replace(/[&<>"']/g, m => ({
+      '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'
+    }[m]));
+  }
 
-      async function apiGet(paths){
-        for (const p of paths){
-          try{
-            const r = await fetch(withAuth(p), { credentials:'include', headers: bearerHeaders() });
-            if(r.ok) return await r.json();
-          }catch(_){}
-        }
-        return null;
-      }
+  function me(){
+    return (window.izzaUserKey && window.izzaUserKey.get && window.izzaUserKey.get())
+      || (localStorage.getItem('izzaUserU')||'').replace(/^@+/,'').toLowerCase();
+  }
 
-      async function apiPost(paths, body){
-        for (const p of paths){
-          try{
-            const r = await fetch(withAuth(p), {
-              method:'POST',
-              credentials:'include',
-              headers: bearerHeaders(),
-              body: JSON.stringify(body || {})
-            });
-            if(r.ok) return await r.json();
-          }catch(_){}
-        }
-        return null;
-      }
-
-      function normList(j){
-        if(!j) return [];
-        if(Array.isArray(j)) return j;
-        return j.rows || j.items || j.friends || j.notifications || j.results || j.data || [];
-      }
-
-      function updateBadge(n){
-        n = Math.max(0, Number(n)||0);
-        if(!badge) return;
-        if(n > 0){
-          badge.textContent = n > 99 ? '99+' : String(n);
-          badge.style.display = 'inline-flex';
-        } else {
-          badge.style.display = 'none';
-        }
-      }
-
-      async function loadFriends(){
-        if(friendsBox) friendsBox.innerHTML = `<div class="lb-empty muted">Loading friends…</div>`;
-
-        const j = await apiGet([
-          '/izza-game/api/friends',
-          '/izza-game/api/social/friends',
-          '/api/friends'
-        ]);
-
-        const rows = normList(j);
-        if(!friendsBox) return;
-
-        if(!rows.length){
-          friendsBox.innerHTML = `<div class="lb-empty muted">No friends yet. Search a username above.</div>`;
-          return;
-        }
-
-        friendsBox.innerHTML = rows.map(r=>{
-          const u = r.username || r.friend || r.user || r.u || r.name || 'Player';
-          const status = r.status || 'friend';
-          return `
-            <div class="friend-row">
-              <div>
-                <strong>@${esc(u)}</strong><br>
-                <small>${esc(status)}</small>
-              </div>
-              <button class="btn" type="button" data-friend-remove="${esc(u)}">Remove</button>
-            </div>
-          `;
-        }).join('');
-      }
-
-      async function searchFriends(){
-        const q = (searchInput && searchInput.value || '').trim().replace(/^@+/,'').toLowerCase();
-        if(!q){
-          if(searchBox) searchBox.innerHTML = `<div class="lb-empty muted">Type a username to search.</div>`;
-          return;
-        }
-
-        if(searchBox) searchBox.innerHTML = `<div class="lb-empty muted">Searching…</div>`;
-
-        const j = await apiGet([
-          `/izza-game/api/friends/search?q=${encodeURIComponent(q)}`,
-          `/izza-game/api/social/search?q=${encodeURIComponent(q)}`,
-          `/api/friends/search?q=${encodeURIComponent(q)}`
-        ]);
-
-        const rows = normList(j);
-        if(!searchBox) return;
-
-        if(!rows.length){
-          searchBox.innerHTML = `<div class="lb-empty muted">No players found.</div>`;
-          return;
-        }
-
-        const mine = me();
-        searchBox.innerHTML = rows.map(r=>{
-          const u = (r.username || r.user || r.u || r.name || '').replace(/^@+/,'').toLowerCase();
-          if(!u || u === mine) return '';
-          return `
-            <div class="friend-row">
-              <div>
-                <strong>@${esc(u)}</strong><br>
-                <small>${esc(r.status || 'Player')}</small>
-              </div>
-              <button class="btn izza-purple" type="button" data-friend-add="${esc(u)}">Add Friend</button>
-            </div>
-          `;
-        }).join('') || `<div class="lb-empty muted">No players found.</div>`;
-      }
-
-      async function sendFriendRequest(u){
-        if(!u) return;
-        await apiPost([
-          '/izza-game/api/friends/request',
-          '/izza-game/api/social/friends/request',
-          '/api/friends/request'
-        ], { username:u, to:u, friend:u });
-
-        if(searchBox) searchBox.innerHTML = `<div class="lb-empty muted">Friend request sent to @${esc(u)}.</div>`;
-        await loadNotifications();
-        await loadFriends();
-      }
-
-      async function removeFriend(u){
-        if(!u) return;
-        await apiPost([
-          '/izza-game/api/friends/remove',
-          '/izza-game/api/social/friends/remove',
-          '/api/friends/remove'
-        ], { username:u, friend:u });
-        await loadFriends();
-      }
-
-      async function loadNotifications(){
-        if(notifyBox) notifyBox.innerHTML = `<div class="lb-empty muted">Loading notifications…</div>`;
-
-        const j = await apiGet([
-          '/izza-game/api/notifications',
-          '/izza-game/api/social/notifications',
-          '/api/notifications'
-        ]);
-
-        const rows = normList(j);
-        const unread = Number(j && (j.unread ?? j.unread_count ?? j.count)) || rows.filter(x=>!x.read && !x.seen).length;
-        updateBadge(unread);
-
-        if(!notifyBox) return;
-
-        if(!rows.length){
-          notifyBox.innerHTML = `<div class="lb-empty muted">No notifications yet.</div>`;
-          return;
-        }
-
-        notifyBox.innerHTML = rows.map(n=>{
-          const id = n.id || n.notification_id || n.key || '';
-          const type = n.type || '';
-          const from = n.from || n.from_user || n.username || n.user || n.sender || '';
-          const msg = n.message || n.text || (type === 'friend_request' && from ? `@${from} sent you a friend request.` : 'Notification');
-
-          const actions = (type === 'friend_request' || n.kind === 'friend_request' || n.action === 'friend_request')
-            ? `
-              <div class="row" style="margin-top:8px">
-                <button class="btn izza-purple" type="button" data-notify-accept="${esc(id)}" data-from="${esc(from)}">Accept</button>
-                <button class="btn" type="button" data-notify-decline="${esc(id)}" data-from="${esc(from)}">Decline</button>
-              </div>
-            `
-            : `
-              <div class="row" style="margin-top:8px">
-                <button class="btn" type="button" data-notify-read="${esc(id)}">Mark read</button>
-              </div>
-            `;
-
-          return `
-            <div class="friend-row" style="display:block">
-              <strong>${esc(msg)}</strong>
-              ${actions}
-            </div>
-          `;
-        }).join('');
-      }
-
-      async function acceptRequest(id, from){
-        await apiPost([
-          '/izza-game/api/friends/accept',
-          '/izza-game/api/social/friends/accept',
-          '/api/friends/accept'
-        ], { id, from, username:from });
-        await loadFriends();
-        await loadNotifications();
-      }
-
-      async function declineRequest(id, from){
-        await apiPost([
-          '/izza-game/api/friends/decline',
-          '/izza-game/api/social/friends/decline',
-          '/api/friends/decline'
-        ], { id, from, username:from });
-        await loadNotifications();
-      }
-
-      async function markRead(id){
-        await apiPost([
-          '/izza-game/api/notifications/read',
-          '/izza-game/api/social/notifications/read',
-          '/api/notifications/read'
-        ], { id });
-        await loadNotifications();
-      }
-
-      friendsBtn.addEventListener('click', ()=>{
-        friendsPanel.classList.toggle('show');
-        notifyPanel.classList.remove('show');
-        if(friendsPanel.classList.contains('show')) loadFriends();
-      }, {passive:true});
-
-      notifyBtn.addEventListener('click', ()=>{
-        notifyPanel.classList.toggle('show');
-        friendsPanel.classList.remove('show');
-        if(notifyPanel.classList.contains('show')) loadNotifications();
-      }, {passive:true});
-
-      if(searchBtn) searchBtn.addEventListener('click', searchFriends, {passive:true});
-      if(searchInput) searchInput.addEventListener('keydown', e=>{
-        if(e.key === 'Enter'){ e.preventDefault(); searchFriends(); }
+  async function mpGet(path){
+    try{
+      const r = await fetch(withAuth(MP_BASE + path), {
+        credentials:'include',
+        headers: bearerHeaders()
       });
+      if(r.ok) return await r.json();
+    }catch(_){}
+    return null;
+  }
 
-      document.addEventListener('click', async e=>{
-        const add = e.target.closest('[data-friend-add]');
-        if(add){ await sendFriendRequest(add.getAttribute('data-friend-add')); return; }
-
-        const rem = e.target.closest('[data-friend-remove]');
-        if(rem){ await removeFriend(rem.getAttribute('data-friend-remove')); return; }
-
-        const acc = e.target.closest('[data-notify-accept]');
-        if(acc){ await acceptRequest(acc.getAttribute('data-notify-accept'), acc.getAttribute('data-from')); return; }
-
-        const dec = e.target.closest('[data-notify-decline]');
-        if(dec){ await declineRequest(dec.getAttribute('data-notify-decline'), dec.getAttribute('data-from')); return; }
-
-        const read = e.target.closest('[data-notify-read]');
-        if(read){ await markRead(read.getAttribute('data-notify-read')); return; }
+  async function mpPost(path, body){
+    try{
+      const r = await fetch(withAuth(MP_BASE + path), {
+        method:'POST',
+        credentials:'include',
+        headers: bearerHeaders(),
+        body: JSON.stringify(body || {})
       });
+      if(r.ok) return await r.json();
+    }catch(_){}
+    return null;
+  }
 
-      setTimeout(loadNotifications, 900);
-      document.addEventListener('visibilitychange', ()=>{
-        if(!document.hidden) loadNotifications();
-      }, {passive:true});
-    })();
+  function updateBadge(n){
+    n = Math.max(0, Number(n)||0);
+    if(!badge) return;
+    if(n > 0){
+      badge.textContent = n > 99 ? '99+' : String(n);
+      badge.style.display = 'inline-flex';
+    } else {
+      badge.style.display = 'none';
+    }
+  }
+
+  async function loadFriends(){
+    if(friendsBox) friendsBox.innerHTML = `<div class="lb-empty muted">Loading friends…</div>`;
+
+    const j = await mpGet('/friends/list');
+    const rows = (j && j.friends) || [];
+
+    if(!friendsBox) return;
+
+    if(!rows.length){
+      friendsBox.innerHTML = `<div class="lb-empty muted">No friends yet. Search a username above.</div>`;
+      return;
+    }
+
+    friendsBox.innerHTML = rows.map(r=>{
+      const u = r.username || r.friend || r.user || r.u || r.name || 'Player';
+      const active = r.active ? 'Active' : 'Offline';
+      return `
+        <div class="friend-row">
+          <div>
+            <strong>@${esc(u)}</strong><br>
+            <small>${esc(active)}</small>
+          </div>
+          <button class="btn izza-purple" type="button" data-friend-invite="${esc(u)}">Invite</button>
+        </div>
+      `;
+    }).join('');
+  }
+
+  async function searchFriends(){
+    const q = (searchInput && searchInput.value || '').trim().replace(/^@+/,'').toLowerCase();
+    if(!q){
+      if(searchBox) searchBox.innerHTML = `<div class="lb-empty muted">Type a username to search.</div>`;
+      return;
+    }
+
+    if(searchBox) searchBox.innerHTML = `<div class="lb-empty muted">Searching…</div>`;
+
+    const j = await mpGet('/players/search?q=' + encodeURIComponent(q));
+    const rows = (j && j.users) || [];
+
+    if(!searchBox) return;
+
+    if(!rows.length){
+      searchBox.innerHTML = `<div class="lb-empty muted">No players found.</div>`;
+      return;
+    }
+
+    const mine = me();
+    searchBox.innerHTML = rows.map(r=>{
+      const u = (r.username || r.user || r.u || r.name || '').replace(/^@+/,'').toLowerCase();
+      if(!u || u === mine) return '';
+
+      return `
+        <div class="friend-row">
+          <div>
+            <strong>@${esc(u)}</strong><br>
+            <small>${esc(r.active ? 'Active' : 'Offline')}</small>
+          </div>
+          <button class="btn izza-purple" type="button" data-friend-add="${esc(u)}">Add Friend</button>
+        </div>
+      `;
+    }).join('') || `<div class="lb-empty muted">No players found.</div>`;
+  }
+
+  async function sendFriendRequest(u){
+    if(!u) return;
+
+    await mpPost('/friends/request', {
+      toUsername: u,
+      username: u
+    });
+
+    if(searchBox) searchBox.innerHTML = `<div class="lb-empty muted">Friend request sent to @${esc(u)}.</div>`;
+    await loadNotifications();
+    await loadFriends();
+  }
+
+  async function inviteFriend(u){
+    if(!u) return;
+
+    await mpPost('/lobby/invite', {
+      toUsername: u
+    });
+
+    if(friendsBox){
+      friendsBox.innerHTML = `<div class="lb-empty muted">Invite sent to @${esc(u)}.</div>` + friendsBox.innerHTML;
+    }
+  }
+
+  async function loadNotifications(){
+    if(notifyBox) notifyBox.innerHTML = `<div class="lb-empty muted">Loading notifications…</div>`;
+
+    const j = await mpGet('/notifications');
+
+    const friendReqs = (j && (j.friendRequests || j.requests)) || [];
+    const invites = (j && j.invites) || [];
+    const rows = [
+      ...friendReqs.map(x => Object.assign({}, x, { type:'friend' })),
+      ...invites.map(x => Object.assign({}, x, { type:'battle' }))
+    ];
+
+    updateBadge(rows.length);
+
+    if(!notifyBox) return;
+
+    if(!rows.length){
+      notifyBox.innerHTML = `<div class="lb-empty muted">No notifications yet.</div>`;
+      return;
+    }
+
+    notifyBox.innerHTML = rows.map(n=>{
+      const id = n.id || n.requestId || n.inviteId || '';
+      const from = n.from || n.from_user || n.username || n.user || n.sender || 'player';
+
+      if(n.type === 'friend'){
+        return `
+          <div class="friend-row" style="display:block">
+            <strong>@${esc(from)} sent you a friend request.</strong>
+            <div class="row" style="margin-top:8px">
+              <button class="btn izza-purple" type="button" data-notify-accept="${esc(id)}" data-from="${esc(from)}">Accept</button>
+              <button class="btn" type="button" data-notify-decline="${esc(id)}" data-from="${esc(from)}">Decline</button>
+            </div>
+          </div>
+        `;
+      }
+
+      return `
+        <div class="friend-row" style="display:block">
+          <strong>@${esc(from)} invited you${n.mode ? ' (' + esc(n.mode) + ')' : ''}.</strong>
+          <div class="row" style="margin-top:8px">
+            <button class="btn izza-purple" type="button" data-battle-accept="${esc(id)}" data-from="${esc(from)}">Accept</button>
+            <button class="btn" type="button" data-battle-decline="${esc(id)}" data-from="${esc(from)}">Decline</button>
+          </div>
+        </div>
+      `;
+    }).join('');
+  }
+
+  async function acceptRequest(id, from){
+    await mpPost('/friends/accept', {
+      requestId: id,
+      from,
+      username: from
+    });
+    await loadFriends();
+    await loadNotifications();
+  }
+
+  async function declineRequest(id, from){
+    await mpPost('/friends/decline', {
+      requestId: id,
+      from,
+      username: from
+    });
+    await loadNotifications();
+  }
+
+  async function acceptBattleInvite(id, from){
+    const j = await mpPost('/lobby/accept', {
+      inviteId: id,
+      from
+    });
+    await loadNotifications();
+
+    if(j && j.start){
+      window.location.href = withAuth('/izza-game/play');
+    }
+  }
+
+  async function declineBattleInvite(id, from){
+    await mpPost('/lobby/decline', {
+      inviteId: id,
+      from
+    });
+    await loadNotifications();
+  }
+
+  friendsBtn.addEventListener('click', ()=>{
+    friendsPanel.classList.toggle('show');
+    notifyPanel.classList.remove('show');
+    if(friendsPanel.classList.contains('show')) loadFriends();
+  }, {passive:true});
+
+  notifyBtn.addEventListener('click', ()=>{
+    notifyPanel.classList.toggle('show');
+    friendsPanel.classList.remove('show');
+    if(notifyPanel.classList.contains('show')) loadNotifications();
+  }, {passive:true});
+
+  if(searchBtn) searchBtn.addEventListener('click', searchFriends, {passive:true});
+  if(searchInput) searchInput.addEventListener('keydown', e=>{
+    if(e.key === 'Enter'){ e.preventDefault(); searchFriends(); }
+  });
+
+  document.addEventListener('click', async e=>{
+    const add = e.target.closest('[data-friend-add]');
+    if(add){ await sendFriendRequest(add.getAttribute('data-friend-add')); return; }
+
+    const inv = e.target.closest('[data-friend-invite]');
+    if(inv){ await inviteFriend(inv.getAttribute('data-friend-invite')); return; }
+
+    const acc = e.target.closest('[data-notify-accept]');
+    if(acc){ await acceptRequest(acc.getAttribute('data-notify-accept'), acc.getAttribute('data-from')); return; }
+
+    const dec = e.target.closest('[data-notify-decline]');
+    if(dec){ await declineRequest(dec.getAttribute('data-notify-decline'), dec.getAttribute('data-from')); return; }
+
+    const bacc = e.target.closest('[data-battle-accept]');
+    if(bacc){ await acceptBattleInvite(bacc.getAttribute('data-battle-accept'), bacc.getAttribute('data-from')); return; }
+
+    const bdec = e.target.closest('[data-battle-decline]');
+    if(bdec){ await declineBattleInvite(bdec.getAttribute('data-battle-decline'), bdec.getAttribute('data-from')); return; }
+  });
+
+  setTimeout(loadNotifications, 900);
+  document.addEventListener('visibilitychange', ()=>{
+    if(!document.hidden) loadNotifications();
+  }, {passive:true});
+})();
 
     /* ===== Leaderboard Modal logic (added) ===== */
     (function(){
