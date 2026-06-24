@@ -793,60 +793,96 @@
   const postUrl = "/auth/exchange";
   const sandbox = {{ 'true' if sandbox else 'false' }};
 
+  let piReady = false;
+
   function setMsg(t){ if(msg) msg.textContent = t || ''; }
   function setErr(t){ if(err) err.textContent = t || ''; }
 
   function initPi(){
-    if (!window.Pi || !Pi.init) return false;
-    try { Pi.init({ version:"2.0", sandbox:sandbox }); return true; }
-    catch(e){ console.error("Pi.init failed", e); setErr("Pi.init failed: " + (e?.message || e)); return false; }
+    if (!window.Pi || !Pi.init) {
+      piReady = false;
+      return false;
+    }
+
+    try {
+      Pi.init({ version:"2.0", sandbox:sandbox });
+      piReady = true;
+      return true;
+    } catch(e) {
+      console.error("Pi.init failed", e);
+      piReady = false;
+      setErr("Pi.init failed: " + (e?.message || e));
+      return false;
+    }
   }
 
-  if(!initPi()) setMsg("Open in Pi Browser or refresh. Pi SDK is initializing.");
+  function waitForPi(cb, tries=0){
+    if (window.Pi && Pi.init && Pi.authenticate) {
+      if (!piReady) initPi();
+      cb();
+      return;
+    }
 
-  function doAuth(nextPath){
-    setErr('');
-    if (!window.Pi || !Pi.authenticate){
+    if (tries >= 20) {
       setMsg("Pi SDK not available. Open in Pi Browser or refresh.");
       return;
     }
 
-    setMsg("Requesting authorization…");
+    setMsg("Loading Pi SDK…");
+    setTimeout(()=>waitForPi(cb, tries + 1), 250);
+  }
 
-    const scopes = ['payments','username'];
+  initPi();
 
-    function onIncompletePaymentFound(_p){}
+  function doAuth(nextPath){
+    waitForPi(function(){
+      setErr('');
 
-    Pi.authenticate(scopes, onIncompletePaymentFound)
-      .then(function(auth){
-        const form = document.createElement('form');
-        form.method = 'POST';
-        form.action = postUrl;
+      if (!piReady) {
+        const ok = initPi();
+        if (!ok) {
+          setMsg("Pi SDK was not ready. Please tap again.");
+          return;
+        }
+      }
 
-        const inp = document.createElement('input');
-        inp.type = 'hidden';
-        inp.name = 'payload';
-        inp.value = JSON.stringify({
-          accessToken: auth.accessToken,
-          user: auth.user,
-          next: nextPath || "/dashboard"
+      setMsg("Requesting authorization…");
+
+      const scopes = ['payments','username'];
+
+      function onIncompletePaymentFound(_p){}
+
+      Pi.authenticate(scopes, onIncompletePaymentFound)
+        .then(function(auth){
+          const form = document.createElement('form');
+          form.method = 'POST';
+          form.action = postUrl;
+
+          const payload = document.createElement('input');
+          payload.type = 'hidden';
+          payload.name = 'payload';
+          payload.value = JSON.stringify({
+            accessToken: auth.accessToken,
+            user: auth.user,
+            next: nextPath || "/dashboard"
+          });
+          form.appendChild(payload);
+
+          const nextInp = document.createElement('input');
+          nextInp.type = 'hidden';
+          nextInp.name = 'next';
+          nextInp.value = nextPath || "/dashboard";
+          form.appendChild(nextInp);
+
+          document.body.appendChild(form);
+          form.submit();
+        })
+        .catch(function(e){
+          console.error(e);
+          setMsg("Authorization failed. Please try again.");
+          setErr(e?.message || String(e));
         });
-        form.appendChild(inp);
-
-        const nextInp = document.createElement('input');
-        nextInp.type = 'hidden';
-        nextInp.name = 'next';
-        nextInp.value = nextPath || "/dashboard";
-        form.appendChild(nextInp);
-
-        document.body.appendChild(form);
-        form.submit();
-      })
-      .catch(function(e){
-        console.error(e);
-        setMsg("Authorization failed. Please try again.");
-        setErr(e?.message || String(e));
-      });
+    });
   }
 
   btnClone?.addEventListener('click', ()=>doAuth('/dashboard'));
