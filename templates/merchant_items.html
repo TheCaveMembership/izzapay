@@ -340,6 +340,19 @@
           </div>
         </form>
       </div>
+    {% if m and m.slug == 'izza-game-crafting' %}
+  <div class="card" id="live-auction-access" style="margin-bottom:12px;border-color:#7a44ff">
+    <div class="h2">🔴 Live Video Auctions</div>
+    <p class="muted">
+      Exclusive IZZA PAY live video auction tools are enabled for this store.
+      Buyers can sign up for One Piece TCG, Pokémon TCG, or both. Sales will complete through IZZA PAY.
+    </p>
+    <div class="btn-row">
+      <a class="ip-btn" href="/live-auctions" target="_blank">View Signup Page</a>
+      <a class="ip-btn ghost" href="/live-auctions/admin{% if t %}?t={{ t }}{% endif %}">Manage Auctions</a>
+    </div>
+  </div>
+{% endif %}
 
       <!-- Create Product -->
       <div class="card" id="create-product">
