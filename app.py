@@ -1543,7 +1543,7 @@ def _with_t(path):
 def require_live_auction_owner():
     u = current_user_row()
     if not u:
-        return None, None, redirect(_with_t("/signin?fresh=1"))
+        return None, None, redirect(_with_t("/signin?fresh=1&next=/live-auctions/admin"))
 
     with conn() as cx:
         m = cx.execute(
