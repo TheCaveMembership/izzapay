@@ -1,35 +1,133 @@
-// Remote Players API — v3.1 stable
-// One clean remote-player layer for Worlds 1–4.
+// Remote Players API — v3.2 NODE MP
+// Worlds 1–4 now talk to the Node persistence service multiplayer routes.
 // SOLO = no remote players, missions enabled.
 // Worlds 1–4 = remote players visible, missions hidden.
 
 (function(){
-  if (window.__IZZA_REMOTE_PLAYERS_V31__) return;
-  window.__IZZA_REMOTE_PLAYERS_V31__ = true;
+  if (window.__IZZA_REMOTE_PLAYERS_V32_NODE__) return;
+  window.__IZZA_REMOTE_PLAYERS_V32_NODE__ = true;
 
-  const BUILD = 'v3.1-stable-remote-players';
+  const BUILD = 'v3.2-node-remote-players';
   console.log('[IZZA PLAY]', BUILD);
 
-  const MP_BASE = window.__MP_BASE__ || '/izza-game/api/mp';
-  const TOK = (window.__IZZA_T__ || '').toString();
+  const NODE_BASE_RAW =
+    window.__MP_NODE_BASE__ ||
+    window.__IZZA_NODE_MP_BASE__ ||
+    window.__IZZA_PERSIST_BASE__ ||
+    '';
 
-  const withTok = p => TOK ? p + (p.includes('?') ? '&' : '?') + 't=' + encodeURIComponent(TOK) : p;
+  const MP_BASE = NODE_BASE_RAW
+    ? String(NODE_BASE_RAW).replace(/\/$/, '') + '/api/mp'
+    : (window.__MP_BASE__ || '/izza-game/api/mp');
+
+  try{
+    window.__MP_BASE__ = MP_BASE;
+  }catch{}
+
+  function readUsername(){
+    try{
+      const p = window.__IZZA_PROFILE__ || {};
+      const a = p.appearance || {};
+      let u =
+        p.username ||
+        p.pi_username ||
+        a.username ||
+        '';
+
+      if(!u){
+        const raw = localStorage.getItem('piAuthUser');
+        if(raw){
+          try{
+            const j = JSON.parse(raw);
+            u = j.username || j.pi_username || j.user || '';
+          }catch{}
+        }
+      }
+
+      if(!u && window.izzaUserKey?.get) u = window.izzaUserKey.get();
+
+      return String(u || 'guest').trim().replace(/^@+/, '').toLowerCase();
+    }catch{
+      return 'guest';
+    }
+  }
+
+  const TOK = (window.__IZZA_T__ || window.__PI_LOGIN_TOKEN__ || localStorage.getItem('izzaLoginToken') || '').toString();
+  const USER = readUsername();
+
+  function withAuth(p){
+    let out = p;
+    const add = (k,v)=>{
+      if(!v) return;
+      out += (out.includes('?') ? '&' : '?') + encodeURIComponent(k) + '=' + encodeURIComponent(v);
+    };
+    add('u', USER);
+    add('t', TOK);
+    return out;
+  }
+
+  function authBody(b){
+    const body = Object.assign({}, b || {});
+    if(USER && !body.u) body.u = USER;
+    if(TOK && !body.t) body.t = TOK;
+    return body;
+  }
+
+  function authHeaders(){
+    const h = {'Content-Type':'application/json'};
+    if(USER) h['X-IZZA-User'] = USER;
+    if(TOK){
+      h['X-IZZA-Token'] = TOK;
+      h['Authorization'] = 'Bearer ' + TOK;
+    }
+    return h;
+  }
 
   async function jget(p){
-    const r = await fetch(withTok(MP_BASE + p), { credentials:'include' });
-    if(!r.ok) throw new Error(`${r.status} ${r.statusText}`);
+    const url = withAuth(MP_BASE + p);
+    const r = await fetch(url, {
+      credentials:'include',
+      headers:authHeaders()
+    });
+    if(!r.ok){
+      const txt = await r.text().catch(()=>'');
+      throw new Error(`${r.status} ${r.statusText} ${txt.slice(0,160)}`);
+    }
     return r.json();
   }
 
   async function jpost(p,b){
-    const r = await fetch(withTok(MP_BASE + p), {
+    const url = withAuth(MP_BASE + p);
+    const r = await fetch(url, {
       method:'POST',
       credentials:'include',
-      headers:{'Content-Type':'application/json'},
-      body:JSON.stringify(b || {})
+      headers:authHeaders(),
+      body:JSON.stringify(authBody(b))
     });
-    if(!r.ok) throw new Error(`${r.status} ${r.statusText}`);
+    if(!r.ok){
+      const txt = await r.text().catch(()=>'');
+      throw new Error(`${r.status} ${r.statusText} ${txt.slice(0,160)}`);
+    }
     return r.json();
+  }
+
+  function clientLog(event, data){
+    try{
+      console.log('[REMOTE NODE DEBUG]', event, data || {});
+      fetch(withAuth(MP_BASE + '/client-log'), {
+        method:'POST',
+        credentials:'include',
+        headers:authHeaders(),
+        body:JSON.stringify(authBody({
+          event,
+          build:BUILD,
+          world:getWorld(),
+          data:data || {},
+          href:location.href,
+          ts:Date.now()
+        }))
+      }).catch(()=>{});
+    }catch{}
   }
 
   const getWorld = () => localStorage.getItem('izzaWorldId') || 'solo';
@@ -40,7 +138,7 @@
       const p = window.__IZZA_PROFILE__ || {};
       const a = p.appearance || p || {};
       return {
-        username: p.username || 'guest',
+        username: USER || p.username || 'guest',
         body_type: a.body_type || 'male',
         sprite_skin: a.sprite_skin || 'default',
         skin_tone: a.skin_tone || 'light',
@@ -51,7 +149,7 @@
       };
     }catch{
       return {
-        username:'guest',
+        username:USER || 'guest',
         body_type:'male',
         sprite_skin:'default',
         skin_tone:'light',
@@ -209,10 +307,10 @@
     return Promise.resolve(ph);
   }
 
-  const BUFFER_MS = 140;
+  const BUFFER_MS = 120;
   const PREDICT_MS = 120;
-  const STALE_MS = 6000;
-  const MAX_SNAP = 48;
+  const STALE_MS = 9000;
+  const MAX_SNAP = 64;
 
   function pushSnap(rp, x, y, facing){
     const t = Date.now();
@@ -296,7 +394,7 @@
 
   function upsertRemote(p){
     const u = String(p?.username || '').trim();
-    if(!u) return;
+    if(!u || u.toLowerCase() === USER.toLowerCase()) return;
 
     let rp = byName[u];
     if(!rp){
@@ -385,7 +483,9 @@
         }
 
         ctx.restore();
-      }catch{}
+      }catch(e){
+        clientLog('render-error', { message:e.message });
+      }
     });
   }
 
@@ -398,54 +498,89 @@
     }catch{}
   }
 
-  let lastRosterTs = 0;
   let posT = null;
   let rosterT = null;
   let heartbeatT = null;
   let lastSent = {x:null,y:null,facing:null};
+  let joinedWorld = null;
 
   const RATE = {
-    posMs: 100,
-    rosterMs: 180,
-    heartbeatMs: 4000
+    posMs: 80,
+    rosterMs: 140,
+    heartbeatMs: 2500
   };
+
+  async function joinWorld(world){
+    world = String(world || getWorld() || 'solo');
+    if(world === 'solo') return {ok:true, world:'solo'};
+
+    const r = await jpost('/world/join', {
+      world,
+      worldId:world,
+      appearance:readAppearance(),
+      inv:readInventory()
+    });
+
+    if(r && r.ok){
+      joinedWorld = world;
+      clientLog('node-join-ok', { world, counts:r.counts || null });
+    }
+
+    return r;
+  }
 
   async function sendHeartbeat(){
     if(!isMPWorld()) return;
     try{
+      const world = getWorld();
+      if(joinedWorld !== world) await joinWorld(world);
+
       const me = IZZA?.api?.player || {x:0,y:0,facing:'down'};
       await jpost('/world/heartbeat', {
+        world,
+        worldId:world,
         x:me.x|0,
         y:me.y|0,
         facing:me.facing || 'down',
         appearance:readAppearance(),
         inv:readInventory()
       });
-    }catch{}
+    }catch(e){
+      clientLog('heartbeat-failed', { message:e.message });
+    }
   }
 
   async function sendPos(){
     if(!isMPWorld()) return;
     try{
+      const world = getWorld();
+      if(joinedWorld !== world) await joinWorld(world);
+
       const me = IZZA?.api?.player || {x:0,y:0,facing:'down'};
       const x = me.x|0, y = me.y|0, facing = me.facing || 'down';
 
       if(lastSent.x === x && lastSent.y === y && lastSent.facing === facing) return;
       lastSent = {x,y,facing};
 
-      await jpost('/world/pos', {x,y,facing});
-    }catch{}
+      await jpost('/world/pos', {world, worldId:world, x,y,facing});
+    }catch(e){
+      clientLog('pos-failed', { message:e.message });
+    }
   }
 
   async function pullRoster(){
     if(!isMPWorld()) return;
     try{
-      const r = await jget('/world/roster?since=' + encodeURIComponent(lastRosterTs || 0));
+      const world = getWorld();
+      if(joinedWorld !== world) await joinWorld(world);
+
+      const r = await jget('/world/roster?world=' + encodeURIComponent(world));
       if(r && r.ok){
         if(Array.isArray(r.players)) r.players.forEach(upsertRemote);
-        if(typeof r.serverNow === 'number') lastRosterTs = r.serverNow;
       }
-    }catch{}
+    }catch(e){
+      clientLog('roster-failed', { message:e.message });
+    }
   }
 
   function armTimers(){
@@ -456,6 +591,7 @@
     heartbeatT = setInterval(sendHeartbeat, RATE.heartbeatMs);
     rosterT = setInterval(pullRoster, RATE.rosterMs);
 
+    joinWorld(getWorld()).catch(e=>clientLog('initial-join-failed', {message:e.message}));
     sendHeartbeat();
     pullRoster();
   }
@@ -469,17 +605,17 @@
   function onWorldChanged(world){
     const next = String(world || getWorld() || 'solo');
     clearRemotePlayers();
-    lastRosterTs = 0;
+    joinedWorld = null;
     lastSent = {x:null,y:null,facing:null};
 
     if(next === 'solo'){
       disarmTimers();
       setMultiplayerMode(false);
+      try{ jpost('/presence/offline', {}).catch(()=>{}); }catch{}
       return;
     }
 
     setMultiplayerMode(true);
-    try{ jpost('/world/join', {world:next, worldId:next}).catch(()=>{}); }catch{}
     armTimers();
   }
 
@@ -491,10 +627,11 @@
     send(type, data){
       if(type === 'join-world'){
         const world = String(data?.world || data?.worldId || '1');
-        try{ jpost('/world/join', {world, worldId:world}).catch(()=>{}); }catch{}
-        onWorldChanged(world);
+        joinWorld(world)
+          .then(()=>onWorldChanged(world))
+          .catch(e=>clientLog('api-join-world-failed', {world, message:e.message}));
       }else if(type === 'worlds-counts'){
-        jget('/worlds/counts').then(j=>fanout('worlds-counts', j || {})).catch(()=>{});
+        jget('/worlds/counts').then(j=>fanout('worlds-counts', j || {})).catch(e=>clientLog('counts-failed', {message:e.message}));
       }else if(type === 'players-get'){
         pullRoster();
       }
@@ -531,6 +668,12 @@
     IZZA?.on?.('world-changed', e=> onWorldChanged(e?.world || getWorld()));
   }catch{}
 
+  window.addEventListener('beforeunload', ()=>{
+    try{
+      if(isMPWorld()) navigator.sendBeacon?.(withAuth(MP_BASE + '/presence/offline'), JSON.stringify(authBody({})));
+    }catch{}
+  });
+
   function installPublicAPI(){
     if(!window.IZZA || !IZZA.api) return;
     IZZA.api.remotePlayers = REMOTES;
@@ -543,6 +686,7 @@
     installPublicAPI();
     installRenderer();
     wireLoadoutPushOnce();
+    clientLog('boot', { MP_BASE, USER, hasToken:!!TOK, world:getWorld() });
     onWorldChanged(getWorld());
   }
 
