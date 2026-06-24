@@ -6,8 +6,18 @@
 //     GET  /api/state/:username
 //     GET  /api/state/:username?prefer=lastGood
 //     POST /api/state/:username
-//     POST /api/crafting/ai_svg          <-- AI SVG endpoint (upgraded quality + initiative)
-//     GET  /api/crafting/ai_info         <-- model/key check (if you add later)
+//     POST /api/crafting/ai_svg
+//     GET  /api/crafting/ai_info
+//     NEW MULTIPLAYER NODE ROUTES:
+//       POST /api/mp/world/join
+//       GET  /api/mp/worlds/counts
+//       POST /api/mp/world/heartbeat
+//       POST /api/mp/world/pos
+//       GET  /api/mp/world/roster
+//       POST /api/mp/world/leave
+//       POST /api/mp/presence/offline
+//       POST /api/mp/client-log
+//     Also supports /izza-game/api/mp/... aliases.
 
 import express from 'express';
 import morgan from 'morgan';
@@ -15,13 +25,14 @@ import cors from 'cors';
 import { promises as fs } from 'fs';
 import path from 'path';
 import fetch from 'node-fetch';
+import crypto from 'crypto';
 
 // ---------- storage config ----------
 const ROOT = process.env.DATA_DIR || '/var/data/izza/players';
 const HISTORY_DEPTH = 5;
 
 async function ensureDir() { await fs.mkdir(ROOT, { recursive: true }); }
-function normUser(u){ return String(u||'').trim().toLowerCase().replace(/[^a-z0-9_\-\.]/g,''); }
+function normUser(u){ return String(u||'').trim().toLowerCase().replace(/^@+/,'').replace(/[^a-z0-9_\-\.]/g,''); }
 function filePath(base, suffix=''){ return path.join(ROOT, `${base}${suffix}.json`); }
 
 async function readJSON(file){
@@ -34,7 +45,7 @@ async function writeJSON(file, obj){
 function isPlainObject(o){ return !!o && typeof o==='object' && !Array.isArray(o); }
 function isEmptySnapshot(snap){
   if(!isPlainObject(snap)) return true;
-  if(snap.version !== 1) return false; // unknown future versions: treat as non-empty
+  if(snap.version !== 1) return false;
   const coins    = (snap.coins|0) || 0;
   const invEmpty = !isPlainObject(snap.inventory) || Object.keys(snap.inventory).length===0;
   const b        = isPlainObject(snap.bank) ? snap.bank : {};
@@ -72,8 +83,6 @@ const app = express();
 
 const allowedOrigins = [
   'https://izzapay.onrender.com',
-  // 'http://localhost:3000',
-  // 'http://127.0.0.1:3000',
 ];
 
 app.use(cors({
@@ -83,7 +92,7 @@ app.use(cors({
   },
   credentials: true,
   methods: ['GET', 'POST', 'OPTIONS'],
-  allowedHeaders: ['Content-Type', 'Authorization']
+  allowedHeaders: ['Content-Type', 'Authorization', 'X-IZZA-User', 'X-IZZA-Token']
 }));
 
 app.use((req, res, next) => { res.header('Vary', 'Origin'); next(); });
@@ -101,6 +110,400 @@ app.use(express.json({ limit:'1mb' }));
 app.use(express.text({ type: ['text/plain','application/octet-stream'], limit:'1mb' }));
 
 app.get('/healthz', (_req,res)=> res.json({ ok:true }));
+
+// ---------------------------------------------------------------------------
+// MULTIPLAYER NODE BACKEND
+// ---------------------------------------------------------------------------
+
+const MP_WORLDS = ['1','2','3','4'];
+const MP_TTL_MS = parseInt(process.env.MP_TTL_MS || '12000', 10);
+const MP_MAX_PLAYERS_PER_WORLD = parseInt(process.env.MP_MAX_PLAYERS_PER_WORLD || '250', 10);
+
+const mpState = {
+  userWorld: new Map(),
+  worlds: new Map(MP_WORLDS.map(w => [w, new Map()]))
+};
+
+function mpCoerceWorld(w){
+  const s = String(w || '1').trim();
+  return MP_WORLDS.includes(s) ? s : '1';
+}
+
+function mpTokenFromReq(req){
+  const q = req.query?.t;
+  if(q) return String(q).trim();
+
+  const body = isPlainObject(req.body) ? req.body : {};
+  if(body.t) return String(body.t).trim();
+
+  const xTok = req.headers['x-izza-token'];
+  if(xTok) return String(xTok).trim();
+
+  const auth = String(req.headers.authorization || '');
+  if(auth.toLowerCase().startsWith('bearer ')) return auth.slice(7).trim();
+
+  return '';
+}
+
+function mpUsernameFromReq(req){
+  const body = isPlainObject(req.body) ? req.body : {};
+
+  const fromQuery =
+    req.query?.u ||
+    req.query?.user ||
+    req.query?.username ||
+    req.query?.pi_username ||
+    '';
+
+  const fromBody =
+    body.u ||
+    body.user ||
+    body.username ||
+    body.pi_username ||
+    body?.appearance?.username ||
+    '';
+
+  const fromHeader =
+    req.headers['x-izza-user'] ||
+    req.headers['x-pi-username'] ||
+    '';
+
+  let u = normUser(fromQuery || fromBody || fromHeader);
+
+  if(!u){
+    const tok = mpTokenFromReq(req);
+    try{
+      const first = String(tok || '').split('.')[0] || '';
+      const decoded = JSON.parse(Buffer.from(first, 'base64url').toString('utf8'));
+      u = normUser(decoded.username || decoded.user || decoded.pi_username || decoded.handle || '');
+    }catch{}
+  }
+
+  return u;
+}
+
+function mpRequireUser(req, res){
+  const username = mpUsernameFromReq(req);
+  const token = mpTokenFromReq(req);
+
+  if(!username){
+    console.warn('[MP] not_authenticated', {
+      path:req.path,
+      hasToken:!!token,
+      query:req.query || {},
+      bodyKeys:isPlainObject(req.body) ? Object.keys(req.body) : []
+    });
+    res.status(401).json({
+      ok:false,
+      error:'not_authenticated',
+      reason:'missing_u',
+      hint:'Pass ?u=<username>&t=<token> or JSON {u, t}.'
+    });
+    return null;
+  }
+
+  return { username, token };
+}
+
+function mpSweep(){
+  const now = Date.now();
+
+  for(const world of MP_WORLDS){
+    const map = mpState.worlds.get(world);
+    for(const [username, st] of map.entries()){
+      if(now - Number(st.last || 0) > MP_TTL_MS){
+        map.delete(username);
+        if(mpState.userWorld.get(username) === world){
+          mpState.userWorld.delete(username);
+        }
+      }
+    }
+  }
+}
+
+function mpCounts(){
+  mpSweep();
+  const out = {};
+  for(const world of MP_WORLDS){
+    out[world] = mpState.worlds.get(world).size;
+  }
+  return out;
+}
+
+function mpSetWorld(username, world){
+  world = mpCoerceWorld(world);
+
+  for(const w of MP_WORLDS){
+    mpState.worlds.get(w).delete(username);
+  }
+
+  mpState.userWorld.set(username, world);
+
+  const map = mpState.worlds.get(world);
+  if(!map.has(username)){
+    map.set(username, {
+      username,
+      world,
+      x:0,
+      y:0,
+      facing:'down',
+      appearance:{},
+      inv:{},
+      last:Date.now()
+    });
+  }
+
+  return world;
+}
+
+function mpGetWorld(username){
+  return mpState.userWorld.get(username) || '1';
+}
+
+function mpUpdatePlayer(username, world, patch){
+  world = mpCoerceWorld(world || mpGetWorld(username));
+
+  const map = mpState.worlds.get(world);
+  const cur = map.get(username) || {
+    username,
+    world,
+    x:0,
+    y:0,
+    facing:'down',
+    appearance:{},
+    inv:{},
+    last:0
+  };
+
+  const next = {
+    ...cur,
+    username,
+    world,
+    x: Number.isFinite(Number(patch.x)) ? Number(patch.x) : Number(cur.x || 0),
+    y: Number.isFinite(Number(patch.y)) ? Number(patch.y) : Number(cur.y || 0),
+    facing: String(patch.facing || cur.facing || 'down').slice(0, 16),
+    appearance: isPlainObject(patch.appearance) ? patch.appearance : (cur.appearance || {}),
+    inv: isPlainObject(patch.inv) ? patch.inv : (cur.inv || {}),
+    last: Date.now()
+  };
+
+  map.set(username, next);
+  mpState.userWorld.set(username, world);
+  return next;
+}
+
+const mpPaths = p => [`/api/mp${p}`, `/izza-game/api/mp${p}`];
+
+app.post(mpPaths('/client-log'), (req,res)=>{
+  try{
+    const body = isPlainObject(req.body) ? req.body : {};
+    console.log('[MP CLIENT]', JSON.stringify({
+      event:body.event || 'client-log',
+      world:body.world || '',
+      data:body.data || {},
+      href:body.href || '',
+      ts:body.ts || Date.now()
+    }).slice(0, 3000));
+    res.json({ ok:true });
+  }catch(e){
+    console.warn('[MP CLIENT LOG ERROR]', e);
+    res.json({ ok:true });
+  }
+});
+
+app.post(mpPaths('/world/client-log'), (req,res)=>{
+  try{
+    const body = isPlainObject(req.body) ? req.body : {};
+    console.log('[MP CLIENT WORLD]', JSON.stringify({
+      event:body.event || 'client-log',
+      world:body.world || '',
+      data:body.data || {},
+      href:body.href || '',
+      ts:body.ts || Date.now()
+    }).slice(0, 3000));
+    res.json({ ok:true });
+  }catch(e){
+    console.warn('[MP CLIENT WORLD LOG ERROR]', e);
+    res.json({ ok:true });
+  }
+});
+
+app.post(mpPaths('/world/join'), (req,res)=>{
+  const who = mpRequireUser(req,res);
+  if(!who) return;
+
+  const body = isPlainObject(req.body) ? req.body : {};
+  const wanted = body.worldId || body.world || req.query.worldId || req.query.world || '1';
+  const world = mpCoerceWorld(wanted);
+
+  mpSweep();
+
+  const count = mpState.worlds.get(world).size;
+  const alreadyHere = mpGetWorld(who.username) === world;
+  if(!alreadyHere && count >= MP_MAX_PLAYERS_PER_WORLD){
+    return res.status(429).json({
+      ok:false,
+      error:'world_full',
+      world,
+      max:MP_MAX_PLAYERS_PER_WORLD
+    });
+  }
+
+  mpSetWorld(who.username, world);
+
+  console.log('[MP] join', {
+    username:who.username,
+    world,
+    hasToken:!!who.token,
+    counts:mpCounts()
+  });
+
+  res.set('Cache-Control','no-store');
+  res.json({
+    ok:true,
+    world,
+    username:who.username,
+    counts:mpCounts(),
+    ttlMs:MP_TTL_MS
+  });
+});
+
+app.get(mpPaths('/worlds/counts'), (_req,res)=>{
+  res.set('Cache-Control','no-store');
+  res.json({ ok:true, counts:mpCounts(), serverNow:Date.now()/1000 });
+});
+
+app.post(mpPaths('/world/heartbeat'), (req,res)=>{
+  const who = mpRequireUser(req,res);
+  if(!who) return;
+
+  const body = isPlainObject(req.body) ? req.body : {};
+  const world = mpGetWorld(who.username);
+  const st = mpUpdatePlayer(who.username, world, body);
+
+  mpSweep();
+
+  res.set('Cache-Control','no-store');
+  res.json({
+    ok:true,
+    world,
+    username:who.username,
+    now:Date.now()/1000,
+    player:{
+      username:st.username,
+      x:st.x,
+      y:st.y,
+      facing:st.facing,
+      last:st.last
+    }
+  });
+});
+
+app.post(mpPaths('/world/pos'), (req,res)=>{
+  const who = mpRequireUser(req,res);
+  if(!who) return;
+
+  const body = isPlainObject(req.body) ? req.body : {};
+  const world = mpGetWorld(who.username);
+  mpUpdatePlayer(who.username, world, {
+    x:body.x,
+    y:body.y,
+    facing:body.facing
+  });
+
+  res.set('Cache-Control','no-store');
+  res.json({ ok:true, world, now:Date.now()/1000 });
+});
+
+app.get(mpPaths('/world/roster'), (req,res)=>{
+  const who = mpRequireUser(req,res);
+  if(!who) return;
+
+  mpSweep();
+
+  const world = mpGetWorld(who.username);
+  const since = Number(req.query.since || 0);
+  const sinceMs = since > 9999999999 ? since : since * 1000;
+
+  const players = [];
+  const map = mpState.worlds.get(world);
+
+  for(const [username, st] of map.entries()){
+    if(username === who.username) continue;
+
+    const last = Number(st.last || 0);
+    if(sinceMs && last <= sinceMs) continue;
+
+    players.push({
+      id:username,
+      username,
+      x:Number(st.x || 0),
+      y:Number(st.y || 0),
+      facing:st.facing || 'down',
+      appearance:st.appearance || {},
+      inv:st.inv || {},
+      lastUpdate:last / 1000
+    });
+  }
+
+  res.set('Cache-Control','no-store');
+  res.json({
+    ok:true,
+    world,
+    players,
+    serverNow:Date.now()/1000,
+    counts:mpCounts()
+  });
+});
+
+app.post(mpPaths('/world/leave'), (req,res)=>{
+  const who = mpRequireUser(req,res);
+  if(!who) return res.json({ ok:true });
+
+  for(const world of MP_WORLDS){
+    mpState.worlds.get(world).delete(who.username);
+  }
+  mpState.userWorld.delete(who.username);
+
+  console.log('[MP] leave', { username:who.username });
+  res.json({ ok:true });
+});
+
+app.post(mpPaths('/presence/offline'), (req,res)=>{
+  const who = mpRequireUser(req,res);
+  if(!who) return res.json({ ok:true });
+
+  for(const world of MP_WORLDS){
+    mpState.worlds.get(world).delete(who.username);
+  }
+  mpState.userWorld.delete(who.username);
+
+  console.log('[MP] offline', { username:who.username });
+  res.json({ ok:true });
+});
+
+app.get(mpPaths('/me'), (req,res)=>{
+  const who = mpRequireUser(req,res);
+  if(!who) return;
+
+  const world = mpGetWorld(who.username);
+  const st = mpState.worlds.get(world).get(who.username);
+  const last = st ? Number(st.last || 0) : 0;
+
+  res.set('Cache-Control','no-store');
+  res.json({
+    ok:true,
+    username:who.username,
+    active:!!st && Date.now() - last <= MP_TTL_MS,
+    lastSeen:last,
+    world,
+    inviteLink:'/izza-game/auth'
+  });
+});
+
+// ---------------------------------------------------------------------------
+// STATE STORAGE
+// ---------------------------------------------------------------------------
 
 app.get('/api/state/:username', async (req,res)=>{
   try{
@@ -196,7 +599,7 @@ function sinceForPeriod(period){
   if (p === 'week')  return now - 7*24*60*60*1000;
   if (p === 'month') return now - 30*24*60*60*1000;
   if (p === 'year')  return now - 365*24*60*60*1000;
-  return 0; // 'all'
+  return 0;
 }
 
 function rankify(rows){
@@ -304,17 +707,13 @@ app.get(['/izza-game/api/leaderboard','/api/leaderboard'], async (req,res)=>{
 });
 
 // ---------------------------------------------------------------------------
-// AI SVG endpoint  — BEST ARTIST MODE (initiative + richer vectors)
+// AI SVG endpoint
 // ---------------------------------------------------------------------------
 
 const OPENAI_API_KEY = process.env.OPENAI_API_KEY || '';
-// Stronger default model; override via env if needed.
 const SVG_MODEL_ID   = process.env.SVG_MODEL_ID   || 'gpt-4.1';
-
-// Animation add-on price (client can show/charge this; server only strips/keeps anim)
 const ANIM_PRICE_IC  = parseInt(process.env.ANIM_PRICE_IC || '150', 10);
 
-// Tight SVG sanitizer — keeps only safe, inline <svg>
 function sanitizeSVG(svg) {
   try {
     const max = 200_000;
@@ -333,10 +732,8 @@ function sanitizeSVG(svg) {
   } catch { return ''; }
 }
 
-// NOTE: Best-artist mode — do NOT strip animations (even if not paid).
 function stripAnimations(svg) { return String(svg || ''); }
 
-// ----------------- MAXED SYSTEM PROMPT (NO sizing changes) -----------------
 const SYSTEM_PROMPT = `
 You generate SVG overlays for IZZA. Convert the player's text into an original, safe, vector-only overlay.
 
@@ -353,7 +750,7 @@ COMPOSITION & FIT:
 • Layer order: base → occlusion shadows → specular highlights → edge accents → optional glow/FX.
 • Arms/legs are two distinct sides; hands (weapons) are horizontal. Never draw full-canvas backgrounds.
 • When hair/foliage/flames are requested, build layered silhouettes (back/mid/front). Use <clipPath> for widow’s-peak hairlines, bangs, and interior cut-outs. Avoid “plain triangle crowns.”
-• Infer missing context: e.g., “hockey helmet” → draw a readable face with a hockey helmet; “soccer cleats” → legs+boots; “basketball jersey” → chest+neckline. Keep the provided slot viewBox and overlay sizing.
+• Infer missing context. Keep the provided slot viewBox and overlay sizing.
 
 SLOTS (unchanged):
 - helmet: viewBox="0 0 128 128"
@@ -363,114 +760,47 @@ SLOTS (unchanged):
 - hands:  viewBox="0 0 160 100"
 
 STYLE ROUTER:
-• REALISTIC → real materials: brushed/polished metals, glass & gemstones, leather grains, woods, carbon/kevlar, fabrics, ceramic glaze. Soft AO, controlled specular, micro-bevels. Thin/clean outlines only (avoid >1.4).
-• CARTOON / ANIME → bold silhouettes & confident outlines, 2–3 tone cel shading, speed lines/energy streaks allowed. Still maintain light/dark separation (no single flat fills).
-• STYLIZED → neon luxury street: punchy shapes, precise highlights, tasteful glow stacks and occult/tech motifs.
+• REALISTIC → real materials, soft AO, specular, micro-bevels.
+• CARTOON / ANIME → bold silhouettes, cel shading, confident outlines.
+• STYLIZED → neon luxury street, precise highlights, tasteful glow stacks.
 
-REFERENCE HANDLING (broad but safe):
-• Understand slang, memes, games, anime, cartoons, and TV. Evoke the vibe with original, legally distinct motifs. Avoid exact logos/wordmarks, title typography, or 1:1 character copies. No real-person likenesses; use generic archetypes.
-• Currency / “dead presidents” → banknote engraving cues (generic bust).
-• Sports (generic) → evoke team vibes safely: color palettes, stripes, number plates, animal/letter silhouettes that are legally distinct; no real wordmarks.
+REFERENCE HANDLING:
+• Evoke vibes with original legally distinct motifs. No logos, wordmarks, exact characters, or real-person likenesses.
 
-ARMOUR vs APPAREL INTENT:
-• Apparel (gloves/scarf/bandana/hat/sunglasses/crown/tiara) → render apparel; do not add armor plates.
-• Materials that imply armor (steel/plate/chain/kevlar/ceramic/titanium/gold) → armor look; apparel bits may accent.
-
-FACE POLICY (helmet slot):
-• If “open face / no mask / hat”, leave face area open—never a blank featureless face.
-• If mask/visor, include readable eye/visor/mouth cues (cutouts, slits, glow), not a blank slab.
-• Default when ambiguous → avoid blank faces: hint eyes/visor cutouts or keep face open.
-
-MATERIAL / TEXTURE LIBRARY (invoke when mentioned or implied):
-• Metals: brushed steel, gunmetal, anodized aluminum, polished/rose gold, brass, copper, titanium (radial/linear specular; micro-bevels).
-• Stones & gems: diamond facet star glints, emerald/sapphire/ruby/jade, marble veins, granite speckle.
-• Composites/ceramics: carbon-fiber weave, kevlar weave, ceramic glaze micro-speckle.
-• Fabrics/leather: denim twill, canvas, knit ribbing, quilted padding, leather grain & stitching, suede/velvet/satin sheen.
-• Natural: wood rings, bark texture, water caustics, ice crystal facets, flame stacks (core→mid→blur), smoke wisps, sand/dust, aurora/galaxy gradients, clouds/sky bands, grass blades.
-
-ANIME / GAME VIBES (evoke, don’t copy):
-• One Piece → adventurous pirate motifs, straw-hat nods, bold cel shading.
-• Pokémon → cute rounded chibi energy, elemental icons; legally distinct.
-• Dragon Ball / DBZ → spiky energy auras, speed lines, hard cel shadows, rim lights.
-• Tactical shooters (CoD-like) → matte polymers, rails, cerakote tan/black, realistic wear.
-• Stealth-tech (MGS-like) → subdued palettes, crisp specular on industrial panels.
-• Hero shooters (Overwatch/Valorant-like) → stylized hard surfaces, saturated accents, generic decals.
-• Fantasy/Soulslike/Zelda-like → engraved metals, leather straps, gem inlays, mystic glyphs (generic).
-• Halo/Destiny-like → armored alloys with emissive seams, clean bevels.
-• Fortnite-like → chunky playful shapes, clean bevels, bold contrast.
-
-ACCESSORIES / PATTERNS / COLORS (when asked):
-• Accessories: crowns/tiaras, headbands, bandanas, scarves, goggles/sunglasses (aviator/square/round), earrings, nose rings, chains, pendants, makeup/face paint (abstract).
-• Patterns: camo (generic), animal prints, plaid/tartan, pinstripe, argyle, checkerboard, tie-dye swirl, geometric repeats, guilloché.
-• Palettes: neon, pastel, monochrome, earth-tones, metallics, iridescent/oil-slick, color-shift “anodized”.
-
-ANIMATION (if allowed for this item):
-• At most 1–2 lightweight loops via <animate>/<animateTransform> or CSS @keyframes; silhouette must look complete if paused. No JS.
-
-METADATA ON ROOT:
-• data-slot="helmet|vest|arms|legs|hands"
-• If FX used, data-fx="glow,flame,energy,smoke,water,ice"
-• If any animation present, data-anim="1"
+FACE POLICY:
+• Helmet face is never blank. Use open-face area or visor/eye cutouts.
 
 QUALITY:
-• Compose like a top studio concept sheet. Clean silhouettes, layered shapes, 2–3 tone cel shadows, rim lights or AO as needed.
-• Prefer clipPath/mask for interior cuts; avoid emoji-flat triangles.
-
-CHECKLIST (self-verify before emitting):
-• Correct slot viewBox, transparent background, no full-bleed rects.
-• Arms/legs are two sides; hands are horizontal.
-• Realistic = believable materials; Cartoon = anime/cel shading; Stylized = neon luxury street.
-• Helmet face is NEVER blank; obey “open face” vs “mask/visor” intent.
+• Compose like a top studio concept sheet.
 `;
 
-// ---- Lexicons to expand prompts with smart hints (anime/games/sports/colors/patterns) ----
 const REFERENCE_LEXICON = [
   { re:/\b(one\s*piece|luffy|straw\s*hat)\b/i, add:'Adventure-pirate anime vibe: open-face hat, bold cel-shading; legally distinct.' },
   { re:/\b(pok[eé]mon|pokemon|pikachu|pika)\b/i, add:'Cute chibi energy, rounded forms, electric icons; legally distinct.' },
   { re:/\b(dragon\s*ball|dbz|super\s*saiyan)\b/i, add:'Spiky energy aura, speed lines, hard cel-shadows.' },
   { re:/\b(call\s*of\s*duty|cod)\b/i, add:'Tactical polymers, rails, matte cerakote tan/black, realistic wear.' },
-  { re:/\b(metal\s*gear|mgs)\b/i, add:'Industrial stealth-tech: subdued palette, crisp panel specular.' },
-  { re:/\b(overwatch|valorant)\b/i, add:'Stylized hard-surface bevels, saturated accents, generic decals.' },
-  { re:/\b(zelda|souls|soulslike)\b/i, add:'Engraved metals, leather straps, gem inlays, mystic glyphs.' },
-  { re:/\b(halo|destiny)\b/i, add:'Armored alloys with emissive seams and clean bevels.' },
-  { re:/\b(fortnite)\b/i, add:'Chunky playful shapes, bold contrast, clean bevels.' },
   { re:/\b(dead\s*president|banknote|bill|money|cash|currency)\b/i, add:'Banknote engraving vibe: guilloché curves, micro-hatching, oval bust frame; generic bust.' },
 ];
 
 const SPORTS_LEXICON = [
-  { re:/\bhockey\b/i,  add:'Sports: hockey → mask/visor cage options, ear covers, chin strap, stick/puck cues (generic).' },
-  { re:/\bfootball\b/i,add:'Sports: (American) football → helmet shell + facemask bars; jersey yoke; laces cues (generic).' },
-  { re:/\bsoccer|football\s*\(soccer\)\b/i, add:'Sports: soccer → kit jersey neckline/crest silhouette; shin guards/cleats; ball panel pattern (generic).' },
-  { re:/\bbasketball\b/i, add:'Sports: basketball → sleeveless jersey/neck rib; ball channel lines; sweatband option (generic).' },
-  { re:/\bbaseball\b/i,  add:'Sports: baseball → cap/batting-helmet silhouette; stitching cues on ball (generic).' },
-  { re:/\btennis\b/i,    add:'Sports: tennis → racket string grid, overgrip spiral; sweatband option (generic).' },
-  { re:/\bboxing|mma\b/i,add:'Sports: boxing/MMA → padded gloves shapes, mouthguard cue, robe/shorts trims (generic).' },
+  { re:/\bhockey\b/i,  add:'Sports: hockey → mask/visor cage options, ear covers, chin strap, stick/puck cues.' },
+  { re:/\bfootball\b/i,add:'Sports: football → helmet shell + facemask bars; jersey yoke.' },
+  { re:/\bsoccer/i, add:'Sports: soccer → kit jersey neckline, shin guards/cleats, ball pattern.' },
+  { re:/\bbasketball\b/i, add:'Sports: basketball → sleeveless jersey/neck rib, ball channel lines.' },
 ];
 
 const PATTERN_LEXICON = [
-  { re:/\bcamo|camouflage\b/i, add:'Generic woodland/desert/urban camo blocks; no military insignia.' },
+  { re:/\bcamo|camouflage\b/i, add:'Generic camo blocks; no military insignia.' },
   { re:/\btartan|plaid|flannel\b/i, add:'Balanced tartan/plaid repeats with subtle fabric weave.' },
-  { re:/\bpin\s*stripe|pinstripe\b/i, add:'Fine pinstripes with soft specular on peaks.' },
-  { re:/\bargyle\b/i, add:'Diamond argyle tiling with thin separators.' },
-  { re:/\bcheetah|tiger|leopard\b/i, add:'Animal print with tasteful scaling and edge softening.' },
   { re:/\bchecker(board)?\b/i, add:'High-contrast checkers with slight motion skew.' },
   { re:/\btie[-\s]?dye\b/i, add:'Spiral tie-dye gradient bands.' },
-  { re:/\bguilloch[eé]\b/i, add:'Banknote guilloché wave curves and rosettes.' },
-  { re:/\bhoundstooth\b/i, add:'Houndstooth tessellation; keep scale small and crisp.' },
-  { re:/\bhex(agon)?\b/i, add:'Hex tiling with subtle bevels; sci-fi panel vibe.' },
 ];
 
 const COLOR_LEXICON = [
-  { re:/\b(emerald|jade|forest)\b/i, add:'Green ramp (deep→emerald→mint) with gemstone/leafy cues.' },
-  { re:/\b(cobalt|royal|navy)\b/i, add:'Blue ramp (navy→cobalt→sky) with cool rim lights.' },
+  { re:/\b(emerald|jade|forest)\b/i, add:'Green ramp with gemstone/leafy cues.' },
+  { re:/\b(cobalt|royal|navy)\b/i, add:'Blue ramp with cool rim lights.' },
   { re:/\b(crimson|scarlet|ruby)\b/i, add:'Rich red ramp with ruby glints.' },
-  { re:/\b(amber|saffron|goldenrod)\b/i, add:'Warm yellow-orange metallic option.' },
-  { re:/\b(lilac|lavender|amethyst)\b/i, add:'Soft violet ramp with delicate sheen.' },
-  { re:/\b(teal|turquoise|aqua)\b/i, add:'Blue-green ramp with watery caustic highlights.' },
-  { re:/\b(burgundy|maroon|wine)\b/i, add:'Deep red-violet with velvet glow.' },
-  { re:/\b(steel|gunmetal|slate)\b/i, add:'Cool gray ramp; brushed/stone specular cues.' },
-  { re:/\bpastel\s*rainbow\b/i, add:'Soft multi-stop rainbow (rose→peach→lemon→mint→sky→lilac).' },
-  { re:/\bneon\s*rainbow\b/i, add:'High-saturation gradient with glow stacks at edges.' },
+  { re:/\bneon\s*rainbow\b/i, add:'High-saturation gradient with glow stacks.' },
 ];
 
 function expandWithLexicons(txt){
@@ -483,17 +813,15 @@ function expandWithLexicons(txt){
   return adds.length ? 'HINTS:\n• ' + adds.join('\n• ') : '';
 }
 
-// --- Helpers: style detection & scoring heuristics ---
 function detectStyleFromPrompt(prompt, explicit) {
   if (explicit && /^(realistic|cartoon|stylized)$/i.test(explicit)) {
     return explicit.toLowerCase();
   }
   const p = (prompt||'').toLowerCase();
   const animeOrGame =
-    /(anime|manga|shōnen|shonen|cel[-\s]?shade|chibi|one\s*piece|luffy|pokemon|pokémon|pikachu|dragon\s*ball|dbz|naruto|ghibli|persona|zelda|genshin|overwatch|valorant|street\s*fighter|fortnite)/i.test(p) ||
-    /(call\s*of\s*duty|cod|metal\s*gear|mgs|gta|grand\s*theft\s*auto)/i.test(p);
+    /(anime|manga|cel[-\s]?shade|chibi|one\s*piece|pokemon|pokémon|dragon\s*ball|dbz|naruto|zelda|overwatch|valorant|fortnite)/i.test(p);
   const realMaterials =
-    /(photo|photoreal|realistic|pbr|steel|iron|gold|silver|chrome|aluminum|copper|brass|leather|denim|cotton|wool|velvet|wood|marble|granite|stone|concrete|diamond|gem|crystal|glass|rust|patina|water|flame|fire|smoke|sky|cloud|grass|sand|snow|ice)/i.test(p);
+    /(photo|photoreal|realistic|pbr|steel|iron|gold|silver|chrome|leather|denim|wood|marble|stone|diamond|gem|crystal|glass|water|flame|fire|smoke|snow|ice)/i.test(p);
   if (animeOrGame && !realMaterials) return 'cartoon';
   if (realMaterials && !animeOrGame) return 'realistic';
   return realMaterials ? 'realistic' : 'cartoon';
@@ -503,25 +831,14 @@ function scoreSvgQuality(s, mode) {
   if (!s) return -1;
   const t = s.toLowerCase();
   const count = (re)=> (t.match(re)||[]).length;
-
-  const paths = count(/<path\b/g);
-  const lin   = count(/<lineargradient\b/g);
-  const rad   = count(/<radialgradient\b/g);
-  const fil   = count(/<filter\b/g);
-  const clips = count(/<clippath\b/g);
-  const masks = count(/<mask\b/g);
-  const elli  = count(/<ellipse\b/g);
-  const hairHints = count(/widow|peak|clip|mask|spike|bangs|layered/);
-
   let score = 0;
-  score += paths*2 + elli + lin*2 + rad*2 + fil + clips*4 + masks*4 + hairHints*3;
-
-  if (mode === 'realistic') {
-    score -= count(/stroke-width="(?:3(\.\d+)?|[4-9]\d*(\.\d+)?)"/g)*2; // discourage thick toon lines
-  }
-  if (mode === 'cartoon') {
-    score += count(/stroke-width="1(\.\d+)?"/g); // tidy outlines
-  }
+  score += count(/<path\b/g)*2;
+  score += count(/<lineargradient\b/g)*2;
+  score += count(/<radialgradient\b/g)*2;
+  score += count(/<filter\b/g);
+  score += count(/<clippath\b/g)*4;
+  score += count(/<mask\b/g)*4;
+  if (mode === 'realistic') score -= count(/stroke-width="(?:3(\.\d+)?|[4-9]\d*(\.\d+)?)"/g)*2;
   return score;
 }
 
@@ -534,9 +851,8 @@ app.post('/api/crafting/ai_svg', async (req, res) => {
     const name       = String(meta.name || '').slice(0, 64);
     const wantAnim   = !!meta.animate;
     const animPaid   = !!meta.animationPaid;
-    const styleParam = (meta.style || 'auto').toLowerCase(); // 'auto'|'realistic'|'cartoon'|'stylized'
+    const styleParam = (meta.style || 'auto').toLowerCase();
     const style      = detectStyleFromPrompt(prompt, styleParam === 'auto' ? '' : styleParam);
-
     const lexHints   = expandWithLexicons(prompt);
 
     if (!prompt) return res.status(400).json({ ok:false, reason:'empty-prompt' });
@@ -551,50 +867,23 @@ app.post('/api/crafting/ai_svg', async (req, res) => {
     };
     const part = SLOT[partIn] ? partIn : 'helmet';
     const { vb, box } = SLOT[part];
-    const ORIENT_RIGHT_HINT =
-      part === 'hands'
-        ? 'ORIENTATION: For hands/guns, draw the weapon facing RIGHT — barrel/muzzle on the right (+X), stock/grip on the left. Keep the root <svg> unrotated and unflipped.'
-        : '';
 
-    const animHint = wantAnim ? `
-ANIMATION (if used):
-• Keep to 1–2 lightweight loops via <animate>/<animateTransform> or CSS @keyframes in <style>.
-• Subtle pulses, glow breaths, gentle flame lick. No JS. Static silhouette must look complete if paused.
-` : '';
-
-    const modeHint =
-      style === 'realistic' ? `STYLE: REALISTIC — depict real materials/natural elements with believable vector shading (base+AO+specular+edge wear). Avoid thick toon outlines (>1.4).`
-    : style === 'cartoon'   ? `STYLE: ANIME/SHŌNEN — bold clean outlines, cel-shading, crisp highlights, readable silhouettes. Echo the visual vibe if specific anime/game is named (no logos/text).`
-                            : `STYLE: STYLIZED — luxury-street neon with occult vibe; bold but layered with highlights and glow stacks.`;
-
-    const userLines = [
+    const userMsg = [
       `Part: ${part}`,
       name ? `Name: ${name}` : null,
       `Prompt: ${prompt}`,
       lexHints,
       `Use viewBox="${vb}". Fit composition tightly for ~${box.w}×${box.h} overlay.`,
-      `Arms/legs must be left+right, not a single blob. Hands (weapons) must be horizontal.`,
-      ORIENT_RIGHT_HINT,
-      modeHint,
-      'QUALITY: Compose like a top studio concept sheet. Clean silhouettes, layered shapes, 2–3 tone cel shadows, rim lights or AO where appropriate. Prefer clipPath/mask for interior cuts; avoid emoji-flat triangles.',
-      (/\b(dragon\s*ball|dbz|super\s*saiyan|one\s*piece|pokemon|pok[eé]mon|call\s*of\s*duty|metal\s*gear|mgs|gta|grand\s*theft\s*auto)\b/i.test(prompt)
-        ? 'DETAIL: Layered hair/gear; front/mid/back depth; specular hits; readable at 28px.'
-        : null),
-      animHint
-    ];
+      part === 'hands' ? 'For hands/guns, draw the weapon facing RIGHT.' : '',
+      style === 'realistic'
+        ? 'STYLE: REALISTIC — believable vector materials, AO, specular, edge wear.'
+        : style === 'cartoon'
+          ? 'STYLE: ANIME/CARTOON — bold outlines, cel shading, readable silhouettes.'
+          : 'STYLE: STYLIZED — neon luxury street with highlights and glow.',
+      wantAnim ? 'ANIMATION: At most 1–2 lightweight loops. No JS.' : ''
+    ].filter(Boolean).join('\n');
 
-    if (
-      part === 'helmet' &&
-      !/\b(eye|visor|mask|mouth|smile|grin|teeth|goggles|glasses|open\s*face|hat|bandana|scarf)\b/i.test(prompt)
-    ) {
-      userLines.push('Helmet face should not be blank; include an open-face area or subtle visor/eye cutouts.');
-    }
-
-    const userMsg = userLines.filter(Boolean).join('\n');
-
-    const temperature = style === 'realistic' ? 0.45
-                      : style === 'cartoon'   ? 0.9
-                                              : 0.7;
+    const temperature = style === 'realistic' ? 0.45 : style === 'cartoon' ? 0.9 : 0.7;
 
     const resp = await fetch('https://api.openai.com/v1/chat/completions', {
       method: 'POST',
@@ -624,7 +913,6 @@ ANIMATION (if used):
     const candidates = (data?.choices || []).map(c => (c?.message?.content||'').trim()).filter(Boolean);
     if (!candidates.length) return res.status(502).json({ ok:false, reason:'no-candidate' });
 
-    // choose best per style heuristic
     let best = candidates[0], bestScore = scoreSvgQuality(best, style);
     for (let i=1;i<candidates.length;i++){
       const sc = scoreSvgQuality(candidates[i], style);
@@ -637,10 +925,9 @@ ANIMATION (if used):
       return res.status(422).json({ ok:false, reason:'sanitize-fail' });
     }
 
-    // Best-artist mode: allow animations regardless of payment
     let animationStripped = false;
     if (wantAnim && !animPaid) {
-      const kept = stripAnimations(svg); // no-op
+      const kept = stripAnimations(svg);
       animationStripped = kept !== svg ? true : false;
       svg = kept;
     }
@@ -649,7 +936,7 @@ ANIMATION (if used):
       ok: true,
       svg,
       style,
-      animated: wantAnim,        // reflect requested animation intent
+      animated: wantAnim,
       animationStripped,
       priceIC: ANIM_PRICE_IC
     });
@@ -660,7 +947,7 @@ ANIMATION (if used):
 });
 
 // ---------------------------------------------------------------------------
-// CRAFTED ITEMS STORAGE (per-user)
+// CRAFTED ITEMS STORAGE
 // ---------------------------------------------------------------------------
 
 function craftedPath(user){ return filePath(user, '.crafted'); }
@@ -723,7 +1010,6 @@ app.get('/api/crafting/mine/meta', async (req,res)=>{
   }
 });
 
-import crypto from 'crypto';
 function newId(){ return crypto.randomBytes(8).toString('hex'); }
 
 app.post('/api/crafting/mine', async (req,res)=>{
@@ -765,6 +1051,6 @@ app.post('/api/crafting/mine', async (req,res)=>{
     res.status(500).json({ ok:false, reason:'server-error' });
   }
 });
-// ----------------- end patch -----------------
+
 const PORT = process.env.PORT || 10000;
-app.listen(PORT, ()=> console.log(`IZZA persistence on ${PORT} (root=${ROOT})`));
+app.listen(PORT, ()=> console.log(`IZZA persistence on ${PORT} (root=${ROOT}) + Node MP routes ready`));
