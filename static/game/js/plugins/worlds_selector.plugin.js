@@ -1,6 +1,6 @@
 // worlds_selector.plugin.js — Worlds switcher (SOLO default) + robust button mount
 (function(){
-  const BUILD='worlds-selector/v2.2-solo+safe-join+single-source';
+  const BUILD='worlds-selector/v2.3-solo+safe-join+no-snapback';
   console.log('[IZZA PLAY]', BUILD);
 
   const MP_BASE = window.__MP_BASE__ || '/izza-game/api/mp';
@@ -32,10 +32,17 @@
           headers:{'Content-Type':'application/json'},
           body:JSON.stringify({ world, worldId:world })
         });
-        return await r.json().catch(()=>({ ok:false }));
+
+        const j = await r.json().catch(()=>({}));
+
+        if(r.ok && !j.error){
+          return Object.assign({ ok:true, world }, j);
+        }
+
+        return Object.assign({ ok:false, world }, j);
       }catch(e){
         console.warn('[WORLDS] join failed', e);
-        return { ok:false };
+        return { ok:false, world };
       }
     },
     askCounts(){
@@ -322,7 +329,7 @@
     renderWorldCards();
 
     const joinRes = await MP.joinWorld(newWorld);
-    if(newWorld !== 'solo' && !joinRes.ok){
+    if(newWorld !== 'solo' && joinRes.ok === false){
       setWorld(old);
       renderWorldCards();
       toast('Could not join world. Try again.');
