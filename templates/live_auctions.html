@@ -38,7 +38,8 @@
       <h2>Live Auction Signup</h2>
 
       {% if user %}
-        <form method="post" action="/live-auctions/signup">
+        <form method="post" action="/live-auctions/signup{% if t %}?t={{ t|urlencode }}{% endif %}">
+  <input type="hidden" name="t" value="{{ t or '' }}">
           <p>Signed in as <strong>@{{ user.username or user.pi_username }}</strong></p>
 
           <label>
@@ -62,7 +63,9 @@
         </form>
       {% else %}
         <p>Sign in with Pi first to join the live auction signup list.</p>
-        <a class="btn purple" href="/signin?fresh=1">Sign In With Pi</a>
+        <a class="btn purple" href="/signin?fresh=1&next=/live-auctions{% if t %}%3Ft={{ t|urlencode }}{% endif %}">
+  Sign In With Pi
+</a>
       {% endif %}
     </div>
 
