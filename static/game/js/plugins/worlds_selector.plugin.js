@@ -1,15 +1,41 @@
 // worlds_selector.plugin.js — Worlds switcher (SOLO default) + robust button mount
 (function(){
-  const BUILD='worlds-selector/v2.4-solo+strict-backend+debug-logs';
+  const BUILD='worlds-selector/v2.5-solo+token-auth+debug-logs';
   console.log('[IZZA PLAY]', BUILD);
 
   const MP_BASE = window.__MP_BASE__ || '/izza-game/api/mp';
+  const TOK = (window.__IZZA_T__ || '').toString();
+
+  function currentUsername(){
+    try{
+      const p = window.__IZZA_PROFILE__ || {};
+      return (p.username || p.pi_username || p.user || '').toString().replace(/^@+/,'');
+    }catch{ return ''; }
+  }
+
+  function withAuth(url){
+    let out = url;
+    if(TOK) out += (out.includes('?') ? '&' : '?') + 't=' + encodeURIComponent(TOK);
+    const u = currentUsername();
+    if(u) out += (out.includes('?') ? '&' : '?') + 'u=' + encodeURIComponent(u);
+    return out;
+  }
+
+  function authHeaders(extra){
+    return Object.assign(
+      {'Content-Type':'application/json'},
+      TOK ? {'Authorization':'Bearer '+TOK} : {},
+      extra || {}
+    );
+  }
 
   function clientLog(event, data){
     const payload = {
       event,
       build: BUILD,
       world: localStorage.getItem('izzaWorldId') || 'solo',
+      username: currentUsername(),
+      hasToken: !!TOK,
       href: location.href,
       data: data || {},
       ts: Date.now()
@@ -18,19 +44,19 @@
     console.log('[WORLDS DEBUG]', payload);
 
     try{
-      fetch(`${MP_BASE}/client-log`, {
+      fetch(withAuth(`${MP_BASE}/client-log`), {
         method:'POST',
         credentials:'include',
-        headers:{'Content-Type':'application/json'},
+        headers:authHeaders(),
         body:JSON.stringify(payload)
       }).catch(()=>{});
     }catch{}
 
     try{
-      fetch(`${MP_BASE}/world/client-log`, {
+      fetch(withAuth(`${MP_BASE}/world/client-log`), {
         method:'POST',
         credentials:'include',
-        headers:{'Content-Type':'application/json'},
+        headers:authHeaders(),
         body:JSON.stringify(payload)
       }).catch(()=>{});
     }catch{}
@@ -67,15 +93,19 @@
         return { ok:true, world:'solo' };
       }
 
-      const url = `${MP_BASE}/world/join`;
-      clientLog('join-start', { world, url });
+      const url = withAuth(`${MP_BASE}/world/join`);
+      clientLog('join-start', { world, url: url.replace(/t=[^&]+/,'t=TOKEN_PRESENT'), hasToken:!!TOK });
 
       try{
         const r = await fetch(url, {
           method:'POST',
           credentials:'include',
-          headers:{'Content-Type':'application/json'},
-          body:JSON.stringify({ world, worldId:world })
+          headers:authHeaders(),
+          body:JSON.stringify({
+            world,
+            worldId:world,
+            username:currentUsername()
+          })
         });
 
         const rawText = await r.text().catch(()=>'');
@@ -410,7 +440,7 @@
     if(switching) return;
 
     const old = getWorld();
-    clientLog('switch-request', { old, newWorld });
+    clientLog('switch-request', { old, newWorld, hasToken:!!TOK, username:currentUsername() });
 
     if(String(old) === String(newWorld)){
       closeWorldsModal();
@@ -488,7 +518,7 @@
     try{ IZZA.api.worldId = cur; }catch{}
     setMultiplayerMode(isMulti);
 
-    clientLog('boot', { cur, isMulti });
+    clientLog('boot', { cur, isMulti, hasToken:!!TOK, username:currentUsername() });
 
     if(isMulti){
       const joinRes = await MP.joinWorld(cur);
