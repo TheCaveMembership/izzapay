@@ -1,13 +1,13 @@
 // Remote Players API — v3.2 NODE MP
-// Worlds 1–4 now talk to the Node persistence service multiplayer routes.
-// SOLO = no remote players, missions enabled.
-// Worlds 1–4 = remote players visible, missions hidden.
+// Worlds 1–4 talk to Node multiplayer routes.
+// IMPORTANT: this file does NOT overwrite window.__MP_BASE__.
+// Flask __MP_BASE__ stays untouched so Friends list keeps working.
 
 (function(){
   if (window.__IZZA_REMOTE_PLAYERS_V32_NODE__) return;
   window.__IZZA_REMOTE_PLAYERS_V32_NODE__ = true;
 
-  const BUILD = 'v3.2-node-remote-players';
+  const BUILD = 'v3.2-node-remote-players+no-flask-overwrite';
   console.log('[IZZA PLAY]', BUILD);
 
   const NODE_BASE_RAW =
@@ -18,21 +18,17 @@
 
   const MP_BASE = NODE_BASE_RAW
     ? String(NODE_BASE_RAW).replace(/\/$/, '') + '/api/mp'
-    : (window.__MP_BASE__ || '/izza-game/api/mp');
+    : 'https://izzagame.onrender.com/api/mp';
 
   try{
-    window.__MP_BASE__ = MP_BASE;
+    window.__IZZA_NODE_ACTIVE_MP_BASE__ = MP_BASE;
   }catch{}
 
   function readUsername(){
     try{
       const p = window.__IZZA_PROFILE__ || {};
       const a = p.appearance || {};
-      let u =
-        p.username ||
-        p.pi_username ||
-        a.username ||
-        '';
+      let u = p.username || p.pi_username || a.username || '';
 
       if(!u){
         const raw = localStorage.getItem('piAuthUser');
@@ -84,8 +80,7 @@
   }
 
   async function jget(p){
-    const url = withAuth(MP_BASE + p);
-    const r = await fetch(url, {
+    const r = await fetch(withAuth(MP_BASE + p), {
       credentials:'include',
       headers:authHeaders()
     });
@@ -97,8 +92,7 @@
   }
 
   async function jpost(p,b){
-    const url = withAuth(MP_BASE + p);
-    const r = await fetch(url, {
+    const r = await fetch(withAuth(MP_BASE + p), {
       method:'POST',
       credentials:'include',
       headers:authHeaders(),
@@ -670,7 +664,12 @@
 
   window.addEventListener('beforeunload', ()=>{
     try{
-      if(isMPWorld()) navigator.sendBeacon?.(withAuth(MP_BASE + '/presence/offline'), JSON.stringify(authBody({})));
+      if(isMPWorld()){
+        navigator.sendBeacon?.(
+          withAuth(MP_BASE + '/presence/offline'),
+          new Blob([JSON.stringify(authBody({}))], {type:'application/json'})
+        );
+      }
     }catch{}
   });
 
@@ -686,7 +685,13 @@
     installPublicAPI();
     installRenderer();
     wireLoadoutPushOnce();
-    clientLog('boot', { MP_BASE, USER, hasToken:!!TOK, world:getWorld() });
+    clientLog('boot', {
+      nodeMPBase:MP_BASE,
+      flaskMPBase:window.__MP_BASE__ || '',
+      USER,
+      hasToken:!!TOK,
+      world:getWorld()
+    });
     onWorldChanged(getWorld());
   }
 
