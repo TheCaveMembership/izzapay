@@ -1,27 +1,29 @@
-// Remote Players API — v3.2 NODE MP
-// Worlds 1–4 talk to Node multiplayer routes.
+// Remote Players API — v3.3 NODE SOCKET MP
+// Worlds 1–4 use Node Socket.IO for smooth live multiplayer.
+// REST remains as fallback.
 // IMPORTANT: this file does NOT overwrite window.__MP_BASE__.
 // Flask __MP_BASE__ stays untouched so Friends list keeps working.
 
 (function(){
-  if (window.__IZZA_REMOTE_PLAYERS_V32_NODE__) return;
-  window.__IZZA_REMOTE_PLAYERS_V32_NODE__ = true;
+  if (window.__IZZA_REMOTE_PLAYERS_V33_NODE_SOCKET__) return;
+  window.__IZZA_REMOTE_PLAYERS_V33_NODE_SOCKET__ = true;
 
-  const BUILD = 'v3.2-node-remote-players+no-flask-overwrite';
+  const BUILD = 'v3.3-node-socket-remote-players+rest-fallback+no-flask-overwrite';
   console.log('[IZZA PLAY]', BUILD);
 
   const NODE_BASE_RAW =
     window.__MP_NODE_BASE__ ||
     window.__IZZA_NODE_MP_BASE__ ||
     window.__IZZA_PERSIST_BASE__ ||
-    '';
+    'https://izzagame.onrender.com';
 
-  const MP_BASE = NODE_BASE_RAW
-    ? String(NODE_BASE_RAW).replace(/\/$/, '') + '/api/mp'
-    : 'https://izzagame.onrender.com/api/mp';
+  const NODE_ORIGIN = String(NODE_BASE_RAW).replace(/\/$/, '');
+  const MP_BASE = NODE_ORIGIN + '/api/mp';
+  const SOCKET_IO_SRC = NODE_ORIGIN + '/socket.io/socket.io.js';
 
   try{
     window.__IZZA_NODE_ACTIVE_MP_BASE__ = MP_BASE;
+    window.__IZZA_NODE_SOCKET_ORIGIN__ = NODE_ORIGIN;
   }catch{}
 
   function readUsername(){
@@ -301,10 +303,10 @@
     return Promise.resolve(ph);
   }
 
-  const BUFFER_MS = 120;
-  const PREDICT_MS = 120;
+  const BUFFER_MS = 110;
+  const PREDICT_MS = 140;
   const STALE_MS = 9000;
-  const MAX_SNAP = 64;
+  const MAX_SNAP = 72;
 
   function pushSnap(rp, x, y, facing){
     const t = Date.now();
@@ -419,6 +421,16 @@
     }
   }
 
+  function removeRemote(username){
+    const u = String(username || '').trim();
+    if(!u) return;
+    const rp = byName[u];
+    if(!rp) return;
+    const i = REMOTES.indexOf(rp);
+    if(i >= 0) REMOTES.splice(i, 1);
+    delete byName[u];
+  }
+
   function pruneStale(now){
     for(let i=REMOTES.length-1; i>=0; i--){
       const rp = REMOTES[i];
@@ -498,15 +510,176 @@
   let lastSent = {x:null,y:null,facing:null};
   let joinedWorld = null;
 
+  let socket = null;
+  let socketReady = false;
+  let socketLoading = false;
+  let socketFailed = false;
+
   const RATE = {
-    posMs: 80,
-    rosterMs: 140,
+    posMs: 55,
+    rosterMs: 2000,
     heartbeatMs: 2500
   };
+
+  function getPlayerPacket(includeLoadout){
+    const me = IZZA?.api?.player || {x:0,y:0,facing:'down'};
+    const out = {
+      world:getWorld(),
+      worldId:getWorld(),
+      x:me.x|0,
+      y:me.y|0,
+      facing:me.facing || 'down'
+    };
+    if(includeLoadout){
+      out.appearance = readAppearance();
+      out.inv = readInventory();
+    }
+    return out;
+  }
+
+  function loadSocketClient(){
+    return new Promise((resolve, reject)=>{
+      if(window.io) return resolve(window.io);
+      if(socketLoading){
+        const started = Date.now();
+        const wait = setInterval(()=>{
+          if(window.io){
+            clearInterval(wait);
+            resolve(window.io);
+          }else if(Date.now() - started > 6000){
+            clearInterval(wait);
+            reject(new Error('socket.io client load timeout'));
+          }
+        }, 80);
+        return;
+      }
+
+      socketLoading = true;
+      const s = document.createElement('script');
+      s.src = SOCKET_IO_SRC;
+      s.async = true;
+      s.onload = ()=> resolve(window.io);
+      s.onerror = ()=> reject(new Error('socket.io client failed to load'));
+      document.head.appendChild(s);
+    });
+  }
+
+  async function connectSocket(){
+    if(socket || socketFailed) return socket;
+    try{
+      const ioLib = await loadSocketClient();
+      if(!ioLib) throw new Error('window.io unavailable');
+
+      socket = ioLib(NODE_ORIGIN, {
+        path:'/socket.io',
+        transports:['websocket','polling'],
+        withCredentials:true,
+        query:{ u:USER, t:TOK },
+        auth:{ u:USER, t:TOK, token:TOK },
+        reconnection:true,
+        reconnectionAttempts:Infinity,
+        reconnectionDelay:500,
+        reconnectionDelayMax:3000,
+        timeout:6000
+      });
+
+      socket.on('connect', ()=>{
+        socketReady = true;
+        socketFailed = false;
+        clientLog('socket-connect', { id:socket.id, world:getWorld() });
+        if(isMPWorld()) socketJoin(getWorld(), true);
+      });
+
+      socket.on('disconnect', reason=>{
+        socketReady = false;
+        clientLog('socket-disconnect', { reason });
+      });
+
+      socket.on('connect_error', err=>{
+        socketReady = false;
+        clientLog('socket-connect-error', { message:err?.message || String(err || '') });
+      });
+
+      socket.on('mp:hello', data=>{
+        clientLog('socket-hello', data || {});
+      });
+
+      socket.on('mp:joined', data=>{
+        if(data && data.ok){
+          joinedWorld = data.world || getWorld();
+          clearRemotePlayers();
+          if(Array.isArray(data.roster)) data.roster.forEach(upsertRemote);
+          fanout('worlds-counts', { ok:true, counts:data.counts || {}, serverNow:data.serverNow });
+        }
+      });
+
+      socket.on('mp:player', p=> upsertRemote(p || {}));
+      socket.on('mp:player-joined', p=> upsertRemote(p || {}));
+
+      socket.on('mp:player-left', p=>{
+        removeRemote(p?.username);
+      });
+
+      socket.on('mp:roster', data=>{
+        if(data && data.ok && Array.isArray(data.players)){
+          data.players.forEach(upsertRemote);
+        }
+      });
+
+      socket.on('mp:counts', data=>{
+        fanout('worlds-counts', data || {});
+      });
+
+      socket.on('mp:error', data=>{
+        clientLog('socket-mp-error', data || {});
+      });
+
+      socket.on('mp:join-error', data=>{
+        clientLog('socket-join-error', data || {});
+      });
+
+      return socket;
+    }catch(e){
+      socketFailed = true;
+      clientLog('socket-init-failed-rest-fallback', { message:e.message });
+      return null;
+    }
+  }
+
+  function socketEmit(type, data){
+    try{
+      if(socket && socketReady){
+        socket.emit(type, data || {});
+        return true;
+      }
+    }catch(e){
+      clientLog('socket-emit-failed', { type, message:e.message });
+    }
+    return false;
+  }
+
+  function socketJoin(world, includeLoadout){
+    world = String(world || getWorld() || 'solo');
+    if(world === 'solo') return false;
+    return socketEmit('mp:join', {
+      world,
+      worldId:world,
+      appearance:includeLoadout ? readAppearance() : undefined,
+      inv:includeLoadout ? readInventory() : undefined,
+      x:getPlayerPacket(false).x,
+      y:getPlayerPacket(false).y,
+      facing:getPlayerPacket(false).facing
+    });
+  }
 
   async function joinWorld(world){
     world = String(world || getWorld() || 'solo');
     if(world === 'solo') return {ok:true, world:'solo'};
+
+    if(socketReady && socketJoin(world, true)){
+      joinedWorld = world;
+      return { ok:true, world, socket:true };
+    }
 
     const r = await jpost('/world/join', {
       world,
@@ -517,7 +690,7 @@
 
     if(r && r.ok){
       joinedWorld = world;
-      clientLog('node-join-ok', { world, counts:r.counts || null });
+      clientLog('rest-join-ok', { world, counts:r.counts || null });
     }
 
     return r;
@@ -527,18 +700,18 @@
     if(!isMPWorld()) return;
     try{
       const world = getWorld();
-      if(joinedWorld !== world) await joinWorld(world);
 
-      const me = IZZA?.api?.player || {x:0,y:0,facing:'down'};
-      await jpost('/world/heartbeat', {
-        world,
-        worldId:world,
-        x:me.x|0,
-        y:me.y|0,
-        facing:me.facing || 'down',
-        appearance:readAppearance(),
-        inv:readInventory()
-      });
+      if(socketReady){
+        if(joinedWorld !== world){
+          socketJoin(world, true);
+          joinedWorld = world;
+        }
+        socketEmit('mp:heartbeat', getPlayerPacket(true));
+        return;
+      }
+
+      if(joinedWorld !== world) await joinWorld(world);
+      await jpost('/world/heartbeat', getPlayerPacket(true));
     }catch(e){
       clientLog('heartbeat-failed', { message:e.message });
     }
@@ -548,15 +721,20 @@
     if(!isMPWorld()) return;
     try{
       const world = getWorld();
-      if(joinedWorld !== world) await joinWorld(world);
 
-      const me = IZZA?.api?.player || {x:0,y:0,facing:'down'};
-      const x = me.x|0, y = me.y|0, facing = me.facing || 'down';
+      if(joinedWorld !== world){
+        await joinWorld(world);
+      }
+
+      const pkt = getPlayerPacket(false);
+      const x = pkt.x, y = pkt.y, facing = pkt.facing;
 
       if(lastSent.x === x && lastSent.y === y && lastSent.facing === facing) return;
       lastSent = {x,y,facing};
 
-      await jpost('/world/pos', {world, worldId:world, x,y,facing});
+      if(socketReady && socketEmit('mp:pos', pkt)) return;
+
+      await jpost('/world/pos', pkt);
     }catch(e){
       clientLog('pos-failed', { message:e.message });
     }
@@ -566,6 +744,16 @@
     if(!isMPWorld()) return;
     try{
       const world = getWorld();
+
+      if(socketReady){
+        if(joinedWorld !== world){
+          socketJoin(world, true);
+          joinedWorld = world;
+        }
+        socketEmit('mp:roster', {});
+        return;
+      }
+
       if(joinedWorld !== world) await joinWorld(world);
 
       const r = await jget('/world/roster?world=' + encodeURIComponent(world));
@@ -580,6 +768,12 @@
   function armTimers(){
     disarmTimers();
     if(!isMPWorld()) return;
+
+    connectSocket().then(()=>{
+      if(isMPWorld() && socketReady){
+        socketJoin(getWorld(), true);
+      }
+    }).catch(()=>{});
 
     posT = setInterval(sendPos, RATE.posMs);
     heartbeatT = setInterval(sendHeartbeat, RATE.heartbeatMs);
@@ -605,7 +799,10 @@
     if(next === 'solo'){
       disarmTimers();
       setMultiplayerMode(false);
-      try{ jpost('/presence/offline', {}).catch(()=>{}); }catch{}
+      try{
+        if(socketReady) socketEmit('mp:leave', {});
+        jpost('/presence/offline', {}).catch(()=>{});
+      }catch{}
       return;
     }
 
@@ -621,10 +818,14 @@
     send(type, data){
       if(type === 'join-world'){
         const world = String(data?.world || data?.worldId || '1');
+        try{ localStorage.setItem('izzaWorldId', world); }catch{}
         joinWorld(world)
           .then(()=>onWorldChanged(world))
           .catch(e=>clientLog('api-join-world-failed', {world, message:e.message}));
       }else if(type === 'worlds-counts'){
+        if(socketReady){
+          socketEmit('mp:roster', {});
+        }
         jget('/worlds/counts').then(j=>fanout('worlds-counts', j || {})).catch(e=>clientLog('counts-failed', {message:e.message}));
       }else if(type === 'players-get'){
         pullRoster();
@@ -665,6 +866,7 @@
   window.addEventListener('beforeunload', ()=>{
     try{
       if(isMPWorld()){
+        if(socketReady) socketEmit('mp:leave', {});
         navigator.sendBeacon?.(
           withAuth(MP_BASE + '/presence/offline'),
           new Blob([JSON.stringify(authBody({}))], {type:'application/json'})
@@ -687,6 +889,8 @@
     wireLoadoutPushOnce();
     clientLog('boot', {
       nodeMPBase:MP_BASE,
+      nodeOrigin:NODE_ORIGIN,
+      socketSrc:SOCKET_IO_SRC,
       flaskMPBase:window.__MP_BASE__ || '',
       USER,
       hasToken:!!TOK,
