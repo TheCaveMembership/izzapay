@@ -312,6 +312,121 @@ def init_db():
         );
         CREATE INDEX IF NOT EXISTS idx_nft_pending_pub ON nft_pending_claims(buyer_pub, status);
         CREATE INDEX IF NOT EXISTS idx_nft_pending_user ON nft_pending_claims(buyer_username, status);
+                ----------------------------------------------------------------------
+        -- IZZA LIVE VIDEO AUCTIONS
+        -- Exclusive merchant slug: /store/izza-game-crafting
+        ----------------------------------------------------------------------
+
+        CREATE TABLE IF NOT EXISTS live_auction_signups(
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          username TEXT NOT NULL UNIQUE,
+          pi_uid TEXT,
+          interest_one_piece INTEGER DEFAULT 0,
+          interest_pokemon INTEGER DEFAULT 0,
+          email TEXT,
+          created_at INTEGER NOT NULL,
+          updated_at INTEGER
+        );
+        CREATE INDEX IF NOT EXISTS idx_live_auction_signups_username
+          ON live_auction_signups(username);
+
+        CREATE TABLE IF NOT EXISTS live_auctions(
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          merchant_id INTEGER NOT NULL,
+          slug TEXT UNIQUE,
+          title TEXT NOT NULL,
+          description TEXT,
+          tcg_type TEXT DEFAULT 'mixed',
+          starts_at INTEGER,
+          scheduled_length_minutes INTEGER DEFAULT 60,
+          status TEXT NOT NULL DEFAULT 'draft',
+          stream_status TEXT DEFAULT 'offline',
+          stream_key TEXT,
+          playback_url TEXT,
+          created_by_username TEXT,
+          created_at INTEGER NOT NULL,
+          updated_at INTEGER,
+          FOREIGN KEY(merchant_id) REFERENCES merchants(id)
+        );
+        CREATE INDEX IF NOT EXISTS idx_live_auctions_merchant_status
+          ON live_auctions(merchant_id, status);
+        CREATE INDEX IF NOT EXISTS idx_live_auctions_starts_at
+          ON live_auctions(starts_at);
+
+        CREATE TABLE IF NOT EXISTS live_auction_lots(
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          auction_id INTEGER NOT NULL,
+          lot_number INTEGER,
+          title TEXT NOT NULL,
+          description TEXT,
+          image_url TEXT,
+          starting_bid_pi REAL DEFAULT 0,
+          bid_increment_pi REAL DEFAULT 0.01,
+          status TEXT NOT NULL DEFAULT 'pending',
+          winner_username TEXT,
+          winning_bid_pi REAL,
+          started_at INTEGER,
+          ended_at INTEGER,
+          created_at INTEGER NOT NULL,
+          FOREIGN KEY(auction_id) REFERENCES live_auctions(id) ON DELETE CASCADE
+        );
+        CREATE INDEX IF NOT EXISTS idx_live_auction_lots_auction
+          ON live_auction_lots(auction_id, lot_number, status);
+
+        CREATE TABLE IF NOT EXISTS live_auction_bids(
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          auction_id INTEGER NOT NULL,
+          lot_id INTEGER NOT NULL,
+          username TEXT NOT NULL,
+          bid_pi REAL NOT NULL,
+          source TEXT DEFAULT 'websocket',
+          accepted INTEGER DEFAULT 1,
+          created_at INTEGER NOT NULL,
+          FOREIGN KEY(auction_id) REFERENCES live_auctions(id) ON DELETE CASCADE,
+          FOREIGN KEY(lot_id) REFERENCES live_auction_lots(id) ON DELETE CASCADE
+        );
+        CREATE INDEX IF NOT EXISTS idx_live_auction_bids_lot
+          ON live_auction_bids(lot_id, bid_pi, created_at);
+        CREATE INDEX IF NOT EXISTS idx_live_auction_bids_user
+          ON live_auction_bids(username, auction_id);
+
+        CREATE TABLE IF NOT EXISTS live_auction_wins(
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          auction_id INTEGER NOT NULL,
+          lot_id INTEGER NOT NULL UNIQUE,
+          username TEXT NOT NULL,
+          winning_bid_pi REAL NOT NULL,
+          bundled_item_id INTEGER,
+          order_id INTEGER,
+          checkout_status TEXT DEFAULT 'pending',
+          created_at INTEGER NOT NULL,
+          updated_at INTEGER,
+          FOREIGN KEY(auction_id) REFERENCES live_auctions(id) ON DELETE CASCADE,
+          FOREIGN KEY(lot_id) REFERENCES live_auction_lots(id),
+          FOREIGN KEY(bundled_item_id) REFERENCES items(id),
+          FOREIGN KEY(order_id) REFERENCES orders(id)
+        );
+        CREATE INDEX IF NOT EXISTS idx_live_auction_wins_user_status
+          ON live_auction_wins(username, checkout_status);
+
+        CREATE TABLE IF NOT EXISTS live_auction_checkout_bundles(
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          auction_id INTEGER NOT NULL,
+          username TEXT NOT NULL,
+          merchant_id INTEGER NOT NULL,
+          item_id INTEGER,
+          total_pi REAL NOT NULL DEFAULT 0,
+          lots_json TEXT NOT NULL,
+          status TEXT NOT NULL DEFAULT 'pending',
+          created_at INTEGER NOT NULL,
+          updated_at INTEGER,
+          UNIQUE(auction_id, username),
+          FOREIGN KEY(auction_id) REFERENCES live_auctions(id) ON DELETE CASCADE,
+          FOREIGN KEY(merchant_id) REFERENCES merchants(id),
+          FOREIGN KEY(item_id) REFERENCES items(id)
+        );
+        CREATE INDEX IF NOT EXISTS idx_live_auction_bundles_user_status
+          ON live_auction_checkout_bundles(username, status);
         """)
 
         # Partial UNIQUE indexes for active listings
@@ -726,6 +841,123 @@ def ensure_schema():
         BEGIN
           UPDATE users SET username = NEW.pi_username WHERE id = NEW.id;
         END;
+        """)
+
+                # ------------------------------------------------------------------
+        # IZZA LIVE VIDEO AUCTIONS schema
+        # Safe additive migration only
+        # ------------------------------------------------------------------
+        cx.executescript("""
+        CREATE TABLE IF NOT EXISTS live_auction_signups(
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          username TEXT NOT NULL UNIQUE,
+          pi_uid TEXT,
+          interest_one_piece INTEGER DEFAULT 0,
+          interest_pokemon INTEGER DEFAULT 0,
+          email TEXT,
+          created_at INTEGER NOT NULL,
+          updated_at INTEGER
+        );
+        CREATE INDEX IF NOT EXISTS idx_live_auction_signups_username
+          ON live_auction_signups(username);
+
+        CREATE TABLE IF NOT EXISTS live_auctions(
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          merchant_id INTEGER NOT NULL,
+          slug TEXT UNIQUE,
+          title TEXT NOT NULL,
+          description TEXT,
+          tcg_type TEXT DEFAULT 'mixed',
+          starts_at INTEGER,
+          scheduled_length_minutes INTEGER DEFAULT 60,
+          status TEXT NOT NULL DEFAULT 'draft',
+          stream_status TEXT DEFAULT 'offline',
+          stream_key TEXT,
+          playback_url TEXT,
+          created_by_username TEXT,
+          created_at INTEGER NOT NULL,
+          updated_at INTEGER,
+          FOREIGN KEY(merchant_id) REFERENCES merchants(id)
+        );
+        CREATE INDEX IF NOT EXISTS idx_live_auctions_merchant_status
+          ON live_auctions(merchant_id, status);
+        CREATE INDEX IF NOT EXISTS idx_live_auctions_starts_at
+          ON live_auctions(starts_at);
+
+        CREATE TABLE IF NOT EXISTS live_auction_lots(
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          auction_id INTEGER NOT NULL,
+          lot_number INTEGER,
+          title TEXT NOT NULL,
+          description TEXT,
+          image_url TEXT,
+          starting_bid_pi REAL DEFAULT 0,
+          bid_increment_pi REAL DEFAULT 0.01,
+          status TEXT NOT NULL DEFAULT 'pending',
+          winner_username TEXT,
+          winning_bid_pi REAL,
+          started_at INTEGER,
+          ended_at INTEGER,
+          created_at INTEGER NOT NULL,
+          FOREIGN KEY(auction_id) REFERENCES live_auctions(id) ON DELETE CASCADE
+        );
+        CREATE INDEX IF NOT EXISTS idx_live_auction_lots_auction
+          ON live_auction_lots(auction_id, lot_number, status);
+
+        CREATE TABLE IF NOT EXISTS live_auction_bids(
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          auction_id INTEGER NOT NULL,
+          lot_id INTEGER NOT NULL,
+          username TEXT NOT NULL,
+          bid_pi REAL NOT NULL,
+          source TEXT DEFAULT 'websocket',
+          accepted INTEGER DEFAULT 1,
+          created_at INTEGER NOT NULL,
+          FOREIGN KEY(auction_id) REFERENCES live_auctions(id) ON DELETE CASCADE,
+          FOREIGN KEY(lot_id) REFERENCES live_auction_lots(id) ON DELETE CASCADE
+        );
+        CREATE INDEX IF NOT EXISTS idx_live_auction_bids_lot
+          ON live_auction_bids(lot_id, bid_pi, created_at);
+        CREATE INDEX IF NOT EXISTS idx_live_auction_bids_user
+          ON live_auction_bids(username, auction_id);
+
+        CREATE TABLE IF NOT EXISTS live_auction_wins(
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          auction_id INTEGER NOT NULL,
+          lot_id INTEGER NOT NULL UNIQUE,
+          username TEXT NOT NULL,
+          winning_bid_pi REAL NOT NULL,
+          bundled_item_id INTEGER,
+          order_id INTEGER,
+          checkout_status TEXT DEFAULT 'pending',
+          created_at INTEGER NOT NULL,
+          updated_at INTEGER,
+          FOREIGN KEY(auction_id) REFERENCES live_auctions(id) ON DELETE CASCADE,
+          FOREIGN KEY(lot_id) REFERENCES live_auction_lots(id),
+          FOREIGN KEY(bundled_item_id) REFERENCES items(id),
+          FOREIGN KEY(order_id) REFERENCES orders(id)
+        );
+        CREATE INDEX IF NOT EXISTS idx_live_auction_wins_user_status
+          ON live_auction_wins(username, checkout_status);
+
+        CREATE TABLE IF NOT EXISTS live_auction_checkout_bundles(
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          auction_id INTEGER NOT NULL,
+          username TEXT NOT NULL,
+          merchant_id INTEGER NOT NULL,
+          item_id INTEGER,
+          total_pi REAL NOT NULL DEFAULT 0,
+          lots_json TEXT NOT NULL,
+          status TEXT NOT NULL DEFAULT 'pending',
+          created_at INTEGER NOT NULL,
+          updated_at INTEGER,
+          UNIQUE(auction_id, username),
+          FOREIGN KEY(auction_id) REFERENCES live_auctions(id) ON DELETE CASCADE,
+          FOREIGN KEY(merchant_id) REFERENCES merchants(id),
+          FOREIGN KEY(item_id) REFERENCES items(id)
+        );
+        CREATE INDEX IF NOT EXISTS idx_live_auction_bundles_user_status
+          ON live_auction_checkout_bundles(username, status);
         """)
 
         # ------------------------------------------------------------------
