@@ -348,9 +348,14 @@
       Buyers can sign up for One Piece TCG, Pokémon TCG, or both. Sales will complete through IZZA PAY.
     </p>
     <div class="btn-row">
-      <a class="ip-btn" href="/live-auctions" target="_blank">View Signup Page</a>
-      <a class="ip-btn ghost" href="/live-auctions/admin{% if t %}?t={{ t }}{% endif %}">Manage Auctions</a>
-    </div>
+  <a class="ip-btn" href="/live-auctions{% if t %}?t={{ t|urlencode }}{% endif %}" target="_blank">
+    View Signup Page
+  </a>
+
+  <a class="ip-btn ghost" href="/live-auctions/admin{% if t %}?t={{ t|urlencode }}{% endif %}">
+    Manage Auctions
+  </a>
+</div>
   </div>
 {% endif %}
 
