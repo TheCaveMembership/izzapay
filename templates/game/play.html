@@ -475,9 +475,15 @@
 
   <!-- Multiplayer base paths -->
 <script>
+  // Node server ONLY for smooth remote player movement / world roster
   window.__MP_NODE_BASE__ = 'https://izzagame.onrender.com';
   window.__IZZA_NODE_MP_BASE__ = 'https://izzagame.onrender.com';
-  window.__MP_BASE__ = 'https://izzagame.onrender.com/api/mp';
+
+  // Flask stays as the main IZZA GAME multiplayer/friends API
+  // This keeps Friends list working like Arcade / before
+  window.__MP_BASE__ = '/izza-game/api/mp';
+
+  // No websocket path for now
   window.__MP_WS__ = '';
 </script>
 
