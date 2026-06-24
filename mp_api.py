@@ -262,6 +262,35 @@ def mp_world_roster():
         })
     return jsonify({"ok":True, "world":world, "players": players, "serverNow": time.time()})
 
+@mp_bp.post("/world/leave")
+def mp_world_leave():
+    who = _current_user_ids()
+    if not who:
+        return jsonify({"ok": True})
+    uid,_,_ = who
+
+    for w in _WORLDS:
+        _WORLD_MEMBERS[w].discard(uid)
+        _WORLD_STATE[w].pop(uid, None)
+
+    _WORLD_OF.pop(uid, None)
+    return jsonify({"ok": True})
+
+
+@mp_bp.post("/presence/offline")
+def mp_presence_offline():
+    who = _current_user_ids()
+    if not who:
+        return jsonify({"ok": True})
+    uid,_,_ = who
+
+    for w in _WORLDS:
+        _WORLD_STATE[w].pop(uid, None)
+        _WORLD_MEMBERS[w].discard(uid)
+
+    _WORLD_OF.pop(uid, None)
+    return jsonify({"ok": True})
+
 # ---- me/friends/search/lobby (unchanged from v3.3) --------------------------
 
 @mp_bp.get("/me")
