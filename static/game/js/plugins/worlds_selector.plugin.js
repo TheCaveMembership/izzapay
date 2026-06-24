@@ -1,9 +1,40 @@
 // worlds_selector.plugin.js — Worlds switcher (SOLO default) + robust button mount
 (function(){
-  const BUILD='worlds-selector/v2.3-solo+safe-join+no-snapback';
+  const BUILD='worlds-selector/v2.4-solo+strict-backend+debug-logs';
   console.log('[IZZA PLAY]', BUILD);
 
   const MP_BASE = window.__MP_BASE__ || '/izza-game/api/mp';
+
+  function clientLog(event, data){
+    const payload = {
+      event,
+      build: BUILD,
+      world: localStorage.getItem('izzaWorldId') || 'solo',
+      href: location.href,
+      data: data || {},
+      ts: Date.now()
+    };
+
+    console.log('[WORLDS DEBUG]', payload);
+
+    try{
+      fetch(`${MP_BASE}/client-log`, {
+        method:'POST',
+        credentials:'include',
+        headers:{'Content-Type':'application/json'},
+        body:JSON.stringify(payload)
+      }).catch(()=>{});
+    }catch{}
+
+    try{
+      fetch(`${MP_BASE}/world/client-log`, {
+        method:'POST',
+        credentials:'include',
+        headers:{'Content-Type':'application/json'},
+        body:JSON.stringify(payload)
+      }).catch(()=>{});
+    }catch{}
+  }
 
   const MP = {
     send(type, data){
@@ -11,40 +42,71 @@
         if (window.REMOTE_PLAYERS_API?.send) return REMOTE_PLAYERS_API.send(type, data);
         if (window.RemotePlayers?.send)      return RemotePlayers.send(type, data);
         if (window.IZZA?.emit)               return IZZA.emit('mp-send', {type, data});
-      }catch(e){ console.warn('[WORLDS] send fail', e); }
+      }catch(e){
+        console.warn('[WORLDS] send fail', e);
+        clientLog('mp-send-fail', { type, message:e.message });
+      }
     },
+
     on(type, cb){
       try{
         if (window.REMOTE_PLAYERS_API?.on) return REMOTE_PLAYERS_API.on(type, cb);
         if (window.RemotePlayers?.on)      return RemotePlayers.on(type, cb);
-        if (window.IZZA?.on)               return IZZA.on('mp-'+type, (_,{data})=>cb(data));
-      }catch(e){ console.warn('[WORLDS] on fail', e); }
+        if (window.IZZA?.on)               return IZZA.on('mp-'+type, (payload)=>cb(payload && payload.data ? payload.data : payload));
+      }catch(e){
+        console.warn('[WORLDS] on fail', e);
+        clientLog('mp-on-fail', { type, message:e.message });
+      }
     },
+
     async joinWorld(worldId){
       const world = String(worldId || 'solo');
 
-      if(world === 'solo') return { ok:true, world:'solo' };
+      if(world === 'solo'){
+        clientLog('join-solo-local-ok', { world });
+        return { ok:true, world:'solo' };
+      }
+
+      const url = `${MP_BASE}/world/join`;
+      clientLog('join-start', { world, url });
 
       try{
-        const r = await fetch(`${MP_BASE}/world/join`, {
+        const r = await fetch(url, {
           method:'POST',
           credentials:'include',
           headers:{'Content-Type':'application/json'},
           body:JSON.stringify({ world, worldId:world })
         });
 
-        const j = await r.json().catch(()=>({}));
-
-        if(r.ok && !j.error){
-          return Object.assign({ ok:true, world }, j);
+        const rawText = await r.text().catch(()=>'');
+        let j = {};
+        try{ j = rawText ? JSON.parse(rawText) : {}; }catch{
+          j = { parseError:true, rawText: rawText.slice(0,500) };
         }
 
-        return Object.assign({ ok:false, world }, j);
+        const result = Object.assign({
+          ok: !!(r.ok && !j.error && j.ok !== false),
+          httpOk: r.ok,
+          status: r.status,
+          statusText: r.statusText,
+          world
+        }, j);
+
+        clientLog(result.ok ? 'join-success' : 'join-failed-response', result);
+        return result;
       }catch(e){
-        console.warn('[WORLDS] join failed', e);
-        return { ok:false, world };
+        const result = {
+          ok:false,
+          world,
+          error:'fetch_failed',
+          message:e && e.message ? e.message : String(e)
+        };
+        console.warn('[WORLDS] join failed', result);
+        clientLog('join-fetch-error', result);
+        return result;
       }
     },
+
     askCounts(){
       MP.send('worlds-counts', {});
     }
@@ -74,6 +136,7 @@
       }));
     }catch(e){
       console.warn('[WORLDS] multiplayer mode toggle failed', e);
+      clientLog('set-multiplayer-mode-failed', { on, message:e.message });
     }
   }
 
@@ -107,7 +170,10 @@
     btn.id = 'btnWorlds';
     btn.type = 'button';
     btn.textContent = 'Worlds';
-    btn.addEventListener('click', openWorldsModal, { passive:true });
+    btn.addEventListener('click', ()=>{
+      clientLog('worlds-button-clicked', {});
+      openWorldsModal();
+    }, { passive:true });
     return btn;
   }
 
@@ -140,6 +206,7 @@
 
       window.addEventListener('resize', sync);
       window.addEventListener('scroll', sync, { passive:true });
+      clientLog('worlds-button-mounted-global-friends', {});
       return true;
     }
 
@@ -148,6 +215,7 @@
       const btn = makeWorldsBtn();
       styleLike(btn, legacy);
       legacy.insertAdjacentElement('afterend', btn);
+      clientLog('worlds-button-mounted-legacy-friends', {});
       return true;
     }
 
@@ -178,6 +246,7 @@
 
       window.addEventListener('resize', sync);
       window.addEventListener('scroll', sync, { passive:true });
+      clientLog('worlds-button-mounted-chat', {});
       return true;
     }
 
@@ -197,6 +266,7 @@
     });
 
     document.body.appendChild(btn);
+    clientLog('worlds-button-mounted-fallback', {});
     return true;
   }
 
@@ -212,6 +282,7 @@
 
   let counts = {1:0,2:0,3:0,4:0};
   let pollTimer = null;
+  let switching = false;
 
   function openWorldsModal(){
     const cur = getWorld();
@@ -239,6 +310,7 @@
           </div>
           <div id="worldGrid" style="display:grid;grid-template-columns:1fr 1fr;gap:10px"></div>
           <div id="worldCurrentText" style="opacity:.8;font-size:12px;margin-top:8px">You are in <b>${cur.toUpperCase()}</b>.</div>
+          <div id="worldJoinError" style="display:none;color:#ff9b9b;font-size:12px;margin-top:8px"></div>
           <div style="opacity:.8;font-size:12px;margin-top:2px">SOLO = missions on, no players. Worlds 1–4 = multiplayer.</div>
         </div>
       `;
@@ -265,6 +337,18 @@
     }
   }
 
+  function setJoinError(text){
+    const el = document.getElementById('worldJoinError');
+    if(!el) return;
+    if(!text){
+      el.style.display = 'none';
+      el.textContent = '';
+      return;
+    }
+    el.style.display = 'block';
+    el.textContent = text;
+  }
+
   function renderWorldCards(){
     const grid = document.getElementById('worldGrid');
     if(!grid) return;
@@ -287,8 +371,10 @@
       color:'#cfe0ff',
       border:'1px solid #2a3550',
       borderRadius:'10px',
-      padding:'10px 12px'
+      padding:'10px 12px',
+      opacity:switching ? '.65' : '1'
     });
+    solo.disabled = switching;
     solo.onclick = ()=> switchWorld('solo');
     grid.appendChild(solo);
 
@@ -308,9 +394,11 @@
         color:'#cfe0ff',
         border:'1px solid #2a3550',
         borderRadius:'10px',
-        padding:'10px 12px'
+        padding:'10px 12px',
+        opacity:switching ? '.65' : '1'
       });
 
+      card.disabled = switching;
       card.onclick = ()=> switchWorld(String(n));
       grid.appendChild(card);
     });
@@ -319,24 +407,40 @@
   async function switchWorld(newWorld){
     newWorld = String(newWorld || 'solo');
 
+    if(switching) return;
+
     const old = getWorld();
+    clientLog('switch-request', { old, newWorld });
+
     if(String(old) === String(newWorld)){
       closeWorldsModal();
       return;
     }
 
-    setWorld(newWorld);
+    switching = true;
+    setJoinError('');
     renderWorldCards();
 
     const joinRes = await MP.joinWorld(newWorld);
+
     if(newWorld !== 'solo' && joinRes.ok === false){
-      setWorld(old);
+      switching = false;
       renderWorldCards();
-      toast('Could not join world. Try again.');
+
+      const detail = joinRes.error || joinRes.message || joinRes.statusText || `HTTP ${joinRes.status || 'unknown'}`;
+      const msg = `Could not join World ${newWorld}: ${detail}`;
+
+      console.warn('[WORLDS] strict join failed, staying in old world', joinRes);
+      clientLog('switch-blocked-backend-failed', { old, newWorld, joinRes });
+
+      setJoinError(msg);
+      toast(msg);
       return;
     }
 
     const isMulti = newWorld !== 'solo';
+
+    setWorld(newWorld);
 
     try{ IZZA.api.worldId = newWorld; }catch{}
 
@@ -344,6 +448,7 @@
 
     try{ IZZA?.api?._onWorldChanged?.(newWorld); }catch(e){
       console.warn('[WORLDS] core world change hook failed', e);
+      clientLog('core-world-change-hook-failed', { newWorld, message:e.message });
     }
 
     try{
@@ -356,6 +461,10 @@
       }));
     }catch{}
 
+    switching = false;
+    renderWorldCards();
+
+    clientLog('switch-success', { old, newWorld, joinRes });
     toast(isMulti ? `🌍 Joined World ${newWorld}` : '🏝️ Back to SOLO world');
 
     closeWorldsModal();
@@ -368,18 +477,29 @@
     }
   });
 
-  function boot(){
+  async function boot(){
     if(!localStorage.getItem('izzaWorldId')) setWorld('solo');
 
     ensureWorldsButton();
 
     const cur = getWorld();
+    const isMulti = String(cur) !== 'solo';
 
-    MP.joinWorld(cur).then(()=>{
-      const isMulti = String(cur) !== 'solo';
-      try{ IZZA.api.worldId = cur; }catch{}
-      setMultiplayerMode(isMulti);
-    });
+    try{ IZZA.api.worldId = cur; }catch{}
+    setMultiplayerMode(isMulti);
+
+    clientLog('boot', { cur, isMulti });
+
+    if(isMulti){
+      const joinRes = await MP.joinWorld(cur);
+      if(joinRes.ok === false){
+        clientLog('boot-join-failed-resetting-solo', { cur, joinRes });
+        setWorld('solo');
+        try{ IZZA.api.worldId = 'solo'; }catch{}
+        setMultiplayerMode(false);
+        toast('World join failed on boot. Returned to SOLO.');
+      }
+    }
   }
 
   if(document.readyState === 'loading'){
