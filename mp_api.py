@@ -1,20 +1,7 @@
-# mp_api.py — v3.4
-# Adds world presence (outside of duels) so players in the same world can see each other.
-# Endpoints:
-#   POST /world/join            { worldId }                     -> { ok, world }
-#   GET  /worlds/counts                                        -> { ok, counts:{'1':N,...} }
-#   POST /world/heartbeat       { x,y,facing,appearance,inv }   -> { ok, world, now }
-#   POST /world/pos             { x,y,facing }                  -> { ok }
-#   GET  /world/roster          ?since=ts                       -> { ok, world, players:[...] }
-#
-# Keeps existing features:
-#   friends, invites, best-of-3 duels, tracer sharing, mirrored cops,
-#   equipped-weapon mirroring, /duel/selfdown
-#
-# Notes:
-# - Presence TTL ~30s; roster returns others (not you) currently in same world.
-# - Inventory/appearance is mirrored so remote renderer can tint/skin correctly.
-# - Worlds: 'solo' is ignored by presence (counts exclude 'solo').
+# mp_api.py — v3.4.1
+# Adds world presence cleanup routes:
+#   POST /world/leave
+#   POST /presence/offline
 
 from typing import Optional, Tuple, Dict, Any, List
 from flask import Blueprint, jsonify, request, session
@@ -23,21 +10,22 @@ import time
 
 mp_bp = Blueprint("mp", __name__)
 
-# ---- auth bridge -------------------------------------------------------------
-
 def _import_main_verifier():
     try:
         from app import verify_login_token
         return verify_login_token
     except Exception:
         return None
+
 VERIFY_TOKEN = _import_main_verifier()
 
 def _bearer_from_req():
     t = request.args.get("t") or request.form.get("t")
-    if t: return t.strip()
-    auth = request.headers.get("Authorization","")
-    if auth.lower().startswith("bearer "): return auth.split(" ",1)[1].strip()
+    if t:
+        return t.strip()
+    auth = request.headers.get("Authorization", "")
+    if auth.lower().startswith("bearer "):
+        return auth.split(" ", 1)[1].strip()
     return None
 
 def _current_user_ids() -> Optional[Tuple[int, str, str]]:
@@ -46,65 +34,56 @@ def _current_user_ids() -> Optional[Tuple[int, str, str]]:
         tok = _bearer_from_req()
         if tok and VERIFY_TOKEN:
             uid = VERIFY_TOKEN(tok)
-    if not uid: return None
+    if not uid:
+        return None
     with conn() as cx:
         row = cx.execute("SELECT id, pi_uid, pi_username FROM users WHERE id=?", (uid,)).fetchone()
-        if not row: return None
+        if not row:
+            return None
         return int(row["id"]), row["pi_uid"], row["pi_username"]
-
-# ---- util --------------------------------------------------------------------
 
 def _username_by_id(uid: int) -> Optional[str]:
     with conn() as cx:
         r = cx.execute("SELECT pi_username FROM users WHERE id=?", (uid,)).fetchone()
         return r["pi_username"] if r else None
 
-# ---- Worlds ------------------------------------------------------------------
-
-_WORLDS = ("1","2","3","4")
-_WORLD_OF: Dict[int, str] = {}                 # uid -> worldId ('1'..'4'); 'solo' is client-only
-_WORLD_MEMBERS: Dict[str, set] = {w:set() for w in _WORLDS}
+_WORLDS = ("1", "2", "3", "4")
+_WORLD_OF: Dict[int, str] = {}
+_WORLD_MEMBERS: Dict[str, set] = {w: set() for w in _WORLDS}
+_PRES_TTL = 30.0
+_WORLD_STATE: Dict[str, Dict[int, Dict[str, Any]]] = {w: {} for w in _WORLDS}
 
 def _coerce_world(w: Any) -> str:
     s = str(w or "1").strip()
     return s if s in _WORLDS else "1"
 
-def _set_world(uid:int, world:str):
+def _set_world(uid: int, world: str):
     world = _coerce_world(world)
-    for w in _WORLDS: _WORLD_MEMBERS[w].discard(uid)
+    for w in _WORLDS:
+        _WORLD_MEMBERS[w].discard(uid)
     _WORLD_OF[uid] = world
     _WORLD_MEMBERS[world].add(uid)
 
-def _user_world(uid:int) -> str:
+def _user_world(uid: int) -> str:
     return _WORLD_OF.get(uid, "1")
 
-def _counts_by_world() -> Dict[str,int]:
+def _counts_by_world() -> Dict[str, int]:
     return {w: len(_WORLD_MEMBERS[w]) for w in _WORLDS}
-
-# ---- World presence (outside of duels) --------------------------------------
-
-# In-memory presence: world -> uid -> state
-# state: {x,y,facing,appearance,inv,last}
-_PRES_TTL = 30.0  # players are considered "active" if they've pinged within the last 30s
-_WORLD_STATE: Dict[str, Dict[int, Dict[str,Any]]] = {w:{} for w in _WORLDS}
 
 def _sweep_presence():
     now = time.time()
     for w, umap in _WORLD_STATE.items():
-        dead = [uid for uid, st in umap.items() if (now - float(st.get("last",0))) > _PRES_TTL]
-        for uid in dead: umap.pop(uid, None)
-
-# ---- Presence projection -----------------------------------------------------
+        dead = [uid for uid, st in umap.items() if (now - float(st.get("last", 0))) > _PRES_TTL]
+        for uid in dead:
+            umap.pop(uid, None)
+            _WORLD_MEMBERS[w].discard(uid)
 
 def _presence_for(uid: int) -> Dict[str, Any]:
-    """Return {active, lastSeen(ms), world} for a user based on _WORLD_STATE + TTL."""
     w = _user_world(uid)
     st = _WORLD_STATE.get(w, {}).get(int(uid))
     last = float(st.get("last", 0.0)) if st else 0.0
     active = bool(st) and (time.time() - last) <= _PRES_TTL
     return {"active": bool(active), "lastSeen": int(last * 1000) if last else 0, "world": w}
-
-# ---- minimal schema (friends/invites/rank) ----------------------------------
 
 def _ensure_schema():
     with conn() as cx:
@@ -112,49 +91,54 @@ def _ensure_schema():
         CREATE TABLE IF NOT EXISTS mp_friend_requests(
           id INTEGER PRIMARY KEY AUTOINCREMENT,
           from_user INTEGER NOT NULL,
-          to_user   INTEGER NOT NULL,
-          status    TEXT NOT NULL DEFAULT 'pending',
+          to_user INTEGER NOT NULL,
+          status TEXT NOT NULL DEFAULT 'pending',
           created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
           UNIQUE(from_user, to_user)
         );
         CREATE TABLE IF NOT EXISTS mp_invites(
           id INTEGER PRIMARY KEY AUTOINCREMENT,
           from_user INTEGER NOT NULL,
-          to_user   INTEGER NOT NULL,
-          mode      TEXT,
-          status    TEXT NOT NULL DEFAULT 'pending',
-          ttl_sec   INTEGER NOT NULL DEFAULT 1800,
+          to_user INTEGER NOT NULL,
+          mode TEXT,
+          status TEXT NOT NULL DEFAULT 'pending',
+          ttl_sec INTEGER NOT NULL DEFAULT 1800,
           created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
         );
         CREATE TABLE IF NOT EXISTS mp_ranks(
           user_id INTEGER PRIMARY KEY,
           br10_w INTEGER DEFAULT 0, br10_l INTEGER DEFAULT 0,
-          v1_w   INTEGER DEFAULT 0, v1_l   INTEGER DEFAULT 0,
-          v2_w   INTEGER DEFAULT 0, v2_l   INTEGER DEFAULT 0,
-          v3_w   INTEGER DEFAULT 0, v3_l   INTEGER DEFAULT 0
+          v1_w INTEGER DEFAULT 0, v1_l INTEGER DEFAULT 0,
+          v2_w INTEGER DEFAULT 0, v2_l INTEGER DEFAULT 0,
+          v3_w INTEGER DEFAULT 0, v3_l INTEGER DEFAULT 0
         );
         """)
 
 def _user_id_by_username(username: str):
-    username=(username or "").strip()
-    if not username: return None
-    want=username.lstrip("@").lower()
+    username = (username or "").strip()
+    if not username:
+        return None
+    want = username.lstrip("@").lower()
     with conn() as cx:
-        r=cx.execute("SELECT id FROM users WHERE LOWER(REPLACE(pi_username,'@',''))=?", (want,)).fetchone()
+        r = cx.execute(
+            "SELECT id FROM users WHERE LOWER(REPLACE(pi_username,'@',''))=?",
+            (want,)
+        ).fetchone()
         return int(r["id"]) if r else None
 
-def _is_friend(a:int,b:int)->bool:
+def _is_friend(a: int, b: int) -> bool:
     with conn() as cx:
-        r=cx.execute("""SELECT 1 FROM mp_friend_requests
-                        WHERE status='accepted'
-                          AND ((from_user=? AND to_user=?) OR (from_user=? AND to_user=?))
-                        LIMIT 1""",(a,b,b,a)).fetchone()
+        r = cx.execute("""
+            SELECT 1 FROM mp_friend_requests
+            WHERE status='accepted'
+              AND ((from_user=? AND to_user=?) OR (from_user=? AND to_user=?))
+            LIMIT 1
+        """, (a, b, b, a)).fetchone()
         return bool(r)
 
-# ---- simple mm queues (per world) -------------------------------------------
-
-_QUEUES: Dict[str, Dict[str, List[int]]] = { "v1": { w:[] for w in _WORLDS } }
-_STARTS: Dict[int, Dict[str, Any]] = {}  # per-user "start" payloads
+_QUEUES: Dict[str, Dict[str, List[int]]] = {"v1": {w: [] for w in _WORLDS}}
+_STARTS: Dict[int, Dict[str, Any]] = {}
+_DUELS: Dict[str, Dict[str, Any]] = {}
 
 def _make_start(mode: str, a: int, b: int, world: str) -> Dict[str, Any]:
     return {
@@ -167,46 +151,43 @@ def _make_start(mode: str, a: int, b: int, world: str) -> Dict[str, Any]:
         ]
     }
 
-def _try_match_v1(world:str):
-    q=_QUEUES["v1"][world]
-    if len(q)>=2:
-        a=q.pop(0); b=q.pop(0)
-        start=_make_start("v1", a, b, world)
-        _STARTS[a]=start; _STARTS[b]=start
+def _try_match_v1(world: str):
+    q = _QUEUES["v1"][world]
+    if len(q) >= 2:
+        a = q.pop(0)
+        b = q.pop(0)
+        start = _make_start("v1", a, b, world)
+        _STARTS[a] = start
+        _STARTS[b] = start
         _DUELS[start["matchId"]] = _new_room("v1", a, b, world)
-
-# ---- API: worlds -------------------------------------------------------------
 
 @mp_bp.post("/world/join")
 def mp_world_join():
     _ensure_schema()
-    who=_current_user_ids()
-    if not who: return jsonify({"error":"not_authenticated"}), 401
-    uid,_,_=who
-    data=(request.get_json(silent=True) or {})
+    who = _current_user_ids()
+    if not who:
+        return jsonify({"error": "not_authenticated"}), 401
+    uid, _, _ = who
+    data = request.get_json(silent=True) or {}
     world = _coerce_world(data.get("worldId") or data.get("world") or request.args.get("world") or "1")
     _set_world(uid, world)
-    return jsonify({"ok":True,"world":world})
+    return jsonify({"ok": True, "world": world})
 
 @mp_bp.get("/worlds/counts")
 def mp_world_counts():
-    # presence sweep keeps counts semi-accurate; ignore 'solo'
     _sweep_presence()
-    return jsonify({"ok":True, "counts": _counts_by_world()})
-
-# ---- World presence endpoints -----------------------------------------------
+    return jsonify({"ok": True, "counts": _counts_by_world()})
 
 @mp_bp.post("/world/heartbeat")
 def mp_world_heartbeat():
-    """Upsert the caller's world presence with full appearance + inv (armory/crafted)."""
-    who=_current_user_ids()
-    if not who: return jsonify({"error":"not_authenticated"}), 401
-    uid,_,_=who
-
-    data = (request.get_json(silent=True) or {})
+    who = _current_user_ids()
+    if not who:
+        return jsonify({"error": "not_authenticated"}), 401
+    uid, _, _ = who
+    data = request.get_json(silent=True) or {}
     world = _user_world(uid)
-    state = _WORLD_STATE[world].get(uid, {})
 
+    state = _WORLD_STATE[world].get(uid, {})
     state.update({
         "x": float(data.get("x") or state.get("x") or 0.0),
         "y": float(data.get("y") or state.get("y") or 0.0),
@@ -216,101 +197,109 @@ def mp_world_heartbeat():
         "last": time.time(),
         "username": _username_by_id(uid) or state.get("username") or "player"
     })
+
     _WORLD_STATE[world][uid] = state
+    _WORLD_MEMBERS[world].add(uid)
     _sweep_presence()
-    return jsonify({"ok":True, "world":world, "now": time.time()})
+    return jsonify({"ok": True, "world": world, "now": time.time()})
 
 @mp_bp.post("/world/pos")
 def mp_world_pos():
-    """Lightweight position tick (x,y,facing) to reduce bandwidth between full heartbeats."""
-    who=_current_user_ids()
-    if not who: return jsonify({"error":"not_authenticated"}), 401
-    uid,_,_=who
+    who = _current_user_ids()
+    if not who:
+        return jsonify({"error": "not_authenticated"}), 401
+    uid, _, _ = who
     world = _user_world(uid)
-    data = (request.get_json(silent=True) or {})
+    data = request.get_json(silent=True) or {}
+
     st = _WORLD_STATE[world].get(uid, {"username": _username_by_id(uid) or "player"})
     st["x"] = float(data.get("x") or st.get("x") or 0.0)
     st["y"] = float(data.get("y") or st.get("y") or 0.0)
     st["facing"] = data.get("facing") or st.get("facing") or "down"
     st["last"] = time.time()
+
     _WORLD_STATE[world][uid] = st
-    return jsonify({"ok":True})
+    _WORLD_MEMBERS[world].add(uid)
+    return jsonify({"ok": True})
 
 @mp_bp.get("/world/roster")
 def mp_world_roster():
-    """Return other active players in my current world with recent updates."""
-    who=_current_user_ids()
-    if not who: return jsonify({"error":"not_authenticated"}), 401
-    uid,_,_=who
+    who = _current_user_ids()
+    if not who:
+        return jsonify({"error": "not_authenticated"}), 401
+    uid, _, _ = who
     world = _user_world(uid)
     since = float(request.args.get("since") or 0.0)
+
     _sweep_presence()
-    players=[]
+    players = []
     for pid, st in _WORLD_STATE[world].items():
-        if pid==uid: continue
-        last=float(st.get("last",0.0))
-        if since and last<=since: continue
+        if pid == uid:
+            continue
+        last = float(st.get("last", 0.0))
+        if since and last <= since:
+            continue
         players.append({
             "id": pid,
             "username": st.get("username") or _username_by_id(pid) or "player",
-            "x": float(st.get("x",0.0)),
-            "y": float(st.get("y",0.0)),
-            "facing": st.get("facing","down"),
+            "x": float(st.get("x", 0.0)),
+            "y": float(st.get("y", 0.0)),
+            "facing": st.get("facing", "down"),
             "appearance": st.get("appearance") or {},
             "inv": st.get("inv") or {},
             "lastUpdate": last
         })
-    return jsonify({"ok":True, "world":world, "players": players, "serverNow": time.time()})
+
+    return jsonify({"ok": True, "world": world, "players": players, "serverNow": time.time()})
 
 @mp_bp.post("/world/leave")
 def mp_world_leave():
     who = _current_user_ids()
     if not who:
         return jsonify({"ok": True})
-    uid,_,_ = who
 
+    uid, _, _ = who
     for w in _WORLDS:
         _WORLD_MEMBERS[w].discard(uid)
         _WORLD_STATE[w].pop(uid, None)
-
     _WORLD_OF.pop(uid, None)
-    return jsonify({"ok": True})
 
+    return jsonify({"ok": True})
 
 @mp_bp.post("/presence/offline")
 def mp_presence_offline():
     who = _current_user_ids()
     if not who:
         return jsonify({"ok": True})
-    uid,_,_ = who
 
+    uid, _, _ = who
     for w in _WORLDS:
-        _WORLD_STATE[w].pop(uid, None)
         _WORLD_MEMBERS[w].discard(uid)
-
+        _WORLD_STATE[w].pop(uid, None)
     _WORLD_OF.pop(uid, None)
-    return jsonify({"ok": True})
 
-# ---- me/friends/search/lobby (unchanged from v3.3) --------------------------
+    return jsonify({"ok": True})
 
 @mp_bp.get("/me")
 def mp_me():
     _ensure_schema()
-    who=_current_user_ids()
-    if not who: return jsonify({"error":"not_authenticated"}), 401
-    uid,_,name=who
-    if uid not in _WORLD_OF: _set_world(uid, "1")
+    who = _current_user_ids()
+    if not who:
+        return jsonify({"error": "not_authenticated"}), 401
+    uid, _, name = who
     p = _presence_for(uid)
     return jsonify({"username": name, **p, "inviteLink": "/izza-game/auth"})
 
 @mp_bp.get("/friends/list")
 def mp_friends_list():
     _ensure_schema()
-    who=_current_user_ids()
-    if not who: return jsonify({"error":"not_authenticated"}), 401
-    uid,_,_=who
+    who = _current_user_ids()
+    if not who:
+        return jsonify({"error": "not_authenticated"}), 401
+    uid, _, _ = who
+
     with conn() as cx:
-        rows=cx.execute("""
+        rows = cx.execute("""
             SELECT DISTINCT
                    CASE WHEN fr.from_user=? THEN fr.to_user ELSE fr.from_user END AS fid,
                    u.pi_username AS username
@@ -318,91 +307,109 @@ def mp_friends_list():
             JOIN users u ON u.id = CASE WHEN fr.from_user=? THEN fr.to_user ELSE fr.from_user END
             WHERE fr.status='accepted' AND (fr.from_user=? OR fr.to_user=?)
             ORDER BY u.pi_username COLLATE NOCASE
-        """,(uid,uid,uid,uid)).fetchall()
-    friends=[]
+        """, (uid, uid, uid, uid)).fetchall()
+
+    friends = []
     for r in rows:
         fid = int(r["fid"])
-        p = _presence_for(fid)
-        friends.append({"username": r["username"], **p})
-    return jsonify({"friends":friends})
+        friends.append({"username": r["username"], **_presence_for(fid)})
+    return jsonify({"friends": friends})
 
 @mp_bp.get("/players/search")
 @mp_bp.get("/friends/search")
 def mp_players_search():
     _ensure_schema()
-    who=_current_user_ids()
-    if not who: return jsonify({"error":"not_authenticated"}), 401
-    my_id,_,_=who
-    raw_q=(request.args.get("q") or "").strip()
-    if len(raw_q)<2: return jsonify({"users":[]})
-    q=raw_q.lstrip("@").lower(); like=f"%{q}%"
+    who = _current_user_ids()
+    if not who:
+        return jsonify({"error": "not_authenticated"}), 401
+
+    raw_q = (request.args.get("q") or "").strip()
+    if len(raw_q) < 2:
+        return jsonify({"users": []})
+
+    q = raw_q.lstrip("@").lower()
+    like = f"%{q}%"
+
     with conn() as cx:
-        rows=cx.execute("""
+        rows = cx.execute("""
             SELECT DISTINCT u.id AS uid, u.pi_username AS username
             FROM users u
             JOIN game_profiles gp ON gp.pi_uid=u.pi_uid
             WHERE LOWER(REPLACE(u.pi_username,'@','')) LIKE ?
             ORDER BY u.pi_username COLLATE NOCASE
             LIMIT 15
-        """,(like,)).fetchall()
-    users=[]
+        """, (like,)).fetchall()
+
+    users = []
     for r in rows:
         uid = int(r["uid"])
-        p = _presence_for(uid)
-        users.append({"username": r["username"], **p})
-    return jsonify({"users":users})
+        users.append({"username": r["username"], **_presence_for(uid)})
+    return jsonify({"users": users})
 
 @mp_bp.post("/friends/request")
 def mp_friends_request():
     _ensure_schema()
     who = _current_user_ids()
-    if not who: return jsonify({"error":"not_authenticated"}), 401
-    me,_,_ = who
+    if not who:
+        return jsonify({"error": "not_authenticated"}), 401
+    me, _, _ = who
 
-    data = (request.get_json(silent=True) or {})
+    data = request.get_json(silent=True) or {}
     to_name = (data.get("toUsername") or data.get("username") or "").strip()
     to_id = _user_id_by_username(to_name)
-    if not to_id: return jsonify({"ok":False, "error":"player_not_found"}), 404
-    if to_id == me: return jsonify({"ok":False, "error":"cannot_friend_self"}), 400
+
+    if not to_id:
+        return jsonify({"ok": False, "error": "player_not_found"}), 404
+    if to_id == me:
+        return jsonify({"ok": False, "error": "cannot_friend_self"}), 400
 
     with conn() as cx:
         if _is_friend(me, to_id):
-            return jsonify({"ok": True, "already":"friends"})
+            return jsonify({"ok": True, "already": "friends"})
         try:
-            cx.execute("""INSERT INTO mp_friend_requests(from_user,to_user,status)
-                          VALUES(?,?, 'pending')""", (me, to_id))
+            cx.execute(
+                "INSERT INTO mp_friend_requests(from_user,to_user,status) VALUES(?,?, 'pending')",
+                (me, to_id)
+            )
         except Exception:
-            cx.execute("""UPDATE mp_friend_requests
-                          SET status='pending'
-                          WHERE ((from_user=? AND to_user=?) OR (from_user=? AND to_user=?))
-                            AND status!='accepted'""", (me, to_id, to_id, me))
+            cx.execute("""
+                UPDATE mp_friend_requests
+                SET status='pending'
+                WHERE ((from_user=? AND to_user=?) OR (from_user=? AND to_user=?))
+                  AND status!='accepted'
+            """, (me, to_id, to_id, me))
+
     return jsonify({"ok": True})
 
 @mp_bp.post("/friends/accept")
 def mp_friends_accept():
     _ensure_schema()
     who = _current_user_ids()
-    if not who: return jsonify({"error":"not_authenticated"}), 401
-    me,_,_ = who
+    if not who:
+        return jsonify({"error": "not_authenticated"}), 401
+    me, _, _ = who
 
-    data = (request.get_json(silent=True) or {})
+    data = request.get_json(silent=True) or {}
     req_id = data.get("requestId")
     from_name = (data.get("from") or data.get("username") or "").strip()
 
     with conn() as cx:
+        row = None
         if req_id:
-            row = cx.execute("""SELECT * FROM mp_friend_requests
-                                WHERE id=? AND to_user=? AND status='pending'""",
-                             (int(req_id), me)).fetchone()
+            row = cx.execute(
+                "SELECT * FROM mp_friend_requests WHERE id=? AND to_user=? AND status='pending'",
+                (int(req_id), me)
+            ).fetchone()
         else:
             from_id = _user_id_by_username(from_name)
-            row = None
             if from_id:
-                row = cx.execute("""SELECT * FROM mp_friend_requests
-                                    WHERE from_user=? AND to_user=? AND status='pending'""",
-                                 (from_id, me)).fetchone()
+                row = cx.execute(
+                    "SELECT * FROM mp_friend_requests WHERE from_user=? AND to_user=? AND status='pending'",
+                    (from_id, me)
+                ).fetchone()
+
         if not row:
-            return jsonify({"ok":False, "error":"request_not_found"}), 404
+            return jsonify({"ok": False, "error": "request_not_found"}), 404
 
         cx.execute("UPDATE mp_friend_requests SET status='accepted' WHERE id=?", (row["id"],))
 
@@ -412,410 +419,32 @@ def mp_friends_accept():
 def mp_friends_decline():
     _ensure_schema()
     who = _current_user_ids()
-    if not who: return jsonify({"error":"not_authenticated"}), 401
-    me,_,_ = who
+    if not who:
+        return jsonify({"error": "not_authenticated"}), 401
+    me, _, _ = who
 
-    data = (request.get_json(silent=True) or {})
+    data = request.get_json(silent=True) or {}
     req_id = data.get("requestId")
     from_name = (data.get("from") or data.get("username") or "").strip()
 
     with conn() as cx:
+        row = None
         if req_id:
-            row = cx.execute("""SELECT * FROM mp_friend_requests
-                                WHERE id=? AND to_user=? AND status='pending'""",
-                             (int(req_id), me)).fetchone()
+            row = cx.execute(
+                "SELECT * FROM mp_friend_requests WHERE id=? AND to_user=? AND status='pending'",
+                (int(req_id), me)
+            ).fetchone()
         else:
             from_id = _user_id_by_username(from_name)
-            row = None
             if from_id:
-                row = cx.execute("""SELECT * FROM mp_friend_requests
-                                    WHERE from_user=? AND to_user=? AND status='pending'""",
-                                 (from_id, me)).fetchone()
+                row = cx.execute(
+                    "SELECT * FROM mp_friend_requests WHERE from_user=? AND to_user=? AND status='pending'",
+                    (from_id, me)
+                ).fetchone()
+
         if not row:
-            return jsonify({"ok":False, "error":"request_not_found"}), 404
+            return jsonify({"ok": False, "error": "request_not_found"}), 404
 
         cx.execute("UPDATE mp_friend_requests SET status='declined' WHERE id=?", (row["id"],))
 
     return jsonify({"ok": True})
-
-@mp_bp.post("/lobby/invite")
-def mp_lobby_invite():
-    _ensure_schema()
-    who=_current_user_ids()
-    if not who: return jsonify({"error":"not_authenticated"}), 401
-    me,_,_=who
-    to=( (request.get_json(silent=True) or {}).get("toUsername") or "" ).strip()
-    to_id=_user_id_by_username(to)
-    if not to_id: return jsonify({"ok":False,"error":"player_not_found"}),404
-    if to_id==me: return jsonify({"ok":False,"error":"cannot_invite_self"}),400
-    with conn() as cx:
-        cx.execute("INSERT INTO mp_invites(from_user,to_user,mode,ttl_sec,status) VALUES(?,?,?,?, 'pending')",
-                   (me, to_id, 'v1', 1800))
-    return jsonify({"ok":True})
-
-@mp_bp.post("/lobby/accept")
-def mp_lobby_accept():
-    _ensure_schema()
-    who=_current_user_ids()
-    if not who: return jsonify({"error":"not_authenticated"}), 401
-    uid,_,_=who
-    data=(request.get_json(silent=True) or {})
-    inv_id=int(data.get("inviteId") or 0)
-    if not inv_id: return jsonify({"ok":False,"error":"bad_invite"}),400
-    with conn() as cx:
-        inv=cx.execute("SELECT * FROM mp_invites WHERE id=? AND to_user=? AND status='pending'", (inv_id,uid)).fetchone()
-        if not inv: return jsonify({"ok":False,"error":"invite_not_found"}),404
-        cx.execute("UPDATE mp_invites SET status='accepted' WHERE id=?", (inv_id,))
-    inviter = int(inv["from_user"])
-    world = _user_world(inviter)
-    start=_make_start(inv["mode"] or "v1", inviter, int(inv["to_user"]), world)
-    _STARTS[int(inv["from_user"])]=start
-    _STARTS[int(inv["to_user"])]=start
-    _DUELS[start["matchId"]] = _new_room(start["mode"], inviter, int(inv["to_user"]), world)
-    return jsonify({"ok":True,"start":start})
-
-@mp_bp.post("/lobby/decline")
-def mp_lobby_decline():
-    _ensure_schema()
-    who=_current_user_ids()
-    if not who: return jsonify({"error":"not_authenticated"}), 401
-    uid,_,_=who
-    data=(request.get_json(silent=True) or {})
-    inv_id=int(data.get("inviteId") or 0)
-    if not inv_id: return jsonify({"ok":False,"error":"bad_invite"}),400
-    with conn() as cx:
-        inv=cx.execute("SELECT * FROM mp_invites WHERE id=? AND to_user=? AND status='pending'", (inv_id,uid)).fetchone()
-        if not inv: return jsonify({"ok":False,"error":"invite_not_found"}),404
-        cx.execute("UPDATE mp_invites SET status='declined' WHERE id=?", (inv_id,))
-    return jsonify({"ok":True})
-
-@mp_bp.get("/notifications")
-def mp_notifications():
-    _ensure_schema()
-    who=_current_user_ids()
-    if not who: return jsonify({"error":"not_authenticated"}), 401
-    uid,_,_=who
-    if uid not in _WORLD_OF: _set_world(uid, "1")
-    start=_STARTS.pop(uid, None)
-    with conn() as cx:
-        rows=cx.execute("""
-            SELECT i.id, u.pi_username AS from_username, i.mode
-            FROM mp_invites i
-            JOIN users u ON u.id = i.from_user
-            WHERE i.to_user=? AND i.status='pending'
-            ORDER BY i.created_at DESC LIMIT 5
-        """,(uid,)).fetchall()
-        fr_rows=cx.execute("""
-            SELECT fr.id, u.pi_username AS from_username
-            FROM mp_friend_requests fr
-            JOIN users u ON u.id = fr.from_user
-            WHERE fr.to_user=? AND fr.status='pending'
-            ORDER BY fr.created_at DESC LIMIT 10
-        """,(uid,)).fetchall()
-    invites=[{"id":r["id"],"from":r["from_username"],"mode":r["mode"] or "v1"} for r in rows]
-    friend_requests=[{"id":r["id"],"from":r["from_username"]} for r in fr_rows]
-    return jsonify({"invites":invites, "friendRequests": friend_requests, "start":start, "world": _user_world(uid)})
-
-# ---- Queue / dequeue (per world) --------------------------------------------
-
-@mp_bp.post("/queue")
-def mp_queue():
-    _ensure_schema()
-    who=_current_user_ids()
-    if not who: return jsonify({"error":"not_authenticated"}), 401
-    uid,_,_=who
-    if uid not in _WORLD_OF: _set_world(uid, "1")
-    world = _user_world(uid)
-    data=(request.get_json(silent=True) or {})
-    mode=(data.get("mode") or "v1").lower()
-    if mode=="v1":
-        q = _QUEUES["v1"][world]
-        if uid not in q: q.append(uid)
-        _try_match_v1(world)
-        start=_STARTS.pop(uid, None)
-        if start:
-            _DUELS[start["matchId"]] = _new_room(start["mode"], start["players"][0]["id"], start["players"][1]["id"], world)
-            return jsonify({"ok":True,"start":start})
-        return jsonify({"ok":True,"queued":True,"world":world})
-    return jsonify({"ok":True,"queued":True,"world":world})
-
-@mp_bp.post("/dequeue")
-def mp_dequeue():
-    who=_current_user_ids()
-    if not who: return jsonify({"error":"not_authenticated"}), 401
-    uid,_,_=who
-    for w in _WORLDS:
-        for m in _QUEUES:
-            q = _QUEUES[m][w]
-            if uid in q: q.remove(uid)
-    return jsonify({"ok":True})
-
-# ---- Duel state + endpoints (unchanged from v3.3) ---------------------------
-
-_DUELS: Dict[str, Dict[str, Any]] = {}
-
-def _new_room(mode:str, a:int, b:int, world:str) -> Dict[str, Any]:
-    now=time.time()
-    return {
-        "mode": mode,
-        "world": _coerce_world(world),
-        "players": [int(a),int(b)],
-        "snapshots": {},
-        "state": {},
-        "cops": {int(a):[], int(b):[]},
-        "round": {"number":1, "bestOf":3, "wins":{int(a):0,int(b):0},
-                  "ended":False, "matchOver":False, "countdownAt": now+5.0},
-        "events": {"traces":[]},
-        "pullSince": {int(a):0.0,int(b):0.0}
-    }
-
-def _get_room(mid:str):
-    return _DUELS.get(str(mid))
-
-def _other(room:Dict[str,Any], uid:int)->int:
-    a,b=room["players"]; return a if uid==b else b
-
-def _equipped_from_inv(inv:Dict[str,Any])->str:
-    try:
-        if inv.get("uzi",{}).get("equipped"): return "uzi"
-        if inv.get("pistol",{}).get("equipped"): return "pistol"
-        if inv.get("grenade",{}).get("equipped"): return "grenade"
-        if inv.get("bat",{}).get("equipped"): return "bat"
-        if inv.get("knuckles",{}).get("equipped"): return "knuckles"
-        return "hand"
-    except Exception:
-        return "hand"
-
-@mp_bp.post("/duel/poke")
-def mp_duel_poke():
-    who=_current_user_ids()
-    if not who: return jsonify({"error":"not_authenticated"}), 401
-    uid,_,uname=who
-    data=(request.get_json(silent=True) or {})
-    mid=str(data.get("matchId") or "")
-    room=_get_room(mid)
-    if not room or uid not in room.get("players",[]): return jsonify({"ok":False,"error":"no_room"}),404
-    if _user_world(uid) != room.get("world"):
-        return jsonify({"ok":False,"error":"wrong_world","world":room.get("world")}), 409
-
-    st = room["state"].get(uid, {})
-    st.update({
-        "x": float(data.get("x") or 0.0),
-        "y": float(data.get("y") or 0.0),
-        "facing": data.get("facing") or "down",
-        "hp": float(data.get("hp") or 3.0),
-        "inv": data.get("inv") or {},
-        "t": time.time()
-    })
-    room["state"][uid]=st
-
-    snap = room["snapshots"].get(uid, {})
-    snap.setdefault("username", uname)
-    if data.get("appearance"):
-        snap["appearance"] = data["appearance"]
-    room["snapshots"][uid]=snap
-
-    cops = data.get("cops")
-    if isinstance(cops, list):
-        room["cops"][uid] = [
-            {"x":int(c.get("x",0)), "y":int(c.get("y",0)),
-             "kind": (c.get("kind") or "police"), "facing": (c.get("facing") or "down")}
-            for c in cops[:6]
-        ]
-
-    return jsonify({"ok":True})
-
-@mp_bp.get("/duel/pull")
-def mp_duel_pull():
-    who=_current_user_ids()
-    if not who: return jsonify({"error":"not_authenticated"}), 401
-    uid,_,_=who
-    mid=request.args.get("matchId","")
-    room=_get_room(mid)
-    if not room or uid not in room.get("players",[]): return jsonify({"ok":False,"error":"no_room"}),404
-    if _user_world(uid) != room.get("world"):
-        return jsonify({"ok":False,"error":"wrong_world","world":room.get("world")}), 409
-
-    opp  = _other(room, uid)
-    me_state = room["state"].get(uid) or {}
-    op_state = room["state"].get(opp) or {}
-    op_snap  = room["snapshots"].get(opp, {})
-    op_inv   = op_state.get("inv") or {}
-    op_weapon= _equipped_from_inv(op_inv)
-
-    since = room["pullSince"].get(uid, 0.0)
-    all_traces = room["events"]["traces"]
-    new_traces = [e for e in all_traces if e.get("t",0)>since and e.get("from")!=uid]
-    room["pullSince"][uid] = time.time()
-
-    rnd = room["round"].copy()
-
-    payload = {
-        "ok": True,
-        "world": room.get("world"),
-        "serverNow": time.time(),
-        "opponent": None,
-        "me": {"hp": float(me_state.get("hp", 3.0)), "lastUpdate": float(me_state.get("t", 0.0))},
-        "round": rnd,
-        "opponentCops": room["cops"].get(opp, []),
-        "traces": new_traces
-    }
-    if op_state:
-        payload["opponent"] = {
-            "username": op_snap.get("username") or _username_by_id(opp) or "Opponent",
-            "appearance": op_snap.get("appearance") or {},
-            "x": float(op_state.get("x",0.0)),
-            "y": float(op_state.get("y",0.0)),
-            "facing": op_state.get("facing","down"),
-            "hp": float(op_state.get("hp", 3.0)),
-            "inv": op_inv,
-            "equipped": op_weapon,
-            "lastUpdate": float(op_state.get("t",0.0))
-        }
-    return jsonify(payload)
-
-@mp_bp.post("/duel/hit")
-def mp_duel_hit():
-    who=_current_user_ids()
-    if not who: return jsonify({"error":"not_authenticated"}), 401
-    uid,_,_=who
-    data=(request.get_json(silent=True) or {})
-    mid=str(data.get("matchId") or "")
-    kind=(data.get("kind") or "bullet").lower()
-    room=_get_room(mid)
-    if not room or uid not in room.get("players",[]): return jsonify({"ok":False,"error":"no_room"}),404
-    if _user_world(uid) != room.get("world"):
-        return jsonify({"ok":False,"error":"wrong_world","world":room.get("world")}), 409
-
-    opp = _other(room, uid)
-    os  = room["state"].get(opp) or {"hp":3.0}
-
-    def delta_quarters(k:str)->int:
-        if k in ("pistol","uzi","bullet"): return 1
-        if k=="grenade": return 4
-        if k in ("bat","knucks","knuckles"): return 2
-        if k in ("hand","melee"): return 1
-        return 1
-
-    qhp = os.get("_qhp")
-    if qhp is None:
-        base = os.get("hp", 3.0)
-        qhp  = int(round(float(base)*4))
-
-    qhp = max(0, qhp - delta_quarters(kind))
-    os["_qhp"] = qhp
-    os["hp"]   = float(qhp/4.0)
-    room["state"][opp] = os
-
-    ended_now = False
-    if qhp <= 0:
-        ended_now = True
-        _on_round_end(room, winner_uid=uid)
-
-    return jsonify({"ok":True, "opponentHp": os["hp"], "roundEnded": ended_now, "round": room["round"]})
-
-@mp_bp.post("/duel/trace")
-def mp_duel_trace():
-    who=_current_user_ids()
-    if not who: return jsonify({"error":"not_authenticated"}), 401
-    uid,_,_=who
-    data=(request.get_json(silent=True) or {})
-    mid=str(data.get("matchId") or "")
-    room=_get_room(mid)
-    if not room or uid not in room.get("players",[]): return jsonify({"ok":False,"error":"no_room"}),404
-    if _user_world(uid) != room.get("world"):
-        return jsonify({"ok":False,"error":"wrong_world","world":room.get("world")}), 409
-
-    e = {
-        "from": uid,
-        "kind": (data.get("kind") or "pistol"),
-        "x1": float(data.get("x1") or 0.0),
-        "y1": float(data.get("y1") or 0.0),
-        "x2": float(data.get("x2") or 0.0),
-        "y2": float(data.get("y2") or 0.0),
-        "t": time.time()
-    }
-    buf = room["events"]["traces"]
-    buf.append(e)
-    if len(buf) > 120:
-        room["events"]["traces"] = buf[-120:]
-    return jsonify({"ok":True})
-
-@mp_bp.post("/duel/selfdown")
-def mp_duel_selfdown():
-    who=_current_user_ids()
-    if not who: return jsonify({"error":"not_authenticated"}), 401
-    uid,_,_=who
-    data=(request.get_json(silent=True) or {})
-    mid=str(data.get("matchId") or "")
-    room=_get_room(mid)
-    if not room or uid not in room.get("players",[]): return jsonify({"ok":False,"error":"no_room"}),404
-    if _user_world(uid) != room.get("world"):
-        return jsonify({"ok":False,"error":"wrong_world","world":room.get("world")}), 409
-
-    opp = _other(room, uid)
-    _on_round_end(room, winner_uid=opp)
-    return jsonify({"ok":True, "round": room["round"]})
-
-def _on_round_end(room:Dict[str,Any], winner_uid:int):
-    rnd = room["round"]
-    if rnd.get("ended") or rnd.get("matchOver"):
-        return
-
-    rnd["ended"] = True
-    wins = rnd["wins"]
-    wins[winner_uid] = int(wins.get(winner_uid,0)) + 1
-
-    a,b = room["players"]
-    a_w, b_w = int(wins.get(a,0)), int(wins.get(b,0))
-    best = int(rnd.get("bestOf",3))
-    need = best//2 + 1
-
-    if a_w >= need or b_w >= need:
-        rnd["matchOver"] = True
-        _apply_match_result(mode=room.get("mode","v1"), a=a, b=b, a_w=a_w, b_w=b_w)
-        room["_expireAt"] = time.time() + 15.0
-        return
-
-    rnd["number"] = int(rnd.get("number",1)) + 1
-    rnd["ended"] = False
-    rnd["countdownAt"] = time.time() + 5.0
-    for uid in (a,b):
-        st = room["state"].get(uid) or {}
-        st["_qhp"] = int(round(float(st.get("hp", 3.0))*4))
-        room["state"][uid] = st
-
-def _apply_match_result(mode:str, a:int, b:int, a_w:int, b_w:int):
-    try:
-        with conn() as cx:
-            cx.execute("INSERT OR IGNORE INTO mp_ranks(user_id) VALUES(?)", (a,))
-            cx.execute("INSERT OR IGNORE INTO mp_ranks(user_id) VALUES(?)", (b,))
-            if mode=="v1":
-                if a_w > b_w:
-                    cx.execute("UPDATE mp_ranks SET v1_w = COALESCE(v1_w,0)+1 WHERE user_id=?", (a,))
-                    cx.execute("UPDATE mp_ranks SET v1_l = COALESCE(v1_l,0)+1 WHERE user_id=?", (b,))
-                else:
-                    cx.execute("UPDATE mp_ranks SET v1_w = COALESCE(v1_w,0)+1 WHERE user_id=?", (b,))
-                    cx.execute("UPDATE mp_ranks SET v1_l = COALESCE(v1_l,0)+1 WHERE user_id=?", (a,))
-    except Exception:
-        pass
-
-# ---- background sweeper ------------------------------------------------------
-
-@mp_bp.before_app_request
-def _sweep():
-    now = time.time()
-    # traces & duel expiry
-    trash = []
-    for mid, room in list(_DUELS.items()):
-        traces = room["events"]["traces"]
-        if traces:
-            room["events"]["traces"] = [e for e in traces if (now - e.get("t",now)) < 12.0]
-        exp = room.get("_expireAt")
-        if exp and now >= exp:
-            trash.append(mid)
-    for mid in trash:
-        _DUELS.pop(mid, None)
-
-    # world presence TTL
-    _sweep_presence()
