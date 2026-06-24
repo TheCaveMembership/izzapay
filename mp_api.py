@@ -1,7 +1,6 @@
-# mp_api.py — v3.4.1
-# Adds world presence cleanup routes:
-#   POST /world/leave
-#   POST /presence/offline
+# mp_api.py — v3.4.2
+# Fixes multiplayer world auth by accepting the same session shapes used by IZZA Game / IZZA Pay.
+# Adds clear Render logs for auth failures and world join attempts.
 
 from typing import Optional, Tuple, Dict, Any, List
 from flask import Blueprint, jsonify, request, session
@@ -9,6 +8,12 @@ from db import conn
 import time
 
 mp_bp = Blueprint("mp", __name__)
+
+def _log(msg: str):
+    try:
+        print(f"[MP_API] {msg}", flush=True)
+    except Exception:
+        pass
 
 def _import_main_verifier():
     try:
@@ -28,19 +33,115 @@ def _bearer_from_req():
         return auth.split(" ", 1)[1].strip()
     return None
 
-def _current_user_ids() -> Optional[Tuple[int, str, str]]:
-    uid = session.get("user_id")
-    if not uid:
-        tok = _bearer_from_req()
-        if tok and VERIFY_TOKEN:
-            uid = VERIFY_TOKEN(tok)
+def _session_debug_keys():
+    try:
+        return sorted([str(k) for k in session.keys()])
+    except Exception:
+        return []
+
+def _lookup_user_by_id(uid):
     if not uid:
         return None
-    with conn() as cx:
-        row = cx.execute("SELECT id, pi_uid, pi_username FROM users WHERE id=?", (uid,)).fetchone()
-        if not row:
-            return None
-        return int(row["id"]), row["pi_uid"], row["pi_username"]
+    try:
+        with conn() as cx:
+            row = cx.execute(
+                "SELECT id, pi_uid, pi_username FROM users WHERE id=?",
+                (int(uid),)
+            ).fetchone()
+            if row:
+                return int(row["id"]), row["pi_uid"], row["pi_username"]
+    except Exception as e:
+        _log(f"lookup by id failed: {e}")
+    return None
+
+def _lookup_user_by_pi_uid(pi_uid):
+    if not pi_uid:
+        return None
+    try:
+        with conn() as cx:
+            row = cx.execute(
+                "SELECT id, pi_uid, pi_username FROM users WHERE pi_uid=?",
+                (str(pi_uid),)
+            ).fetchone()
+            if row:
+                return int(row["id"]), row["pi_uid"], row["pi_username"]
+    except Exception as e:
+        _log(f"lookup by pi_uid failed: {e}")
+    return None
+
+def _lookup_user_by_username(username):
+    if not username:
+        return None
+    want = str(username).strip().lstrip("@").lower()
+    if not want:
+        return None
+    try:
+        with conn() as cx:
+            row = cx.execute(
+                "SELECT id, pi_uid, pi_username FROM users WHERE LOWER(REPLACE(pi_username,'@',''))=?",
+                (want,)
+            ).fetchone()
+            if row:
+                return int(row["id"]), row["pi_uid"], row["pi_username"]
+    except Exception as e:
+        _log(f"lookup by username failed: {e}")
+    return None
+
+def _current_user_ids() -> Optional[Tuple[int, str, str]]:
+    # 1) Normal Flask session user_id
+    for key in ("user_id", "uid", "id"):
+        user = _lookup_user_by_id(session.get(key))
+        if user:
+            return user
+
+    # 2) Pi UID session shapes
+    for key in ("pi_uid", "pi_user_id", "pi_id"):
+        user = _lookup_user_by_pi_uid(session.get(key))
+        if user:
+            return user
+
+    # 3) Username session shapes
+    for key in ("pi_username", "username", "user"):
+        val = session.get(key)
+        if isinstance(val, dict):
+            user = (
+                _lookup_user_by_id(val.get("id") or val.get("user_id"))
+                or _lookup_user_by_pi_uid(val.get("pi_uid") or val.get("uid"))
+                or _lookup_user_by_username(val.get("pi_username") or val.get("username"))
+            )
+        else:
+            user = _lookup_user_by_username(val)
+        if user:
+            return user
+
+    # 4) Login token fallback
+    tok = _bearer_from_req()
+    if tok and VERIFY_TOKEN:
+        try:
+            verified = VERIFY_TOKEN(tok)
+
+            if isinstance(verified, dict):
+                user = (
+                    _lookup_user_by_id(verified.get("id") or verified.get("user_id"))
+                    or _lookup_user_by_pi_uid(verified.get("pi_uid") or verified.get("uid"))
+                    or _lookup_user_by_username(verified.get("pi_username") or verified.get("username"))
+                )
+            else:
+                user = _lookup_user_by_id(verified)
+
+            if user:
+                return user
+        except Exception as e:
+            _log(f"token verify failed: {e}")
+
+    _log(
+        "auth failed "
+        f"path={request.path} "
+        f"session_keys={_session_debug_keys()} "
+        f"has_token={bool(tok)} "
+        f"verify_token_loaded={bool(VERIFY_TOKEN)}"
+    )
+    return None
 
 def _username_by_id(uid: int) -> Optional[str]:
     with conn() as cx:
@@ -115,16 +216,8 @@ def _ensure_schema():
         """)
 
 def _user_id_by_username(username: str):
-    username = (username or "").strip()
-    if not username:
-        return None
-    want = username.lstrip("@").lower()
-    with conn() as cx:
-        r = cx.execute(
-            "SELECT id FROM users WHERE LOWER(REPLACE(pi_username,'@',''))=?",
-            (want,)
-        ).fetchone()
-        return int(r["id"]) if r else None
+    user = _lookup_user_by_username(username)
+    return user[0] if user else None
 
 def _is_friend(a: int, b: int) -> bool:
     with conn() as cx:
@@ -165,13 +258,32 @@ def _try_match_v1(world: str):
 def mp_world_join():
     _ensure_schema()
     who = _current_user_ids()
-    if not who:
-        return jsonify({"error": "not_authenticated"}), 401
-    uid, _, _ = who
     data = request.get_json(silent=True) or {}
     world = _coerce_world(data.get("worldId") or data.get("world") or request.args.get("world") or "1")
+
+    if not who:
+        _log(f"world join denied world={world} reason=not_authenticated")
+        return jsonify({
+            "ok": False,
+            "error": "not_authenticated",
+            "message": "No valid IZZA game user session was found for multiplayer.",
+            "sessionKeys": _session_debug_keys()
+        }), 401
+
+    uid, pi_uid, username = who
     _set_world(uid, world)
-    return jsonify({"ok": True, "world": world})
+
+    _log(f"world join ok uid={uid} username={username} world={world}")
+
+    return jsonify({
+        "ok": True,
+        "world": world,
+        "user": {
+            "id": uid,
+            "pi_uid": pi_uid,
+            "username": username
+        }
+    })
 
 @mp_bp.get("/worlds/counts")
 def mp_world_counts():
@@ -264,6 +376,7 @@ def mp_world_leave():
         _WORLD_STATE[w].pop(uid, None)
     _WORLD_OF.pop(uid, None)
 
+    _log(f"world leave uid={uid}")
     return jsonify({"ok": True})
 
 @mp_bp.post("/presence/offline")
@@ -278,6 +391,7 @@ def mp_presence_offline():
         _WORLD_STATE[w].pop(uid, None)
     _WORLD_OF.pop(uid, None)
 
+    _log(f"presence offline uid={uid}")
     return jsonify({"ok": True})
 
 @mp_bp.get("/me")
@@ -285,7 +399,7 @@ def mp_me():
     _ensure_schema()
     who = _current_user_ids()
     if not who:
-        return jsonify({"error": "not_authenticated"}), 401
+        return jsonify({"error": "not_authenticated", "sessionKeys": _session_debug_keys()}), 401
     uid, _, name = who
     p = _presence_for(uid)
     return jsonify({"username": name, **p, "inviteLink": "/izza-game/auth"})
