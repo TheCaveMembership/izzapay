@@ -69,7 +69,7 @@ function xmur3(str){
 function mulberry32(a){
   return function(){ var t=a+=0x6D2B79F5; t=Math.imul(t^t>>>15, t|1); t^=t+Math.imul(t^t>>>7, t|61); return ((t^t>>>14)>>>0)/4294967296; };
 }
-function getCurrentWorld(){ return localStorage.getItem('izzaWorldId') || '1'; }
+function getCurrentWorld(){ return localStorage.getItem('izzaWorldId') || 'solo'; }
 
 let RNG = Math.random;   // fallback
 function reseedForWorld(worldId){
@@ -801,7 +801,7 @@ function _getWorldState(worldId){
 
 // Persist the current world id
 function _setCurrentWorld(worldId){
-  localStorage.setItem('izzaWorldId', String(worldId||'1'));
+  localStorage.setItem('izzaWorldId', String(worldId||'solo'));
 }
 
 // Helper: what counts as SOLO vs MP (strict)
@@ -1013,15 +1013,7 @@ IZZA.api.requestWorldChange = function requestWorldChange(newWorld){
 };
 
 // Mirror MP join locally if your transport relays via IZZA bus
-IZZA.on('mp-send', (msg)=>{
-  if (!msg || msg.type !== 'join-world') return;
-  const target = (msg.data && msg.data.world) || '1';
-  if (!IZZA.api.canSwitchWorld()){
-    try { toast('✋ Lose the cops / clear your stars before switching worlds.'); } catch {}
-    return;
-  }
-  IZZA.api._onWorldChanged(target);
-});
+
 
 // On first ready: expose worldId, seed RNG, and start from a clean scene
 IZZA.on('ready', ()=>{
@@ -2404,10 +2396,9 @@ Object.assign(api, {
   // NEW: world helpers
   getWorldId: () => (IZZA.api && IZZA.api.worldId) ? String(IZZA.api.worldId) : String(getCurrentWorld()),
   isSoloWorld: (id) => {
-    const w = String(id ?? ((IZZA.api && IZZA.api.worldId) ? IZZA.api.worldId : getCurrentWorld()));
-    // adjust this predicate as your project defines “solo”
-    return (w === '1' || w.toLowerCase() === 'solo');
-  },
+  const w = String(id ?? ((IZZA.api && IZZA.api.worldId) ? IZZA.api.worldId : getCurrentWorld())).toLowerCase();
+  return w === 'solo';
+},
 
   ready: true
 });
