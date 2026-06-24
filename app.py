@@ -1529,13 +1529,26 @@ def require_merchant_owner(slug):
 
     LIVE_AUCTION_STORE_SLUG = "izza-game-crafting"
 
+def _live_t():
+    return (request.values.get("t") or request.args.get("t") or "").strip()
+
+def _with_t(path):
+    t = _live_t()
+    if not t:
+        return path
+    joiner = "&" if "?" in path else "?"
+    return f"{path}{joiner}t={t}"
+
 def require_live_auction_owner():
     u = current_user_row()
     if not u:
-        return None, None, redirect("/signin?fresh=1")
+        return None, None, redirect(_with_t("/signin?fresh=1"))
 
     with conn() as cx:
-        m = cx.execute("SELECT * FROM merchants WHERE slug=?", (LIVE_AUCTION_STORE_SLUG,)).fetchone()
+        m = cx.execute(
+            "SELECT * FROM merchants WHERE slug=?",
+            (LIVE_AUCTION_STORE_SLUG,)
+        ).fetchone()
 
     if not m:
         abort(404)
@@ -1548,6 +1561,7 @@ def require_live_auction_owner():
 
 @app.get("/live-auctions")
 def live_auctions_public():
+    t = _live_t()
     u = current_user_row()
 
     with conn() as cx:
@@ -1559,27 +1573,37 @@ def live_auctions_public():
 
         signup = None
         if u:
-            uname = (u["username"] or u["pi_username"] or "").lower()
+            uname = (u["username"] or u["pi_username"] or "").strip().lower()
             signup = cx.execute(
                 "SELECT * FROM live_auction_signups WHERE username=?",
                 (uname,)
             ).fetchone()
 
-    return render_template("live_auctions.html", auctions=auctions, signup=signup, user=u)
+    return render_template(
+        "live_auctions.html",
+        auctions=auctions,
+        signup=signup,
+        user=u,
+        t=t
+    )
 
 
 @app.post("/live-auctions/signup")
 def live_auctions_signup():
+    t = _live_t()
     u = current_user_row()
     if not u:
-        return redirect("/signin?fresh=1")
+        return redirect(_with_t("/signin?fresh=1"))
 
     username = (u["username"] or u["pi_username"] or "").strip().lower()
-    pi_uid = u["pi_uid"]
+    pi_uid = u["pi_uid"] if "pi_uid" in u.keys() else None
     email = (request.form.get("email") or "").strip()
     one_piece = 1 if request.form.get("one_piece") else 0
     pokemon = 1 if request.form.get("pokemon") else 0
     now = int(time.time())
+
+    if not username:
+        return redirect(_with_t("/signin?fresh=1"))
 
     with conn() as cx:
         cx.execute("""
@@ -1595,11 +1619,12 @@ def live_auctions_signup():
               updated_at=excluded.updated_at
         """, (username, pi_uid, one_piece, pokemon, email, now, now))
 
-    return redirect("/live-auctions?signed_up=1")
+    return redirect(_with_t("/live-auctions?signed_up=1"))
 
 
 @app.get("/live-auctions/admin")
 def live_auctions_admin():
+    t = _live_t()
     u, m, fail = require_live_auction_owner()
     if fail:
         return fail
@@ -1621,7 +1646,8 @@ def live_auctions_admin():
         auctions=auctions,
         signups=signups,
         merchant=m,
-        user=u
+        user=u,
+        t=t
     )
 
 
@@ -1635,10 +1661,15 @@ def live_auctions_create():
     description = (request.form.get("description") or "").strip()
     tcg_type = (request.form.get("tcg_type") or "mixed").strip()
     starts_at_raw = (request.form.get("starts_at") or "").strip()
-    length = int(request.form.get("scheduled_length_minutes") or 60)
+    length_raw = (request.form.get("scheduled_length_minutes") or "60").strip()
 
     if not title:
         abort(400)
+
+    try:
+        length = max(1, int(length_raw))
+    except Exception:
+        length = 60
 
     starts_at = None
     if starts_at_raw:
@@ -1649,6 +1680,7 @@ def live_auctions_create():
 
     now = int(time.time())
     slug = "auction-" + uuid.uuid4().hex[:10]
+    created_by = (u["username"] or u["pi_username"] or "").strip().lower()
 
     with conn() as cx:
         cx.execute("""
@@ -1660,16 +1692,15 @@ def live_auctions_create():
             VALUES(?,?,?,?,?,?,?,'scheduled','offline',?,?,?)
         """, (
             m["id"], slug, title, description, tcg_type,
-            starts_at, length,
-            (u["username"] or u["pi_username"] or "").lower(),
-            now, now
+            starts_at, length, created_by, now, now
         ))
 
-    return redirect("/live-auctions/admin")
+    return redirect(_with_t("/live-auctions/admin"))
 
 
 @app.get("/live-auctions/<auction_slug>")
 def live_auction_room(auction_slug):
+    t = _live_t()
     u = current_user_row()
 
     with conn() as cx:
@@ -1696,7 +1727,8 @@ def live_auction_room(auction_slug):
         auction=auction,
         lots=lots,
         signup_count=signup_count,
-        user=u
+        user=u,
+        t=t
     )    
 
 def get_or_create_cart(merchant_id, cid=None):
