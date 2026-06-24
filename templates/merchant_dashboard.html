@@ -8,18 +8,38 @@
 </head>
 <body>
   <h1>Welcome, {{ merchant.store_name }}</h1>
-  <p>Your Store Link: 
+
+  <p>Your Store Link:
     <a href="{{ url_for('merchant_store', slug=merchant.slug) }}" target="_blank">
       {{ request.host_url }}store/{{ merchant.slug }}
     </a>
   </p>
 
+  {% if merchant.slug == 'izza-game-crafting' %}
+    <section style="border:1px solid #333;padding:16px;margin:18px 0;border-radius:12px;background:#111;color:#fff;">
+      <h2>🔴 Live Video Auctions</h2>
+      <p>
+        This store has exclusive access to launch IZZA PAY Live Video Auctions
+        for One Piece TCG and Pokémon TCG.
+      </p>
+      <p>
+        Users can sign up once and select interest in One Piece, Pokémon, or both.
+        Auction purchases will complete through IZZA PAY.
+      </p>
+      <p>
+        <a href="/live-auctions" target="_blank">View Public Signup Page</a>
+        |
+        <a href="/live-auctions/admin">Manage Live Auctions</a>
+      </p>
+    </section>
+  {% endif %}
+
   <h2>Your Products</h2>
   <ul>
     {% for product in products %}
       <li>
-        {{ product.name }} - {{ product.price_pi }} π  
-        <a href="{{ url_for('edit_product', product_id=product.id) }}">Edit</a> | 
+        {{ product.name }} - {{ product.price_pi }} π
+        <a href="{{ url_for('edit_product', product_id=product.id) }}">Edit</a> |
         <a href="{{ url_for('delete_product', product_id=product.id) }}">Delete</a>
       </li>
     {% else %}
