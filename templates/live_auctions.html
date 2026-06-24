@@ -39,7 +39,8 @@
 
       {% if user %}
         <form method="post" action="/live-auctions/signup{% if t %}?t={{ t|urlencode }}{% endif %}">
-  <input type="hidden" name="t" value="{{ t or '' }}">
+          <input type="hidden" name="t" value="{{ t or '' }}">
+
           <p>Signed in as <strong>@{{ user.username or user.pi_username }}</strong></p>
 
           <label>
@@ -63,9 +64,9 @@
         </form>
       {% else %}
         <p>Sign in with Pi first to join the live auction signup list.</p>
-        <a class="btn purple" href="/signin?fresh=1&next=/live-auctions{% if t %}%3Ft={{ t|urlencode }}{% endif %}">
-  Sign In With Pi
-</a>
+        <a class="btn purple" href="/signin?fresh=1&next=%2Flive-auctions{% if t %}%3Ft%3D{{ t|urlencode }}{% endif %}">
+          Sign In With Pi
+        </a>
       {% endif %}
     </div>
 
@@ -76,13 +77,15 @@
         <div class="card">
           <h2>{{ a.title }}</h2>
           <p>{{ a.description or 'Live auction details coming soon.' }}</p>
+
           <div class="row">
             <span class="pill">{{ a.tcg_type }}</span>
             <span class="pill">{{ a.status }}</span>
             <span class="pill">{{ a.scheduled_length_minutes }} min</span>
           </div>
+
           <div style="margin-top:12px">
-            <a class="btn gold" href="/live-auctions/{{ a.slug }}">Open Auction Room</a>
+            <a class="btn gold" href="/live-auctions/{{ a.slug }}{% if t %}?t={{ t|urlencode }}{% endif %}">Open Auction Room</a>
           </div>
         </div>
       {% else %}
