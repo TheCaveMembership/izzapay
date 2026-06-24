@@ -1527,6 +1527,178 @@ def require_merchant_owner(slug):
     if m["owner_user_id"] != u["id"]: abort(403)
     return u, m
 
+    LIVE_AUCTION_STORE_SLUG = "izza-game-crafting"
+
+def require_live_auction_owner():
+    u = current_user_row()
+    if not u:
+        return None, None, redirect("/signin?fresh=1")
+
+    with conn() as cx:
+        m = cx.execute("SELECT * FROM merchants WHERE slug=?", (LIVE_AUCTION_STORE_SLUG,)).fetchone()
+
+    if not m:
+        abort(404)
+
+    if int(m["owner_user_id"]) != int(u["id"]):
+        abort(403)
+
+    return u, m, None
+
+
+@app.get("/live-auctions")
+def live_auctions_public():
+    u = current_user_row()
+
+    with conn() as cx:
+        auctions = cx.execute("""
+            SELECT * FROM live_auctions
+            WHERE status IN ('scheduled','live')
+            ORDER BY starts_at ASC
+        """).fetchall()
+
+        signup = None
+        if u:
+            uname = (u["username"] or u["pi_username"] or "").lower()
+            signup = cx.execute(
+                "SELECT * FROM live_auction_signups WHERE username=?",
+                (uname,)
+            ).fetchone()
+
+    return render_template("live_auctions.html", auctions=auctions, signup=signup, user=u)
+
+
+@app.post("/live-auctions/signup")
+def live_auctions_signup():
+    u = current_user_row()
+    if not u:
+        return redirect("/signin?fresh=1")
+
+    username = (u["username"] or u["pi_username"] or "").strip().lower()
+    pi_uid = u["pi_uid"]
+    email = (request.form.get("email") or "").strip()
+    one_piece = 1 if request.form.get("one_piece") else 0
+    pokemon = 1 if request.form.get("pokemon") else 0
+    now = int(time.time())
+
+    with conn() as cx:
+        cx.execute("""
+            INSERT INTO live_auction_signups(
+              username, pi_uid, interest_one_piece, interest_pokemon,
+              email, created_at, updated_at
+            )
+            VALUES(?,?,?,?,?,?,?)
+            ON CONFLICT(username) DO UPDATE SET
+              interest_one_piece=excluded.interest_one_piece,
+              interest_pokemon=excluded.interest_pokemon,
+              email=excluded.email,
+              updated_at=excluded.updated_at
+        """, (username, pi_uid, one_piece, pokemon, email, now, now))
+
+    return redirect("/live-auctions?signed_up=1")
+
+
+@app.get("/live-auctions/admin")
+def live_auctions_admin():
+    u, m, fail = require_live_auction_owner()
+    if fail:
+        return fail
+
+    with conn() as cx:
+        auctions = cx.execute("""
+            SELECT * FROM live_auctions
+            WHERE merchant_id=?
+            ORDER BY created_at DESC
+        """, (m["id"],)).fetchall()
+
+        signups = cx.execute("""
+            SELECT * FROM live_auction_signups
+            ORDER BY updated_at DESC
+        """).fetchall()
+
+    return render_template(
+        "live_auctions_admin.html",
+        auctions=auctions,
+        signups=signups,
+        merchant=m,
+        user=u
+    )
+
+
+@app.post("/live-auctions/admin/create")
+def live_auctions_create():
+    u, m, fail = require_live_auction_owner()
+    if fail:
+        return fail
+
+    title = (request.form.get("title") or "").strip()
+    description = (request.form.get("description") or "").strip()
+    tcg_type = (request.form.get("tcg_type") or "mixed").strip()
+    starts_at_raw = (request.form.get("starts_at") or "").strip()
+    length = int(request.form.get("scheduled_length_minutes") or 60)
+
+    if not title:
+        abort(400)
+
+    starts_at = None
+    if starts_at_raw:
+        try:
+            starts_at = int(datetime.fromisoformat(starts_at_raw).timestamp())
+        except Exception:
+            starts_at = None
+
+    now = int(time.time())
+    slug = "auction-" + uuid.uuid4().hex[:10]
+
+    with conn() as cx:
+        cx.execute("""
+            INSERT INTO live_auctions(
+              merchant_id, slug, title, description, tcg_type,
+              starts_at, scheduled_length_minutes, status,
+              stream_status, created_by_username, created_at, updated_at
+            )
+            VALUES(?,?,?,?,?,?,?,'scheduled','offline',?,?,?)
+        """, (
+            m["id"], slug, title, description, tcg_type,
+            starts_at, length,
+            (u["username"] or u["pi_username"] or "").lower(),
+            now, now
+        ))
+
+    return redirect("/live-auctions/admin")
+
+
+@app.get("/live-auctions/<auction_slug>")
+def live_auction_room(auction_slug):
+    u = current_user_row()
+
+    with conn() as cx:
+        auction = cx.execute(
+            "SELECT * FROM live_auctions WHERE slug=?",
+            (auction_slug,)
+        ).fetchone()
+
+        if not auction:
+            abort(404)
+
+        lots = cx.execute("""
+            SELECT * FROM live_auction_lots
+            WHERE auction_id=?
+            ORDER BY lot_number ASC, id ASC
+        """, (auction["id"],)).fetchall()
+
+        signup_count = cx.execute(
+            "SELECT COUNT(*) AS c FROM live_auction_signups"
+        ).fetchone()["c"]
+
+    return render_template(
+        "live_auction_room.html",
+        auction=auction,
+        lots=lots,
+        signup_count=signup_count,
+        user=u
+    )    
+
 def get_or_create_cart(merchant_id, cid=None):
     with conn() as cx:
         if cid:
