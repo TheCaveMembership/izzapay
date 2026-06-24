@@ -461,7 +461,52 @@ app.get(mpPaths('/me'), (req,res)=>{
     socket:true
   });
 });
+// ---------------------------------------------------------------------------
+// LIVE VIDEO AUCTION SOCKET BACKEND
+// ---------------------------------------------------------------------------
 
+const auctionState = {
+  rooms: new Map()
+};
+
+function auctionRoom(slug){
+  return `auction:${String(slug || '').trim().toLowerCase()}`;
+}
+
+function getAuction(slug){
+  slug = String(slug || '').trim().toLowerCase();
+  if(!auctionState.rooms.has(slug)){
+    auctionState.rooms.set(slug, {
+      slug,
+      viewers:new Map(),
+      chat:[],
+      currentLot:null,
+      highBid:null,
+      started:false,
+      updatedAt:Date.now()
+    });
+  }
+  return auctionState.rooms.get(slug);
+}
+
+function auctionViewerCount(slug){
+  return getAuction(slug).viewers.size;
+}
+
+function safeAuctionSlug(v){
+  return String(v || '').trim().toLowerCase().replace(/[^a-z0-9_\-]/g,'').slice(0,80);
+}
+
+function bidPayload(body, username){
+  return {
+    username,
+    auctionSlug:safeAuctionSlug(body.auctionSlug || body.slug),
+    lotId:String(body.lotId || '').trim(),
+    lotTitle:String(body.lotTitle || '').trim().slice(0,120),
+    bidPi:Number(body.bidPi || body.amount || 0),
+    ts:Date.now()
+  };
+}
 io.on('connection', socket=>{
   const who = mpUserFromSocket(socket);
 
@@ -483,6 +528,185 @@ io.on('connection', socket=>{
     counts:mpCounts(),
     ttlMs:MP_TTL_MS,
     serverNow:Date.now()/1000
+  });
+
+    // -------------------------------------------------------------------------
+  // LIVE AUCTION SOCKET EVENTS
+  // -------------------------------------------------------------------------
+
+  socket.on('auction:join', payload=>{
+    try{
+      const body = isPlainObject(payload) ? payload : {};
+      const slug = safeAuctionSlug(body.auctionSlug || body.slug);
+      if(!slug){
+        socket.emit('auction:error', { ok:false, error:'missing_auction_slug' });
+        return;
+      }
+
+      const room = auctionRoom(slug);
+      const st = getAuction(slug);
+
+      socket.join(room);
+      socket.data.auctionSlug = slug;
+
+      st.viewers.set(socket.id, {
+        username:who.username,
+        joinedAt:Date.now()
+      });
+      st.updatedAt = Date.now();
+
+      socket.emit('auction:joined', {
+        ok:true,
+        auctionSlug:slug,
+        username:who.username,
+        viewerCount:auctionViewerCount(slug),
+        currentLot:st.currentLot,
+        highBid:st.highBid,
+        started:st.started,
+        serverNow:Date.now()/1000
+      });
+
+      io.to(room).emit('auction:viewers', {
+        ok:true,
+        auctionSlug:slug,
+        viewerCount:auctionViewerCount(slug)
+      });
+    }catch(e){
+      socket.emit('auction:error', { ok:false, error:'join_failed', message:e.message });
+    }
+  });
+
+  socket.on('auction:chat', payload=>{
+    try{
+      const body = isPlainObject(payload) ? payload : {};
+      const slug = safeAuctionSlug(body.auctionSlug || body.slug || socket.data.auctionSlug);
+      const msg = String(body.message || body.text || '').trim().slice(0,300);
+      if(!slug || !msg) return;
+
+      const st = getAuction(slug);
+      const item = {
+        username:who.username,
+        message:msg,
+        ts:Date.now()
+      };
+
+      st.chat.push(item);
+      if(st.chat.length > 150) st.chat.splice(0, st.chat.length - 150);
+      st.updatedAt = Date.now();
+
+      io.to(auctionRoom(slug)).emit('auction:chat', {
+        ok:true,
+        auctionSlug:slug,
+        ...item
+      });
+    }catch(e){
+      socket.emit('auction:error', { ok:false, error:'chat_failed', message:e.message });
+    }
+  });
+
+  socket.on('auction:bid', payload=>{
+    try{
+      const body = isPlainObject(payload) ? payload : {};
+      const bid = bidPayload(body, who.username);
+
+      if(!bid.auctionSlug || !bid.lotId || !Number.isFinite(bid.bidPi) || bid.bidPi <= 0){
+        socket.emit('auction:bid-error', { ok:false, error:'bad_bid' });
+        return;
+      }
+
+      const st = getAuction(bid.auctionSlug);
+
+      if(st.highBid && String(st.highBid.lotId) === String(bid.lotId)){
+        if(Number(bid.bidPi) <= Number(st.highBid.bidPi || 0)){
+          socket.emit('auction:bid-error', {
+            ok:false,
+            error:'bid_too_low',
+            currentHighBid:st.highBid
+          });
+          return;
+        }
+      }
+
+      st.highBid = bid;
+      st.updatedAt = Date.now();
+
+      io.to(auctionRoom(bid.auctionSlug)).emit('auction:bid', {
+        ok:true,
+        ...bid
+      });
+    }catch(e){
+      socket.emit('auction:bid-error', { ok:false, error:'bid_failed', message:e.message });
+    }
+  });
+
+  socket.on('auction:admin:set-lot', payload=>{
+    try{
+      const body = isPlainObject(payload) ? payload : {};
+      const slug = safeAuctionSlug(body.auctionSlug || body.slug || socket.data.auctionSlug);
+      if(!slug) return;
+
+      const st = getAuction(slug);
+      st.currentLot = {
+        lotId:String(body.lotId || '').trim(),
+        lotNumber:body.lotNumber || '',
+        title:String(body.title || '').trim().slice(0,140),
+        description:String(body.description || '').trim().slice(0,500),
+        imageUrl:String(body.imageUrl || body.image_url || '').trim(),
+        startingBidPi:Number(body.startingBidPi || body.starting_bid_pi || 0),
+        bidIncrementPi:Number(body.bidIncrementPi || body.bid_increment_pi || 0.01),
+        ts:Date.now()
+      };
+      st.highBid = null;
+      st.updatedAt = Date.now();
+
+      io.to(auctionRoom(slug)).emit('auction:lot', {
+        ok:true,
+        auctionSlug:slug,
+        currentLot:st.currentLot,
+        highBid:null
+      });
+    }catch(e){
+      socket.emit('auction:error', { ok:false, error:'set_lot_failed', message:e.message });
+    }
+  });
+
+  socket.on('auction:admin:start', payload=>{
+    const body = isPlainObject(payload) ? payload : {};
+    const slug = safeAuctionSlug(body.auctionSlug || body.slug || socket.data.auctionSlug);
+    if(!slug) return;
+
+    const st = getAuction(slug);
+    st.started = true;
+    st.updatedAt = Date.now();
+
+    io.to(auctionRoom(slug)).emit('auction:status', {
+      ok:true,
+      auctionSlug:slug,
+      status:'live',
+      started:true,
+      serverNow:Date.now()/1000
+    });
+  });
+
+  socket.on('auction:admin:end-lot', payload=>{
+    const body = isPlainObject(payload) ? payload : {};
+    const slug = safeAuctionSlug(body.auctionSlug || body.slug || socket.data.auctionSlug);
+    if(!slug) return;
+
+    const st = getAuction(slug);
+    const winner = st.highBid || null;
+
+    io.to(auctionRoom(slug)).emit('auction:lot-ended', {
+      ok:true,
+      auctionSlug:slug,
+      currentLot:st.currentLot,
+      winner,
+      serverNow:Date.now()/1000
+    });
+
+    st.currentLot = null;
+    st.highBid = null;
+    st.updatedAt = Date.now();
   });
 
   socket.on('mp:join', payload=>{
@@ -570,6 +794,18 @@ io.on('connection', socket=>{
   });
 
   socket.on('disconnect', reason=>{
+    const auctionSlug = socket.data.auctionSlug;
+if(auctionSlug){
+  const st = getAuction(auctionSlug);
+
+  st.viewers.delete(socket.id);
+
+  io.to(auctionRoom(auctionSlug)).emit('auction:viewers', {
+    ok:true,
+    auctionSlug,
+    viewerCount:auctionViewerCount(auctionSlug)
+  });
+}
     const oldWorld = mpGetWorld(who.username);
     for(const world of MP_WORLDS) mpState.worlds.get(world).delete(who.username);
     mpState.userWorld.delete(who.username);
