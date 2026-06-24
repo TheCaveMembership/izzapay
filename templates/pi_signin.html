@@ -783,7 +783,9 @@
   <a href="/izza-game/auth?dest=minigames">Profile</a>
 </div>
 
-  <script>
+  <!-- KEEP YOUR FULL FILE EXACTLY THE SAME ABOVE THIS SCRIPT -->
+
+<script>
 (function(){
   const msg = document.getElementById('msg');
   const err = document.getElementById('err');
@@ -792,6 +794,9 @@
   const topStoreBtn = document.getElementById('topStoreBtn');
   const postUrl = "/auth/exchange";
   const sandbox = {{ 'true' if sandbox else 'false' }};
+
+  const urlParams = new URLSearchParams(window.location.search);
+  const NEXT_FROM_URL = urlParams.get('next') || "/dashboard";
 
   let piReady = false;
 
@@ -885,11 +890,13 @@
     });
   }
 
-  btnClone?.addEventListener('click', ()=>doAuth('/dashboard'));
-  bottomStoreBtn?.addEventListener('click', ()=>doAuth('/dashboard'));
-  topStoreBtn?.addEventListener('click', ()=>doAuth('/dashboard'));
+  btnClone?.addEventListener('click', ()=>doAuth(NEXT_FROM_URL));
+  bottomStoreBtn?.addEventListener('click', ()=>doAuth(NEXT_FROM_URL));
+  topStoreBtn?.addEventListener('click', ()=>doAuth(NEXT_FROM_URL));
 })();
 </script>
+
+<!-- KEEP YOUR FULL FILE EXACTLY THE SAME BELOW THIS SCRIPT -->
 
   <script>
   (function(){
