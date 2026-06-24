@@ -1527,7 +1527,8 @@ def require_merchant_owner(slug):
     if m["owner_user_id"] != u["id"]: abort(403)
     return u, m
 
-    LIVE_AUCTION_STORE_SLUG = "izza-game-crafting"
+
+LIVE_AUCTION_STORE_SLUG = "izza-game-crafting"
 
 def _live_t():
     return (request.values.get("t") or request.args.get("t") or "").strip()
