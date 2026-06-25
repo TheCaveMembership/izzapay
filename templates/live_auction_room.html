@@ -4,31 +4,117 @@
   <meta charset="utf-8">
   <title>{{ auction.title }} — IZZA Live Auction</title>
   <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+
+  <meta name="description" content="{{ auction.description or 'Join the IZZA Live Video Auction room for Pokémon TCG and One Piece TCG auctions powered by IZZA PAY.' }}">
+  <meta property="og:title" content="{{ auction.title }} — IZZA Live Auction">
+  <meta property="og:description" content="{{ auction.description or 'Join the IZZA Live Video Auction room. Watch, chat, bid, and checkout through IZZA PAY.' }}">
+  <meta property="og:type" content="website">
+  <meta property="og:url" content="{{ APP_BASE_URL }}/live-auctions/{{ auction.slug }}">
+  <meta property="og:image" content="{{ auction.image_url or (APP_BASE_URL ~ '/static/izza-live-auctions-preview.png') }}">
+  <meta property="og:image:secure_url" content="{{ auction.image_url or (APP_BASE_URL ~ '/static/izza-live-auctions-preview.png') }}">
+  <meta property="og:image:width" content="1200">
+  <meta property="og:image:height" content="1200">
+
+  <meta name="twitter:card" content="summary_large_image">
+  <meta name="twitter:title" content="{{ auction.title }} — IZZA Live Auction">
+  <meta name="twitter:description" content="{{ auction.description or 'Join the IZZA Live Video Auction room.' }}">
+  <meta name="twitter:image" content="{{ auction.image_url or (APP_BASE_URL ~ '/static/izza-live-auctions-preview.png') }}">
+
   <link rel="stylesheet" href="/static/themes.css">
+  <script src="https://sdk.minepi.com/pi-sdk.js"></script>
+
   <style>
-    body{margin:0;background:#05060b;color:#e8f1ff;font-family:Inter,Arial,sans-serif}
-    .wrap{max-width:1100px;margin:0 auto;padding:18px}
-    .card{background:#0b0f1f;border:1px solid #222b4a;border-radius:18px;padding:16px;margin:14px 0}
-    h1{font-size:30px;margin:10px 0}
+    html,body{max-width:100%;overflow-x:hidden}
+    :root{
+      --txt:#e8f1ff;--muted:#9fb0d6;--line:#1d2540;
+      --piPurple1:#7a44ff;--piPurple2:#b784ff;
+      --gold1:#ffcf4d;--gold2:#ffb23a;
+      --glow-gold:0 0 26px rgba(255,207,77,.45),0 0 64px rgba(255,178,58,.25);
+      --glow-purple:0 0 28px rgba(183,132,255,.35),0 0 64px rgba(122,68,255,.25);
+    }
+    body{
+      margin:0;
+      background:
+        radial-gradient(circle at 50% 0%,rgba(122,68,255,.26),transparent 34%),
+        radial-gradient(circle at 15% 12%,rgba(255,207,77,.12),transparent 28%),
+        #000;
+      color:var(--txt);
+      font-family:Inter,Arial,sans-serif;
+    }
+    .rail{position:fixed;top:0;bottom:0;width:12px;z-index:0;pointer-events:none}
+    .rail.left{left:0;background:linear-gradient(180deg,transparent 0%,rgba(255,207,77,.18) 20%,rgba(255,178,58,.2) 55%,transparent 100%)}
+    .rail.right{right:0;background:linear-gradient(180deg,transparent 0%,rgba(183,132,255,.16) 20%,rgba(122,68,255,.22) 55%,transparent 100%)}
+    .wrap{position:relative;z-index:1;max-width:1100px;margin:0 auto;padding:18px}
+    .topHome{display:flex;justify-content:center;margin:8px 0 14px}
+    .hero{text-align:center;margin:6px auto 18px;max-width:900px}
+    h1{font-size:clamp(30px,7vw,58px);line-height:1.03;margin:10px 0}
     h2{margin:0 0 8px}
-    p,.muted{color:#aeb9da}
+    p,.muted{color:#aeb9da;line-height:1.45}
+    .auctionImg{
+      width:min(100%,760px);
+      max-height:420px;
+      object-fit:cover;
+      border-radius:24px;
+      border:1px solid rgba(255,255,255,.14);
+      box-shadow:0 18px 44px rgba(0,0,0,.5),0 0 34px rgba(122,68,255,.22);
+      margin:14px auto;
+      display:block;
+      background:#080914;
+    }
+    .card{
+      background:linear-gradient(180deg,rgba(16,18,32,.92),rgba(8,9,16,.92));
+      border:1px solid rgba(255,255,255,.11);
+      border-radius:18px;
+      padding:16px;
+      margin:14px 0;
+      box-shadow:0 12px 34px rgba(0,0,0,.34);
+    }
     .grid{display:grid;grid-template-columns:1.3fr .7fr;gap:14px}
     @media(max-width:900px){.grid{grid-template-columns:1fr}}
-    .videoBox{aspect-ratio:16/9;background:#000;border:1px solid #2a3550;border-radius:18px;display:flex;align-items:center;justify-content:center;overflow:hidden}
-    .countdown{font-size:28px;font-weight:900;color:#ffcf4d}
+    .videoBox{
+      aspect-ratio:16/9;
+      background:#000;
+      border:1px solid #2a3550;
+      border-radius:22px;
+      display:flex;
+      align-items:center;
+      justify-content:center;
+      overflow:hidden;
+      text-align:center;
+      box-shadow:var(--glow-purple);
+    }
+    .countdown{font-size:clamp(24px,5vw,38px);font-weight:900;color:#ffcf4d;text-shadow:0 0 20px rgba(255,207,77,.35)}
+    .streamText{text-align:center}
     .chat{height:320px;overflow:auto;background:#070a14;border:1px solid #222b4a;border-radius:12px;padding:10px}
     .chatLine{padding:7px 0;border-bottom:1px solid rgba(255,255,255,.06)}
-    .btn{display:inline-flex;padding:12px 16px;border-radius:12px;text-decoration:none;font-weight:900;border:0;cursor:pointer}
-    .gold{background:linear-gradient(180deg,#ffcf4d,#ffb23a);color:#1a1400}
-    .purple{background:linear-gradient(180deg,#7a44ff,#b784ff);color:white}
+    .btn{display:inline-flex;align-items:center;justify-content:center;gap:8px;padding:12px 16px;border-radius:12px;text-decoration:none;font-weight:900;border:0;cursor:pointer}
+    .gold{background:linear-gradient(180deg,#ffcf4d,#ffb23a);color:#1a1400;box-shadow:var(--glow-gold)}
+    .purple{background:linear-gradient(180deg,#7a44ff,#b784ff);color:white;box-shadow:var(--glow-purple)}
+    .ghost{background:transparent;color:#cfe0ff;border:1px solid #2a3550}
     input{width:100%;padding:12px;border-radius:10px;border:1px solid #2a3550;background:#070a14;color:#fff}
     .row{display:flex;gap:8px}
+    #authMsg{margin-top:10px;color:#aeb9da}
+    #authErr{margin-top:8px;color:#ff9aa2;white-space:pre-wrap}
   </style>
 </head>
 <body>
+  <div class="rail left" id="railL" aria-hidden="true"></div>
+  <div class="rail right" id="railR" aria-hidden="true"></div>
+
   <div class="wrap">
-    <h1>🔴 {{ auction.title }}</h1>
-    <p>{{ auction.description or 'Live auction details coming soon.' }}</p>
+    <div class="topHome">
+      <a class="btn ghost" href="/">Home</a>
+    </div>
+
+    <div class="hero">
+      <h1>🔴 {{ auction.title }}</h1>
+      <div class="countdown" id="countdownTop">Starting soon</div>
+      <p>{{ auction.description or 'Live auction details coming soon.' }}</p>
+
+      {% if auction.image_url %}
+        <img class="auctionImg" src="{{ auction.image_url }}" alt="{{ auction.title }}">
+      {% endif %}
+    </div>
 
     <div class="grid">
       <div>
@@ -36,7 +122,7 @@
           {% if auction.playback_url %}
             <video id="auctionVideo" controls playsinline autoplay muted style="width:100%;height:100%"></video>
           {% else %}
-            <div>
+            <div class="streamText">
               <div class="countdown" id="countdown">Starting soon</div>
               <p>Video stream will appear here when the auction goes live.</p>
             </div>
@@ -79,7 +165,9 @@
             </div>
           {% else %}
             <p>Sign in with Pi to chat and bid.</p>
-            <a class="btn gold" href="/signin?fresh=1">Sign In</a>
+            <button class="btn gold" type="button" id="auctionRoomPiSignInBtn">Sign In</button>
+            <div id="authMsg"></div>
+            <div id="authErr"></div>
           {% endif %}
         </div>
 
@@ -95,6 +183,7 @@
   (function(){
     const startsAt = {{ auction.starts_at or 0 }};
     const countdownEls = [
+      document.getElementById('countdownTop'),
       document.getElementById('countdown'),
       document.getElementById('countdownSmall')
     ].filter(Boolean);
@@ -104,6 +193,7 @@
         countdownEls.forEach(e=>e.textContent='Start time coming soon');
         return;
       }
+
       const now = Math.floor(Date.now()/1000);
       let diff = startsAt - now;
 
@@ -152,6 +242,135 @@
     input?.addEventListener('keydown', e=>{
       if(e.key === 'Enter') send?.click();
     });
+  })();
+  </script>
+
+  {% if not user %}
+  <script>
+  (function(){
+    const btn = document.getElementById('auctionRoomPiSignInBtn');
+    const msg = document.getElementById('authMsg');
+    const err = document.getElementById('authErr');
+
+    const postUrl = "/auth/exchange";
+    const sandbox = {{ 'true' if PI_SANDBOX else 'false' }};
+    const nextPath = "/live-auctions/{{ auction.slug }}{% if t %}?t={{ t|urlencode }}{% endif %}";
+
+    let piReady = false;
+
+    function setMsg(t){ if(msg) msg.textContent = t || ''; }
+    function setErr(t){ if(err) err.textContent = t || ''; }
+
+    function initPi(){
+      if (!window.Pi || !Pi.init) {
+        piReady = false;
+        return false;
+      }
+
+      try {
+        Pi.init({ version: "2.0", sandbox: sandbox });
+        piReady = true;
+        return true;
+      } catch(e) {
+        console.error("Pi.init failed", e);
+        piReady = false;
+        setErr("Pi.init failed: " + (e?.message || e));
+        return false;
+      }
+    }
+
+    function waitForPi(cb, tries){
+      tries = tries || 0;
+
+      if (window.Pi && Pi.init && Pi.authenticate) {
+        if (!piReady) initPi();
+        cb();
+        return;
+      }
+
+      if (tries >= 20) {
+        setMsg("Pi SDK not available. Open in Pi Browser or refresh.");
+        return;
+      }
+
+      setMsg("Loading Pi SDK…");
+      setTimeout(function(){
+        waitForPi(cb, tries + 1);
+      }, 250);
+    }
+
+    initPi();
+
+    function doAuctionRoomAuth(){
+      waitForPi(function(){
+        setErr('');
+
+        if (!piReady) {
+          const ok = initPi();
+          if (!ok) {
+            setMsg("Pi SDK was not ready. Please tap again.");
+            return;
+          }
+        }
+
+        setMsg("Requesting authorization…");
+
+        function onIncompletePaymentFound(_p){}
+
+        Pi.authenticate(['payments','username'], onIncompletePaymentFound)
+          .then(function(auth){
+            const form = document.createElement('form');
+            form.method = 'POST';
+            form.action = postUrl;
+
+            const payload = document.createElement('input');
+            payload.type = 'hidden';
+            payload.name = 'payload';
+            payload.value = JSON.stringify({
+              accessToken: auth.accessToken,
+              user: auth.user,
+              next: nextPath
+            });
+            form.appendChild(payload);
+
+            const nextInp = document.createElement('input');
+            nextInp.type = 'hidden';
+            nextInp.name = 'next';
+            nextInp.value = nextPath;
+            form.appendChild(nextInp);
+
+            document.body.appendChild(form);
+            form.submit();
+          })
+          .catch(function(e){
+            console.error(e);
+            setMsg("Authorization failed. Please try again.");
+            setErr(e?.message || String(e));
+          });
+      });
+    }
+
+    btn?.addEventListener('click', doAuctionRoomAuth);
+  })();
+  </script>
+  {% endif %}
+
+  <script>
+  (function(){
+    const L=document.getElementById('railL'), R=document.getElementById('railR');
+
+    function onScroll(){
+      const doc=document.documentElement;
+      const max=doc.scrollHeight-doc.clientHeight;
+      const p=Math.max(0,Math.min(1,(doc.scrollTop||0)/(max||1)));
+      const g=8+44*p, a=0.18+0.35*p;
+
+      if(L) L.style.boxShadow=`0 0 ${g}px ${g/6}px rgba(255,207,77,${a})`;
+      if(R) R.style.boxShadow=`0 0 ${g}px ${g/6}px rgba(183,132,255,${a})`;
+    }
+
+    onScroll();
+    window.addEventListener('scroll', onScroll, {passive:true});
   })();
   </script>
 </body>
