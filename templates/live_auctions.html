@@ -36,7 +36,10 @@
 
     body{
       margin:0;
-      background:#000;
+      background:
+        radial-gradient(circle at 50% 0%,rgba(122,68,255,.26),transparent 34%),
+        radial-gradient(circle at 15% 12%,rgba(255,207,77,.12),transparent 28%),
+        #000;
       color:#e8f1ff;
       font-family:Inter,Arial,sans-serif;
       text-align:center;
@@ -64,9 +67,7 @@
       z-index:1;
     }
 
-    .hero{
-      padding:12px 0 8px;
-    }
+    .hero{padding:12px 0 8px}
 
     .hero h1{
       font-size:clamp(30px,8vw,56px);
@@ -83,6 +84,16 @@
       color:#aeb9da;
       line-height:1.5;
       font-size:clamp(15px,3.8vw,18px);
+    }
+
+    .auctionPreview{
+      width:min(100%,620px);
+      border-radius:26px;
+      border:1px solid rgba(255,255,255,.14);
+      display:block;
+      margin:16px auto 14px;
+      box-shadow:0 18px 44px rgba(0,0,0,.55),0 0 38px rgba(122,68,255,.28),0 0 28px rgba(255,207,77,.18);
+      background:#080914;
     }
 
     .heroPills{
@@ -140,6 +151,7 @@
     @media (max-width:600px){
       .wrap{padding-left:16px;padding-right:16px}
       .card{padding:14px}
+      .auctionPreview{border-radius:20px}
     }
   </style>
 </head>
@@ -154,6 +166,9 @@
   <div class="wrap">
     <div class="hero">
       <h1>🔴 IZZA Live Video Auctions</h1>
+
+      <img class="auctionPreview" src="/static/live-auctions-preview.png.PNG" alt="IZZA Live Video Auctions">
+
       <p>Sign up once to be part of the first Pi Network live video auction experience for One Piece TCG and Pokémon TCG. Auction wins will checkout through IZZA PAY.</p>
       <div class="heroPills">
         <span class="pill">Pokémon TCG</span>
@@ -241,7 +256,7 @@
     const err = document.getElementById('authErr');
 
     const postUrl = "/auth/exchange";
-    const sandbox = {{ 'true' if sandbox else 'false' }};
+    const sandbox = {{ 'true' if PI_SANDBOX else 'false' }};
     let piReady = false;
 
     function setMsg(t){ if(msg) msg.textContent = t || ''; }
