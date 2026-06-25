@@ -137,16 +137,16 @@
         </div>
 
         <div class="card">
-          <h2>Lots</h2>
+          <h2>My Wins</h2>
           {% for lot in lots %}
             <div class="card">
               <h2>#{{ lot.lot_number or lot.id }} — {{ lot.title }}</h2>
               <p>{{ lot.description or '' }}</p>
-              <p><strong>Starting:</strong> {{ lot.starting_bid_pi }} π</p>
+              <p><strong>Winning Bid:</strong> {{ lot.starting_bid_pi }} π</p>
               <p><strong>Status:</strong> {{ lot.status }}</p>
             </div>
           {% else %}
-            <p>No lots added yet.</p>
+            <p>No auction wins yet. When you win a card during the livestream, it will appear here. All of your wins will be totalled and a final checkout will become available for you at the end of the live stream.</p>
           {% endfor %}
         </div>
       </div>
@@ -173,7 +173,7 @@
 
         <div class="card">
           <h2>Checkout Flow</h2>
-          <p>When you win lots, IZZA will bundle your wins into one checkout item through the IZZA store, then you pay once through IZZA PAY.</p>
+          <p>When you win cards during the livestream, IZZA will total your wins and make one final checkout available at the end of the live stream through IZZA PAY.</p>
         </div>
       </div>
     </div>
