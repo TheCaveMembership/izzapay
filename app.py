@@ -1530,6 +1530,12 @@ def require_merchant_owner(slug):
 
 LIVE_AUCTION_STORE_SLUG = "izza-game-crafting"
 
+# Ensure live auction image column exists
+with conn() as cx:
+    cols = {r["name"] for r in cx.execute("PRAGMA table_info(live_auctions)")}
+    if "image_url" not in cols:
+        cx.execute("ALTER TABLE live_auctions ADD COLUMN image_url TEXT")
+
 def _live_t():
     return (request.values.get("t") or request.args.get("t") or "").strip()
 
@@ -1580,21 +1586,14 @@ def live_auctions_public():
                 (uname,)
             ).fetchone()
 
-    return render_template(
-        "live_auctions.html",
-        auctions=auctions,
-        signup=signup,
-        user=u,
-        t=t
-    )
+    return render_template("live_auctions.html", auctions=auctions, signup=signup, user=u, t=t)
 
 
 @app.post("/live-auctions/signup")
 def live_auctions_signup():
-    t = _live_t()
     u = current_user_row()
     if not u:
-        return redirect(_with_t("/signin?fresh=1"))
+        return redirect(_with_t("/signin?fresh=1&next=/live-auctions"))
 
     username = (u["username"] or u["pi_username"] or "").strip().lower()
     pi_uid = u["pi_uid"] if "pi_uid" in u.keys() else None
@@ -1604,7 +1603,7 @@ def live_auctions_signup():
     now = int(time.time())
 
     if not username:
-        return redirect(_with_t("/signin?fresh=1"))
+        return redirect(_with_t("/signin?fresh=1&next=/live-auctions"))
 
     with conn() as cx:
         cx.execute("""
@@ -1663,6 +1662,7 @@ def live_auctions_create():
     tcg_type = (request.form.get("tcg_type") or "mixed").strip()
     starts_at_raw = (request.form.get("starts_at") or "").strip()
     length_raw = (request.form.get("scheduled_length_minutes") or "60").strip()
+    image_url = (request.form.get("image_url") or "").strip()
 
     if not title:
         abort(400)
@@ -1688,13 +1688,40 @@ def live_auctions_create():
             INSERT INTO live_auctions(
               merchant_id, slug, title, description, tcg_type,
               starts_at, scheduled_length_minutes, status,
-              stream_status, created_by_username, created_at, updated_at
+              stream_status, created_by_username, image_url, created_at, updated_at
             )
-            VALUES(?,?,?,?,?,?,?,'scheduled','offline',?,?,?)
+            VALUES(?,?,?,?,?,?,?,'scheduled','offline',?,?,?,?)
         """, (
             m["id"], slug, title, description, tcg_type,
-            starts_at, length, created_by, now, now
+            starts_at, length, created_by, image_url, now, now
         ))
+
+    return redirect(_with_t("/live-auctions/admin"))
+
+
+@app.post("/live-auctions/admin/delete")
+def live_auctions_delete():
+    u, m, fail = require_live_auction_owner()
+    if fail:
+        return fail
+
+    try:
+        auction_id = int(request.form.get("auction_id") or 0)
+    except Exception:
+        auction_id = 0
+
+    if auction_id <= 0:
+        abort(400)
+
+    with conn() as cx:
+        cx.execute(
+            "DELETE FROM live_auction_lots WHERE auction_id=?",
+            (auction_id,)
+        )
+        cx.execute(
+            "DELETE FROM live_auctions WHERE id=? AND merchant_id=?",
+            (auction_id, m["id"])
+        )
 
     return redirect(_with_t("/live-auctions/admin"))
 
@@ -1730,7 +1757,7 @@ def live_auction_room(auction_slug):
         signup_count=signup_count,
         user=u,
         t=t
-    )    
+    )
 
 def get_or_create_cart(merchant_id, cid=None):
     with conn() as cx:
