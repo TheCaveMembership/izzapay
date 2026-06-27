@@ -1548,9 +1548,6 @@ def _row_cols(cx, table):
     except Exception:
         return set()
 
-def _has_col(cx, table, col):
-    return col in _row_cols(cx, table)
-
 def _auction_username(u):
     if not u:
         return ""
@@ -1672,16 +1669,36 @@ with conn() as cx:
           auction_id INTEGER NOT NULL,
           user_id INTEGER,
           username TEXT NOT NULL,
-          card_title TEXT NOT NULL,
+          card_title TEXT,
           card_description TEXT,
           card_image_url TEXT,
-          winning_bid_pi REAL NOT NULL,
+          winning_bid_pi REAL DEFAULT 0,
           status TEXT NOT NULL DEFAULT 'won',
           checkout_id INTEGER,
-          created_at INTEGER NOT NULL,
-          updated_at INTEGER NOT NULL
+          created_at INTEGER,
+          updated_at INTEGER
         )
     """)
+
+    law_cols = _row_cols(cx, "live_auction_wins")
+    if "user_id" not in law_cols:
+        cx.execute("ALTER TABLE live_auction_wins ADD COLUMN user_id INTEGER")
+    if "card_title" not in law_cols:
+        cx.execute("ALTER TABLE live_auction_wins ADD COLUMN card_title TEXT")
+    if "card_description" not in law_cols:
+        cx.execute("ALTER TABLE live_auction_wins ADD COLUMN card_description TEXT")
+    if "card_image_url" not in law_cols:
+        cx.execute("ALTER TABLE live_auction_wins ADD COLUMN card_image_url TEXT")
+    if "winning_bid_pi" not in law_cols:
+        cx.execute("ALTER TABLE live_auction_wins ADD COLUMN winning_bid_pi REAL DEFAULT 0")
+    if "status" not in law_cols:
+        cx.execute("ALTER TABLE live_auction_wins ADD COLUMN status TEXT DEFAULT 'won'")
+    if "checkout_id" not in law_cols:
+        cx.execute("ALTER TABLE live_auction_wins ADD COLUMN checkout_id INTEGER")
+    if "created_at" not in law_cols:
+        cx.execute("ALTER TABLE live_auction_wins ADD COLUMN created_at INTEGER")
+    if "updated_at" not in law_cols:
+        cx.execute("ALTER TABLE live_auction_wins ADD COLUMN updated_at INTEGER")
 
     cx.execute("""
         CREATE TABLE IF NOT EXISTS live_auction_checkouts(
@@ -1692,14 +1709,34 @@ with conn() as cx:
           merchant_id INTEGER NOT NULL,
           item_id INTEGER,
           link_id TEXT,
-          total_pi REAL NOT NULL,
-          wins_json TEXT NOT NULL,
+          total_pi REAL NOT NULL DEFAULT 0,
+          wins_json TEXT NOT NULL DEFAULT '[]',
           status TEXT NOT NULL DEFAULT 'pending',
-          created_at INTEGER NOT NULL,
-          updated_at INTEGER NOT NULL,
+          created_at INTEGER,
+          updated_at INTEGER,
           UNIQUE(auction_id, username)
         )
     """)
+
+    lac_cols = _row_cols(cx, "live_auction_checkouts")
+    if "user_id" not in lac_cols:
+        cx.execute("ALTER TABLE live_auction_checkouts ADD COLUMN user_id INTEGER")
+    if "merchant_id" not in lac_cols:
+        cx.execute("ALTER TABLE live_auction_checkouts ADD COLUMN merchant_id INTEGER")
+    if "item_id" not in lac_cols:
+        cx.execute("ALTER TABLE live_auction_checkouts ADD COLUMN item_id INTEGER")
+    if "link_id" not in lac_cols:
+        cx.execute("ALTER TABLE live_auction_checkouts ADD COLUMN link_id TEXT")
+    if "total_pi" not in lac_cols:
+        cx.execute("ALTER TABLE live_auction_checkouts ADD COLUMN total_pi REAL DEFAULT 0")
+    if "wins_json" not in lac_cols:
+        cx.execute("ALTER TABLE live_auction_checkouts ADD COLUMN wins_json TEXT DEFAULT '[]'")
+    if "status" not in lac_cols:
+        cx.execute("ALTER TABLE live_auction_checkouts ADD COLUMN status TEXT DEFAULT 'pending'")
+    if "created_at" not in lac_cols:
+        cx.execute("ALTER TABLE live_auction_checkouts ADD COLUMN created_at INTEGER")
+    if "updated_at" not in lac_cols:
+        cx.execute("ALTER TABLE live_auction_checkouts ADD COLUMN updated_at INTEGER")
 
     cx.execute("CREATE INDEX IF NOT EXISTS idx_live_auction_wins_auction_user ON live_auction_wins(auction_id, username)")
     cx.execute("CREATE INDEX IF NOT EXISTS idx_live_auction_checkouts_auction_user ON live_auction_checkouts(auction_id, username)")
@@ -1733,20 +1770,34 @@ def _create_auction_checkout_item(cx, merchant_id, auction, username, total_pi, 
     cols = _row_cols(cx, "items")
     data = {}
 
-    if "merchant_id" in cols: data["merchant_id"] = int(merchant_id)
-    if "title" in cols: data["title"] = title
-    if "description" in cols: data["description"] = description
-    if "image_url" in cols: data["image_url"] = image_url
-    if "link_id" in cols: data["link_id"] = link_id
-    if "pi_price" in cols: data["pi_price"] = float(total_pi)
-    if "price_pi" in cols: data["price_pi"] = float(total_pi)
-    if "stock_qty" in cols: data["stock_qty"] = 1
-    if "qty" in cols: data["qty"] = 1
-    if "active" in cols: data["active"] = 1
-    if "allow_backorder" in cols: data["allow_backorder"] = 0
-    if "created_at" in cols: data["created_at"] = now
-    if "sku" in cols: data["sku"] = f"AUCTION-{auction['id']}-{username}".upper()[:64]
-    if "fulfillment_kind" in cols: data["fulfillment_kind"] = "physical"
+    if "merchant_id" in cols:
+        data["merchant_id"] = int(merchant_id)
+    if "title" in cols:
+        data["title"] = title
+    if "description" in cols:
+        data["description"] = description
+    if "image_url" in cols:
+        data["image_url"] = image_url
+    if "link_id" in cols:
+        data["link_id"] = link_id
+    if "pi_price" in cols:
+        data["pi_price"] = float(total_pi)
+    if "price_pi" in cols:
+        data["price_pi"] = float(total_pi)
+    if "stock_qty" in cols:
+        data["stock_qty"] = 1
+    if "qty" in cols:
+        data["qty"] = 1
+    if "active" in cols:
+        data["active"] = 1
+    if "allow_backorder" in cols:
+        data["allow_backorder"] = 0
+    if "created_at" in cols:
+        data["created_at"] = now
+    if "sku" in cols:
+        data["sku"] = f"AUCTION-{auction['id']}-{username}".upper()[:64]
+    if "fulfillment_kind" in cols:
+        data["fulfillment_kind"] = "physical"
 
     if not data:
         raise RuntimeError("items_table_has_no_supported_columns")
