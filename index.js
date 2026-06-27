@@ -475,17 +475,42 @@ function auctionRoom(slug){
 
 function getAuction(slug){
   slug = String(slug || '').trim().toLowerCase();
+
   if(!auctionState.rooms.has(slug)){
     auctionState.rooms.set(slug, {
       slug,
+
+      // Connected viewers
       viewers:new Map(),
+
+      // Live chat history
       chat:[],
+
+      // Current auction lot
       currentLot:null,
+
+      // Highest bid for current lot
       highBid:null,
+
+      // Auction status
       started:false,
+
+      // Live stream host
+      hostSocketId:null,
+      hostUsername:'',
+      streamStatus:'offline',
+
+      // Current auction round
+      round:null,
+
+      // Winner history for this auction
+      wins:new Map(),
+
+      // Last update timestamp
       updatedAt:Date.now()
     });
   }
+
   return auctionState.rooms.get(slug);
 }
 
@@ -575,6 +600,84 @@ io.on('connection', socket=>{
       socket.emit('auction:error', { ok:false, error:'join_failed', message:e.message });
     }
   });
+
+  // WebRTC live video signaling
+socket.on('auction:host-join', payload=>{
+  const body = isPlainObject(payload) ? payload : {};
+  const slug = safeAuctionSlug(body.auctionSlug || body.slug || socket.data.auctionSlug);
+  if(!slug) return;
+
+  const st = getAuction(slug);
+  socket.join(auctionRoom(slug));
+  socket.data.auctionSlug = slug;
+  socket.data.auctionHost = true;
+
+  st.hostSocketId = socket.id;
+  st.hostUsername = who.username;
+  st.streamStatus = 'ready';
+  st.updatedAt = Date.now();
+
+  io.to(auctionRoom(slug)).emit('auction:stream-ready', {
+    ok:true,
+    auctionSlug:slug,
+    hostUsername:who.username
+  });
+});
+
+socket.on('auction:viewer-ready', payload=>{
+  const body = isPlainObject(payload) ? payload : {};
+  const slug = safeAuctionSlug(body.auctionSlug || body.slug || socket.data.auctionSlug);
+  if(!slug) return;
+
+  const st = getAuction(slug);
+  if(st.hostSocketId){
+    io.to(st.hostSocketId).emit('auction:viewer-ready', {
+      ok:true,
+      auctionSlug:slug,
+      viewerSocketId:socket.id,
+      username:who.username
+    });
+  }
+});
+
+socket.on('auction:webrtc-offer', payload=>{
+  const body = isPlainObject(payload) ? payload : {};
+  const target = String(body.targetSocketId || '').trim();
+  if(!target || !body.offer) return;
+
+  io.to(target).emit('auction:webrtc-offer', {
+    ok:true,
+    auctionSlug:safeAuctionSlug(body.auctionSlug || body.slug || socket.data.auctionSlug),
+    fromSocketId:socket.id,
+    offer:body.offer
+  });
+});
+
+socket.on('auction:webrtc-answer', payload=>{
+  const body = isPlainObject(payload) ? payload : {};
+  const target = String(body.targetSocketId || '').trim();
+  if(!target || !body.answer) return;
+
+  io.to(target).emit('auction:webrtc-answer', {
+    ok:true,
+    auctionSlug:safeAuctionSlug(body.auctionSlug || body.slug || socket.data.auctionSlug),
+    fromSocketId:socket.id,
+    answer:body.answer
+  });
+});
+
+socket.on('auction:webrtc-ice', payload=>{
+  const body = isPlainObject(payload) ? payload : {};
+  const target = String(body.targetSocketId || '').trim();
+  if(!target || !body.candidate) return;
+
+  io.to(target).emit('auction:webrtc-ice', {
+    ok:true,
+    auctionSlug:safeAuctionSlug(body.auctionSlug || body.slug || socket.data.auctionSlug),
+    fromSocketId:socket.id,
+    candidate:body.candidate
+  });
+});
 
   socket.on('auction:chat', payload=>{
     try{
