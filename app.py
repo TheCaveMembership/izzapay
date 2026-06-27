@@ -1667,6 +1667,7 @@ with conn() as cx:
         CREATE TABLE IF NOT EXISTS live_auction_wins(
           id INTEGER PRIMARY KEY AUTOINCREMENT,
           auction_id INTEGER NOT NULL,
+          lot_id INTEGER DEFAULT 0,
           user_id INTEGER,
           username TEXT NOT NULL,
           card_title TEXT,
@@ -1681,6 +1682,8 @@ with conn() as cx:
     """)
 
     law_cols = _row_cols(cx, "live_auction_wins")
+    if "lot_id" not in law_cols:
+        cx.execute("ALTER TABLE live_auction_wins ADD COLUMN lot_id INTEGER DEFAULT 0")
     if "user_id" not in law_cols:
         cx.execute("ALTER TABLE live_auction_wins ADD COLUMN user_id INTEGER")
     if "card_title" not in law_cols:
@@ -1744,6 +1747,45 @@ with conn() as cx:
 
 def _auction_checkout_title(auction, username):
     return f"IZZA Live Auction Wins — @{username}"
+
+def _insert_live_auction_win(cx, auction, user_id, username, card_title, card_description, card_image_url, winning_bid_pi, lot_id=0):
+    now = int(time.time())
+    cols = _row_cols(cx, "live_auction_wins")
+
+    data = {}
+
+    if "auction_id" in cols:
+        data["auction_id"] = int(auction["id"])
+    if "lot_id" in cols:
+        data["lot_id"] = int(lot_id or 0)
+    if "user_id" in cols:
+        data["user_id"] = user_id
+    if "username" in cols:
+        data["username"] = username
+    if "card_title" in cols:
+        data["card_title"] = card_title
+    if "card_description" in cols:
+        data["card_description"] = card_description
+    if "card_image_url" in cols:
+        data["card_image_url"] = card_image_url
+    if "winning_bid_pi" in cols:
+        data["winning_bid_pi"] = float(winning_bid_pi or 0)
+    if "status" in cols:
+        data["status"] = "won"
+    if "created_at" in cols:
+        data["created_at"] = now
+    if "updated_at" in cols:
+        data["updated_at"] = now
+
+    keys = list(data.keys())
+    vals = [data[k] for k in keys]
+
+    cx.execute(
+        f"INSERT INTO live_auction_wins({','.join(keys)}) VALUES({','.join(['?'] * len(keys))})",
+        vals
+    )
+
+    return int(cx.execute("SELECT last_insert_rowid() AS id").fetchone()["id"])
 
 def _create_auction_checkout_item(cx, merchant_id, auction, username, total_pi, wins):
     link_id = uuid.uuid4().hex[:8]
@@ -1943,6 +1985,29 @@ def live_auctions_create():
             m["id"], slug, title, description, tcg_type,
             starts_at, length, created_by, image_url, now, now
         ))
+
+    return redirect(_with_t("/live-auctions/admin"))
+
+
+@app.post("/live-auctions/admin/delete")
+def live_auctions_delete():
+    u, m, fail = require_live_auction_owner()
+    if fail:
+        return fail
+
+    try:
+        auction_id = int(request.form.get("auction_id") or 0)
+    except Exception:
+        auction_id = 0
+
+    if auction_id <= 0:
+        abort(400)
+
+    with conn() as cx:
+        cx.execute("DELETE FROM live_auction_lots WHERE auction_id=?", (auction_id,))
+        cx.execute("DELETE FROM live_auction_wins WHERE auction_id=?", (auction_id,))
+        cx.execute("DELETE FROM live_auction_checkouts WHERE auction_id=?", (auction_id,))
+        cx.execute("DELETE FROM live_auctions WHERE id=? AND merchant_id=?", (auction_id, m["id"]))
 
     return redirect(_with_t("/live-auctions/admin"))
 
