@@ -22,6 +22,7 @@
 
   <link rel="stylesheet" href="/static/themes.css">
   <script src="https://sdk.minepi.com/pi-sdk.js"></script>
+  <script src="https://izzagame.onrender.com/socket.io/socket.io.js"></script>
 
   <style>
     html,body{max-width:100%;overflow-x:hidden}
@@ -82,22 +83,59 @@
       overflow:hidden;
       text-align:center;
       box-shadow:var(--glow-purple);
+      position:relative;
+    }
+    .videoBox video{
+      width:100%;
+      height:100%;
+      object-fit:cover;
+      display:none;
+      background:#000;
+    }
+    .streamText{
+      text-align:center;
+      padding:14px;
+      position:absolute;
+      inset:0;
+      display:flex;
+      flex-direction:column;
+      align-items:center;
+      justify-content:center;
+      background:radial-gradient(circle at 50% 35%,rgba(122,68,255,.22),transparent 42%),#000;
     }
     .countdown{font-size:clamp(24px,5vw,38px);font-weight:900;color:#ffcf4d;text-shadow:0 0 20px rgba(255,207,77,.35)}
-    .streamText{text-align:center}
     .chat{height:320px;overflow:auto;background:#070a14;border:1px solid #222b4a;border-radius:12px;padding:10px}
     .chatLine{padding:7px 0;border-bottom:1px solid rgba(255,255,255,.06)}
     .btn{display:inline-flex;align-items:center;justify-content:center;gap:8px;padding:12px 16px;border-radius:12px;text-decoration:none;font-weight:900;border:0;cursor:pointer}
     .gold{background:linear-gradient(180deg,#ffcf4d,#ffb23a);color:#1a1400;box-shadow:var(--glow-gold)}
     .purple{background:linear-gradient(180deg,#7a44ff,#b784ff);color:white;box-shadow:var(--glow-purple)}
     .ghost{background:transparent;color:#cfe0ff;border:1px solid #2a3550}
-    input{width:100%;padding:12px;border-radius:10px;border:1px solid #2a3550;background:#070a14;color:#fff}
+    .danger{background:linear-gradient(180deg,#ff5c7a,#d91f4b);color:white}
+    input,textarea{width:100%;box-sizing:border-box;padding:12px;border-radius:10px;border:1px solid #2a3550;background:#070a14;color:#fff}
+    textarea{min-height:70px}
     .row{display:flex;gap:8px}
-    #authMsg{margin-top:10px;color:#aeb9da}
-    #authErr{margin-top:8px;color:#ff9aa2;white-space:pre-wrap}
+    .stack{display:flex;flex-direction:column;gap:8px}
+    .pill{display:inline-block;border:1px solid #2a3550;border-radius:999px;padding:5px 9px;color:#cfe0ff;font-size:12px;background:#0b0f1f}
+    .bidBox{display:flex;gap:8px;margin-top:10px}
+    .bidBox input{max-width:140px}
+    .currentLotCard{border-color:rgba(255,207,77,.35)}
+    .winItem{border-color:rgba(90,212,158,.5)}
+    #authMsg,#socketMsg{margin-top:10px;color:#aeb9da}
+    #authErr,#socketErr{margin-top:8px;color:#ff9aa2;white-space:pre-wrap}
+    @media(max-width:520px){
+      .row,.bidBox{flex-direction:column}
+      .bidBox input{max-width:none}
+    }
   </style>
 </head>
 <body>
+  {% set viewer_name = ((user.username or user.pi_username) if user else '') %}
+  {% set created_by = (auction.created_by_username if auction.created_by_username is defined else '') %}
+  {% set room_host = false %}
+  {% if user and ((is_host is defined and is_host) or (created_by and viewer_name|lower == created_by|lower)) %}
+    {% set room_host = true %}
+  {% endif %}
+
   <div class="rail left" id="railL" aria-hidden="true"></div>
   <div class="rail right" id="railR" aria-hidden="true"></div>
 
@@ -120,34 +158,83 @@
       <div>
         <div class="videoBox" id="videoBox">
           {% if auction.playback_url %}
-            <video id="auctionVideo" controls playsinline autoplay muted style="width:100%;height:100%"></video>
-          {% else %}
-            <div class="streamText">
-              <div class="countdown" id="countdown">Starting soon</div>
-              <p>Video stream will appear here when the auction goes live.</p>
+            <video id="auctionVideo" controls playsinline autoplay muted></video>
+          {% endif %}
+
+          <video id="remoteVideo" playsinline autoplay controls></video>
+          <video id="hostPreview" playsinline autoplay muted></video>
+
+          <div class="streamText" id="streamText">
+            <div class="countdown" id="countdown">Starting soon</div>
+            <p id="streamStatusText">Video stream will appear here when the auction goes live.</p>
+          </div>
+        </div>
+
+        {% if user and room_host %}
+          <div class="card">
+            <h2>Host Live Controls</h2>
+            <p class="muted">Use your iPhone camera to start the livestream. Start one round per card, then end the round to announce the winner.</p>
+
+            <div class="row" style="margin-bottom:10px;flex-wrap:wrap">
+              <button class="btn gold" id="startCameraBtn" type="button">Start iPhone Camera</button>
+              <button class="btn danger" id="stopCameraBtn" type="button">Stop Camera</button>
             </div>
+
+            <div class="stack">
+              <input id="roundTitle" placeholder="Card title, example: Charizard VMAX / One Piece Manga Rare">
+              <textarea id="roundDescription" placeholder="Card details, condition, set, notes..."></textarea>
+              <div class="row">
+                <input id="roundStartingBid" type="number" step="0.01" min="0" placeholder="Starting bid π">
+                <input id="roundIncrement" type="number" step="0.01" min="0.01" placeholder="Bid increment π">
+              </div>
+              <div class="row" style="flex-wrap:wrap">
+                <button class="btn purple" id="startRoundBtn" type="button">Start Auction Round</button>
+                <button class="btn gold" id="endRoundBtn" type="button">End Round / Declare Winner</button>
+              </div>
+            </div>
+          </div>
+        {% endif %}
+
+        <div class="card">
+          <h2>Auction Status</h2>
+          <p><strong>Status:</strong> {{ auction.status }} / <span id="liveStreamStatus">{{ auction.stream_status }}</span></p>
+          <p><strong>Signed up:</strong> {{ signup_count }} IZZA users</p>
+          <p><strong>Viewers:</strong> <span id="viewerCount">—</span></p>
+          <div class="countdown" id="countdownSmall">—</div>
+          <div id="socketMsg"></div>
+          <div id="socketErr"></div>
+        </div>
+
+        <div class="card currentLotCard">
+          <h2>Current Card Round</h2>
+          <p id="currentLotTitle">No card is currently being auctioned.</p>
+          <p id="currentLotDesc" class="muted"></p>
+          <p><strong>High Bid:</strong> <span id="highBidText">—</span></p>
+
+          {% if user %}
+            <div class="bidBox">
+              <input id="bidAmount" type="number" step="0.01" min="0" placeholder="Your bid π">
+              <button class="btn gold" id="placeBidBtn" type="button">Place Bid</button>
+            </div>
+          {% else %}
+            <p class="muted">Sign in with Pi to place bids.</p>
           {% endif %}
         </div>
 
         <div class="card">
-          <h2>Auction Status</h2>
-          <p><strong>Status:</strong> {{ auction.status }} / {{ auction.stream_status }}</p>
-          <p><strong>Signed up:</strong> {{ signup_count }} IZZA users</p>
-          <div class="countdown" id="countdownSmall">—</div>
-        </div>
-
-        <div class="card">
           <h2>My Wins</h2>
-          {% for lot in lots %}
-            <div class="card">
-              <h2>#{{ lot.lot_number or lot.id }} — {{ lot.title }}</h2>
-              <p>{{ lot.description or '' }}</p>
-              <p><strong>Winning Bid:</strong> {{ lot.starting_bid_pi }} π</p>
-              <p><strong>Status:</strong> {{ lot.status }}</p>
-            </div>
-          {% else %}
-            <p>No auction wins yet. When you win a card during the livestream, it will appear here. All of your wins will be totalled and a final checkout will become available for you at the end of the live stream.</p>
-          {% endfor %}
+          <div id="myWinsList">
+            {% for lot in lots %}
+              <div class="card winItem">
+                <h2>#{{ lot.lot_number or lot.id }} — {{ lot.title }}</h2>
+                <p>{{ lot.description or '' }}</p>
+                <p><strong>Winning Bid:</strong> {{ lot.starting_bid_pi }} π</p>
+                <p><strong>Status:</strong> {{ lot.status }}</p>
+              </div>
+            {% else %}
+              <p id="noWinsText">No auction wins yet. When you win a card during the livestream, it will appear here. All of your wins will be totalled and a final checkout will become available for you at the end of the live stream.</p>
+            {% endfor %}
+          </div>
         </div>
       </div>
 
@@ -217,11 +304,82 @@
   })();
   </script>
 
+  {% if user %}
   <script>
   (function(){
+    const NODE_BASE = "https://izzagame.onrender.com";
+    const AUCTION_SLUG = {{ auction.slug|tojson }};
+    const USERNAME = {{ viewer_name|tojson }};
+    const TOKEN = {{ (t or '')|tojson }};
+    const IS_HOST = {{ 'true' if room_host else 'false' }};
+    const PLAYBACK_URL = {{ (auction.playback_url or '')|tojson }};
+
     const chatBox = document.getElementById('chatBox');
     const input = document.getElementById('chatInput');
     const send = document.getElementById('chatSend');
+
+    const socketMsg = document.getElementById('socketMsg');
+    const socketErr = document.getElementById('socketErr');
+    const viewerCount = document.getElementById('viewerCount');
+    const liveStreamStatus = document.getElementById('liveStreamStatus');
+
+    const streamText = document.getElementById('streamText');
+    const streamStatusText = document.getElementById('streamStatusText');
+    const auctionVideo = document.getElementById('auctionVideo');
+    const remoteVideo = document.getElementById('remoteVideo');
+    const hostPreview = document.getElementById('hostPreview');
+
+    const currentLotTitle = document.getElementById('currentLotTitle');
+    const currentLotDesc = document.getElementById('currentLotDesc');
+    const highBidText = document.getElementById('highBidText');
+    const bidAmount = document.getElementById('bidAmount');
+    const placeBidBtn = document.getElementById('placeBidBtn');
+
+    const startCameraBtn = document.getElementById('startCameraBtn');
+    const stopCameraBtn = document.getElementById('stopCameraBtn');
+    const startRoundBtn = document.getElementById('startRoundBtn');
+    const endRoundBtn = document.getElementById('endRoundBtn');
+    const roundTitle = document.getElementById('roundTitle');
+    const roundDescription = document.getElementById('roundDescription');
+    const roundStartingBid = document.getElementById('roundStartingBid');
+    const roundIncrement = document.getElementById('roundIncrement');
+
+    const myWinsList = document.getElementById('myWinsList');
+    const noWinsText = document.getElementById('noWinsText');
+
+    let currentLot = null;
+    let highBid = null;
+    let localStream = null;
+    let activeRoundId = '';
+    let socket = null;
+
+    const pcs = new Map();
+
+    const rtcConfig = {
+      iceServers: [
+        { urls: "stun:stun.l.google.com:19302" },
+        { urls: "stun:stun1.l.google.com:19302" }
+      ]
+    };
+
+    function setMsg(t){ if(socketMsg) socketMsg.textContent = t || ''; }
+    function setErr(t){ if(socketErr) socketErr.textContent = t || ''; }
+
+    function showVideo(el){
+      if(streamText) streamText.style.display = 'none';
+      [auctionVideo, remoteVideo, hostPreview].forEach(v=>{
+        if(v && v !== el) v.style.display = 'none';
+      });
+      if(el) el.style.display = 'block';
+    }
+
+    function showStreamText(t){
+      if(streamText) streamText.style.display = 'flex';
+      if(streamStatusText) streamStatusText.textContent = t || 'Video stream will appear here when the auction goes live.';
+      [auctionVideo, remoteVideo, hostPreview].forEach(v=>{
+        if(v) v.style.display = 'none';
+      });
+    }
 
     function addLine(text){
       if(!chatBox) return;
@@ -232,18 +390,394 @@
       chatBox.scrollTop = chatBox.scrollHeight;
     }
 
+    function paintLot(lot){
+      currentLot = lot || null;
+
+      if(!currentLot){
+        if(currentLotTitle) currentLotTitle.textContent = 'No card is currently being auctioned.';
+        if(currentLotDesc) currentLotDesc.textContent = '';
+        if(highBidText) highBidText.textContent = '—';
+        return;
+      }
+
+      if(currentLotTitle) currentLotTitle.textContent = currentLot.title || 'Current card';
+      if(currentLotDesc) currentLotDesc.textContent = currentLot.description || '';
+      if(highBidText) highBidText.textContent = highBid ? `${highBid.bidPi} π by @${highBid.username}` : `Starting at ${currentLot.startingBidPi || 0} π`;
+
+      if(bidAmount && !bidAmount.value){
+        const starting = Number(currentLot.startingBidPi || 0);
+        const inc = Number(currentLot.bidIncrementPi || 0.01);
+        const next = highBid ? Number(highBid.bidPi || 0) + inc : starting;
+        bidAmount.value = next.toFixed(2);
+      }
+    }
+
+    function paintBid(bid){
+      highBid = bid || null;
+      if(highBidText){
+        highBidText.textContent = highBid ? `${highBid.bidPi} π by @${highBid.username}` : '—';
+      }
+
+      if(bidAmount && currentLot){
+        const inc = Number(currentLot.bidIncrementPi || 0.01);
+        const next = highBid ? Number(highBid.bidPi || 0) + inc : Number(currentLot.startingBidPi || 0);
+        bidAmount.value = next.toFixed(2);
+      }
+    }
+
+    function addWin(winner, lot){
+      if(!winner || !lot) return;
+      if(String(winner.username || '').toLowerCase() !== String(USERNAME || '').toLowerCase()) return;
+
+      if(noWinsText) noWinsText.remove();
+
+      const div = document.createElement('div');
+      div.className = 'card winItem';
+      div.innerHTML = `
+        <h2>${escapeHtml(lot.title || 'Won card')}</h2>
+        <p>${escapeHtml(lot.description || '')}</p>
+        <p><strong>Winning Bid:</strong> ${Number(winner.bidPi || 0)} π</p>
+        <p><strong>Status:</strong> Won during livestream</p>
+      `;
+      myWinsList?.appendChild(div);
+    }
+
+    function escapeHtml(s){
+      return String(s || '').replace(/[&<>"']/g, c => ({
+        '&':'&amp;',
+        '<':'&lt;',
+        '>':'&gt;',
+        '"':'&quot;',
+        "'":'&#39;'
+      }[c]));
+    }
+
+    function makeSocket(){
+      socket = io(NODE_BASE, {
+        transports: ['websocket', 'polling'],
+        withCredentials: true,
+        query: {
+          u: USERNAME,
+          t: TOKEN
+        },
+        auth: {
+          u: USERNAME,
+          t: TOKEN
+        }
+      });
+
+      socket.on('connect', ()=>{
+        setErr('');
+        setMsg('Connected to live auction server.');
+        socket.emit('auction:join', { auctionSlug: AUCTION_SLUG });
+      });
+
+      socket.on('connect_error', e=>{
+        setErr('Socket connection failed: ' + (e?.message || e));
+      });
+
+      socket.on('auction:joined', data=>{
+        if(data.viewerCount != null && viewerCount) viewerCount.textContent = data.viewerCount;
+        if(data.currentLot) paintLot(data.currentLot);
+        if(data.highBid) paintBid(data.highBid);
+
+        if(data.started && liveStreamStatus) liveStreamStatus.textContent = 'live';
+
+        if(data.started && !IS_HOST && !PLAYBACK_URL){
+          socket.emit('auction:viewer-ready', { auctionSlug: AUCTION_SLUG });
+        }
+      });
+
+      socket.on('auction:viewers', data=>{
+        if(data.viewerCount != null && viewerCount) viewerCount.textContent = data.viewerCount;
+      });
+
+      socket.on('auction:stream-ready', data=>{
+        if(liveStreamStatus) liveStreamStatus.textContent = 'ready';
+        showStreamText('Live stream is connecting…');
+
+        if(!IS_HOST){
+          socket.emit('auction:viewer-ready', { auctionSlug: AUCTION_SLUG });
+        }
+      });
+
+      socket.on('auction:stream-ended', ()=>{
+        if(liveStreamStatus) liveStreamStatus.textContent = 'offline';
+        showStreamText('The livestream has ended.');
+      });
+
+      socket.on('auction:status', data=>{
+        if(data.status && liveStreamStatus) liveStreamStatus.textContent = data.status;
+        if(data.started && !IS_HOST && !PLAYBACK_URL){
+          socket.emit('auction:viewer-ready', { auctionSlug: AUCTION_SLUG });
+        }
+      });
+
+      socket.on('auction:chat', data=>{
+        if(!data || !data.message) return;
+        addLine('@' + data.username + ': ' + data.message);
+      });
+
+      socket.on('auction:lot', data=>{
+        highBid = null;
+        paintLot(data.currentLot || null);
+        paintBid(null);
+        addLine('System: New card round started.');
+      });
+
+      socket.on('auction:bid', data=>{
+        paintBid(data);
+        addLine('Bid: @' + data.username + ' bid ' + data.bidPi + ' π');
+      });
+
+      socket.on('auction:bid-error', data=>{
+        setErr(data?.error || 'Bid failed.');
+      });
+
+      socket.on('auction:lot-ended', data=>{
+        const winner = data.winner || null;
+        const lot = data.currentLot || currentLot;
+
+        if(winner){
+          addLine('Winner: @' + winner.username + ' won ' + (lot?.title || 'this card') + ' for ' + winner.bidPi + ' π');
+          addWin(winner, lot);
+        }else{
+          addLine('System: Round ended with no bids.');
+        }
+
+        currentLot = null;
+        highBid = null;
+        paintLot(null);
+      });
+
+      socket.on('auction:viewer-ready', async data=>{
+        if(!IS_HOST || !localStream || !data.viewerSocketId) return;
+        await createHostOffer(data.viewerSocketId);
+      });
+
+      socket.on('auction:webrtc-offer', async data=>{
+        if(IS_HOST || !data.offer) return;
+        await acceptViewerOffer(data.fromSocketId, data.offer);
+      });
+
+      socket.on('auction:webrtc-answer', async data=>{
+        const pc = pcs.get(data.fromSocketId);
+        if(pc && data.answer){
+          await pc.setRemoteDescription(new RTCSessionDescription(data.answer));
+        }
+      });
+
+      socket.on('auction:webrtc-ice', async data=>{
+        const pc = pcs.get(data.fromSocketId);
+        if(pc && data.candidate){
+          try{ await pc.addIceCandidate(new RTCIceCandidate(data.candidate)); }catch(e){}
+        }
+      });
+    }
+
+    async function createHostOffer(viewerSocketId){
+      const pc = new RTCPeerConnection(rtcConfig);
+      pcs.set(viewerSocketId, pc);
+
+      localStream.getTracks().forEach(track=>pc.addTrack(track, localStream));
+
+      pc.onicecandidate = e=>{
+        if(e.candidate){
+          socket.emit('auction:webrtc-ice', {
+            auctionSlug: AUCTION_SLUG,
+            targetSocketId: viewerSocketId,
+            candidate: e.candidate
+          });
+        }
+      };
+
+      const offer = await pc.createOffer();
+      await pc.setLocalDescription(offer);
+
+      socket.emit('auction:webrtc-offer', {
+        auctionSlug: AUCTION_SLUG,
+        targetSocketId: viewerSocketId,
+        offer
+      });
+    }
+
+    async function acceptViewerOffer(hostSocketId, offer){
+      const pc = new RTCPeerConnection(rtcConfig);
+      pcs.set(hostSocketId, pc);
+
+      pc.ontrack = e=>{
+        const stream = e.streams && e.streams[0];
+        if(remoteVideo && stream){
+          remoteVideo.srcObject = stream;
+          showVideo(remoteVideo);
+        }
+      };
+
+      pc.onicecandidate = e=>{
+        if(e.candidate){
+          socket.emit('auction:webrtc-ice', {
+            auctionSlug: AUCTION_SLUG,
+            targetSocketId: hostSocketId,
+            candidate: e.candidate
+          });
+        }
+      };
+
+      await pc.setRemoteDescription(new RTCSessionDescription(offer));
+      const answer = await pc.createAnswer();
+      await pc.setLocalDescription(answer);
+
+      socket.emit('auction:webrtc-answer', {
+        auctionSlug: AUCTION_SLUG,
+        targetSocketId: hostSocketId,
+        answer
+      });
+    }
+
+    async function startCamera(){
+      try{
+        setErr('');
+        localStream = await navigator.mediaDevices.getUserMedia({
+          video: {
+            facingMode: 'environment',
+            width: { ideal: 1280 },
+            height: { ideal: 720 }
+          },
+          audio: true
+        });
+
+        if(hostPreview){
+          hostPreview.srcObject = localStream;
+          showVideo(hostPreview);
+        }
+
+        if(liveStreamStatus) liveStreamStatus.textContent = 'ready';
+
+        socket.emit('auction:host-join', {
+          auctionSlug: AUCTION_SLUG
+        });
+
+        socket.emit('auction:admin:start', {
+          auctionSlug: AUCTION_SLUG
+        });
+
+        setMsg('Camera started. Viewers can now connect to the livestream.');
+      }catch(e){
+        setErr('Camera failed: ' + (e?.message || e));
+      }
+    }
+
+    function stopCamera(){
+      for(const pc of pcs.values()){
+        try{ pc.close(); }catch(e){}
+      }
+      pcs.clear();
+
+      if(localStream){
+        localStream.getTracks().forEach(t=>t.stop());
+        localStream = null;
+      }
+
+      showStreamText('Camera stopped. Refresh or start camera again to resume.');
+      setMsg('Camera stopped.');
+    }
+
+    function startRound(){
+      const title = (roundTitle?.value || '').trim();
+      const description = (roundDescription?.value || '').trim();
+      const startingBidPi = Number(roundStartingBid?.value || 0);
+      const bidIncrementPi = Number(roundIncrement?.value || 0.01);
+
+      if(!title){
+        setErr('Enter a card title before starting the round.');
+        return;
+      }
+
+      activeRoundId = 'round-' + Date.now();
+
+      socket.emit('auction:admin:set-lot', {
+        auctionSlug: AUCTION_SLUG,
+        lotId: activeRoundId,
+        title,
+        description,
+        startingBidPi,
+        bidIncrementPi
+      });
+
+      socket.emit('auction:admin:start', {
+        auctionSlug: AUCTION_SLUG
+      });
+
+      setErr('');
+      setMsg('Auction round started.');
+    }
+
+    function endRound(){
+      socket.emit('auction:admin:end-lot', {
+        auctionSlug: AUCTION_SLUG
+      });
+
+      setMsg('Round ended.');
+      if(roundTitle) roundTitle.value = '';
+      if(roundDescription) roundDescription.value = '';
+      if(roundStartingBid) roundStartingBid.value = '';
+      if(roundIncrement) roundIncrement.value = '';
+    }
+
     send?.addEventListener('click', ()=>{
       const msg = (input.value || '').trim();
-      if(!msg) return;
-      addLine('You: ' + msg);
+      if(!msg || !socket) return;
+
+      socket.emit('auction:chat', {
+        auctionSlug: AUCTION_SLUG,
+        message: msg
+      });
+
       input.value = '';
     });
 
     input?.addEventListener('keydown', e=>{
       if(e.key === 'Enter') send?.click();
     });
+
+    placeBidBtn?.addEventListener('click', ()=>{
+      setErr('');
+
+      if(!currentLot){
+        setErr('No active card round right now.');
+        return;
+      }
+
+      const amount = Number(bidAmount?.value || 0);
+      if(!Number.isFinite(amount) || amount <= 0){
+        setErr('Enter a valid bid amount.');
+        return;
+      }
+
+      socket.emit('auction:bid', {
+        auctionSlug: AUCTION_SLUG,
+        lotId: currentLot.lotId,
+        lotTitle: currentLot.title,
+        bidPi: amount
+      });
+    });
+
+    startCameraBtn?.addEventListener('click', startCamera);
+    stopCameraBtn?.addEventListener('click', stopCamera);
+    startRoundBtn?.addEventListener('click', startRound);
+    endRoundBtn?.addEventListener('click', endRound);
+
+    if(PLAYBACK_URL && auctionVideo){
+      auctionVideo.src = PLAYBACK_URL;
+      showVideo(auctionVideo);
+    }else{
+      showStreamText('Video stream will appear here when the auction goes live.');
+    }
+
+    makeSocket();
   })();
   </script>
+  {% endif %}
 
   {% if not user %}
   <script>
