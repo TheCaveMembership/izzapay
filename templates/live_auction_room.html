@@ -7,7 +7,7 @@
 
   <meta name="description" content="{{ auction.description or 'Join the IZZA Live Video Auction room for Pokémon TCG and One Piece TCG auctions powered by IZZA PAY.' }}">
   <meta property="og:title" content="{{ auction.title }} — IZZA Live Auction">
-  <meta property="og:description" content="{{ auction.description or 'Join the IZZA Live Video Auction room. Watch, chat, bid, and checkout through IZZA PAY.' }}">
+  <meta property="og:description" content="{{ auction.description or 'Join the IZZA Live Auction room. Watch, chat, bid, and checkout through IZZA PAY.' }}">
   <meta property="og:type" content="website">
   <meta property="og:url" content="{{ APP_BASE_URL }}/live-auctions/{{ auction.slug }}">
   <meta property="og:image" content="{{ auction.image_url or (APP_BASE_URL ~ '/static/izza-live-auctions-preview.png') }}">
@@ -17,7 +17,7 @@
 
   <meta name="twitter:card" content="summary_large_image">
   <meta name="twitter:title" content="{{ auction.title }} — IZZA Live Auction">
-  <meta name="twitter:description" content="{{ auction.description or 'Join the IZZA Live Video Auction room.' }}">
+  <meta name="twitter:description" content="{{ auction.description or 'Join the IZZA Live Auction room.' }}">
   <meta name="twitter:image" content="{{ auction.image_url or (APP_BASE_URL ~ '/static/izza-live-auctions-preview.png') }}">
 
   <link rel="stylesheet" href="/static/themes.css">
@@ -120,6 +120,7 @@
     .bidBox input{max-width:140px}
     .currentLotCard{border-color:rgba(255,207,77,.35)}
     .winItem{border-color:rgba(90,212,158,.5)}
+    .checkoutLinkBox{word-break:break-word;color:#ffcf4d;font-weight:900}
     #authMsg,#socketMsg{margin-top:10px;color:#aeb9da}
     #authErr,#socketErr{margin-top:8px;color:#ff9aa2;white-space:pre-wrap}
     @media(max-width:520px){
@@ -191,6 +192,17 @@
                 <button class="btn purple" id="startRoundBtn" type="button">Start Auction Round</button>
                 <button class="btn gold" id="endRoundBtn" type="button">End Round / Declare Winner</button>
               </div>
+            </div>
+          </div>
+
+          <div class="card">
+            <h2>Finalize Winner Checkout</h2>
+            <p class="muted">After a user wins one or more cards, enter their Pi username and create one final IZZA PAY checkout link for their total.</p>
+
+            <div class="stack">
+              <input id="finalizeUsername" placeholder="Winner username, example: cammac">
+              <button class="btn gold" id="finalizeUserBtn" type="button">Create Final Checkout Link</button>
+              <div id="finalizeResult" class="checkoutLinkBox"></div>
             </div>
           </div>
         {% endif %}
@@ -344,6 +356,10 @@
     const roundStartingBid = document.getElementById('roundStartingBid');
     const roundIncrement = document.getElementById('roundIncrement');
 
+    const finalizeUsername = document.getElementById('finalizeUsername');
+    const finalizeUserBtn = document.getElementById('finalizeUserBtn');
+    const finalizeResult = document.getElementById('finalizeResult');
+
     const myWinsList = document.getElementById('myWinsList');
     const noWinsText = document.getElementById('noWinsText');
 
@@ -388,6 +404,16 @@
       div.textContent = text;
       chatBox.appendChild(div);
       chatBox.scrollTop = chatBox.scrollHeight;
+    }
+
+    function escapeHtml(s){
+      return String(s || '').replace(/[&<>"']/g, c => ({
+        '&':'&amp;',
+        '<':'&lt;',
+        '>':'&gt;',
+        '"':'&quot;',
+        "'":'&#39;'
+      }[c]));
     }
 
     function paintLot(lot){
@@ -442,28 +468,83 @@
       myWinsList?.appendChild(div);
     }
 
-    function escapeHtml(s){
-      return String(s || '').replace(/[&<>"']/g, c => ({
-        '&':'&amp;',
-        '<':'&lt;',
-        '>':'&gt;',
-        '"':'&quot;',
-        "'":'&#39;'
-      }[c]));
+    async function recordWin(winner, lot){
+      if(!IS_HOST || !winner || !lot) return;
+
+      try{
+        const r = await fetch(`/api/live-auctions/${encodeURIComponent(AUCTION_SLUG)}/admin/record-win{% if t %}?t={{ t|urlencode }}{% endif %}`, {
+          method:'POST',
+          headers:{ 'Content-Type':'application/json' },
+          body:JSON.stringify({
+            username:winner.username,
+            card_title:lot.title || 'Won card',
+            card_description:lot.description || '',
+            card_image_url:lot.imageUrl || lot.image_url || '',
+            winning_bid_pi:Number(winner.bidPi || 0)
+          })
+        });
+
+        const j = await r.json().catch(()=>({}));
+        if(!r.ok || !j.ok){
+          setErr('Winner showed live, but SQLite save failed: ' + (j.reason || j.error || r.status));
+          return;
+        }
+
+        setMsg('Winner saved to SQLite.');
+      }catch(e){
+        setErr('Winner save failed: ' + (e?.message || e));
+      }
+    }
+
+    async function finalizeUser(){
+      if(!IS_HOST) return;
+
+      const username = (finalizeUsername?.value || '').trim().replace(/^@+/, '').toLowerCase();
+      if(!username){
+        setErr('Enter the winner username before creating checkout.');
+        return;
+      }
+
+      try{
+        setErr('');
+        if(finalizeResult) finalizeResult.textContent = 'Creating checkout link…';
+
+        const r = await fetch(`/api/live-auctions/${encodeURIComponent(AUCTION_SLUG)}/admin/finalize-user{% if t %}?t={{ t|urlencode }}{% endif %}`, {
+          method:'POST',
+          headers:{ 'Content-Type':'application/json' },
+          body:JSON.stringify({ username })
+        });
+
+        const j = await r.json().catch(()=>({}));
+        if(!r.ok || !j.ok){
+          if(finalizeResult) finalizeResult.textContent = '';
+          setErr('Finalize failed: ' + (j.reason || j.error || r.status));
+          return;
+        }
+
+        const url = j.checkout_url || '';
+        const fullUrl = url ? `${window.location.origin}${url}` : '';
+
+        if(finalizeResult){
+          finalizeResult.innerHTML = fullUrl
+            ? `Checkout created: <a href="${escapeHtml(url)}">${escapeHtml(fullUrl)}</a>`
+            : 'Checkout created.';
+        }
+
+        addLine('System: Final checkout created for @' + username + '.');
+        setMsg('Final checkout link created.');
+      }catch(e){
+        if(finalizeResult) finalizeResult.textContent = '';
+        setErr('Finalize failed: ' + (e?.message || e));
+      }
     }
 
     function makeSocket(){
       socket = io(NODE_BASE, {
         transports: ['websocket', 'polling'],
         withCredentials: true,
-        query: {
-          u: USERNAME,
-          t: TOKEN
-        },
-        auth: {
-          u: USERNAME,
-          t: TOKEN
-        }
+        query: { u: USERNAME, t: TOKEN },
+        auth: { u: USERNAME, t: TOKEN }
       });
 
       socket.on('connect', ()=>{
@@ -480,7 +561,6 @@
         if(data.viewerCount != null && viewerCount) viewerCount.textContent = data.viewerCount;
         if(data.currentLot) paintLot(data.currentLot);
         if(data.highBid) paintBid(data.highBid);
-
         if(data.started && liveStreamStatus) liveStreamStatus.textContent = 'live';
 
         if(data.started && !IS_HOST && !PLAYBACK_URL){
@@ -492,7 +572,7 @@
         if(data.viewerCount != null && viewerCount) viewerCount.textContent = data.viewerCount;
       });
 
-      socket.on('auction:stream-ready', data=>{
+      socket.on('auction:stream-ready', ()=>{
         if(liveStreamStatus) liveStreamStatus.textContent = 'ready';
         showStreamText('Live stream is connecting…');
 
@@ -534,13 +614,14 @@
         setErr(data?.error || 'Bid failed.');
       });
 
-      socket.on('auction:lot-ended', data=>{
+      socket.on('auction:lot-ended', async data=>{
         const winner = data.winner || null;
         const lot = data.currentLot || currentLot;
 
         if(winner){
           addLine('Winner: @' + winner.username + ' won ' + (lot?.title || 'this card') + ' for ' + winner.bidPi + ' π');
           addWin(winner, lot);
+          await recordWin(winner, lot);
         }else{
           addLine('System: Round ended with no bids.');
         }
@@ -653,13 +734,8 @@
 
         if(liveStreamStatus) liveStreamStatus.textContent = 'ready';
 
-        socket.emit('auction:host-join', {
-          auctionSlug: AUCTION_SLUG
-        });
-
-        socket.emit('auction:admin:start', {
-          auctionSlug: AUCTION_SLUG
-        });
+        socket.emit('auction:host-join', { auctionSlug: AUCTION_SLUG });
+        socket.emit('auction:admin:start', { auctionSlug: AUCTION_SLUG });
 
         setMsg('Camera started. Viewers can now connect to the livestream.');
       }catch(e){
@@ -704,18 +780,14 @@
         bidIncrementPi
       });
 
-      socket.emit('auction:admin:start', {
-        auctionSlug: AUCTION_SLUG
-      });
+      socket.emit('auction:admin:start', { auctionSlug: AUCTION_SLUG });
 
       setErr('');
       setMsg('Auction round started.');
     }
 
     function endRound(){
-      socket.emit('auction:admin:end-lot', {
-        auctionSlug: AUCTION_SLUG
-      });
+      socket.emit('auction:admin:end-lot', { auctionSlug: AUCTION_SLUG });
 
       setMsg('Round ended.');
       if(roundTitle) roundTitle.value = '';
@@ -766,6 +838,7 @@
     stopCameraBtn?.addEventListener('click', stopCamera);
     startRoundBtn?.addEventListener('click', startRound);
     endRoundBtn?.addEventListener('click', endRound);
+    finalizeUserBtn?.addEventListener('click', finalizeUser);
 
     if(PLAYBACK_URL && auctionVideo){
       auctionVideo.src = PLAYBACK_URL;
