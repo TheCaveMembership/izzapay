@@ -573,13 +573,20 @@
       });
 
       socket.on('auction:stream-ready', ()=>{
-        if(liveStreamStatus) liveStreamStatus.textContent = 'ready';
-        showStreamText('Live stream is connecting…');
+  if(liveStreamStatus) liveStreamStatus.textContent = 'ready';
 
-        if(!IS_HOST){
-          socket.emit('auction:viewer-ready', { auctionSlug: AUCTION_SLUG });
-        }
-      });
+  if(IS_HOST){
+    if(hostPreview && localStream){
+      hostPreview.srcObject = localStream;
+      showVideo(hostPreview);
+    }
+    setMsg('Your camera is live. Viewers can connect now.');
+    return;
+  }
+
+  showStreamText('Live stream is connecting…');
+  socket.emit('auction:viewer-ready', { auctionSlug: AUCTION_SLUG });
+});
 
       socket.on('auction:stream-ended', ()=>{
         if(liveStreamStatus) liveStreamStatus.textContent = 'offline';
@@ -716,32 +723,35 @@
     }
 
     async function startCamera(){
-      try{
-        setErr('');
-        localStream = await navigator.mediaDevices.getUserMedia({
-          video: {
-            facingMode: 'environment',
-            width: { ideal: 1280 },
-            height: { ideal: 720 }
-          },
-          audio: true
-        });
+  try{
+    setErr('');
+    localStream = await navigator.mediaDevices.getUserMedia({
+      video: {
+        facingMode: 'environment',
+        width: { ideal: 1280 },
+        height: { ideal: 720 }
+      },
+      audio: true
+    });
 
-        if(hostPreview){
-          hostPreview.srcObject = localStream;
-          showVideo(hostPreview);
-        }
-
-        if(liveStreamStatus) liveStreamStatus.textContent = 'ready';
-
-        socket.emit('auction:host-join', { auctionSlug: AUCTION_SLUG });
-        socket.emit('auction:admin:start', { auctionSlug: AUCTION_SLUG });
-
-        setMsg('Camera started. Viewers can now connect to the livestream.');
-      }catch(e){
-        setErr('Camera failed: ' + (e?.message || e));
-      }
+    if(hostPreview){
+      hostPreview.srcObject = localStream;
+      hostPreview.muted = true;
+      hostPreview.playsInline = true;
+      await hostPreview.play().catch(()=>{});
+      showVideo(hostPreview);
     }
+
+    if(liveStreamStatus) liveStreamStatus.textContent = 'ready';
+
+    socket.emit('auction:host-join', { auctionSlug: AUCTION_SLUG });
+    socket.emit('auction:admin:start', { auctionSlug: AUCTION_SLUG });
+
+    setMsg('Camera started. You should see your camera preview here. Viewers can now connect.');
+  }catch(e){
+    setErr('Camera failed: ' + (e?.message || e));
+  }
+}
 
     function stopCamera(){
       for(const pc of pcs.values()){
