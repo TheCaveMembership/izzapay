@@ -1565,6 +1565,107 @@ def require_live_auction_owner():
 
     return u, m, None
 
+# ----------------- LIVE AUCTION WINS + FINAL CHECKOUT -----------------
+
+with conn() as cx:
+    cx.execute("""
+        CREATE TABLE IF NOT EXISTS live_auction_wins(
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          auction_id INTEGER NOT NULL,
+          user_id INTEGER,
+          username TEXT NOT NULL,
+          card_title TEXT NOT NULL,
+          card_description TEXT,
+          card_image_url TEXT,
+          winning_bid_pi REAL NOT NULL,
+          status TEXT NOT NULL DEFAULT 'won',
+          checkout_id INTEGER,
+          created_at INTEGER NOT NULL,
+          updated_at INTEGER NOT NULL
+        )
+    """)
+
+    cx.execute("""
+        CREATE TABLE IF NOT EXISTS live_auction_checkouts(
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          auction_id INTEGER NOT NULL,
+          user_id INTEGER,
+          username TEXT NOT NULL,
+          merchant_id INTEGER NOT NULL,
+          item_id INTEGER,
+          link_id TEXT,
+          total_pi REAL NOT NULL,
+          wins_json TEXT NOT NULL,
+          status TEXT NOT NULL DEFAULT 'pending',
+          created_at INTEGER NOT NULL,
+          updated_at INTEGER NOT NULL,
+          UNIQUE(auction_id, username)
+        )
+    """)
+
+    cx.execute("CREATE INDEX IF NOT EXISTS idx_live_auction_wins_auction_user ON live_auction_wins(auction_id, username)")
+    cx.execute("CREATE INDEX IF NOT EXISTS idx_live_auction_checkouts_auction_user ON live_auction_checkouts(auction_id, username)")
+
+
+def _auction_username(u):
+    return (u["username"] or u["pi_username"] or "").strip().lower()
+
+
+def _auction_checkout_title(auction, username):
+    return f"IZZA Live Auction Wins — @{username}"
+
+
+def _create_auction_checkout_item(cx, merchant_id, auction, username, total_pi, wins):
+    """
+    Creates one normal IZZA PAY checkout item for the user's combined auction wins.
+    Uses dynamic columns so it does not break if your items schema differs slightly.
+    """
+    link_id = uuid.uuid4().hex[:8]
+    now = int(time.time())
+
+    title = _auction_checkout_title(auction, username)
+    desc_lines = [
+        f"Final checkout for @{username} from live auction: {auction['title']}",
+        "",
+        "Winning cards:"
+    ]
+
+    for w in wins:
+        desc_lines.append(f"- {w['card_title']} — {float(w['winning_bid_pi']):.2f} π")
+
+    description = "\n".join(desc_lines)
+    image_url = wins[0]["card_image_url"] if wins and wins[0]["card_image_url"] else (auction["image_url"] or "")
+
+    cols = {r["name"] for r in cx.execute("PRAGMA table_info(items)")}
+
+    data = {}
+
+    if "merchant_id" in cols: data["merchant_id"] = merchant_id
+    if "title" in cols: data["title"] = title
+    if "description" in cols: data["description"] = description
+    if "image_url" in cols: data["image_url"] = image_url
+    if "link_id" in cols: data["link_id"] = link_id
+    if "pi_price" in cols: data["pi_price"] = float(total_pi)
+    if "price_pi" in cols: data["price_pi"] = float(total_pi)
+    if "stock_qty" in cols: data["stock_qty"] = 1
+    if "qty" in cols: data["qty"] = 1
+    if "active" in cols: data["active"] = 1
+    if "allow_backorder" in cols: data["allow_backorder"] = 0
+    if "created_at" in cols: data["created_at"] = now
+    if "sku" in cols: data["sku"] = f"AUCTION-{auction['id']}-{username}".upper()[:64]
+    if "fulfillment_kind" in cols: data["fulfillment_kind"] = "physical"
+
+    keys = list(data.keys())
+    vals = [data[k] for k in keys]
+
+    cx.execute(
+        f"INSERT INTO items({','.join(keys)}) VALUES({','.join(['?'] * len(keys))})",
+        vals
+    )
+
+    item_id = cx.execute("SELECT last_insert_rowid() AS id").fetchone()["id"]
+    return int(item_id), link_id
+
 
 @app.get("/live-auctions")
 def live_auctions_public():
@@ -1724,6 +1825,200 @@ def live_auctions_delete():
         )
 
     return redirect(_with_t("/live-auctions/admin"))
+
+@app.get("/api/live-auctions/<auction_slug>/my-wins")
+def live_auction_my_wins(auction_slug):
+    u = current_user_row()
+    if not u:
+        return jsonify(ok=False, reason="auth_required"), 401
+
+    username = _auction_username(u)
+
+    with conn() as cx:
+        auction = cx.execute(
+            "SELECT * FROM live_auctions WHERE slug=?",
+            (auction_slug,)
+        ).fetchone()
+
+        if not auction:
+            return jsonify(ok=False, reason="auction_not_found"), 404
+
+        wins = cx.execute("""
+            SELECT *
+            FROM live_auction_wins
+            WHERE auction_id=? AND username=?
+            ORDER BY created_at ASC
+        """, (auction["id"], username)).fetchall()
+
+        checkout = cx.execute("""
+            SELECT *
+            FROM live_auction_checkouts
+            WHERE auction_id=? AND username=?
+        """, (auction["id"], username)).fetchone()
+
+    total_pi = sum(float(w["winning_bid_pi"] or 0) for w in wins)
+
+    return jsonify(
+        ok=True,
+        wins=[dict(w) for w in wins],
+        total_pi=round(total_pi, 7),
+        checkout=dict(checkout) if checkout else None,
+        checkout_url=(f"/checkout/{checkout['link_id']}" if checkout and checkout["link_id"] else None)
+    )
+
+
+@app.post("/api/live-auctions/<auction_slug>/admin/record-win")
+def live_auction_record_win(auction_slug):
+    u, m, fail = require_live_auction_owner()
+    if fail:
+        return fail
+
+    data = request.get_json(silent=True) or {}
+
+    username = (data.get("username") or "").strip().lower().replace("@", "")
+    card_title = (data.get("card_title") or data.get("title") or "").strip()
+    card_description = (data.get("card_description") or data.get("description") or "").strip()
+    card_image_url = (data.get("card_image_url") or data.get("image_url") or "").strip()
+
+    try:
+        winning_bid_pi = float(data.get("winning_bid_pi") or data.get("bid_pi") or 0)
+    except Exception:
+        winning_bid_pi = 0.0
+
+    if not username or not card_title or winning_bid_pi <= 0:
+        return jsonify(ok=False, reason="bad_win_payload"), 400
+
+    now = int(time.time())
+
+    with conn() as cx:
+        auction = cx.execute(
+            "SELECT * FROM live_auctions WHERE slug=? AND merchant_id=?",
+            (auction_slug, m["id"])
+        ).fetchone()
+
+        if not auction:
+            return jsonify(ok=False, reason="auction_not_found"), 404
+
+        user_row = cx.execute("""
+            SELECT * FROM users
+            WHERE lower(pi_username)=? OR lower(username)=?
+            LIMIT 1
+        """, (username, username)).fetchone()
+
+        user_id = int(user_row["id"]) if user_row else None
+
+        cx.execute("""
+            INSERT INTO live_auction_wins(
+              auction_id, user_id, username, card_title, card_description,
+              card_image_url, winning_bid_pi, status, created_at, updated_at
+            )
+            VALUES(?,?,?,?,?,?,?,?,?,?)
+        """, (
+            auction["id"], user_id, username, card_title, card_description,
+            card_image_url, winning_bid_pi, "won", now, now
+        ))
+
+    return jsonify(ok=True, recorded=True)
+
+
+@app.post("/api/live-auctions/<auction_slug>/admin/finalize-user")
+def live_auction_finalize_user(auction_slug):
+    u, m, fail = require_live_auction_owner()
+    if fail:
+        return fail
+
+    data = request.get_json(silent=True) or request.form or {}
+    username = (data.get("username") or "").strip().lower().replace("@", "")
+
+    if not username:
+        return jsonify(ok=False, reason="missing_username"), 400
+
+    now = int(time.time())
+
+    with conn() as cx:
+        auction = cx.execute(
+            "SELECT * FROM live_auctions WHERE slug=? AND merchant_id=?",
+            (auction_slug, m["id"])
+        ).fetchone()
+
+        if not auction:
+            return jsonify(ok=False, reason="auction_not_found"), 404
+
+        existing = cx.execute("""
+            SELECT *
+            FROM live_auction_checkouts
+            WHERE auction_id=? AND username=?
+        """, (auction["id"], username)).fetchone()
+
+        if existing and existing["link_id"]:
+            return jsonify(
+                ok=True,
+                already=True,
+                checkout_url=f"/checkout/{existing['link_id']}",
+                total_pi=float(existing["total_pi"] or 0)
+            )
+
+        wins = cx.execute("""
+            SELECT *
+            FROM live_auction_wins
+            WHERE auction_id=? AND username=? AND status='won'
+            ORDER BY created_at ASC
+        """, (auction["id"], username)).fetchall()
+
+        if not wins:
+            return jsonify(ok=False, reason="no_wins_for_user"), 400
+
+        total_pi = round(sum(float(w["winning_bid_pi"] or 0) for w in wins), 7)
+        wins_json = json.dumps([dict(w) for w in wins], separators=(",", ":"))
+
+        user_row = cx.execute("""
+            SELECT * FROM users
+            WHERE lower(pi_username)=? OR lower(username)=?
+            LIMIT 1
+        """, (username, username)).fetchone()
+
+        user_id = int(user_row["id"]) if user_row else None
+
+        item_id, link_id = _create_auction_checkout_item(
+            cx, int(m["id"]), auction, username, total_pi, wins
+        )
+
+        cx.execute("""
+            INSERT INTO live_auction_checkouts(
+              auction_id, user_id, username, merchant_id, item_id, link_id,
+              total_pi, wins_json, status, created_at, updated_at
+            )
+            VALUES(?,?,?,?,?,?,?,?,?,?,?)
+            ON CONFLICT(auction_id, username) DO UPDATE SET
+              item_id=excluded.item_id,
+              link_id=excluded.link_id,
+              total_pi=excluded.total_pi,
+              wins_json=excluded.wins_json,
+              status='pending',
+              updated_at=excluded.updated_at
+        """, (
+            auction["id"], user_id, username, m["id"], item_id, link_id,
+            total_pi, wins_json, "pending", now, now
+        ))
+
+        cx.execute("""
+            UPDATE live_auction_wins
+            SET checkout_id=(
+              SELECT id FROM live_auction_checkouts
+              WHERE auction_id=? AND username=?
+            ),
+            updated_at=?
+            WHERE auction_id=? AND username=?
+        """, (auction["id"], username, now, auction["id"], username))
+
+    return jsonify(
+        ok=True,
+        finalized=True,
+        total_pi=total_pi,
+        checkout_url=f"/checkout/{link_id}",
+        link_id=link_id,
+        item_id=item_id
+    )
 
 
 @app.get("/live-auctions/<auction_slug>")
