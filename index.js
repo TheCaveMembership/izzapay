@@ -896,56 +896,57 @@ socket.on('auction:webrtc-ice', payload=>{
     io.emit('mp:counts', { ok:true, counts:mpCounts(), serverNow:Date.now()/1000 });
   });
 
-  socket.on('disconnect', reason=>{
-  const auctionSlug = socket.data.auctionSlug;
+    socket.on('disconnect', reason=>{
+    const auctionSlug = socket.data.auctionSlug;
 
-  if(auctionSlug){
-    const st = getAuction(auctionSlug);
+    if(auctionSlug){
+      const st = getAuction(auctionSlug);
 
-    st.viewers.delete(socket.id);
+      st.viewers.delete(socket.id);
 
-    if(st.hostSocketId === socket.id){
-      st.hostSocketId = null;
-      st.hostUsername = '';
-      st.streamStatus = 'offline';
+      if(st.hostSocketId === socket.id){
+        st.hostSocketId = null;
+        st.hostUsername = '';
+        st.streamStatus = 'offline';
 
-      io.to(auctionRoom(auctionSlug)).emit('auction:stream-ended', {
+        io.to(auctionRoom(auctionSlug)).emit('auction:stream-ended', {
+          ok:true,
+          auctionSlug
+        });
+      }
+
+      io.to(auctionRoom(auctionSlug)).emit('auction:viewers', {
         ok:true,
-        auctionSlug
+        auctionSlug,
+        viewerCount:auctionViewerCount(auctionSlug)
       });
     }
 
-    io.to(auctionRoom(auctionSlug)).emit('auction:viewers', {
-      ok:true,
-      auctionSlug,
-      viewerCount:auctionViewerCount(auctionSlug)
+    const oldWorld = mpGetWorld(who.username);
+
+    for(const world of MP_WORLDS){
+      mpState.worlds.get(world).delete(who.username);
+    }
+
+    mpState.userWorld.delete(who.username);
+    mpState.sockets.delete(who.username);
+
+    socket.to(mpRoom(oldWorld)).emit('mp:player-left', {
+      username:who.username,
+      world:oldWorld,
+      reason
     });
-  }
 
-  const oldWorld = mpGetWorld(who.username);
+    io.emit('mp:counts', {
+      ok:true,
+      counts:mpCounts(),
+      serverNow:Date.now()/1000
+    });
 
-  for(const world of MP_WORLDS){
-    mpState.worlds.get(world).delete(who.username);
-  }
-
-  mpState.userWorld.delete(who.username);
-  mpState.sockets.delete(who.username);
-
-  socket.to(mpRoom(oldWorld)).emit('mp:player-left', {
-    username:who.username,
-    world:oldWorld,
-    reason
-  });
-
-  io.emit('mp:counts', {
-    ok:true,
-    counts:mpCounts(),
-    serverNow:Date.now()/1000
-  });
-
-  console.log('[MP SOCKET] disconnected', {
-    username:who.username,
-    reason
+    console.log('[MP SOCKET] disconnected', {
+      username:who.username,
+      reason
+    });
   });
 });
 
