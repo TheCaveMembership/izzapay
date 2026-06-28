@@ -1989,27 +1989,7 @@ def live_auctions_create():
     return redirect(_with_t("/live-auctions/admin"))
 
 
-@app.post("/live-auctions/admin/delete")
-def live_auctions_delete():
-    u, m, fail = require_live_auction_owner()
-    if fail:
-        return fail
 
-    try:
-        auction_id = int(request.form.get("auction_id") or 0)
-    except Exception:
-        auction_id = 0
-
-    if auction_id <= 0:
-        abort(400)
-
-    with conn() as cx:
-        cx.execute("DELETE FROM live_auction_lots WHERE auction_id=?", (auction_id,))
-        cx.execute("DELETE FROM live_auction_wins WHERE auction_id=?", (auction_id,))
-        cx.execute("DELETE FROM live_auction_checkouts WHERE auction_id=?", (auction_id,))
-        cx.execute("DELETE FROM live_auctions WHERE id=? AND merchant_id=?", (auction_id, m["id"]))
-
-    return redirect(_with_t("/live-auctions/admin"))
 
 
 @app.post("/live-auctions/admin/delete")
